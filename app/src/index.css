@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bronze: #86764f;
+  --color-bronze-dark: #5f5335;
+  --color-espresso: #1e1812;
+  --color-cream: #faf8f3;
+  --color-maroon: #7a2e3b;
+
+  --font-literata: "Literata", serif;
+  --font-commissioner: "Commissioner", sans-serif;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-cream);
+    color: var(--color-espresso);
+    font-family: var(--font-commissioner);
+  }
+
+  ::selection {
+    background: var(--color-bronze);
+    color: #fff;
+  }
+
+  a {
+    color: var(--color-bronze-dark);
+  }
+  a:hover {
+    color: var(--color-espresso);
+  }
+
+  input:focus-visible,
+  button:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--color-bronze);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 0.35s ease-out;
+}

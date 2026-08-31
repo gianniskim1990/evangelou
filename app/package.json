@@ -1,0 +1,31 @@
+{
+  "name": "evaggelou-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "images:stock": "node scripts/fetch-stock-images.mjs"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "esbuild": "^0.28.2",
+    "oxlint": "^1.79.0",
+    "sharp": "^0.35.4",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2"
+  }
+}

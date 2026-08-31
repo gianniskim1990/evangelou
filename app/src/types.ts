@@ -1,0 +1,121 @@
+export type Screen =
+  | "home"
+  | "catalog"
+  | "configurator"
+  | "checkout"
+  | "confirmation"
+  | "status";
+
+export interface Chocolate {
+  id: string;
+  name: string;
+  desc: string;
+}
+
+export interface Size {
+  id: string;
+  name: string;
+  price: number;
+}
+
+export interface Base {
+  id: string;
+  name: string;
+  extra: number;
+}
+
+export interface ToppingItem {
+  id: string;
+  name: string;
+}
+
+export interface ToppingGroup {
+  id: string;
+  name: string;
+  items: ToppingItem[];
+}
+
+export interface CatalogGroup {
+  id: string;
+  name: string;
+  categories: string[];
+}
+
+export interface Product {
+  name: string;
+  price: number;
+  perKilo?: boolean;
+  diabetic?: boolean;
+}
+
+export interface OfferProduct {
+  cat: string;
+  name: string;
+  price: number;
+  was: number;
+  perKilo?: boolean;
+}
+
+export interface PopularProduct {
+  cat: string;
+  name: string;
+  price: number;
+}
+
+export interface Store {
+  name: string;
+  address: string;
+  phone: string;
+  phoneHref: string;
+  site: string;
+  instagram: string;
+  hours: string;
+  deliveryMinOrder: number;
+  deliveryFee: number;
+}
+
+export interface CartItem {
+  id: string;
+  name: string;
+  unitPrice: number;
+  qty: number;
+  meta: string;
+  isCake: boolean;
+}
+
+export interface ConfiguratorState {
+  step: number;
+  size: string | null;
+  choc: string | null;
+  base: string | null;
+  toppings: string[];
+}
+
+export type Fulfillment = "pickup" | "delivery";
+export type Payment = "cash" | "card";
+
+export interface Address {
+  street: string;
+  floor: string;
+  bell: string;
+  notes: string;
+}
+
+export interface CardDetails {
+  name: string;
+  number: string;
+  expiry: string;
+  cvv: string;
+}
+
+export interface OrderSnapshot {
+  orderNumber: string;
+  items: CartItem[];
+  subtotal: number;
+  deliveryFee: number;
+  total: number;
+  fulfillment: Fulfillment;
+  pickupTime: string;
+  hasCake: boolean;
+  cakeDateTime: string;
+}
