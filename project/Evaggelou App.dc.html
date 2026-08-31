@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+  <link href="https://fonts.googleapis.com/css2?family=Literata:wght@500;600;700&amp;family=Commissioner:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #FAF8F3; }
+    * { box-sizing: border-box; }
+    ::selection { background: #86764F; color: #FFFFFF; }
+    a { color: #5F5335; text-decoration: underline; }
+    a:hover { color: #1E1812; }
+    input:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #86764F; outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
+    @keyframes popIn { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: scale(1); } }
+    input[type="date"], input[type="time"] { font-family: "Commissioner", sans-serif; }
+  </style>
+</helmet>
+
+<div style="max-width:480px;margin:0 auto;min-height:100vh;background:#FAF8F3;font-family:'Commissioner',sans-serif;color:#1E1812;position:relative;padding-bottom:{{ rootPadBottom }}px;">
+
+  <sc-if value="{{ showTopHeader }}" hint-placeholder-val="{{ true }}">
+    <header style="position:sticky;top:0;z-index:20;background:#FAF8F3;border-bottom:1px solid rgba(30,24,18,0.12);display:flex;align-items:center;justify-content:space-between;padding:14px 16px;">
+      <img src="uploads/logo-evaggelou-color.png" alt="Ζαχαροπλαστική Ευαγγέλου" style="height:36px;object-fit:contain;object-position:left;cursor:pointer;" onClick="{{ goHome }}">
+      <div style="display:flex;align-items:center;gap:18px;">
+        <a href="tel:{{ phoneHref }}" aria-label="Κλήση καταστήματος" style="display:flex;align-items:center;justify-content:center;color:#1E1812;text-decoration:none;">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h3l2 5-2 2a12 12 0 0 0 6 6l2-2 5 2v3a2 2 0 0 1-2 2C10 22 2 14 2 6a2 2 0 0 1 2-2Z"></path></svg>
+        </a>
+        <button onClick="{{ openCart }}" aria-label="Καλάθι" style="position:relative;display:flex;align-items:center;justify-content:center;background:none;border:none;color:#1E1812;cursor:pointer;padding:0;">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l-1 12H7L6 8Z"></path><path d="M9 8a3 3 0 0 1 6 0"></path></svg>
+          <sc-if value="{{ hasCartItems }}" hint-placeholder-val="{{ false }}">
+            <span style="position:absolute;top:-8px;right:-9px;background:#5F5335;color:#FFFFFF;font-size:10px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">{{ cartCount }}</span>
+          </sc-if>
+        </button>
+      </div>
+    </header>
+  </sc-if>
+
+  <sc-if value="{{ showBackHeader }}" hint-placeholder-val="{{ false }}">
+    <header style="position:sticky;top:0;z-index:20;background:#FFFFFF;box-shadow:0 2px 12px rgba(30,24,18,0.10);display:flex;align-items:center;gap:12px;padding:14px 16px;">
+      <button onClick="{{ backHeaderAction }}" aria-label="Πίσω" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:#FAF8F3;border:none;color:#1E1812;cursor:pointer;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5 8 12l7 7"></path></svg>
+      </button>
+      <div style="font-family:'Literata',serif;font-weight:600;font-size:18px;">{{ backHeaderTitle }}</div>
+    </header>
+  </sc-if>
+
+  <sc-if value="{{ dataLoading }}" hint-placeholder-val="{{ false }}">
+    <div style="padding:80px 24px;text-align:center;color:#86764F;">Φόρτωση…</div>
+  </sc-if>
+
+  <sc-if value="{{ showHome }}" hint-placeholder-val="{{ true }}">
+    <main>
+      <section style="background:#1E1812;padding:36px 20px 40px;border-radius:0 0 32px 0;position:relative;">
+        <div style="font-size:13px;font-weight:600;color:#86764F;letter-spacing:0.02em;margin-bottom:10px;">Ο δημιουργός προφιτερόλ</div>
+        <h1 style="font-family:'Literata',serif;font-weight:500;font-size:30px;line-height:1.15;color:#FAF8F3;margin:0 0 14px;max-width:260px;">Φτιάξε το<br><span style="font-weight:700;">προφιτερόλ σου.</span></h1>
+        <div style="font-size:14.5px;color:#FAF8F3;opacity:0.7;margin-bottom:26px;max-width:250px;">Μία από τις 7 σοκολάτες. Η βάση σου. Όσα υλικά θέλεις.</div>
+        <button onClick="{{ goConfigurator }}" style="background:#FAF8F3;color:#1E1812;border:none;border-radius:2px;padding:14px 24px;font-size:14.5px;font-weight:700;cursor:pointer;font-family:'Commissioner',sans-serif;">Φτιάξε το προφιτερόλ σου</button>
+        <div style="position:absolute;right:28px;bottom:32px;width:46px;height:46px;border:1.5px solid #86764F;border-radius:50%;opacity:0.6;"></div>
+      </section>
+
+      <section style="padding:30px 0 4px;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 16px 16px;">
+          <h2 style="font-family:'Literata',serif;font-style:italic;font-weight:500;font-size:20px;margin:0;">Προσφορές</h2>
+        </div>
+        <div style="display:flex;gap:20px;overflow-x:auto;padding:0 16px 6px;">
+          <sc-for list="{{ offerCards }}" as="p" hint-placeholder-count="3">
+            <div style="flex:0 0 168px;border-top:2px solid #7A2E3B;padding-top:12px;">
+              <span style="display:block;font-size:11.5px;font-weight:600;color:#7A2E3B;text-decoration:underline;margin-bottom:10px;">Προσφορά</span>
+              <div style="font-size:14.5px;font-weight:600;line-height:1.3;margin-bottom:12px;min-height:38px;">{{ p.name }}</div>
+              <div style="display:flex;align-items:baseline;gap:7px;margin-bottom:12px;">
+                <span style="font-family:'Literata',serif;font-weight:600;font-size:17px;">{{ p.priceText }}</span>
+                <span style="font-size:12px;color:#1E1812;opacity:0.45;text-decoration:line-through;">{{ p.wasText }}</span>
+              </div>
+              <button onClick="{{ p.add }}" style="width:32px;height:32px;border:1.5px solid #1E1812;background:none;color:#1E1812;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+              </button>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <section style="background:color-mix(in oklch, #86764F 10%, #FAF8F3);padding:30px 16px 34px;margin-top:14px;">
+        <h2 style="font-family:'Literata',serif;font-style:italic;font-weight:500;font-size:20px;margin:0 0 16px;">Δημοφιλέστερα</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+          <sc-for list="{{ popularCards }}" as="p" hint-placeholder-count="4">
+            <div style="border-top:1px solid rgba(30,24,18,0.18);padding:12px 12px 12px 0;">
+              <div style="font-size:13.5px;font-weight:600;line-height:1.3;margin-bottom:10px;min-height:34px;">{{ p.name }}</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-family:'Literata',serif;font-weight:600;font-size:15px;">{{ p.priceText }}</span>
+                <button onClick="{{ p.add }}" style="width:26px;height:26px;border:1.5px solid #1E1812;background:none;color:#1E1812;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                </button>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <button onClick="{{ goCatalog }}" style="width:100%;background:#5F5335;border:none;color:#FFFFFF;padding:20px 16px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Commissioner',sans-serif;display:flex;align-items:center;justify-content:space-between;">
+        <span>Δες όλο τον κατάλογο</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"></path></svg>
+      </button>
+
+      <footer style="background:#1E1812;color:#FAF8F3;padding:30px 20px 34px;border-top:3px solid #86764F;">
+        <img src="uploads/logo-evaggelou-color.png" alt="Ζαχαροπλαστική Ευαγγέλου" style="height:28px;object-fit:contain;filter:brightness(0) invert(1);opacity:0.9;margin-bottom:18px;">
+        <div style="font-size:13.5px;line-height:1.8;opacity:0.85;">
+          <div>{{ storeAddress }}</div>
+          <div><a href="tel:{{ phoneHref }}" style="color:#FAF8F3;">{{ storePhoneDisplay }}</a></div>
+          <div>{{ storeInstagram }}</div>
+          <div>Ωράριο: Δευτέρα–Κυριακή, {{ openingHours }}</div>
+        </div>
+        <div style="font-size:11.5px;opacity:0.5;margin-top:12px;">*ωράριο ενδεικτικό, προς επιβεβαίωση</div>
+      </footer>
+    </main>
+  </sc-if>
+
+  <sc-if value="{{ showCatalog }}" hint-placeholder-val="{{ false }}">
+    <main>
+      <div style="position:sticky;top:65px;z-index:15;background:#FAF8F3;border-bottom:1px solid rgba(30,24,18,0.12);overflow-x:auto;white-space:nowrap;padding:0 12px;">
+        <sc-for list="{{ catalogSections }}" as="g" hint-placeholder-count="9">
+          <button onClick="{{ g.select }}" style="display:inline-block;margin-right:20px;border:none;border-bottom:2px solid {{ g.tabBorderColor }};background:none;padding:12px 0;font-size:13px;font-weight:{{ g.tabWeight }};cursor:pointer;font-family:'Commissioner',sans-serif;color:{{ g.tabColor }};">{{ g.name }}</button>
+        </sc-for>
+      </div>
+      <sc-for list="{{ catalogSections }}" as="g" hint-placeholder-count="9">
+        <section id="group-{{ g.id }}" style="padding:26px 16px 6px;">
+          <h2 style="font-family:'Literata',serif;font-weight:600;font-size:15px;letter-spacing:0.14em;text-transform:uppercase;color:#86764F;margin:0 0 16px;">{{ g.name }}</h2>
+          <sc-for list="{{ g.categories }}" as="cat" hint-placeholder-count="3">
+            <div style="margin-bottom:22px;">
+              <h3 style="font-size:16px;font-weight:600;margin:0 0 10px;">{{ cat.name }}</h3>
+              <div>
+                <sc-for list="{{ cat.products }}" as="p" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid rgba(30,24,18,0.1);">
+                    <div style="flex:1;">
+                      <div style="font-size:14.5px;font-weight:600;line-height:1.3;">{{ p.name }}</div>
+                      <sc-if value="{{ p.diabetic }}" hint-placeholder-val="{{ false }}">
+                        <span style="font-size:11.5px;color:#5F5335;text-decoration:underline;">Χωρίς ζάχαρη</span>
+                      </sc-if>
+                    </div>
+                    <span style="font-family:'Literata',serif;font-weight:600;font-size:14.5px;white-space:nowrap;">{{ p.priceText }}</span>
+                    <button onClick="{{ p.add }}" aria-label="Προσθήκη" style="width:28px;height:28px;flex:0 0 auto;border:1.5px solid #1E1812;background:none;color:#1E1812;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                    </button>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </section>
+      </sc-for>
+      <div style="height:24px;"></div>
+    </main>
+  </sc-if>
+
+  <sc-if value="{{ showConfigurator }}" hint-placeholder-val="{{ false }}">
+    <main style="padding:18px 16px 24px;">
+      <div style="display:flex;gap:20px;align-items:center;margin-bottom:22px;">
+        <span style="font-family:'Literata',serif;font-weight:700;font-size:22px;flex:0 0 auto;">{{ cfgStep }}/5</span>
+        <div style="display:flex;gap:5px;flex:1;">
+          <sc-for list="{{ stepDots }}" as="d" hint-placeholder-count="5">
+            <div style="flex:1;height:2px;background:{{ d.color }};"></div>
+          </sc-for>
+        </div>
+      </div>
+      <h2 style="font-family:'Literata',serif;font-weight:600;font-size:22px;margin:0 0 18px;">{{ cfgStepTitle }}</h2>
+
+      <div style="position:relative;width:250px;height:210px;margin:0 auto 26px;">
+        <div style="position:absolute;left:5px;bottom:6px;width:240px;height:26px;border-radius:50%;background:radial-gradient(ellipse at center, rgba(30,24,18,0.16), transparent 75%);"></div>
+        <div style="position:absolute;left:14px;bottom:14px;width:222px;height:80px;border:1.5px solid #1E1812;border-top:none;border-radius:0 0 110px 110px;background:#FFFFFF;opacity:0.55;"></div>
+        <sc-for list="{{ visualBuns }}" as="b" hint-placeholder-count="5">
+          <div style="position:absolute;left:{{ b.x }}px;top:{{ b.y }}px;width:{{ b.size }}px;height:{{ b.size }}px;border-radius:50%;background:radial-gradient(circle at 32% 30%, #FFFFFF, #FAF8F3 45%, #86764F 100%);border:1.5px solid #86764F;transition:transform 0.4s;transform:scale({{ visualScale }});"></div>
+        </sc-for>
+        <svg width="250" height="210" viewBox="0 0 250 210" style="position:absolute;left:0;top:0;pointer-events:none;transition:opacity 0.5s;opacity:{{ chocOpacity }};">
+          <path d="M20 50 Q 60 30, 100 50 T 180 50 T 230 55" stroke="#1E1812" stroke-width="4" fill="none" stroke-linecap="round"></path>
+          <path d="M35 85 Q 75 65, 115 85 T 195 85" stroke="#1E1812" stroke-width="4" fill="none" stroke-linecap="round"></path>
+          <path d="M55 120 Q 95 100, 135 120 T 190 122" stroke="#1E1812" stroke-width="4" fill="none" stroke-linecap="round"></path>
+        </svg>
+        <sc-for list="{{ visualToppings }}" as="t" hint-placeholder-count="10">
+          <div style="position:absolute;left:{{ t.x }}px;top:{{ t.y }}px;width:{{ t.size }}px;height:{{ t.size }}px;border-radius:50%;background:#1E1812;opacity:{{ t.opacity }};animation:popIn 0.35s ease-out;"></div>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{ isStep1 }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;">
+          <sc-for list="{{ sizeOptions }}" as="s" hint-placeholder-count="3">
+            <button onClick="{{ s.select }}" style="text-align:left;border:none;border-bottom:1px solid {{ s.borderColor }};background:{{ s.bg }};color:{{ s.color }};padding:16px 14px;cursor:pointer;font-family:'Commissioner',sans-serif;display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:15px;font-weight:600;">{{ s.name }}</span>
+              <span style="font-family:'Literata',serif;font-weight:600;font-size:15px;color:{{ s.priceColor }};">{{ s.priceText }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isStep2 }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;">
+          <sc-for list="{{ chocOptions }}" as="c" hint-placeholder-count="7">
+            <button onClick="{{ c.select }}" style="text-align:left;border:none;border-bottom:1px solid {{ c.borderColor }};background:{{ c.bg }};padding:13px 14px;cursor:pointer;font-family:'Commissioner',sans-serif;">
+              <div style="font-size:15px;font-weight:600;margin-bottom:2px;color:{{ c.color }};">{{ c.name }}</div>
+              <div style="font-size:12.5px;color:{{ c.descColor }};">{{ c.desc }}</div>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isStep3 }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;">
+          <sc-for list="{{ baseOptions }}" as="b" hint-placeholder-count="5">
+            <button onClick="{{ b.select }}" style="text-align:left;border:none;border-bottom:1px solid {{ b.borderColor }};background:{{ b.bg }};color:{{ b.color }};padding:16px 14px;cursor:pointer;font-family:'Commissioner',sans-serif;display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:15px;font-weight:600;">{{ b.name }}</span>
+              <span style="font-size:13px;color:{{ b.extraColor }};font-weight:600;">{{ b.extraText }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isStep4 }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:#1E1812;opacity:0.7;margin-bottom:14px;">Τα πρώτα {{ freeToppingsCount }} είναι δωρεάν, τα υπόλοιπα με {{ toppingExtraPriceText }} το καθένα. Έχεις επιλέξει {{ selectedToppingsCount }}.</div>
+        <sc-for list="{{ toppingGroupsDisplay }}" as="grp" hint-placeholder-count="5">
+          <div style="margin-bottom:16px;">
+            <h4 style="font-size:13px;font-weight:600;color:#86764F;margin:0 0 8px;">{{ grp.name }}</h4>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <sc-for list="{{ grp.items }}" as="it" hint-placeholder-count="3">
+                <button onClick="{{ it.toggle }}" style="border:1.5px solid {{ it.borderColor }};background:{{ it.bg }};color:{{ it.color }};border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">{{ it.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </sc-if>
+
+      <sc-if value="{{ isStep5 }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#FFFFFF;border-radius:14px;padding:16px;margin-bottom:18px;">
+          <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #FAF8F3;"><span style="opacity:0.65;">Μέγεθος</span><span style="font-weight:600;">{{ summarySize }}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #FAF8F3;"><span style="opacity:0.65;">Σοκολάτα</span><span style="font-weight:600;">{{ summaryChoc }}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #FAF8F3;"><span style="opacity:0.65;">Βάση</span><span style="font-weight:600;">{{ summaryBase }}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:7px 0;"><span style="opacity:0.65;">Υλικά</span><span style="font-weight:600;text-align:right;max-width:60%;">{{ summaryToppings }}</span></div>
+        </div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;">
+          <span style="font-size:15px;font-weight:600;">Σύνολο</span>
+          <span style="font-family:'Literata',serif;font-weight:700;font-size:22px;">{{ cfgTotalText }}</span>
+        </div>
+      </sc-if>
+
+      <div style="display:flex;gap:10px;margin-top:22px;">
+        <sc-if value="{{ showCfgBack }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ cfgPrev }}" style="flex:0 0 90px;background:#FFFFFF;border:1px solid #86764F;color:#1E1812;border-radius:12px;padding:14px 0;font-size:14px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Πίσω</button>
+        </sc-if>
+        <sc-if value="{{ isStep5 }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ addConfiguredToCart }}" style="flex:1;background:#5F5335;color:#FFFFFF;border:none;border-radius:12px;padding:14px 0;font-size:15px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Προσθήκη στο καλάθι</button>
+        </sc-if>
+        <sc-if value="{{ isStep5 }}" hint-placeholder-val="{{ true }}">
+        </sc-if>
+        <sc-if value="{{ notStep5 }}" hint-placeholder-val="{{ true }}">
+          <button onClick="{{ cfgNext }}" disabled="{{ cfgNextDisabled }}" style="flex:1;background:{{ cfgNextBg }};color:#FFFFFF;border:none;border-radius:12px;padding:14px 0;font-size:15px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Επόμενο</button>
+        </sc-if>
+      </div>
+    </main>
+  </sc-if>
+
+  <sc-if value="{{ showCheckout }}" hint-placeholder-val="{{ false }}">
+    <main style="padding:18px 16px 24px;">
+      <div style="display:flex;gap:8px;margin-bottom:20px;">
+        <button onClick="{{ setFulfillmentPickup }}" style="flex:1;border:2px solid {{ pickupBorder }};background:#FFFFFF;color:#1E1812;border-radius:12px;padding:12px 0;font-size:14px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Παραλαβή</button>
+        <button onClick="{{ setFulfillmentDelivery }}" style="flex:1;border:2px solid {{ deliveryBorder }};background:#FFFFFF;color:#1E1812;border-radius:12px;padding:12px 0;font-size:14px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Delivery στην Καβάλα</button>
+      </div>
+
+      <sc-if value="{{ isPickup }}" hint-placeholder-val="{{ true }}">
+        <sc-if value="{{ storeClosedNow }}" hint-placeholder-val="{{ false }}">
+          <div style="background:#FFFFFF;border-radius:12px;padding:12px 14px;font-size:13px;margin-bottom:14px;color:#1E1812;opacity:0.8;">Το κατάστημα είναι κλειστό τώρα. Διάλεξε ώρα παραλαβής μέσα στο ωράριο μας, {{ openingHours }}.</div>
+        </sc-if>
+        <label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px;">Ώρα παραλαβής</label>
+        <select value="{{ pickupTime }}" onChange="{{ setPickupTime }}" required="{{ true }}" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);background:#FFFFFF;font-size:14px;font-family:'Commissioner',sans-serif;margin-bottom:18px;">
+          <option value="">Διάλεξε ώρα</option>
+          <sc-for list="{{ pickupSlots }}" as="t" hint-placeholder-count="6">
+            <option value="{{ t }}">{{ t }}</option>
+          </sc-for>
+        </select>
+      </sc-if>
+
+      <sc-if value="{{ isDelivery }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#FFFFFF;border-radius:12px;padding:12px 14px;font-size:13px;margin-bottom:14px;">
+          <div>Ελάχιστη παραγγελία: <strong>{{ deliveryMinOrderText }}</strong></div>
+          <div>Μεταφορικά: <strong>{{ deliveryFeeText }}</strong></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
+          <input value="{{ addrStreet }}" onChange="{{ setAddrStreet }}" required="{{ true }}" placeholder="Διεύθυνση, αριθμός" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;">
+          <div style="display:flex;gap:10px;">
+            <input value="{{ addrFloor }}" onChange="{{ setAddrFloor }}" placeholder="Όροφος" style="flex:1;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;">
+            <input value="{{ addrBell }}" onChange="{{ setAddrBell }}" placeholder="Κουδούνι" style="flex:1;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;">
+          </div>
+          <textarea value="{{ addrNotes }}" onChange="{{ setAddrNotes }}" placeholder="Σχόλια για την παράδοση (προαιρετικό)" rows="2" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;resize:vertical;"></textarea>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ hasCake }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#FFFFFF;border-radius:14px;padding:16px;margin-bottom:18px;">
+          <h3 style="font-size:15px;font-weight:600;margin:0 0 12px;">Στοιχεία για την τούρτα</h3>
+          <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">Ημερομηνία και ώρα παραλαβής (τουλάχιστον 24 ώρες πριν)</label>
+          <input type="datetime-local" value="{{ cakeDateTime }}" onChange="{{ setCakeDateTime }}" min="{{ cakeMinDateTime }}" required="{{ true }}" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;margin-bottom:12px;">
+          <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">Μήνυμα πάνω στην τούρτα (προαιρετικό)</label>
+          <input value="{{ cakeMessage }}" onChange="{{ setCakeMessage }}" maxlength="40" placeholder="π.χ. Χρόνια πολλά Μαρία" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;margin-bottom:12px;">
+          <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">Κεράκια</label>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <button onClick="{{ decCandles }}" style="width:34px;height:34px;border-radius:50%;border:1px solid #86764F;background:#FFFFFF;cursor:pointer;">−</button>
+            <span style="font-weight:600;min-width:20px;text-align:center;">{{ candlesCount }}</span>
+            <button onClick="{{ incCandles }}" style="width:34px;height:34px;border-radius:50%;border:1px solid #86764F;background:#FFFFFF;cursor:pointer;">+</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <h3 style="font-size:15px;font-weight:600;margin:0 0 12px;">Πληρωμή</h3>
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <button onClick="{{ setPayCash }}" style="flex:1;border:2px solid {{ cashBorder }};background:#FFFFFF;border-radius:12px;padding:12px 0;font-size:14px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Μετρητά στην παράδοση</button>
+        <button onClick="{{ setPayCard }}" style="flex:1;border:2px solid {{ cardBorder }};background:#FFFFFF;border-radius:12px;padding:12px 0;font-size:14px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Κάρτα</button>
+      </div>
+
+      <sc-if value="{{ isPayCard }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:8px;">
+          <input value="{{ cardName }}" onChange="{{ setCardName }}" required="{{ true }}" placeholder="Όνομα κατόχου" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;">
+          <input value="{{ cardNumber }}" onChange="{{ setCardNumber }}" required="{{ true }}" inputMode="numeric" maxlength="19" placeholder="0000 0000 0000 0000" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;">
+          <div style="display:flex;gap:10px;">
+            <input value="{{ cardExpiry }}" onChange="{{ setCardExpiry }}" required="{{ true }}" maxlength="5" placeholder="ΜΜ/ΕΕ" style="flex:1;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;">
+            <input value="{{ cardCvv }}" onChange="{{ setCardCvv }}" required="{{ true }}" inputMode="numeric" maxlength="3" placeholder="CVV" style="flex:1;padding:13px 14px;border-radius:12px;border:1px solid rgba(30,24,18,0.2);font-size:14px;font-family:'Commissioner',sans-serif;">
+          </div>
+        </div>
+        <div style="font-size:12px;color:#1E1812;opacity:0.55;margin-bottom:18px;">Demo — δεν πραγματοποιείται πραγματική χρέωση σε αυτή τη φάση.</div>
+      </sc-if>
+
+      <div style="background:#FFFFFF;border-radius:14px;padding:16px;margin:18px 0;">
+        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="opacity:0.65;">Υποσύνολο</span><span>{{ checkoutSubtotalText }}</span></div>
+        <sc-if value="{{ isDelivery }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="opacity:0.65;">Μεταφορικά</span><span>{{ deliveryFeeText }}</span></div>
+        </sc-if>
+        <div style="display:flex;justify-content:space-between;padding-top:9px;margin-top:5px;border-top:1px solid #FAF8F3;font-weight:700;font-size:16px;"><span>Σύνολο</span><span style="font-family:'Literata',serif;">{{ checkoutTotalText }}</span></div>
+      </div>
+
+      <button onClick="{{ submitOrder }}" disabled="{{ submitDisabled }}" style="width:100%;background:#5F5335;color:#FFFFFF;border:none;border-radius:12px;padding:15px 0;font-size:15px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;opacity:{{ submitOpacity }};">Ολοκλήρωση παραγγελίας</button>
+    </main>
+  </sc-if>
+
+  <sc-if value="{{ showConfirmation }}" hint-placeholder-val="{{ false }}">
+    <main style="padding:40px 20px;text-align:center;">
+      <div style="width:56px;height:56px;border-radius:50%;background:#86764F;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
+      </div>
+      <h2 style="font-family:'Literata',serif;font-weight:600;font-size:21px;margin:0 0 6px;">Η παραγγελία σου καταχωρήθηκε</h2>
+      <div style="font-size:14px;opacity:0.7;margin-bottom:22px;">Αριθμός παραγγελίας {{ orderNumber }}</div>
+      <div style="background:#FFFFFF;border-radius:14px;padding:16px;text-align:left;margin-bottom:18px;">
+        <sc-for list="{{ confirmLines }}" as="l" hint-placeholder-count="3">
+          <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;"><span>{{ l.name }}{{ l.qtyText }}</span><span style="font-weight:600;">{{ l.priceText }}</span></div>
+        </sc-for>
+        <div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:6px;border-top:1px solid #FAF8F3;font-weight:700;"><span>Σύνολο</span><span>{{ checkoutTotalText }}</span></div>
+      </div>
+      <div style="font-size:14px;opacity:0.75;margin-bottom:26px;">{{ etaLabel }}: <strong style="opacity:1;color:#1E1812;">{{ etaText }}</strong><br>Για οποιαδήποτε ερώτηση: <a href="tel:{{ phoneHref }}">{{ storePhoneDisplay }}</a></div>
+      <button onClick="{{ goStatus }}" style="width:100%;background:#5F5335;color:#FFFFFF;border:none;border-radius:12px;padding:14px 0;font-size:15px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Δες την κατάσταση παραγγελίας</button>
+    </main>
+  </sc-if>
+
+  <sc-if value="{{ showStatus }}" hint-placeholder-val="{{ false }}">
+    <main style="padding:36px 20px;">
+      <div style="text-align:center;margin-bottom:30px;">
+        <div style="font-size:13px;opacity:0.6;">Παραγγελία</div>
+        <div style="font-family:'Literata',serif;font-weight:600;font-size:19px;">{{ orderNumber }}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0;">
+        <sc-for list="{{ statusSteps }}" as="st" hint-placeholder-count="3">
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;">
+              <div style="width:30px;height:30px;border-radius:50%;background:{{ st.circleBg }};color:{{ st.circleColor }};display:flex;align-items:center;justify-content:center;flex:0 0 auto;">
+                <sc-if value="{{ st.done }}" hint-placeholder-val="{{ false }}">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>
+                </sc-if>
+              </div>
+              <sc-if value="{{ st.hasLine }}" hint-placeholder-val="{{ true }}">
+                <div style="width:2px;flex:1;min-height:34px;background:{{ st.lineBg }};"></div>
+              </sc-if>
+            </div>
+            <div style="padding-bottom:34px;">
+              <div style="font-size:15px;font-weight:600;color:{{ st.textColor }};">{{ st.label }}</div>
+              <sc-if value="{{ st.active }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12.5px;color:#86764F;margin-top:2px;">{{ st.activeNote }}</div>
+              </sc-if>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-size:13.5px;opacity:0.7;text-align:center;margin-top:10px;">Για οποιαδήποτε ερώτηση: <a href="tel:{{ phoneHref }}">{{ storePhoneDisplay }}</a></div>
+    </main>
+  </sc-if>
+
+  <sc-if value="{{ showCartBar }}" hint-placeholder-val="{{ false }}">
+    <button onClick="{{ openCart }}" style="position:fixed;left:50%;transform:translateX(-50%);bottom:64px;width:100%;max-width:448px;background:#1E1812;color:#FAF8F3;border:none;border-radius:14px;padding:13px 18px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-family:'Commissioner',sans-serif;box-shadow:0 6px 20px rgba(30,24,18,0.25);z-index:25;">
+      <span style="font-size:13.5px;font-weight:600;">{{ cartCount }} προϊόντα · {{ cartTotalText }}</span>
+      <span style="font-size:13.5px;font-weight:700;text-decoration:underline;">Δες το καλάθι</span>
+    </button>
+  </sc-if>
+
+  <sc-if value="{{ showBottomNav }}" hint-placeholder-val="{{ true }}">
+    <nav style="position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:480px;background:#FAF8F3;border-top:1px solid rgba(30,24,18,0.12);display:flex;justify-content:space-around;padding:8px 4px 10px;z-index:20;">
+      <button onClick="{{ goHome }}" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:{{ navHomeColor }};font-family:'Commissioner',sans-serif;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 12 4l8 6.5"></path><path d="M6 9.5V20h12V9.5"></path></svg>
+        <span style="font-size:11px;font-weight:600;">Αρχική</span>
+      </button>
+      <button onClick="{{ goCatalog }}" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:{{ navCatalogColor }};font-family:'Commissioner',sans-serif;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"></rect><rect x="13" y="4" width="7" height="7" rx="1.5"></rect><rect x="4" y="13" width="7" height="7" rx="1.5"></rect><rect x="13" y="13" width="7" height="7" rx="1.5"></rect></svg>
+        <span style="font-size:11px;font-weight:600;">Κατάλογος</span>
+      </button>
+      <button onClick="{{ goConfigurator }}" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:{{ navConfigColor }};font-family:'Commissioner',sans-serif;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11h16a8 8 0 0 1-16 0Z"></path><path d="M12 4v4"></path><circle cx="12" cy="3" r="1"></circle></svg>
+        <span style="font-size:11px;font-weight:600;">Δημιουργός</span>
+      </button>
+      <button onClick="{{ openCart }}" style="background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:#1E1812;font-family:'Commissioner',sans-serif;position:relative;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l-1 12H7L6 8Z"></path><path d="M9 8a3 3 0 0 1 6 0"></path></svg>
+        <span style="font-size:11px;font-weight:600;">Καλάθι</span>
+        <sc-if value="{{ hasCartItems }}" hint-placeholder-val="{{ false }}">
+          <span style="position:absolute;top:-3px;right:10px;background:#5F5335;color:#FFFFFF;font-size:9.5px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;">{{ cartCount }}</span>
+        </sc-if>
+      </button>
+    </nav>
+  </sc-if>
+
+  <sc-if value="{{ cartOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeCart }}" style="position:fixed;inset:0;background:rgba(30,24,18,0.45);z-index:29;"></div>
+    <div style="position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:480px;max-height:78vh;background:#FFFFFF;border-radius:20px 20px 0 0;box-shadow:0 -8px 30px rgba(30,24,18,0.25);z-index:30;display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;border-bottom:1px solid #FAF8F3;">
+        <h2 style="font-family:'Literata',serif;font-weight:600;font-size:18px;margin:0;">Το καλάθι σου</h2>
+        <button onClick="{{ closeCart }}" aria-label="Κλείσιμο" style="background:#FAF8F3;border:none;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1E1812" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+        </button>
+      </div>
+      <div style="overflow-y:auto;padding:8px 18px;flex:1;">
+        <sc-if value="{{ cartEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="text-align:center;padding:30px 10px;">
+            <div style="font-size:14px;opacity:0.7;margin-bottom:18px;">Το καλάθι σου είναι άδειο. Πρόσθεσε κάτι από τον κατάλογο ή φτιάξε το δικό σου προφιτερόλ.</div>
+            <div style="display:flex;gap:10px;">
+              <button onClick="{{ goCatalogFromCart }}" style="flex:1;border:1px solid #86764F;background:#FFFFFF;border-radius:10px;padding:10px 0;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Δες τον κατάλογο</button>
+              <button onClick="{{ goConfiguratorFromCart }}" style="flex:1;background:#5F5335;color:#FFFFFF;border:none;border-radius:10px;padding:10px 0;font-size:13.5px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Φτιάξε προφιτερόλ</button>
+            </div>
+          </div>
+        </sc-if>
+        <sc-for list="{{ cartItems }}" as="it" hint-placeholder-count="0">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #FAF8F3;">
+            <div style="flex:1;padding-right:10px;">
+              <div style="font-size:14px;font-weight:600;">{{ it.name }}</div>
+              <sc-if value="{{ it.hasMeta }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;opacity:0.6;margin-top:2px;">{{ it.meta }}</div>
+              </sc-if>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                <button onClick="{{ it.dec }}" style="width:24px;height:24px;border-radius:50%;border:1px solid #86764F;background:#FFFFFF;cursor:pointer;font-size:13px;line-height:1;">−</button>
+                <span style="font-size:13px;font-weight:600;min-width:14px;text-align:center;">{{ it.qty }}</span>
+                <button onClick="{{ it.inc }}" style="width:24px;height:24px;border-radius:50%;border:1px solid #86764F;background:#FFFFFF;cursor:pointer;font-size:13px;line-height:1;">+</button>
+              </div>
+            </div>
+            <span style="font-weight:600;font-size:14px;">{{ it.lineTotalText }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <sc-if value="{{ cartHasItems }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:14px 18px 22px;border-top:1px solid #FAF8F3;">
+          <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;margin-bottom:14px;"><span>Σύνολο</span><span style="font-family:'Literata',serif;">{{ cartTotalText }}</span></div>
+          <button onClick="{{ proceedToCheckout }}" style="width:100%;background:#5F5335;color:#FFFFFF;border:none;border-radius:12px;padding:14px 0;font-size:15px;font-weight:600;cursor:pointer;font-family:'Commissioner',sans-serif;">Ολοκλήρωση παραγγελίας</button>
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;openingHours&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;09:00–23:00&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;storePhone&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;2510 226999&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;deliveryFee&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:2.5,&quot;min&quot;:0,&quot;max&quot;:10,&quot;step&quot;:0.5,&quot;tsType&quot;:&quot;number&quot;},&quot;deliveryMinOrder&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:12,&quot;min&quot;:0,&quot;max&quot;:50,&quot;step&quot;:1,&quot;tsType&quot;:&quot;number&quot;}}">
+const CHOC_TONE = { milk: 0.35, classic: 0.5, white: 0.15, dark: 0.7, gianduia: 0.55, strawberry: 0.3, bueno: 0.45 };
+const BUN_POS = [
+  { x: 90, y: 20, size: 40 }, { x: 40, y: 50, size: 44 }, { x: 140, y: 50, size: 44 },
+  { x: 65, y: 85, size: 42 }, { x: 115, y: 85, size: 42 },
+];
+const TOP_POS = [
+  { x: 30, y: 15 }, { x: 175, y: 20 }, { x: 55, y: 35 }, { x: 150, y: 35 }, { x: 100, y: 5 },
+  { x: 20, y: 70 }, { x: 185, y: 65 }, { x: 90, y: 100 }, { x: 130, y: 105 }, { x: 60, y: 105 },
+];
+
+class Component extends DCLogic {
+  state = {
+    data: null, screen: 'home', cartOpen: false, cart: [], activeGroup: null,
+    cfg: { step: 1, size: null, choc: null, base: null, toppings: [] },
+    fulfillment: 'pickup', pickupTime: '', address: { street: '', floor: '', bell: '', notes: '' },
+    cakeDateTime: '', cakeMessage: '', candles: 1,
+    payment: 'cash', card: { name: '', number: '', expiry: '', cvv: '' },
+    orderNumber: null, statusStage: 0,
+  };
+
+  componentDidMount() {
+    import('./data/menu.js').then((m) => this.setState({ data: m, activeGroup: m.groups[0].id }));
+    this._onScroll = () => {
+      if (this.state.screen !== 'catalog' || !this.state.data) return;
+      let current = this.state.data.groups[0].id;
+      for (const g of this.state.data.groups) {
+        const el = document.getElementById('group-' + g.id);
+        if (el && el.getBoundingClientRect().top <= 130) current = g.id;
+      }
+      if (current !== this.state.activeGroup) this.setState({ activeGroup: current });
+    };
+    window.addEventListener('scroll', this._onScroll, { passive: true });
+  }
+  componentWillUnmount() {
+    window.removeEventListener('scroll', this._onScroll);
+    if (this._statusTimer) clearInterval(this._statusTimer);
+  }
+
+  fmt(n) { return n.toFixed(2).replace('.', ',') + ' €'; }
+
+  addToCart(name, unitPrice, meta, qty) {
+    const isCake = meta === '__ISCAKE__';
+    const cart = this.state.cart.slice();
+    cart.push({ id: Math.random().toString(36).slice(2), name, unitPrice, qty: qty || 1, meta: isCake ? '' : (meta || ''), isCake });
+    this.setState({ cart });
+  }
+
+  renderVals() {
+    const d = this.state.data;
+    const rootPadBottom = this.state.screen === 'checkout' || this.state.screen === 'confirmation' || this.state.screen === 'status' ? 24 : (this.hasItems() ? 150 : 90);
+    if (!d) {
+      return {
+        dataLoading: true, showHome: false, showCatalog: false, showConfigurator: false, showCheckout: false,
+        showConfirmation: false, showStatus: false, showTopHeader: true, showBackHeader: false, showBottomNav: false,
+        showCartBar: false, cartOpen: false, hasCartItems: false, cartCount: 0, phoneHref: '2510226999', goHome: () => {},
+        openCart: () => {}, rootPadBottom: 24,
+      };
+    }
+    const openingHours = this.props.openingHours ?? d.store.hours;
+    const storePhoneDisplay = this.props.storePhone ?? d.store.phone;
+    const phoneHref = (this.props.storePhone ?? d.store.phoneHref).replace(/\D/g, '');
+    const deliveryFee = this.props.deliveryFee ?? d.store.deliveryFee;
+    const deliveryMinOrder = this.props.deliveryMinOrder ?? d.store.deliveryMinOrder;
+
+    const cartCount = this.state.cart.reduce((s, it) => s + it.qty, 0);
+    const cartTotal = this.state.cart.reduce((s, it) => s + it.qty * it.unitPrice, 0);
+    const screen = this.state.screen;
+
+    const vals = {
+      dataLoading: false,
+      showTopHeader: ['home', 'catalog', 'configurator'].includes(screen),
+      showBackHeader: ['checkout', 'confirmation', 'status'].includes(screen),
+      backHeaderTitle: screen === 'checkout' ? 'Ολοκλήρωση παραγγελίας' : screen === 'confirmation' ? 'Επιβεβαίωση' : 'Κατάσταση παραγγελίας',
+      backHeaderAction: () => screen === 'checkout' ? this.setState({ screen: 'home', cartOpen: true }) : this.goHome(),
+      showHome: screen === 'home', showCatalog: screen === 'catalog', showConfigurator: screen === 'configurator',
+      showCheckout: screen === 'checkout', showConfirmation: screen === 'confirmation', showStatus: screen === 'status',
+      showBottomNav: ['home', 'catalog', 'configurator'].includes(screen),
+      showCartBar: ['home', 'catalog', 'configurator'].includes(screen) && cartCount > 0 && !this.state.cartOpen,
+      hasCartItems: cartCount > 0, cartCount, cartTotalText: this.fmt(cartTotal),
+      phoneHref, storePhoneDisplay,
+      goHome: () => this.setState({ screen: 'home' }),
+      goCatalog: () => this.setState({ screen: 'catalog' }),
+      goConfigurator: () => this.setState({ screen: 'configurator', cfg: { step: 1, size: null, choc: null, base: null, toppings: [] } }),
+      openCart: () => this.setState({ cartOpen: true }),
+      closeCart: () => this.setState({ cartOpen: false }),
+      cartOpen: this.state.cartOpen,
+      navHomeColor: screen === 'home' ? '#5F5335' : '#1E1812',
+      navCatalogColor: screen === 'catalog' ? '#5F5335' : '#1E1812',
+      navConfigColor: screen === 'configurator' ? '#5F5335' : '#1E1812',
+      storeAddress: d.store.address, storeInstagram: d.store.instagram, openingHours,
+      rootPadBottom,
+    };
+
+    if (screen === 'home') {
+      vals.offerCards = d.offers.map((o, i) => ({
+        name: o.name, priceText: this.fmt(o.price) + (o.perKilo ? '/κιλό' : ''), wasText: this.fmt(o.was),
+        add: () => this.addToCart(o.name, o.price, ''),
+      }));
+      vals.popularCards = d.popular.map((p) => ({ name: p.name, priceText: this.fmt(p.price), add: () => this.addToCart(p.name, p.price, '') }));
+    }
+
+    if (screen === 'catalog') {
+      vals.catalogSections = d.groups.map((g) => ({
+        id: g.id, name: g.name,
+        tabColor: this.state.activeGroup === g.id ? '#1E1812' : 'rgba(30,24,18,0.4)',
+        tabWeight: this.state.activeGroup === g.id ? '700' : '500',
+        tabBorderColor: this.state.activeGroup === g.id ? '#86764F' : 'transparent',
+        select: () => {
+          this.setState({ activeGroup: g.id });
+          const el = document.getElementById('group-' + g.id);
+          if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 100, behavior: 'smooth' });
+        },
+        categories: g.categories.map((catId) => ({
+          id: catId, name: d.categoryNames[catId],
+          products: d.products[catId].map((p) => ({
+            name: p.name, priceText: this.fmt(p.price) + (p.perKilo ? '/κιλό' : ''), diabetic: !!p.diabetic,
+            add: () => this.addToCart(p.name, p.price, catId === 'cakes' || catId === 'icecream_cakes' ? '__ISCAKE__' : ''),
+          })),
+        })),
+      }));
+    }
+
+    if (screen === 'configurator') Object.assign(vals, this.configuratorVals(d));
+    if (screen === 'checkout') Object.assign(vals, this.checkoutVals(d, openingHours, deliveryFee, deliveryMinOrder, storePhoneDisplay, phoneHref));
+    if (screen === 'confirmation') Object.assign(vals, this.confirmationVals(d, storePhoneDisplay, phoneHref));
+    if (screen === 'status') Object.assign(vals, this.statusVals(d));
+
+    if (this.state.cartOpen) Object.assign(vals, this.cartVals());
+
+    return vals;
+  }
+
+  hasItems() { return this.state.cart.length > 0; }
+
+  configuratorVals(d) {
+    const cfg = this.state.cfg;
+    const step = cfg.step;
+    const titles = { 1: 'Διάλεξε μέγεθος', 2: 'Διάλεξε σοκολάτα', 3: 'Διάλεξε βάση', 4: 'Υλικά & toppings', 5: 'Η σύνοψη σου' };
+    const chocTone = cfg.choc ? CHOC_TONE[cfg.choc] : 0;
+    const sizeObj = d.sizes.find((s) => s.id === cfg.size);
+    const baseObj = d.bases.find((b) => b.id === cfg.base);
+    const chocObj = d.chocolates.find((c) => c.id === cfg.choc);
+    const extraToppings = Math.max(0, cfg.toppings.length - d.FREE_TOPPINGS);
+    const total = (sizeObj ? sizeObj.price : 0) + (baseObj ? baseObj.extra : 0) + extraToppings * d.TOPPING_EXTRA_PRICE;
+
+    const canProceed = (step === 1 && !!cfg.size) || (step === 2 && !!cfg.choc) || (step === 3 && !!cfg.base) || step === 4;
+
+    return {
+      cfgStep: step, cfgStepTitle: titles[step],
+      stepDots: [1, 2, 3, 4, 5].map((n) => ({ color: n <= step ? '#86764F' : '#E5DFD1' })),
+      isStep1: step === 1, isStep2: step === 2, isStep3: step === 3, isStep4: step === 4, isStep5: step === 5,
+      notStep5: step !== 5, showCfgBack: step > 1,
+      visualScale: sizeObj ? (sizeObj.id === 'solo' ? 0.85 : sizeObj.id === 'duo' ? 1 : 1.15) : 0.85,
+      visualBuns: BUN_POS,
+      chocOpacity: chocTone,
+      visualToppings: cfg.toppings.map((tid, i) => {
+        const pos = TOP_POS[i % TOP_POS.length];
+        return { x: pos.x, y: pos.y, size: 10, opacity: 0.85 };
+      }),
+      sizeOptions: d.sizes.map((s) => {
+        const sel = cfg.size === s.id;
+        return { name: s.name, priceText: this.fmt(s.price), bg: sel ? '#5F5335' : '#FFFFFF', color: sel ? '#FFFFFF' : '#1E1812',
+          priceColor: sel ? '#FFFFFF' : '#5F5335', borderColor: sel ? 'transparent' : 'rgba(30,24,18,0.12)',
+          select: () => this.setState({ cfg: { ...cfg, size: s.id } }) };
+      }),
+      chocOptions: d.chocolates.map((c) => {
+        const sel = cfg.choc === c.id;
+        return { name: c.name, desc: c.desc, bg: sel ? '#5F5335' : '#FFFFFF', color: sel ? '#FFFFFF' : '#1E1812',
+          descColor: sel ? 'rgba(255,255,255,0.75)' : 'rgba(30,24,18,0.6)', borderColor: sel ? 'transparent' : 'rgba(30,24,18,0.12)',
+          select: () => this.setState({ cfg: { ...cfg, choc: c.id } }) };
+      }),
+      baseOptions: d.bases.map((b) => {
+        const sel = cfg.base === b.id;
+        return { name: b.name, extraText: b.extra > 0 ? '+' + this.fmt(b.extra) : 'χωρίς χρέωση',
+          bg: sel ? '#5F5335' : '#FFFFFF', color: sel ? '#FFFFFF' : '#1E1812', extraColor: sel ? '#FFFFFF' : '#5F5335',
+          borderColor: sel ? 'transparent' : 'rgba(30,24,18,0.12)',
+          select: () => this.setState({ cfg: { ...cfg, base: b.id } }) };
+      }),
+      freeToppingsCount: d.FREE_TOPPINGS, toppingExtraPriceText: this.fmt(d.TOPPING_EXTRA_PRICE),
+      selectedToppingsCount: cfg.toppings.length,
+      toppingGroupsDisplay: d.toppingGroups.map((grp) => ({
+        name: grp.name,
+        items: grp.items.map((it) => {
+          const selected = cfg.toppings.includes(it.id);
+          return {
+            label: it.name, borderColor: selected ? '#5F5335' : '#E5DFD1', bg: selected ? '#5F5335' : '#FFFFFF', color: selected ? '#FFFFFF' : '#1E1812',
+            toggle: () => {
+              const next = selected ? cfg.toppings.filter((x) => x !== it.id) : cfg.toppings.concat(it.id);
+              this.setState({ cfg: { ...cfg, toppings: next } });
+            },
+          };
+        }),
+      })),
+      summarySize: sizeObj ? sizeObj.name : '—', summaryChoc: chocObj ? chocObj.name : '—', summaryBase: baseObj ? baseObj.name : '—',
+      summaryToppings: cfg.toppings.length ? cfg.toppings.map((tid) => d.toppingGroups.flatMap((g) => g.items).find((it) => it.id === tid).name).join(', ') : 'χωρίς υλικά',
+      cfgTotalText: this.fmt(total),
+      cfgNextDisabled: !canProceed, cfgNextBg: canProceed ? '#5F5335' : '#C9BFA8',
+      cfgNext: () => { if (canProceed) this.setState({ cfg: { ...cfg, step: step + 1 } }); },
+      cfgPrev: () => this.setState({ cfg: { ...cfg, step: step - 1 } }),
+      addConfiguredToCart: () => {
+        const meta = `${sizeObj.name} · ${chocObj.name} · ${baseObj.name}`;
+        this.addToCart('Το προφιτερόλ σου', total, meta);
+        this.setState({ screen: 'home', cfg: { step: 1, size: null, choc: null, base: null, toppings: [] } });
+      },
+    };
+  }
+
+  checkoutVals(d, openingHours, deliveryFee, deliveryMinOrder, storePhoneDisplay, phoneHref) {
+    const [startH] = openingHours.split('–');
+    const slots = [];
+    let [h, m] = [9, 0];
+    for (let i = 0; i < 60; i++) {
+      const hh = String(h).padStart(2, '0'), mm = String(m).padStart(2, '0');
+      if (h >= 23) break;
+      slots.push(`${hh}:${mm}`);
+      m += 15; if (m >= 60) { m = 0; h++; }
+    }
+    const nowH = new Date().getHours();
+    const storeClosedNow = nowH < 9 || nowH >= 23;
+    const cartTotal = this.state.cart.reduce((s, it) => s + it.qty * it.unitPrice, 0);
+    const isDelivery = this.state.fulfillment === 'delivery';
+    const total = cartTotal + (isDelivery ? deliveryFee : 0);
+    const hasCake = this.state.cart.some((it) => it.isCake);
+    const now = new Date(Date.now() + 24 * 3600 * 1000);
+    const cakeMin = now.toISOString().slice(0, 16);
+    const canSubmit = (!isDelivery || this.state.address.street.trim()) && (this.state.fulfillment !== 'pickup' || this.state.pickupTime) &&
+      (!hasCake || this.state.cakeDateTime) && (this.state.payment !== 'card' || (this.state.card.name && this.state.card.number && this.state.card.expiry && this.state.card.cvv));
+
+    return {
+      isPickup: !isDelivery, isDelivery,
+      pickupBorder: !isDelivery ? '#5F5335' : '#E5DFD1', deliveryBorder: isDelivery ? '#5F5335' : '#E5DFD1',
+      setFulfillmentPickup: () => this.setState({ fulfillment: 'pickup' }),
+      setFulfillmentDelivery: () => this.setState({ fulfillment: 'delivery' }),
+      storeClosedNow, openingHours,
+      pickupSlots: slots, pickupTime: this.state.pickupTime,
+      setPickupTime: (e) => this.setState({ pickupTime: e.target.value }),
+      deliveryMinOrderText: this.fmt(deliveryMinOrder), deliveryFeeText: this.fmt(deliveryFee),
+      addrStreet: this.state.address.street, addrFloor: this.state.address.floor, addrBell: this.state.address.bell, addrNotes: this.state.address.notes,
+      setAddrStreet: (e) => this.setState({ address: { ...this.state.address, street: e.target.value } }),
+      setAddrFloor: (e) => this.setState({ address: { ...this.state.address, floor: e.target.value } }),
+      setAddrBell: (e) => this.setState({ address: { ...this.state.address, bell: e.target.value } }),
+      setAddrNotes: (e) => this.setState({ address: { ...this.state.address, notes: e.target.value } }),
+      hasCake, cakeDateTime: this.state.cakeDateTime, cakeMinDateTime: cakeMin, cakeMessage: this.state.cakeMessage, candlesCount: this.state.candles,
+      setCakeDateTime: (e) => this.setState({ cakeDateTime: e.target.value }),
+      setCakeMessage: (e) => this.setState({ cakeMessage: e.target.value }),
+      incCandles: () => this.setState({ candles: Math.min(99, this.state.candles + 1) }),
+      decCandles: () => this.setState({ candles: Math.max(0, this.state.candles - 1) }),
+      cashBorder: this.state.payment === 'cash' ? '#5F5335' : '#E5DFD1', cardBorder: this.state.payment === 'card' ? '#5F5335' : '#E5DFD1',
+      isPayCard: this.state.payment === 'card',
+      setPayCash: () => this.setState({ payment: 'cash' }), setPayCard: () => this.setState({ payment: 'card' }),
+      cardName: this.state.card.name, cardNumber: this.state.card.number, cardExpiry: this.state.card.expiry, cardCvv: this.state.card.cvv,
+      setCardName: (e) => this.setState({ card: { ...this.state.card, name: e.target.value } }),
+      setCardNumber: (e) => {
+        const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+        const grouped = digits.replace(/(.{4})/g, '$1 ').trim();
+        this.setState({ card: { ...this.state.card, number: grouped } });
+      },
+      setCardExpiry: (e) => {
+        let v = e.target.value.replace(/\D/g, '').slice(0, 4);
+        if (v.length > 2) v = v.slice(0, 2) + '/' + v.slice(2);
+        this.setState({ card: { ...this.state.card, expiry: v } });
+      },
+      setCardCvv: (e) => this.setState({ card: { ...this.state.card, cvv: e.target.value.replace(/\D/g, '').slice(0, 3) } }),
+      checkoutSubtotalText: this.fmt(cartTotal), checkoutTotalText: this.fmt(total),
+      submitDisabled: !canSubmit, submitOpacity: canSubmit ? 1 : 0.55,
+      submitOrder: () => {
+        const orderNumber = 'EV-' + Math.floor(100000 + Math.random() * 900000);
+        this.setState({ screen: 'confirmation', orderNumber, statusStage: 0 });
+      },
+    };
+  }
+
+  confirmationVals(d, storePhoneDisplay, phoneHref) {
+    const isDelivery = this.state.fulfillment === 'delivery';
+    const total = this.state.cart.reduce((s, it) => s + it.qty * it.unitPrice, 0) + (isDelivery ? (this.props.deliveryFee ?? d.store.deliveryFee) : 0);
+    const hasCake = this.state.cart.some((it) => it.isCake);
+    let etaLabel = 'Εκτιμώμενη ώρα', etaText = isDelivery ? '35–45 λεπτά' : (this.state.pickupTime || '—');
+    if (hasCake && this.state.cakeDateTime) { etaLabel = 'Παραλαβή τούρτας'; etaText = new Date(this.state.cakeDateTime).toLocaleString('el-GR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    return {
+      orderNumber: this.state.orderNumber || '—',
+      confirmLines: this.state.cart.map((it) => ({ name: it.name, qtyText: it.qty > 1 ? ' ×' + it.qty : '', priceText: this.fmt(it.qty * it.unitPrice) })),
+      checkoutTotalText: this.fmt(total), etaLabel, etaText, storePhoneDisplay, phoneHref,
+      goStatus: () => { this.setState({ screen: 'status', statusStage: 0 }); this.startStatusTimer(); },
+    };
+  }
+
+  startStatusTimer() {
+    if (this._statusTimer) clearInterval(this._statusTimer);
+    this._statusTimer = setInterval(() => {
+      if (this.state.statusStage >= 2) { clearInterval(this._statusTimer); return; }
+      this.setState({ statusStage: this.state.statusStage + 1 });
+    }, 4000);
+  }
+
+  statusVals(d) {
+    const isDelivery = this.state.fulfillment === 'delivery';
+    const labels = ['Ελήφθη', 'Ετοιμάζεται', isDelivery ? 'Στον δρόμο' : 'Έτοιμη για παραλαβή'];
+    const notes = ['Το μαγαζί έλαβε την παραγγελία σου.', 'Ο ζαχαροπλάστης ετοιμάζει την παραγγελία σου.', isDelivery ? 'Ο διανομέας είναι καθ᾽ οδόν.' : 'Η παραγγελία σου σε περιμένει στο μαγαζί.'];
+    const stage = this.state.statusStage;
+    return {
+      statusSteps: labels.map((label, i) => ({
+        label, hasLine: i < labels.length - 1, active: i === stage, activeNote: notes[i], done: i < stage,
+        circleBg: i <= stage ? '#5F5335' : '#E5DFD1', circleColor: '#FFFFFF',
+        lineBg: i < stage ? '#5F5335' : '#E5DFD1', textColor: i <= stage ? '#1E1812' : '#1E1812',
+      })),
+    };
+  }
+
+  cartVals() {
+    const cart = this.state.cart;
+    const total = cart.reduce((s, it) => s + it.qty * it.unitPrice, 0);
+    return {
+      cartEmpty: cart.length === 0, cartHasItems: cart.length > 0,
+      cartItems: cart.map((it, i) => ({
+        name: it.name, hasMeta: !!it.meta, meta: it.meta, qty: it.qty, lineTotalText: this.fmt(it.qty * it.unitPrice),
+        inc: () => { const c = cart.slice(); c[i] = { ...c[i], qty: c[i].qty + 1 }; this.setState({ cart: c }); },
+        dec: () => { const c = cart.slice(); if (c[i].qty <= 1) c.splice(i, 1); else c[i] = { ...c[i], qty: c[i].qty - 1 }; this.setState({ cart: c }); },
+      })),
+      cartTotalText: this.fmt(total),
+      goCatalogFromCart: () => this.setState({ cartOpen: false, screen: 'catalog' }),
+      goConfiguratorFromCart: () => this.setState({ cartOpen: false, screen: 'configurator' }),
+      proceedToCheckout: () => this.setState({ cartOpen: false, screen: 'checkout' }),
+    };
+  }
+}
+
+</script>
+</body>
+</html>
