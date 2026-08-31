@@ -1,4 +1,4 @@
-import { BUN_POS, CHOC_TONE, TOP_POS, visualScaleFor } from "./configuratorVisual";
+import { BUN_POS, CHOC_TONE, TOP_POS, visualScaleFor } from "./configuratorLayout";
 import type { ConfiguratorState } from "../types";
 
 export function ConfiguratorVisual({ cfg }: { cfg: ConfiguratorState }) {
