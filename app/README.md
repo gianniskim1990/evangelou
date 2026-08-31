@@ -19,7 +19,7 @@ npm run images:stock  # one-time stock photo importer (see below)
 
 - `src/data/menu.ts` — όλα τα δεδομένα (κατηγορίες, προϊόντα, σοκολάτες, βάσεις, toppings, στοιχεία καταστήματος). Οι τιμές και η λίστα toppings είναι ενδεικτικές (demo), προς αντικατάσταση από τον πελάτη· δομημένο ώστε να αντικατασταθεί εύκολα από API αργότερα.
 - `src/AppContext.tsx` — όλη η κατάσταση της εφαρμογής (καλάθι, configurator, checkout, παραγγελία) μέσω React Context, χωρίς localStorage.
-- `src/screens/` — οι 6 οθόνες: Αρχική, Κατάλογος, Configurator, Checkout, Επιβεβαίωση, Κατάσταση.
+- `src/screens/` — οι 6 οθόνες: Αρχική, Κατάλογος, Configurator, Checkout, Επιβεβαίωση, Κατάσταση, συν `DesktopHome.tsx`: ξεχωριστό sidebar+grid layout (κατηγορίες, search, Delivery/Παραλαβή, κάρτες με φωτογραφία) που εμφανίζεται **μόνο στην Αρχική σε πλάτος ≥1024px** (Tailwind `lg:`), εμπνευσμένο από αντίστοιχο desktop layout άλλου project (SouvLéri). Το mobile (και όλες οι άλλες οθόνες, σε όποιο πλάτος) μένουν ως έχουν — δεν πειράχτηκαν.
 - `src/components/` — header (top/back), bottom nav, cart bar, cart drawer, `StockImage` (lazy stock photo with fallback).
 - `src/lib/slug.ts`, `src/lib/images.ts` — Greek→Latin slugs and the `/images/products/{slug}.webp` / `/images/categories/{slug}.webp` path convention, shared between the app and the image importer.
 - `scripts/fetch-stock-images.mjs` — one-time (re-runnable) Pexels stock photo importer.
