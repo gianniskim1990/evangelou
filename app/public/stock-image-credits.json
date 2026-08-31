@@ -1,0 +1,1112 @@
+[
+  {
+    "kind": "category",
+    "slug": "cakes",
+    "name": "Τούρτες",
+    "query": "celebration cake slice bakery",
+    "pexelsId": 30877407,
+    "photographer": "Israyosoy S.",
+    "photographerUrl": "https://www.pexels.com/@israyosoy",
+    "pexelsUrl": "https://www.pexels.com/photo/red-velvet-cake-with-decorative-sprinkles-30877407/"
+  },
+  {
+    "kind": "category",
+    "slug": "cheesecake",
+    "name": "Cheesecake",
+    "query": "cheesecake slice",
+    "pexelsId": 15030594,
+    "photographer": "Seher Engel",
+    "photographerUrl": "https://www.pexels.com/@seher-engel-415018873",
+    "pexelsUrl": "https://www.pexels.com/photo/cheesecake-with-strawberries-15030594/"
+  },
+  {
+    "kind": "category",
+    "slug": "choc-syringes",
+    "name": "Σύριγγες σοκολάτας",
+    "query": "chocolate candy stick",
+    "pexelsId": 4725699,
+    "photographer": "Polina Tankilevitch",
+    "photographerUrl": "https://www.pexels.com/@polina-tankilevitch",
+    "pexelsUrl": "https://www.pexels.com/photo/chocolate-glazed-ice-creams-on-sticks-4725699/"
+  },
+  {
+    "kind": "category",
+    "slug": "chocolates-cat",
+    "name": "Σοκολάτες",
+    "query": "chocolate bar",
+    "pexelsId": 8794060,
+    "photographer": "Tamanna Rumee",
+    "photographerUrl": "https://www.pexels.com/@tamanna-rumee-52377920",
+    "pexelsUrl": "https://www.pexels.com/photo/brown-chocolates-on-white-surface-8794060/"
+  },
+  {
+    "kind": "category",
+    "slug": "coffees",
+    "name": "Καφέδες",
+    "query": "coffee cup espresso",
+    "pexelsId": 459489,
+    "photographer": "Pixabay",
+    "photographerUrl": "https://www.pexels.com/@pixabay",
+    "pexelsUrl": "https://www.pexels.com/photo/cup-of-coffee-on-saucer-459489/"
+  },
+  {
+    "kind": "category",
+    "slug": "cones",
+    "name": "Χωνάκια",
+    "query": "ice cream cone",
+    "pexelsId": 684968,
+    "photographer": "Valeria Boltneva",
+    "photographerUrl": "https://www.pexels.com/@valeriya",
+    "pexelsUrl": "https://www.pexels.com/photo/ice-cream-on-cone-with-gray-metallic-holder-photo-684968/"
+  },
+  {
+    "kind": "category",
+    "slug": "cookies",
+    "name": "Βουτήματα | Κουλουράκια",
+    "query": "butter cookies bakery",
+    "pexelsId": 797761,
+    "photographer": "Cats Coming",
+    "photographerUrl": "https://www.pexels.com/@catscoming",
+    "pexelsUrl": "https://www.pexels.com/photo/cookies-797761/"
+  },
+  {
+    "kind": "category",
+    "slug": "creams",
+    "name": "Κρέμες",
+    "query": "custard cream dessert cup",
+    "pexelsId": 14090812,
+    "photographer": "Shalom Dare",
+    "photographerUrl": "https://www.pexels.com/@shalom-dare-342799635",
+    "pexelsUrl": "https://www.pexels.com/photo/cups-with-desserts-14090812/"
+  },
+  {
+    "kind": "category",
+    "slug": "cupcakes",
+    "name": "Κεράκια",
+    "query": "cupcake bakery",
+    "pexelsId": 8525753,
+    "photographer": "Tom Fisk",
+    "photographerUrl": "https://www.pexels.com/@tomfisk",
+    "pexelsUrl": "https://www.pexels.com/photo/cupcakes-on-plates-8525753/"
+  },
+  {
+    "kind": "category",
+    "slug": "diabetic",
+    "name": "Κεράσματα για διαβητικούς",
+    "query": "sugar-free cake slice",
+    "pexelsId": 37296769,
+    "photographer": "Atai Anarbek",
+    "photographerUrl": "https://www.pexels.com/@atai-anarbek-2160540497",
+    "pexelsUrl": "https://www.pexels.com/photo/delicious-slice-of-cheesecake-with-pecans-and-berries-37296769/"
+  },
+  {
+    "kind": "category",
+    "slug": "easter",
+    "name": "Πασχαλινά",
+    "query": "easter bread tsoureki",
+    "pexelsId": 37029520,
+    "photographer": "Lydia Griva",
+    "photographerUrl": "https://www.pexels.com/@iris",
+    "pexelsUrl": "https://www.pexels.com/photo/traditional-easter-bread-and-red-eggs-37029520/"
+  },
+  {
+    "kind": "category",
+    "slug": "halva",
+    "name": "Χαλβάδες νηστίσιμοι",
+    "query": "halva dessert sweet",
+    "pexelsId": 25388881,
+    "photographer": "Valeria Boltneva",
+    "photographerUrl": "https://www.pexels.com/@valeriya",
+    "pexelsUrl": "https://www.pexels.com/photo/turkish-delights-on-stall-at-market-25388881/"
+  },
+  {
+    "kind": "category",
+    "slug": "hot-drinks",
+    "name": "Ροφήματα",
+    "query": "hot chocolate cup",
+    "pexelsId": 2112749,
+    "photographer": "Lucas Pezeta",
+    "photographerUrl": "https://www.pexels.com/@lucaspezeta",
+    "pexelsUrl": "https://www.pexels.com/photo/cup-of-capuccino-2112749/"
+  },
+  {
+    "kind": "category",
+    "slug": "icecream",
+    "name": "Παγωτό",
+    "query": "ice cream tub dessert",
+    "pexelsId": 11501480,
+    "photographer": "Towfiqu barbhuiya",
+    "photographerUrl": "https://www.pexels.com/@towfiqu-barbhuiya-3440682",
+    "pexelsUrl": "https://www.pexels.com/photo/a-tub-of-ice-cream-11501480/"
+  },
+  {
+    "kind": "category",
+    "slug": "icecream-ball",
+    "name": "Παγωτά μπάλα",
+    "query": "ice cream scoop bowl",
+    "pexelsId": 7491892,
+    "photographer": "minchephoto photography",
+    "photographerUrl": "https://www.pexels.com/@minchephoto",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-of-scoops-of-ice-cream-in-bowls-7491892/"
+  },
+  {
+    "kind": "category",
+    "slug": "icecream-cakes",
+    "name": "Τούρτες παγωτό",
+    "query": "ice cream cake dessert",
+    "pexelsId": 4869435,
+    "photographer": "ROMAN ODINTSOV",
+    "photographerUrl": "https://www.pexels.com/@roman-odintsov",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-dessert-4869435/"
+  },
+  {
+    "kind": "category",
+    "slug": "icecream-mini",
+    "name": "Παγωτίνια",
+    "query": "mini ice cream cup",
+    "pexelsId": 5217715,
+    "photographer": "Abdulrhman Alkady",
+    "photographerUrl": "https://www.pexels.com/@alkady",
+    "pexelsUrl": "https://www.pexels.com/photo/ice-cream-in-a-cup-5217715/"
+  },
+  {
+    "kind": "category",
+    "slug": "juices",
+    "name": "Χυμοί",
+    "query": "fresh juice glass",
+    "pexelsId": 2479242,
+    "photographer": "Ylanite Koppens",
+    "photographerUrl": "https://www.pexels.com/@nietjuhart",
+    "pexelsUrl": "https://www.pexels.com/photo/strawberries-on-table-beside-drinking-glass-2479242/"
+  },
+  {
+    "kind": "category",
+    "slug": "marshmallows",
+    "name": "Marshmallows",
+    "query": "marshmallow chocolate",
+    "pexelsId": 29716038,
+    "photographer": "Ylanite Koppens",
+    "photographerUrl": "https://www.pexels.com/@nietjuhart",
+    "pexelsUrl": "https://www.pexels.com/photo/warm-hot-chocolate-with-marshmallows-and-cinnamon-29716038/"
+  },
+  {
+    "kind": "category",
+    "slug": "milkshakes",
+    "name": "Milkshakes",
+    "query": "milkshake glass",
+    "pexelsId": 28525197,
+    "photographer": "Alejandro Aznar",
+    "photographerUrl": "https://www.pexels.com/@alejandro-aznar-155337093",
+    "pexelsUrl": "https://www.pexels.com/photo/refreshing-vanilla-milkshake-on-wooden-table-28525197/"
+  },
+  {
+    "kind": "category",
+    "slug": "millefeuille",
+    "name": "Millefeuille",
+    "query": "mille-feuille napoleon pastry",
+    "pexelsId": 14996847,
+    "photographer": "Midtrack -",
+    "photographerUrl": "https://www.pexels.com/@midtrack",
+    "pexelsUrl": "https://www.pexels.com/photo/baker-assembling-a-dessert-14996847/"
+  },
+  {
+    "kind": "category",
+    "slug": "pralines",
+    "name": "Πραλίνες",
+    "query": "chocolate pralines box",
+    "pexelsId": 31373196,
+    "photographer": "Ömer Furkan Yakar",
+    "photographerUrl": "https://www.pexels.com/@omer-furkan-yakar-542782865",
+    "pexelsUrl": "https://www.pexels.com/photo/luxurious-assorted-chocolates-box-in-kahramanmaras-31373196/"
+  },
+  {
+    "kind": "category",
+    "slug": "profiterole",
+    "name": "Προφιτερόλ",
+    "query": "profiterole dessert chocolate",
+    "pexelsId": 8738010,
+    "photographer": "Farhad Ibrahimzade",
+    "photographerUrl": "https://www.pexels.com/@farhad",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-a-yummy-pastry-8738010/"
+  },
+  {
+    "kind": "category",
+    "slug": "profiterole-chilly",
+    "name": "Προφιτερόλ Chilly",
+    "query": "chilled ice cream dessert cup",
+    "pexelsId": 16630830,
+    "photographer": "David Disponett",
+    "photographerUrl": "https://www.pexels.com/@david-disponett-1118410",
+    "pexelsUrl": "https://www.pexels.com/photo/ice-cream-with-waffles-in-a-dessert-cup-16630830/"
+  },
+  {
+    "kind": "category",
+    "slug": "profiterole-dubai",
+    "name": "Προφιτερόλ Dubai",
+    "query": "dubai chocolate pistachio dessert",
+    "pexelsId": 6262167,
+    "photographer": "Shameel mukkath",
+    "photographerUrl": "https://www.pexels.com/@shameel-mukkath-3421394",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-an-arabic-food-on-plate-6262167/"
+  },
+  {
+    "kind": "category",
+    "slug": "profiterole-icecream",
+    "name": "Προφιτερόλ με παγωτό",
+    "query": "profiterole ice cream dessert",
+    "pexelsId": 8738010,
+    "photographer": "Farhad Ibrahimzade",
+    "photographerUrl": "https://www.pexels.com/@farhad",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-a-yummy-pastry-8738010/"
+  },
+  {
+    "kind": "category",
+    "slug": "profiterole-lotus",
+    "name": "Προφιτερόλ Lotus",
+    "query": "lotus biscoff dessert",
+    "pexelsId": 28935534,
+    "photographer": "thecactusena ‎",
+    "photographerUrl": "https://www.pexels.com/@thecactusena",
+    "pexelsUrl": "https://www.pexels.com/photo/delicious-dessert-with-lotus-biscoff-cookie-topping-28935534/"
+  },
+  {
+    "kind": "category",
+    "slug": "sodas",
+    "name": "Αναψυκτικά",
+    "query": "soft drink glass ice",
+    "pexelsId": 4113653,
+    "photographer": "alleksana",
+    "photographerUrl": "https://www.pexels.com/@alleksana",
+    "pexelsUrl": "https://www.pexels.com/photo/glasses-with-iced-cola-4113653/"
+  },
+  {
+    "kind": "category",
+    "slug": "sweets-individual",
+    "name": "Γλυκά ατομικά",
+    "query": "bakery pastry dessert plate",
+    "pexelsId": 30427442,
+    "photographer": "Kunal Lakhotia",
+    "photographerUrl": "https://www.pexels.com/@kunal-lakhotia-781256899",
+    "pexelsUrl": "https://www.pexels.com/photo/elegant-dessert-spread-with-coffee-and-cake-selection-30427442/"
+  },
+  {
+    "kind": "category",
+    "slug": "syrup-sweets",
+    "name": "Σιροπιαστά",
+    "query": "greek syrup semolina cake",
+    "pexelsId": 6419623,
+    "photographer": "Polina Tankilevitch",
+    "photographerUrl": "https://www.pexels.com/@polina-tankilevitch",
+    "pexelsUrl": "https://www.pexels.com/photo/a-knafeh-in-close-up-photography-6419623/"
+  },
+  {
+    "kind": "category",
+    "slug": "tarts",
+    "name": "Τάρτες",
+    "query": "fruit tart pastry",
+    "pexelsId": 4748367,
+    "photographer": "Regina Ferraz",
+    "photographerUrl": "https://www.pexels.com/@reginaferraz",
+    "pexelsUrl": "https://www.pexels.com/photo/tart-with-slices-of-fresh-fruits-4748367/"
+  },
+  {
+    "kind": "category",
+    "slug": "touloumpakia",
+    "name": "Τουλουμπάκια",
+    "query": "loukoumades honey balls dessert",
+    "pexelsId": 7803116,
+    "photographer": "Engin Akyurt",
+    "photographerUrl": "https://www.pexels.com/@enginakyurt",
+    "pexelsUrl": "https://www.pexels.com/photo/brown-pastries-in-close-up-shot-7803116/"
+  },
+  {
+    "kind": "category",
+    "slug": "tray-sweets",
+    "name": "Γλυκά ταψιού",
+    "query": "baklava tray pastry",
+    "pexelsId": 37347581,
+    "photographer": "Julia Çarı",
+    "photographerUrl": "https://www.pexels.com/@juliachar",
+    "pexelsUrl": "https://www.pexels.com/photo/authentic-turkish-desserts-on-display-in-gaziantep-37347581/"
+  },
+  {
+    "kind": "category",
+    "slug": "treats",
+    "name": "Γλυκά κεράσματα",
+    "query": "greek christmas cookies",
+    "pexelsId": 15920264,
+    "photographer": "Alimurat Üral",
+    "photographerUrl": "https://www.pexels.com/@alimuart",
+    "pexelsUrl": "https://www.pexels.com/photo/sweet-cookies-in-close-up-view-15920264/"
+  },
+  {
+    "kind": "product",
+    "slug": "chalvas-me-tachini",
+    "name": "Χαλβάς με ταχίνι",
+    "query": "tahini halva dessert sweet",
+    "pexelsId": 13272918,
+    "photographer": "Khadija Adib",
+    "photographerUrl": "https://www.pexels.com/@khadija-adib-296475561",
+    "pexelsUrl": "https://www.pexels.com/photo/refreshment-food-on-picnic-blanket-13272918/"
+  },
+  {
+    "kind": "product",
+    "slug": "chalvas-simigdalenios",
+    "name": "Χαλβάς σιμιγδαλένιος",
+    "query": "semolina halva dessert sweet",
+    "pexelsId": 13272918,
+    "photographer": "Khadija Adib",
+    "photographerUrl": "https://www.pexels.com/@khadija-adib-296475561",
+    "pexelsUrl": "https://www.pexels.com/photo/refreshment-food-on-picnic-blanket-13272918/"
+  },
+  {
+    "kind": "product",
+    "slug": "cheesecake-fraoyla",
+    "name": "Cheesecake φράουλα",
+    "query": "strawberry cheesecake slice",
+    "pexelsId": 10455820,
+    "photographer": "Natalya Choohrova",
+    "photographerUrl": "https://www.pexels.com/@natalya-choohrova-118638025",
+    "pexelsUrl": "https://www.pexels.com/photo/strawberry-cake-on-white-ceramic-plate-10455820/"
+  },
+  {
+    "kind": "product",
+    "slug": "cheesecake-oreo",
+    "name": "Cheesecake Oreo",
+    "query": "oreo cheesecake slice",
+    "pexelsId": 8147767,
+    "photographer": "Оксана",
+    "photographerUrl": "https://www.pexels.com/@63701867",
+    "pexelsUrl": "https://www.pexels.com/photo/a-piece-of-cake-with-a-slice-of-strawberry-8147767/"
+  },
+  {
+    "kind": "product",
+    "slug": "chonaki-aplo",
+    "name": "Χωνάκι απλό",
+    "query": "ice cream cone",
+    "pexelsId": 29184089,
+    "photographer": "Paul Groom Photography Bristol",
+    "photographerUrl": "https://www.pexels.com/@paul-groom-bristol-photog",
+    "pexelsUrl": "https://www.pexels.com/photo/vibrant-ice-cream-graffiti-on-bristol-street-29184089/"
+  },
+  {
+    "kind": "product",
+    "slug": "chonaki-me-epikalypsi-sokolatas",
+    "name": "Χωνάκι με επικάλυψη σοκολάτας",
+    "query": "chocolate ice cream cone",
+    "pexelsId": 11719086,
+    "photographer": "劉芷安",
+    "photographerUrl": "https://www.pexels.com/@208940656",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-a-ice-cream-and-honey-11719086/"
+  },
+  {
+    "kind": "product",
+    "slug": "chymos-fraoyla",
+    "name": "Χυμός φράουλα",
+    "query": "strawberry fresh juice glass",
+    "pexelsId": 5041570,
+    "photographer": "Jesus Cabrera",
+    "photographerUrl": "https://www.pexels.com/@jcabrera",
+    "pexelsUrl": "https://www.pexels.com/photo/red-drink-in-a-wine-glass-with-ice-cubes-and-strawberries-5041570/"
+  },
+  {
+    "kind": "product",
+    "slug": "chymos-portokali-freskos",
+    "name": "Χυμός πορτοκάλι φρέσκος",
+    "query": "orange fresh juice glass",
+    "pexelsId": 15823268,
+    "photographer": "Amirho3in tavkoli",
+    "photographerUrl": "https://www.pexels.com/@amirho3intavkooli",
+    "pexelsUrl": "https://www.pexels.com/photo/hand-holding-a-cocktail-15823268/"
+  },
+  {
+    "kind": "product",
+    "slug": "ekler-sokolata",
+    "name": "Εκλέρ σοκολάτα",
+    "query": "chocolate bakery pastry dessert plate",
+    "pexelsId": 34563914,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/flat-lay-of-assorted-desserts-on-plates-34563914/"
+  },
+  {
+    "kind": "product",
+    "slug": "espresso",
+    "name": "Espresso",
+    "query": "espresso coffee cup espresso",
+    "pexelsId": 33856911,
+    "photographer": "نشمـيّـه",
+    "photographerUrl": "https://www.pexels.com/@2155024982",
+    "pexelsUrl": "https://www.pexels.com/photo/minimalist-coffee-on-a-white-tabletop-33856911/"
+  },
+  {
+    "kind": "product",
+    "slug": "freddo-espresso",
+    "name": "Freddo espresso",
+    "query": "espresso iced coffee coffee cup espresso",
+    "pexelsId": 7736771,
+    "photographer": "Kei Scampa",
+    "photographerUrl": "https://www.pexels.com/@kei-scampa-1201427",
+    "pexelsUrl": "https://www.pexels.com/photo/modern-coffee-machine-pouring-espresso-in-glasses-7736771/"
+  },
+  {
+    "kind": "product",
+    "slug": "kantaifi",
+    "name": "Κανταΐφι",
+    "query": "baklava tray pastry",
+    "pexelsId": 38132239,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/assorted-middle-eastern-sweets-tray-arrangement-38132239/"
+  },
+  {
+    "kind": "product",
+    "slug": "kapoytsino",
+    "name": "Καπουτσίνο",
+    "query": "cappuccino coffee cup espresso",
+    "pexelsId": 28496565,
+    "photographer": "Jovan Popović",
+    "photographerUrl": "https://www.pexels.com/@jovan-popovic-1401806",
+    "pexelsUrl": "https://www.pexels.com/photo/artistic-cappuccino-with-latte-art-on-marble-table-28496565/"
+  },
+  {
+    "kind": "product",
+    "slug": "keik-choris-zachari",
+    "name": "Κέικ χωρίς ζάχαρη",
+    "query": "sugar-free cake slice",
+    "pexelsId": 28251609,
+    "photographer": "Onur Kaya",
+    "photographerUrl": "https://www.pexels.com/@kayaartsss",
+    "pexelsUrl": "https://www.pexels.com/photo/fujifilm-x-pro-2-28251609/"
+  },
+  {
+    "kind": "product",
+    "slug": "keraki-red-velvet",
+    "name": "Κεράκι red velvet",
+    "query": "red velvet cupcake bakery",
+    "pexelsId": 1055271,
+    "photographer": "Vojtech Okenka",
+    "photographerUrl": "https://www.pexels.com/@vojtech-okenka-127162",
+    "pexelsUrl": "https://www.pexels.com/photo/cupcake-topped-with-creamy-icing-1055271/"
+  },
+  {
+    "kind": "product",
+    "slug": "keraki-sokolata",
+    "name": "Κεράκι σοκολάτα",
+    "query": "chocolate cupcake bakery",
+    "pexelsId": 20677473,
+    "photographer": "Jakub Zerdzicki",
+    "photographerUrl": "https://www.pexels.com/@jakubzerdzicki",
+    "pexelsUrl": "https://www.pexels.com/photo/colorful-cupcakes-20677473/"
+  },
+  {
+    "kind": "product",
+    "slug": "keraki-vanilia",
+    "name": "Κεράκι βανίλια",
+    "query": "vanilla cupcake bakery",
+    "pexelsId": 20677473,
+    "photographer": "Jakub Zerdzicki",
+    "photographerUrl": "https://www.pexels.com/@jakubzerdzicki",
+    "pexelsUrl": "https://www.pexels.com/photo/colorful-cupcakes-20677473/"
+  },
+  {
+    "kind": "product",
+    "slug": "koka-kola",
+    "name": "Κόκα κόλα",
+    "query": "soft drink glass ice",
+    "pexelsId": 16716138,
+    "photographer": "aidin gheshlaghi",
+    "photographerUrl": "https://www.pexels.com/@aidin-gheshlaghi-423868104",
+    "pexelsUrl": "https://www.pexels.com/photo/dropping-ice-cubes-to-beverage-16716138/"
+  },
+  {
+    "kind": "product",
+    "slug": "koyloyrakia-pascha",
+    "name": "Κουλουράκια Πάσχα",
+    "query": "easter bread tsoureki",
+    "pexelsId": 4692159,
+    "photographer": "Nataliya Vaitkevich",
+    "photographerUrl": "https://www.pexels.com/@n-voitkevich",
+    "pexelsUrl": "https://www.pexels.com/photo/cake-with-nuts-decorated-on-top-4692159/"
+  },
+  {
+    "kind": "product",
+    "slug": "koyloyrakia-voytyroy-merida",
+    "name": "Κουλουράκια βουτύρου, μερίδα",
+    "query": "butter cookies bakery",
+    "pexelsId": 38179907,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/assorted-cookies-with-powdered-sugar-topping-38179907/"
+  },
+  {
+    "kind": "product",
+    "slug": "koyrampies",
+    "name": "Κουραμπιές",
+    "query": "greek christmas cookies",
+    "pexelsId": 10340676,
+    "photographer": "Evi",
+    "photographerUrl": "https://www.pexels.com/@eviphotography",
+    "pexelsUrl": "https://www.pexels.com/photo/christmas-cookies-on-a-black-tray-10340676/"
+  },
+  {
+    "kind": "product",
+    "slug": "krema-karamele",
+    "name": "Κρέμα καραμελέ",
+    "query": "caramel custard cream dessert cup",
+    "pexelsId": 9238689,
+    "photographer": "Changhee Kim",
+    "photographerUrl": "https://www.pexels.com/@changhee-kim-92375293",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-a-caramel-pudding-with-whipped-cream-9238689/"
+  },
+  {
+    "kind": "product",
+    "slug": "krema-sokolatas",
+    "name": "Κρέμα σοκολάτας",
+    "query": "chocolate custard cream dessert cup",
+    "pexelsId": 7190368,
+    "photographer": "kelvin  agustinus",
+    "photographerUrl": "https://www.pexels.com/@kelvinocta16",
+    "pexelsUrl": "https://www.pexels.com/photo/a-person-scooping-an-ice-cream-7190368/"
+  },
+  {
+    "kind": "product",
+    "slug": "marshmallow-me-sokolata",
+    "name": "Marshmallow με σοκολάτα",
+    "query": "chocolate marshmallow chocolate",
+    "pexelsId": 12521142,
+    "photographer": "Laurissa Booyse",
+    "photographerUrl": "https://www.pexels.com/@laurissa-booyse-253087907",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-of-chocolate-12521142/"
+  },
+  {
+    "kind": "product",
+    "slug": "melomakarono",
+    "name": "Μελομακάρονο",
+    "query": "greek christmas cookies",
+    "pexelsId": 10340676,
+    "photographer": "Evi",
+    "photographerUrl": "https://www.pexels.com/@eviphotography",
+    "pexelsUrl": "https://www.pexels.com/photo/christmas-cookies-on-a-black-tray-10340676/"
+  },
+  {
+    "kind": "product",
+    "slug": "milkshake-sokolata",
+    "name": "Milkshake σοκολάτα",
+    "query": "chocolate milkshake glass",
+    "pexelsId": 17558645,
+    "photographer": "Diego Romero",
+    "photographerUrl": "https://www.pexels.com/@diego-romero-471613950",
+    "pexelsUrl": "https://www.pexels.com/photo/sweet-shakes-in-glasses-17558645/"
+  },
+  {
+    "kind": "product",
+    "slug": "milkshake-vanilia",
+    "name": "Milkshake βανίλια",
+    "query": "vanilla milkshake glass",
+    "pexelsId": 15801003,
+    "photographer": "Arya Bajra",
+    "photographerUrl": "https://www.pexels.com/@arya-bajra-283675810",
+    "pexelsUrl": "https://www.pexels.com/photo/milk-cold-drink-with-cookie-and-croissant-15801003/"
+  },
+  {
+    "kind": "product",
+    "slug": "millefeuille-krema",
+    "name": "Millefeuille κρέμα",
+    "query": "mille-feuille napoleon pastry",
+    "pexelsId": 8738018,
+    "photographer": "Farhad Ibrahimzade",
+    "photographerUrl": "https://www.pexels.com/@farhad",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-yummy-pastry-8738018/"
+  },
+  {
+    "kind": "product",
+    "slug": "millefeuille-sokolata",
+    "name": "Millefeuille σοκολάτα",
+    "query": "chocolate mille-feuille napoleon pastry",
+    "pexelsId": 8738018,
+    "photographer": "Farhad Ibrahimzade",
+    "photographerUrl": "https://www.pexels.com/@farhad",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-yummy-pastry-8738018/"
+  },
+  {
+    "kind": "product",
+    "slug": "mpaklavas",
+    "name": "Μπακλαβάς",
+    "query": "baklava tray pastry",
+    "pexelsId": 38132239,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/assorted-middle-eastern-sweets-tray-arrangement-38132239/"
+  },
+  {
+    "kind": "product",
+    "slug": "mpala-fraoyla",
+    "name": "Μπάλα φράουλα",
+    "query": "strawberry ice cream scoop bowl",
+    "pexelsId": 5535554,
+    "photographer": "Galileo Giglio",
+    "photographerUrl": "https://www.pexels.com/@galileo-giglio-3680471",
+    "pexelsUrl": "https://www.pexels.com/photo/a-close-up-shot-of-a-scooped-ice-cream-5535554/"
+  },
+  {
+    "kind": "product",
+    "slug": "mpala-pistatsio",
+    "name": "Μπάλα πιστάτσιο",
+    "query": "pistachio ice cream scoop bowl",
+    "pexelsId": 7761734,
+    "photographer": "Nick Mayer",
+    "photographerUrl": "https://www.pexels.com/@nickmayer",
+    "pexelsUrl": "https://www.pexels.com/photo/an-ice-cream-and-a-spoon-with-chocolate-syrup-7761734/"
+  },
+  {
+    "kind": "product",
+    "slug": "mpala-sokolata",
+    "name": "Μπάλα σοκολάτα",
+    "query": "chocolate ice cream scoop bowl",
+    "pexelsId": 7761734,
+    "photographer": "Nick Mayer",
+    "photographerUrl": "https://www.pexels.com/@nickmayer",
+    "pexelsUrl": "https://www.pexels.com/photo/an-ice-cream-and-a-spoon-with-chocolate-syrup-7761734/"
+  },
+  {
+    "kind": "product",
+    "slug": "mpala-vanilia",
+    "name": "Μπάλα βανίλια",
+    "query": "vanilla ice cream scoop bowl",
+    "pexelsId": 7761734,
+    "photographer": "Nick Mayer",
+    "photographerUrl": "https://www.pexels.com/@nickmayer",
+    "pexelsUrl": "https://www.pexels.com/photo/an-ice-cream-and-a-spoon-with-chocolate-syrup-7761734/"
+  },
+  {
+    "kind": "product",
+    "slug": "pagotini-fraoyla",
+    "name": "Παγωτίνι φράουλα",
+    "query": "strawberry mini ice cream cup",
+    "pexelsId": 37793463,
+    "photographer": "Zeynep  Hız",
+    "photographerUrl": "https://www.pexels.com/@zzeynephiz",
+    "pexelsUrl": "https://www.pexels.com/photo/chocolate-muffins-with-strawberries-on-tray-37793463/"
+  },
+  {
+    "kind": "product",
+    "slug": "pagotini-vanilia-sokolata",
+    "name": "Παγωτίνι βανίλια-σοκολάτα",
+    "query": "vanilla chocolate mini ice cream cup",
+    "pexelsId": 7761734,
+    "photographer": "Nick Mayer",
+    "photographerUrl": "https://www.pexels.com/@nickmayer",
+    "pexelsUrl": "https://www.pexels.com/photo/an-ice-cream-and-a-spoon-with-chocolate-syrup-7761734/"
+  },
+  {
+    "kind": "product",
+    "slug": "pagoto-fraoyla-500gr",
+    "name": "Παγωτό φράουλα 500γρ",
+    "query": "strawberry ice cream tub dessert",
+    "pexelsId": 5535556,
+    "photographer": "Galileo Giglio",
+    "photographerUrl": "https://www.pexels.com/@galileo-giglio-3680471",
+    "pexelsUrl": "https://www.pexels.com/photo/a-close-up-shot-of-a-scooped-ice-cream-5535556/"
+  },
+  {
+    "kind": "product",
+    "slug": "pagoto-sokolata-500gr",
+    "name": "Παγωτό σοκολάτα 500γρ",
+    "query": "chocolate ice cream tub dessert",
+    "pexelsId": 7761734,
+    "photographer": "Nick Mayer",
+    "photographerUrl": "https://www.pexels.com/@nickmayer",
+    "pexelsUrl": "https://www.pexels.com/photo/an-ice-cream-and-a-spoon-with-chocolate-syrup-7761734/"
+  },
+  {
+    "kind": "product",
+    "slug": "pagoto-vanilia-500gr",
+    "name": "Παγωτό βανίλια 500γρ",
+    "query": "vanilla ice cream tub dessert",
+    "pexelsId": 7761734,
+    "photographer": "Nick Mayer",
+    "photographerUrl": "https://www.pexels.com/@nickmayer",
+    "pexelsUrl": "https://www.pexels.com/photo/an-ice-cream-and-a-spoon-with-chocolate-syrup-7761734/"
+  },
+  {
+    "kind": "product",
+    "slug": "pasta-amygdaloy",
+    "name": "Πάστα αμυγδάλου",
+    "query": "almond bakery pastry dessert plate",
+    "pexelsId": 35225556,
+    "photographer": "Göksun Barış Gökalp",
+    "photographerUrl": "https://www.pexels.com/@goksun-baris-gokalp-2158208031",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-of-almond-decorated-cream-tart-35225556/"
+  },
+  {
+    "kind": "product",
+    "slug": "paximadakia-amygdaloy",
+    "name": "Παξιμαδάκια αμυγδάλου",
+    "query": "almond butter cookies bakery",
+    "pexelsId": 38377150,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/assorted-middle-eastern-sweets-and-biscuits-38377150/"
+  },
+  {
+    "kind": "product",
+    "slug": "pralines-koyti-250gr",
+    "name": "Πραλίνες, κουτί 250γρ",
+    "query": "chocolate pralines box",
+    "pexelsId": 37857736,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/assorted-milk-chocolates-in-a-box-37857736/"
+  },
+  {
+    "kind": "product",
+    "slug": "pralines-me-liker",
+    "name": "Πραλίνες με λικέρ",
+    "query": "liqueur chocolate pralines box",
+    "pexelsId": 37857736,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/assorted-milk-chocolates-in-a-box-37857736/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-chilly-fraoyla",
+    "name": "Προφιτερόλ Chilly φράουλα",
+    "query": "strawberry chilled ice cream chilled ice cream dessert cup",
+    "pexelsId": 5535554,
+    "photographer": "Galileo Giglio",
+    "photographerUrl": "https://www.pexels.com/@galileo-giglio-3680471",
+    "pexelsUrl": "https://www.pexels.com/photo/a-close-up-shot-of-a-scooped-ice-cream-5535554/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-chilly-sokolata",
+    "name": "Προφιτερόλ Chilly σοκολάτα",
+    "query": "chocolate chilled ice cream chilled ice cream dessert cup",
+    "pexelsId": 7190368,
+    "photographer": "kelvin  agustinus",
+    "photographerUrl": "https://www.pexels.com/@kelvinocta16",
+    "pexelsUrl": "https://www.pexels.com/photo/a-person-scooping-an-ice-cream-7190368/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-chilly-vanilia",
+    "name": "Προφιτερόλ Chilly βανίλια",
+    "query": "vanilla chilled ice cream chilled ice cream dessert cup",
+    "pexelsId": 7761734,
+    "photographer": "Nick Mayer",
+    "photographerUrl": "https://www.pexels.com/@nickmayer",
+    "pexelsUrl": "https://www.pexels.com/photo/an-ice-cream-and-a-spoon-with-chocolate-syrup-7761734/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-dipli-sokolata",
+    "name": "Προφιτερόλ διπλή σοκολάτα",
+    "query": "chocolate profiterole dessert chocolate",
+    "pexelsId": 19963525,
+    "photographer": "Emre  Akyol",
+    "photographerUrl": "https://www.pexels.com/@emre-akyol-320381804",
+    "pexelsUrl": "https://www.pexels.com/photo/cream-puffs-with-chocolate-sauce-19963525/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-dubai-pistatsio",
+    "name": "Προφιτερόλ Dubai πιστάτσιο",
+    "query": "pistachio dubai pistachio dubai chocolate pistachio dessert",
+    "pexelsId": 4669249,
+    "photographer": "Denys Gromov",
+    "photographerUrl": "https://www.pexels.com/@jdgromov",
+    "pexelsUrl": "https://www.pexels.com/photo/pastries-on-the-table-4669249/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-dubai-sokolata-galaktos",
+    "name": "Προφιτερόλ Dubai σοκολάτα γάλακτος",
+    "query": "chocolate milk chocolate dubai pistachio dubai chocolate pistachio dessert",
+    "pexelsId": 11659348,
+    "photographer": "Vladimir Shipitsin",
+    "photographerUrl": "https://www.pexels.com/@vladimir",
+    "pexelsUrl": "https://www.pexels.com/photo/creamy-dessert-in-chocolate-11659348/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-foyntoyki",
+    "name": "Προφιτερόλ φουντούκι",
+    "query": "hazelnut profiterole dessert chocolate",
+    "pexelsId": 19963525,
+    "photographer": "Emre  Akyol",
+    "photographerUrl": "https://www.pexels.com/@emre-akyol-320381804",
+    "pexelsUrl": "https://www.pexels.com/photo/cream-puffs-with-chocolate-sauce-19963525/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-klasiko",
+    "name": "Προφιτερόλ κλασικό",
+    "query": "profiterole dessert chocolate",
+    "pexelsId": 19963525,
+    "photographer": "Emre  Akyol",
+    "photographerUrl": "https://www.pexels.com/@emre-akyol-320381804",
+    "pexelsUrl": "https://www.pexels.com/photo/cream-puffs-with-chocolate-sauce-19963525/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-lotus",
+    "name": "Προφιτερόλ Lotus",
+    "query": "biscoff lotus lotus biscoff dessert",
+    "pexelsId": 30627481,
+    "photographer": "B_S Media  Production",
+    "photographerUrl": "https://www.pexels.com/@b_s-media-production-568838161",
+    "pexelsUrl": "https://www.pexels.com/photo/delicious-caramel-soft-serve-ice-cream-cup-30627481/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-lotus-me-leyki-sokolata",
+    "name": "Προφιτερόλ Lotus με λευκή σοκολάτα",
+    "query": "chocolate white chocolate biscoff lotus lotus biscoff dessert",
+    "pexelsId": 30627481,
+    "photographer": "B_S Media  Production",
+    "photographerUrl": "https://www.pexels.com/@b_s-media-production-568838161",
+    "pexelsUrl": "https://www.pexels.com/photo/delicious-caramel-soft-serve-ice-cream-cup-30627481/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-me-pagoto-fraoyla",
+    "name": "Προφιτερόλ με παγωτό φράουλα",
+    "query": "strawberry profiterole ice cream dessert",
+    "pexelsId": 5535556,
+    "photographer": "Galileo Giglio",
+    "photographerUrl": "https://www.pexels.com/@galileo-giglio-3680471",
+    "pexelsUrl": "https://www.pexels.com/photo/a-close-up-shot-of-a-scooped-ice-cream-5535556/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-me-pagoto-sokolata",
+    "name": "Προφιτερόλ με παγωτό σοκολάτα",
+    "query": "chocolate profiterole ice cream dessert",
+    "pexelsId": 19963525,
+    "photographer": "Emre  Akyol",
+    "photographerUrl": "https://www.pexels.com/@emre-akyol-320381804",
+    "pexelsUrl": "https://www.pexels.com/photo/cream-puffs-with-chocolate-sauce-19963525/"
+  },
+  {
+    "kind": "product",
+    "slug": "profiterol-me-pagoto-vanilia",
+    "name": "Προφιτερόλ με παγωτό βανίλια",
+    "query": "vanilla profiterole ice cream dessert",
+    "pexelsId": 19963525,
+    "photographer": "Emre  Akyol",
+    "photographerUrl": "https://www.pexels.com/@emre-akyol-320381804",
+    "pexelsUrl": "https://www.pexels.com/photo/cream-puffs-with-chocolate-sauce-19963525/"
+  },
+  {
+    "kind": "product",
+    "slug": "revani",
+    "name": "Ρεβανί",
+    "query": "greek syrup semolina cake",
+    "pexelsId": 37418888,
+    "photographer": "Samed Bayrak",
+    "photographerUrl": "https://www.pexels.com/@samed-bayrak-2518016",
+    "pexelsUrl": "https://www.pexels.com/photo/decadent-chocolate-cake-with-mint-garnish-37418888/"
+  },
+  {
+    "kind": "product",
+    "slug": "ryzogalo-foyrnoy",
+    "name": "Ρυζόγαλο φούρνου",
+    "query": "bakery pastry dessert plate",
+    "pexelsId": 34563914,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/flat-lay-of-assorted-desserts-on-plates-34563914/"
+  },
+  {
+    "kind": "product",
+    "slug": "samali",
+    "name": "Σαμαλί",
+    "query": "greek syrup semolina cake",
+    "pexelsId": 37418888,
+    "photographer": "Samed Bayrak",
+    "photographerUrl": "https://www.pexels.com/@samed-bayrak-2518016",
+    "pexelsUrl": "https://www.pexels.com/photo/decadent-chocolate-cake-with-mint-garnish-37418888/"
+  },
+  {
+    "kind": "product",
+    "slug": "soda",
+    "name": "Σόδα",
+    "query": "soft drink glass ice",
+    "pexelsId": 16716138,
+    "photographer": "aidin gheshlaghi",
+    "photographerUrl": "https://www.pexels.com/@aidin-gheshlaghi-423868104",
+    "pexelsUrl": "https://www.pexels.com/photo/dropping-ice-cubes-to-beverage-16716138/"
+  },
+  {
+    "kind": "product",
+    "slug": "sokolata-galaktos-me-foyntoyki",
+    "name": "Σοκολάτα γάλακτος με φουντούκι",
+    "query": "chocolate hazelnut milk chocolate chocolate bar",
+    "pexelsId": 31443060,
+    "photographer": "Wendy Calandrelli",
+    "photographerUrl": "https://www.pexels.com/@wendy-calandrelli-2147744618",
+    "pexelsUrl": "https://www.pexels.com/photo/creative-flat-lay-of-assorted-chocolates-31443060/"
+  },
+  {
+    "kind": "product",
+    "slug": "sokolata-ygeias-70",
+    "name": "Σοκολάτα υγείας 70%",
+    "query": "chocolate dark chocolate chocolate bar",
+    "pexelsId": 31443060,
+    "photographer": "Wendy Calandrelli",
+    "photographerUrl": "https://www.pexels.com/@wendy-calandrelli-2147744618",
+    "pexelsUrl": "https://www.pexels.com/photo/creative-flat-lay-of-assorted-chocolates-31443060/"
+  },
+  {
+    "kind": "product",
+    "slug": "syrigga-sokolatas-galaktos",
+    "name": "Σύριγγα σοκολάτας γάλακτος",
+    "query": "chocolate milk chocolate chocolate candy stick",
+    "pexelsId": 37857736,
+    "photographer": "Swarup Sarkar",
+    "photographerUrl": "https://www.pexels.com/@roopsarkar",
+    "pexelsUrl": "https://www.pexels.com/photo/assorted-milk-chocolates-in-a-box-37857736/"
+  },
+  {
+    "kind": "product",
+    "slug": "syrigga-sokolatas-leykis",
+    "name": "Σύριγγα σοκολάτας λευκής",
+    "query": "chocolate white chocolate chocolate candy stick",
+    "pexelsId": 31443060,
+    "photographer": "Wendy Calandrelli",
+    "photographerUrl": "https://www.pexels.com/@wendy-calandrelli-2147744618",
+    "pexelsUrl": "https://www.pexels.com/photo/creative-flat-lay-of-assorted-chocolates-31443060/"
+  },
+  {
+    "kind": "product",
+    "slug": "tarta-fraoyla",
+    "name": "Τάρτα φράουλα",
+    "query": "strawberry fruit tart pastry",
+    "pexelsId": 17650199,
+    "photographer": "Zeynep  Hız",
+    "photographerUrl": "https://www.pexels.com/@zzeynephiz",
+    "pexelsUrl": "https://www.pexels.com/photo/donut-with-strawberry-17650199/"
+  },
+  {
+    "kind": "product",
+    "slug": "tarta-lemoni",
+    "name": "Τάρτα λεμόνι",
+    "query": "lemon fruit tart pastry",
+    "pexelsId": 11719204,
+    "photographer": "劉芷安",
+    "photographerUrl": "https://www.pexels.com/@208940656",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-desserts-on-the-table-11719204/"
+  },
+  {
+    "kind": "product",
+    "slug": "tarta-sokolata",
+    "name": "Τάρτα σοκολάτα",
+    "query": "chocolate fruit tart pastry",
+    "pexelsId": 31544097,
+    "photographer": "Nadiye Şamlı",
+    "photographerUrl": "https://www.pexels.com/@nadiye-samli-633420477",
+    "pexelsUrl": "https://www.pexels.com/photo/artistic-chocolate-tarts-on-elegant-tray-31544097/"
+  },
+  {
+    "kind": "product",
+    "slug": "toyloympakia-merida",
+    "name": "Τουλουμπάκια (μερίδα)",
+    "query": "loukoumades honey balls dessert",
+    "pexelsId": 19963525,
+    "photographer": "Emre  Akyol",
+    "photographerUrl": "https://www.pexels.com/@emre-akyol-320381804",
+    "pexelsUrl": "https://www.pexels.com/photo/cream-puffs-with-chocolate-sauce-19963525/"
+  },
+  {
+    "kind": "product",
+    "slug": "toyrta-choris-zachari-kommati",
+    "name": "Τούρτα χωρίς ζάχαρη, κομμάτι",
+    "query": "sugar-free cake slice",
+    "pexelsId": 28251609,
+    "photographer": "Onur Kaya",
+    "photographerUrl": "https://www.pexels.com/@kayaartsss",
+    "pexelsUrl": "https://www.pexels.com/photo/fujifilm-x-pro-2-28251609/"
+  },
+  {
+    "kind": "product",
+    "slug": "toyrta-froyton",
+    "name": "Τούρτα φρούτων",
+    "query": "celebration cake slice bakery",
+    "pexelsId": 9329433,
+    "photographer": "Amar  Preciado",
+    "photographerUrl": "https://www.pexels.com/@amar",
+    "pexelsUrl": "https://www.pexels.com/photo/sponge-cakes-on-glass-display-counter-9329433/"
+  },
+  {
+    "kind": "product",
+    "slug": "toyrta-pagoto-fraoyla",
+    "name": "Τούρτα παγωτό φράουλα",
+    "query": "strawberry ice cream cake dessert",
+    "pexelsId": 5137026,
+    "photographer": "Varun Chandak",
+    "photographerUrl": "https://www.pexels.com/@vrnchndk",
+    "pexelsUrl": "https://www.pexels.com/photo/close-up-shot-of-a-cake-with-icing-5137026/"
+  },
+  {
+    "kind": "product",
+    "slug": "toyrta-pagoto-vanilia-sokolata",
+    "name": "Τούρτα παγωτό βανίλια-σοκολάτα",
+    "query": "vanilla chocolate ice cream cake dessert",
+    "pexelsId": 38858020,
+    "photographer": "Brett Jordan",
+    "photographerUrl": "https://www.pexels.com/@brettjordan",
+    "pexelsUrl": "https://www.pexels.com/photo/strawberry-cheesecake-dessert-on-rustic-table-38858020/"
+  },
+  {
+    "kind": "product",
+    "slug": "toyrta-profiterol",
+    "name": "Τούρτα προφιτερόλ",
+    "query": "celebration cake slice bakery",
+    "pexelsId": 9329433,
+    "photographer": "Amar  Preciado",
+    "photographerUrl": "https://www.pexels.com/@amar",
+    "pexelsUrl": "https://www.pexels.com/photo/sponge-cakes-on-glass-display-counter-9329433/"
+  },
+  {
+    "kind": "product",
+    "slug": "toyrta-sokolata",
+    "name": "Τούρτα σοκολάτα",
+    "query": "chocolate celebration cake slice bakery",
+    "pexelsId": 15823267,
+    "photographer": "Amirho3in tavkoli",
+    "photographerUrl": "https://www.pexels.com/@amirho3intavkooli",
+    "pexelsUrl": "https://www.pexels.com/photo/piece-of-cake-on-a-plate-15823267/"
+  },
+  {
+    "kind": "product",
+    "slug": "tsai",
+    "name": "Τσάι",
+    "query": "hot chocolate cup",
+    "pexelsId": 14704654,
+    "photographer": "mohammad khorram",
+    "photographerUrl": "https://www.pexels.com/@bykhorram",
+    "pexelsUrl": "https://www.pexels.com/photo/hot-chocolate-14704654/"
+  },
+  {
+    "kind": "product",
+    "slug": "tsoyreki-pascha",
+    "name": "Τσουρέκι Πάσχα",
+    "query": "easter bread tsoureki",
+    "pexelsId": 4692159,
+    "photographer": "Nataliya Vaitkevich",
+    "photographerUrl": "https://www.pexels.com/@n-voitkevich",
+    "pexelsUrl": "https://www.pexels.com/photo/cake-with-nuts-decorated-on-top-4692159/"
+  },
+  {
+    "kind": "product",
+    "slug": "zesti-sokolata",
+    "name": "Ζεστή σοκολάτα",
+    "query": "chocolate hot chocolate cup",
+    "pexelsId": 14704654,
+    "photographer": "mohammad khorram",
+    "photographerUrl": "https://www.pexels.com/@bykhorram",
+    "pexelsUrl": "https://www.pexels.com/photo/hot-chocolate-14704654/"
+  }
+]
