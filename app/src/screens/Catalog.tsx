@@ -1,12 +1,14 @@
 import { useEffect } from "react";
 import { useApp } from "../AppContext";
+import { useMenu } from "../MenuContext";
 import { StockImage } from "../components/StockImage";
-import { CAKE_CATEGORIES, categoryNames, groups, products } from "../data/menu";
+import { CAKE_CATEGORIES, groups } from "../data/menu";
 import { categoryImagePath, productImagePath } from "../lib/images";
 import { fmt } from "../lib/format";
 
 export function Catalog() {
   const { activeGroup, setActiveGroup, addToCart } = useApp();
+  const { products, categoryNames } = useMenu();
 
   useEffect(() => {
     if (!activeGroup) setActiveGroup(groups[0].id);

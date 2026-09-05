@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../AppContext";
+import { useMenu } from "../MenuContext";
 import { StockImage } from "../components/StockImage";
-import { categoryNames, groups, offers, popular, products, store } from "../data/menu";
+import { groups, offers, popular, store } from "../data/menu";
 import { productImagePath } from "../lib/images";
 import { fmt, isStoreClosedNow } from "../lib/format";
 
@@ -22,6 +23,7 @@ interface Card {
 
 export function DesktopHome() {
   const { addToCart, fulfillment, setFulfillment, goConfigurator, openCart, cartCount } = useApp();
+  const { products, categoryNames } = useMenu();
   const [selected, setSelected] = useState<string>(POPULAR_ID);
   const [query, setQuery] = useState("");
 
@@ -32,7 +34,7 @@ export function DesktopHome() {
       Object.entries(products).flatMap(([catId, list]) =>
         list.map((p) => ({ ...p, catId, key: `${catId}:${p.name}` })),
       ),
-    [],
+    [products],
   );
 
   const searching = query.trim().length > 0;
@@ -89,7 +91,7 @@ export function DesktopHome() {
         onAdd: () => addToCart(p.name, p.price, "", catId === "cakes" || catId === "icecream_cakes"),
       })),
     );
-  }, [selected, searching, query, allProducts, addToCart]);
+  }, [selected, searching, query, allProducts, addToCart, products, categoryNames]);
 
   const heading = searching
     ? `Αποτελέσματα για «${query.trim()}»`

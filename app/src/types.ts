@@ -108,6 +108,17 @@ export interface CardDetails {
   cvv: string;
 }
 
+/**
+ * Admin-edited deltas on top of the seed data in data/menu.ts, stored
+ * server-side (see api/overrides.ts). A category key present here
+ * replaces that category's product list entirely; categoryNames are
+ * merged key-by-key.
+ */
+export interface MenuOverrides {
+  products: Partial<Record<string, Product[]>>;
+  categoryNames: Partial<Record<string, string>>;
+}
+
 export interface OrderSnapshot {
   orderNumber: string;
   items: CartItem[];
