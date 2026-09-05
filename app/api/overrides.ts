@@ -1,10 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { Redis } from "@upstash/redis";
+import { isAdminRequest } from "./_lib/auth.js";
+import { STORAGE_UNCONFIGURED_MESSAGE, getRedis } from "./_lib/redis.js";
 
 // Single JSON document holding every admin-edited delta on top of the seed
-// data in src/data/menu.ts. Vercel's Storage tab (Upstash for Redis, or the
-// legacy "Vercel KV" naming) injects one of these env var pairs once the
-// integration is connected — we accept either name.
+// data in src/data/menu.ts.
 const OVERRIDES_KEY = "evaggelou:menu-overrides";
 
 interface StoredProduct {
@@ -20,13 +19,6 @@ interface StoredOverrides {
 }
 
 const EMPTY: StoredOverrides = { products: {}, categoryNames: {} };
-
-function getRedis(): Redis | null {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  return new Redis({ url, token });
-}
 
 function isValidProduct(p: unknown): p is StoredProduct {
   if (!p || typeof p !== "object") return false;
@@ -64,10 +56,7 @@ function validateIncoming(body: unknown): StoredOverrides | null {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const redis = getRedis();
   if (!redis) {
-    res.status(503).json({
-      error:
-        "Το menu storage δεν έχει ρυθμιστεί ακόμα — πρόσθεσε ένα Upstash Redis (ή Vercel KV) integration από το Storage tab του project.",
-    });
+    res.status(503).json({ error: STORAGE_UNCONFIGURED_MESSAGE });
     return;
   }
 
@@ -78,9 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === "POST") {
-    const adminPassword = process.env.ADMIN_PASSWORD;
-    const provided = req.headers["x-admin-password"];
-    if (!adminPassword || provided !== adminPassword) {
+    if (!isAdminRequest(req)) {
       res.status(401).json({ error: "Μη εξουσιοδοτημένο." });
       return;
     }

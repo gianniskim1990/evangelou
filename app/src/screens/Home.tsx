@@ -1,11 +1,14 @@
 import { useApp } from "../AppContext";
+import { useSettings } from "../SettingsContext";
 import { StockImage } from "../components/StockImage";
-import { offers, popular, store } from "../data/menu";
+import { offers, popular } from "../data/menu";
+import { formatHoursSummary } from "../lib/hours";
 import { productImagePath } from "../lib/images";
 import { fmt } from "../lib/format";
 
 export function Home() {
   const { goConfigurator, goCatalog, addToCart } = useApp();
+  const { settings } = useSettings();
 
   return (
     <main>
@@ -94,21 +97,20 @@ export function Home() {
       <footer className="border-t-[3px] border-bronze bg-espresso px-5 pt-7.5 pb-8.5 text-cream">
         <img
           src="/logo-evaggelou-color.png"
-          alt={store.name}
+          alt={settings.name}
           className="mb-4.5 h-7 object-contain opacity-90 brightness-0 invert"
         />
         <div className="text-[13.5px] leading-[1.8] opacity-85">
-          <div>{store.address}</div>
+          <div>{settings.address}</div>
           <div>
-            <a href={`tel:${store.phoneHref}`} className="text-cream">
-              {store.phone}
+            <a href={`tel:${settings.phoneHref}`} className="text-cream">
+              {settings.phone}
             </a>
           </div>
-          <div>{store.instagram}</div>
-          <div>Ωράριο: Δευτέρα–Κυριακή, {store.hours}</div>
+          <div>{settings.instagram}</div>
+          <div>Ωράριο: {formatHoursSummary(settings.hours)}</div>
         </div>
-        <div className="mt-3 text-[11.5px] opacity-50">*ωράριο ενδεικτικό, προς επιβεβαίωση</div>
-        <div className="mt-1 text-[11.5px] opacity-50">
+        <div className="mt-3 text-[11.5px] opacity-50">
           Φωτογραφίες από{" "}
           <a href="https://www.pexels.com" target="_blank" rel="noreferrer" className="text-cream underline">
             Pexels

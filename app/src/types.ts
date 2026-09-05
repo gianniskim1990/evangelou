@@ -108,6 +108,32 @@ export interface CardDetails {
   cvv: string;
 }
 
+export interface Customer {
+  name: string;
+  phone: string;
+}
+
+/** weekday: 0=Κυριακή..6=Σάββατο (matches JS Date#getDay()). */
+export interface OpeningPeriod {
+  weekday: number;
+  opensAt: string;
+  closesAt: string;
+  isClosed: boolean;
+}
+
+export interface StoreSettings {
+  name: string;
+  address: string;
+  phone: string;
+  phoneHref: string;
+  instagram: string;
+  deliveryMinOrder: number;
+  deliveryFee: number;
+  hours: OpeningPeriod[];
+}
+
+export type OrderStatus = "new" | "in_progress" | "completed" | "cancelled";
+
 /**
  * Admin-edited deltas on top of the seed data in data/menu.ts, stored
  * server-side (see api/overrides.ts). A category key present here
@@ -117,6 +143,30 @@ export interface CardDetails {
 export interface MenuOverrides {
   products: Partial<Record<string, Product[]>>;
   categoryNames: Partial<Record<string, string>>;
+}
+
+/** The payload a customer's checkout submits to POST /api/orders. */
+export interface NewOrderInput {
+  items: CartItem[];
+  subtotal: number;
+  deliveryFee: number;
+  total: number;
+  fulfillment: Fulfillment;
+  pickupTime: string;
+  address: Address | null;
+  hasCake: boolean;
+  cakeDateTime: string;
+  cakeMessage: string;
+  candles: number;
+  payment: Payment;
+  customer: Customer;
+}
+
+/** What the server stores per order, and returns from GET /api/orders(/:id). */
+export interface StoredOrder extends NewOrderInput {
+  orderNumber: string;
+  status: OrderStatus;
+  createdAt: string;
 }
 
 export interface OrderSnapshot {
@@ -129,4 +179,8 @@ export interface OrderSnapshot {
   pickupTime: string;
   hasCake: boolean;
   cakeDateTime: string;
+  status: OrderStatus;
+  /** False if the order couldn't be persisted (e.g. local dev without the API) — the
+   * confirmation/status screens still work, but the order won't show up in /admin. */
+  synced: boolean;
 }

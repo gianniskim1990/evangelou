@@ -1,20 +1,21 @@
 import { useApp } from "../AppContext";
-import { store } from "../data/menu";
+import { useSettings } from "../SettingsContext";
 
 export function TopHeader() {
   const { goHome, openCart, cartCount } = useApp();
+  const { settings } = useSettings();
 
   return (
     <header className="sticky top-0 z-20 flex items-center justify-between border-b border-espresso/12 bg-cream px-4 py-3.5">
       <img
         src="/logo-evaggelou-color.png"
-        alt={store.name}
+        alt={settings.name}
         className="h-9 cursor-pointer object-contain object-left"
         onClick={goHome}
       />
       <div className="flex items-center gap-4.5">
         <a
-          href={`tel:${store.phoneHref}`}
+          href={`tel:${settings.phoneHref}`}
           aria-label="Κλήση καταστήματος"
           className="flex items-center justify-center text-espresso no-underline"
         >

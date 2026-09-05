@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../AppContext";
 import { useMenu } from "../MenuContext";
+import { useSettings } from "../SettingsContext";
 import { StockImage } from "../components/StockImage";
-import { groups, offers, popular, store } from "../data/menu";
+import { CAKE_CATEGORIES, groups, offers, popular } from "../data/menu";
+import { isStoreClosedNow, periodForToday } from "../lib/hours";
 import { productImagePath } from "../lib/images";
-import { fmt, isStoreClosedNow } from "../lib/format";
+import { fmt } from "../lib/format";
 
 const POPULAR_ID = "__popular__";
 const OFFERS_ID = "__offers__";
@@ -24,10 +26,11 @@ interface Card {
 export function DesktopHome() {
   const { addToCart, fulfillment, setFulfillment, goConfigurator, openCart, cartCount } = useApp();
   const { products, categoryNames } = useMenu();
+  const { settings } = useSettings();
   const [selected, setSelected] = useState<string>(POPULAR_ID);
   const [query, setQuery] = useState("");
 
-  const closedNow = isStoreClosedNow(store.hours);
+  const closedNow = isStoreClosedNow(settings.hours);
 
   const allProducts = useMemo(
     () =>
@@ -88,7 +91,7 @@ export function DesktopHome() {
         diabetic: p.diabetic,
         badge: categoryNames[catId],
         badgeTone: "bronze" as const,
-        onAdd: () => addToCart(p.name, p.price, "", catId === "cakes" || catId === "icecream_cakes"),
+        onAdd: () => addToCart(p.name, p.price, "", CAKE_CATEGORIES.has(catId)),
       })),
     );
   }, [selected, searching, query, allProducts, addToCart, products, categoryNames]);
@@ -105,7 +108,7 @@ export function DesktopHome() {
     <div className="mx-auto flex min-h-screen max-w-[1280px] gap-8 px-8 py-8">
       <aside className="w-[280px] flex-none">
         <div className="mb-5 flex items-center justify-between">
-          <img src="/logo-evaggelou-color.png" alt={store.name} className="h-10 object-contain object-left" />
+          <img src="/logo-evaggelou-color.png" alt={settings.name} className="h-10 object-contain object-left" />
           <button
             onClick={openCart}
             aria-label="Καλάθι"
@@ -124,7 +127,9 @@ export function DesktopHome() {
         </div>
 
         <div className="mb-5 text-[13px] font-semibold" style={{ color: closedNow ? "rgba(30,24,18,0.45)" : "#86764F" }}>
-          {closedNow ? "Κλειστά τώρα" : `Ανοιχτά · ${store.hours}`}
+          {closedNow
+            ? "Κλειστά τώρα"
+            : `Ανοιχτά · ${periodForToday(settings.hours).opensAt}–${periodForToday(settings.hours).closesAt}`}
         </div>
 
         <div className="mb-4 flex gap-2">
@@ -152,7 +157,7 @@ export function DesktopHome() {
           </button>
         </div>
 
-        <div className="mb-2 text-[13px] text-espresso/70">{store.address}</div>
+        <div className="mb-2 text-[13px] text-espresso/70">{settings.address}</div>
 
         <input
           value={query}

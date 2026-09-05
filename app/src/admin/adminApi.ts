@@ -1,4 +1,4 @@
-import type { MenuOverrides } from "../types";
+import type { MenuOverrides, OrderStatus, StoreSettings, StoredOrder } from "../types";
 
 const SESSION_KEY = "evaggelou-admin-password";
 
@@ -29,13 +29,11 @@ export function clearStoredPassword(): void {
 
 export class AdminAuthError extends Error {}
 
-/** Saves a partial overrides delta (only the categories being changed). */
-export async function saveOverrides(delta: Partial<MenuOverrides>): Promise<MenuOverrides> {
+async function adminFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const password = getStoredPassword();
-  const res = await fetch("/api/overrides", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-admin-password": password ?? "" },
-    body: JSON.stringify(delta),
+  const res = await fetch(url, {
+    ...init,
+    headers: { "Content-Type": "application/json", "x-admin-password": password ?? "", ...init?.headers },
   });
   if (res.status === 401) {
     clearStoredPassword();
@@ -43,27 +41,58 @@ export async function saveOverrides(delta: Partial<MenuOverrides>): Promise<Menu
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Αποτυχία αποθήκευσης (${res.status})`);
+    throw new Error(body.error ?? `Αίτημα απέτυχε (${res.status})`);
   }
-  const data = await res.json();
-  return data.overrides as MenuOverrides;
+  return res.json();
+}
+
+/** Saves a partial overrides delta (only the categories being changed). */
+export async function saveOverrides(delta: Partial<MenuOverrides>): Promise<MenuOverrides> {
+  const data = await adminFetch<{ overrides: MenuOverrides }>("/api/overrides", {
+    method: "POST",
+    body: JSON.stringify(delta),
+  });
+  return data.overrides;
 }
 
 export async function resetOverrides(): Promise<MenuOverrides> {
-  const password = getStoredPassword();
-  const res = await fetch("/api/overrides", {
+  const data = await adminFetch<{ overrides: MenuOverrides }>("/api/overrides", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-admin-password": password ?? "" },
     body: JSON.stringify({ reset: true }),
   });
-  if (res.status === 401) {
-    clearStoredPassword();
-    throw new AdminAuthError("Η σύνδεση έληξε, συνδέσου ξανά.");
-  }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Αποτυχία επαναφοράς (${res.status})`);
-  }
-  const data = await res.json();
-  return data.overrides as MenuOverrides;
+  return data.overrides;
+}
+
+export async function fetchAdminOrders(): Promise<StoredOrder[]> {
+  const data = await adminFetch<{ orders: StoredOrder[] }>("/api/orders");
+  return data.orders;
+}
+
+export async function updateOrderStatus(orderNumber: string, status: OrderStatus): Promise<StoredOrder> {
+  const data = await adminFetch<{ order: StoredOrder }>(`/api/orders/${orderNumber}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+  return data.order;
+}
+
+export async function saveSettings(settings: StoreSettings): Promise<StoreSettings> {
+  const data = await adminFetch<{ settings: StoreSettings }>("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(settings),
+  });
+  return data.settings;
+}
+
+export interface AdminAnalytics {
+  days: number;
+  totalOrders: number;
+  totalValue: number;
+  completedCount: number;
+  byStatus: Record<OrderStatus, number>;
+  topProducts: { name: string; qty: number }[];
+}
+
+export async function fetchAnalytics(days: number): Promise<AdminAnalytics> {
+  return adminFetch<AdminAnalytics>(`/api/analytics?days=${days}`);
 }

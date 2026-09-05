@@ -7,14 +7,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { FREE_TOPPINGS, TOPPING_EXTRA_PRICE, bases, chocolates, sizes, store } from "./data/menu";
+import { FREE_TOPPINGS, TOPPING_EXTRA_PRICE, bases, chocolates, sizes } from "./data/menu";
+import { useSettings } from "./SettingsContext";
 import type {
   Address,
   CardDetails,
   CartItem,
   ConfiguratorState,
+  Customer,
   Fulfillment,
+  NewOrderInput,
   OrderSnapshot,
+  OrderStatus,
   Payment,
   Screen,
 } from "./types";
@@ -22,6 +26,7 @@ import type {
 const EMPTY_CFG: ConfiguratorState = { step: 1, size: null, choc: null, base: null, toppings: [] };
 const EMPTY_ADDRESS: Address = { street: "", floor: "", bell: "", notes: "" };
 const EMPTY_CARD: CardDetails = { name: "", number: "", expiry: "", cvv: "" };
+const EMPTY_CUSTOMER: Customer = { name: "", phone: "" };
 
 interface AppContextValue {
   screen: Screen;
@@ -55,6 +60,10 @@ interface AppContextValue {
   cfgPrev: () => void;
   addConfiguredToCart: () => void;
 
+  customer: Customer;
+  setCustomerName: (v: string) => void;
+  setCustomerPhone: (v: string) => void;
+
   fulfillment: Fulfillment;
   setFulfillment: (f: Fulfillment) => void;
   pickupTime: string;
@@ -80,16 +89,17 @@ interface AppContextValue {
   setCardCvv: (v: string) => void;
 
   canSubmitOrder: boolean;
+  submitting: boolean;
   submitOrder: () => void;
 
   order: OrderSnapshot | null;
-  statusStage: number;
   goStatus: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const { settings } = useSettings();
   const [screen, setScreen] = useState<Screen>("home");
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -97,6 +107,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [cfg, setCfg] = useState<ConfiguratorState>(EMPTY_CFG);
 
+  const [customer, setCustomer] = useState<Customer>(EMPTY_CUSTOMER);
   const [fulfillment, setFulfillment] = useState<Fulfillment>("pickup");
   const [pickupTime, setPickupTime] = useState("");
   const [address, setAddress] = useState<Address>(EMPTY_ADDRESS);
@@ -107,7 +118,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [card, setCard] = useState<CardDetails>(EMPTY_CARD);
 
   const [order, setOrder] = useState<OrderSnapshot | null>(null);
-  const [statusStage, setStatusStage] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
   const statusTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -188,6 +199,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [sizeObj, chocObj, baseObj, cfgTotal, addToCart]);
 
   // --- Checkout ---
+  const setCustomerName = useCallback((v: string) => setCustomer((c) => ({ ...c, name: v })), []);
+  const setCustomerPhone = useCallback((v: string) => setCustomer((c) => ({ ...c, phone: v })), []);
+
   const setAddressField = useCallback((field: keyof Address, value: string) => {
     setAddress((a) => ({ ...a, [field]: value }));
   }, []);
@@ -214,44 +228,98 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const isDelivery = fulfillment === "delivery";
   const canSubmitOrder =
+    customer.name.trim().length > 0 &&
+    customer.phone.trim().length > 0 &&
     (!isDelivery || address.street.trim().length > 0) &&
     (fulfillment !== "pickup" || pickupTime.length > 0) &&
     (!hasCakeInCart || cakeDateTime.length > 0) &&
     (payment !== "card" || (card.name.length > 0 && card.number.length > 0 && card.expiry.length > 0 && card.cvv.length > 0));
 
-  const submitOrder = useCallback(() => {
-    const orderNumber = "EV-" + Math.floor(100000 + Math.random() * 900000);
-    const total = cartTotal + (isDelivery ? store.deliveryFee : 0);
+  const submitOrder = useCallback(async () => {
+    const total = cartTotal + (isDelivery ? settings.deliveryFee : 0);
+    const payload: NewOrderInput = {
+      items: cart,
+      subtotal: cartTotal,
+      deliveryFee: isDelivery ? settings.deliveryFee : 0,
+      total,
+      fulfillment,
+      pickupTime,
+      address: isDelivery ? address : null,
+      hasCake: hasCakeInCart,
+      cakeDateTime,
+      cakeMessage,
+      candles,
+      payment,
+      customer,
+    };
+
+    setSubmitting(true);
+    let orderNumber = "EV-" + Math.floor(100000 + Math.random() * 900000);
+    let synced = false;
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        orderNumber = data.order.orderNumber;
+        synced = true;
+      }
+    } catch {
+      // No backend reachable (e.g. local dev without `vercel dev`) — the
+      // demo still completes locally, it just won't show up in /admin.
+    }
+    setSubmitting(false);
+
     setOrder({
       orderNumber,
       items: cart,
       subtotal: cartTotal,
-      deliveryFee: isDelivery ? store.deliveryFee : 0,
+      deliveryFee: payload.deliveryFee,
       total,
       fulfillment,
       pickupTime,
       hasCake: hasCakeInCart,
       cakeDateTime,
+      status: "new",
+      synced,
     });
-    setStatusStage(0);
     setCart([]);
     setScreen("confirmation");
-  }, [cart, cartTotal, isDelivery, fulfillment, pickupTime, hasCakeInCart, cakeDateTime]);
+  }, [cart, cartTotal, isDelivery, settings.deliveryFee, fulfillment, pickupTime, address, hasCakeInCart, cakeDateTime, cakeMessage, candles, payment, customer]);
 
   const goStatus = useCallback(() => {
-    setStatusStage(0);
+    const orderNumber = order?.orderNumber;
+    const synced = order?.synced;
     setScreen("status");
     if (statusTimer.current) window.clearInterval(statusTimer.current);
-    statusTimer.current = window.setInterval(() => {
-      setStatusStage((s) => {
-        if (s >= 2) {
-          if (statusTimer.current) window.clearInterval(statusTimer.current);
-          return s;
+    if (!orderNumber) return;
+
+    let localStage = 0;
+    statusTimer.current = window.setInterval(async () => {
+      if (synced) {
+        try {
+          const res = await fetch(`/api/orders/${orderNumber}`);
+          if (!res.ok) throw new Error(String(res.status));
+          const data = await res.json();
+          const nextStatus = data.order.status as OrderStatus;
+          setOrder((prev) => (prev ? { ...prev, status: nextStatus } : prev));
+          if ((nextStatus === "completed" || nextStatus === "cancelled") && statusTimer.current) {
+            window.clearInterval(statusTimer.current);
+          }
+          return;
+        } catch {
+          // fall through to the local simulation below
         }
-        return s + 1;
-      });
+      }
+      localStage = Math.min(localStage + 1, 2);
+      const simulated: OrderStatus = localStage === 0 ? "new" : localStage === 1 ? "in_progress" : "completed";
+      setOrder((prev) => (prev ? { ...prev, status: simulated } : prev));
+      if (localStage >= 2 && statusTimer.current) window.clearInterval(statusTimer.current);
     }, 4000);
-  }, []);
+  }, [order]);
 
   const value: AppContextValue = {
     screen,
@@ -280,6 +348,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cfgNext,
     cfgPrev,
     addConfiguredToCart,
+    customer,
+    setCustomerName,
+    setCustomerPhone,
     fulfillment,
     setFulfillment,
     pickupTime,
@@ -302,9 +373,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCardExpiry,
     setCardCvv,
     canSubmitOrder,
+    submitting,
     submitOrder,
     order,
-    statusStage,
     goStatus,
   };
 

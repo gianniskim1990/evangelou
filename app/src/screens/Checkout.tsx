@@ -1,13 +1,17 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useApp } from "../AppContext";
-import { store } from "../data/menu";
-import { fmt, isStoreClosedNow, pickupSlots } from "../lib/format";
+import { useSettings } from "../SettingsContext";
+import { fmt } from "../lib/format";
+import { isStoreClosedNow, pickupSlotsForToday } from "../lib/hours";
 
 const inputClass =
   "w-full rounded-xl border border-espresso/20 bg-white px-3.5 py-3.5 text-sm font-[Commissioner,sans-serif]";
 
 export function Checkout() {
   const {
+    customer,
+    setCustomerName,
+    setCustomerPhone,
     fulfillment,
     setFulfillment,
     pickupTime,
@@ -31,18 +35,39 @@ export function Checkout() {
     setCardCvv,
     cartTotal,
     canSubmitOrder,
+    submitting,
     submitOrder,
   } = useApp();
+  const { settings } = useSettings();
 
   const isDelivery = fulfillment === "delivery";
   const isPayCard = payment === "card";
-  const slots = useMemo(() => pickupSlots(store.hours), []);
-  const storeClosedNow = useMemo(() => isStoreClosedNow(store.hours), []);
+  const slots = pickupSlotsForToday(settings.hours);
+  const storeClosedNow = isStoreClosedNow(settings.hours);
   const [cakeMin] = useState(() => new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16));
-  const total = cartTotal + (isDelivery ? store.deliveryFee : 0);
+  const total = cartTotal + (isDelivery ? settings.deliveryFee : 0);
 
   return (
     <main className="px-4 pt-4.5 pb-6">
+      <h3 className="m-0 mb-3 text-[15px] font-semibold">Στοιχεία επικοινωνίας</h3>
+      <div className="mb-5 flex flex-col gap-2.5">
+        <input
+          value={customer.name}
+          onChange={(e) => setCustomerName(e.target.value)}
+          required
+          placeholder="Ονοματεπώνυμο"
+          className={inputClass}
+        />
+        <input
+          value={customer.phone}
+          onChange={(e) => setCustomerPhone(e.target.value)}
+          required
+          type="tel"
+          placeholder="Τηλέφωνο επικοινωνίας"
+          className={inputClass}
+        />
+      </div>
+
       <div className="mb-5 flex gap-2">
         <button
           onClick={() => setFulfillment("pickup")}
@@ -64,7 +89,7 @@ export function Checkout() {
         <>
           {storeClosedNow && (
             <div className="mb-3.5 rounded-xl bg-white px-3.5 py-3 text-[13px] text-espresso/80">
-              Το κατάστημα είναι κλειστό τώρα. Διάλεξε ώρα παραλαβής μέσα στο ωράριο μας, {store.hours}.
+              Το κατάστημα είναι κλειστό τώρα. Διάλεξε ώρα παραλαβής μέσα στο σημερινό ωράριο μας.
             </div>
           )}
           <label className="mb-2 block text-[13px] font-semibold">Ώρα παραλαβής</label>
@@ -88,10 +113,10 @@ export function Checkout() {
         <>
           <div className="mb-3.5 rounded-xl bg-white px-3.5 py-3 text-[13px]">
             <div>
-              Ελάχιστη παραγγελία: <strong>{fmt(store.deliveryMinOrder)}</strong>
+              Ελάχιστη παραγγελία: <strong>{fmt(settings.deliveryMinOrder)}</strong>
             </div>
             <div>
-              Μεταφορικά: <strong>{fmt(store.deliveryFee)}</strong>
+              Μεταφορικά: <strong>{fmt(settings.deliveryFee)}</strong>
             </div>
           </div>
           <div className="mb-4.5 flex flex-col gap-2.5">
@@ -233,7 +258,7 @@ export function Checkout() {
         {isDelivery && (
           <div className="flex justify-between py-1.5">
             <span className="opacity-65">Μεταφορικά</span>
-            <span>{fmt(store.deliveryFee)}</span>
+            <span>{fmt(settings.deliveryFee)}</span>
           </div>
         )}
         <div className="mt-1.5 flex justify-between border-t border-cream pt-2.5 text-base font-bold">
@@ -244,11 +269,11 @@ export function Checkout() {
 
       <button
         onClick={submitOrder}
-        disabled={!canSubmitOrder}
-        style={{ opacity: canSubmitOrder ? 1 : 0.55 }}
+        disabled={!canSubmitOrder || submitting}
+        style={{ opacity: canSubmitOrder && !submitting ? 1 : 0.55 }}
         className="w-full rounded-xl border-none bg-bronze-dark py-4 text-[15px] font-semibold text-white"
       >
-        Ολοκλήρωση παραγγελίας
+        {submitting ? "Υποβολή…" : "Ολοκλήρωση παραγγελίας"}
       </button>
     </main>
   );

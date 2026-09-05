@@ -1,12 +1,34 @@
 import { useApp } from "../AppContext";
-import { store } from "../data/menu";
+import { useSettings } from "../SettingsContext";
+
+const STEP_STATUSES = ["new", "in_progress", "completed"] as const;
 
 export function Status() {
-  const { order, statusStage } = useApp();
+  const { order } = useApp();
+  const { settings } = useSettings();
 
   if (!order) return null;
 
+  if (order.status === "cancelled") {
+    return (
+      <main className="px-5 pt-9 pb-9 text-center">
+        <div className="mb-7.5">
+          <div className="text-[13px] opacity-60">Παραγγελία</div>
+          <div className="font-literata text-[19px] font-semibold">{order.orderNumber}</div>
+        </div>
+        <div className="mb-2 font-literata text-lg font-semibold text-maroon">Η παραγγελία ακυρώθηκε</div>
+        <div className="mb-6.5 text-sm text-espresso/70">
+          Αν αυτό είναι απρόσμενο, καλέσε μας για να δούμε τι έγινε.
+        </div>
+        <div className="text-[13.5px] opacity-70">
+          Για οποιαδήποτε ερώτηση: <a href={`tel:${settings.phoneHref}`}>{settings.phone}</a>
+        </div>
+      </main>
+    );
+  }
+
   const isDelivery = order.fulfillment === "delivery";
+  const stage = Math.max(0, STEP_STATUSES.indexOf(order.status as (typeof STEP_STATUSES)[number]));
   const labels = ["Ελήφθη", "Ετοιμάζεται", isDelivery ? "Στον δρόμο" : "Έτοιμη για παραλαβή"];
   const notes = [
     "Το μαγαζί έλαβε την παραγγελία σου.",
@@ -23,11 +45,11 @@ export function Status() {
 
       <div className="flex flex-col">
         {labels.map((label, i) => {
-          const done = i < statusStage;
-          const active = i === statusStage;
+          const done = i < stage;
+          const active = i === stage;
           const hasLine = i < labels.length - 1;
-          const circleBg = i <= statusStage ? "#5F5335" : "#E5DFD1";
-          const lineBg = i < statusStage ? "#5F5335" : "#E5DFD1";
+          const circleBg = i <= stage ? "#5F5335" : "#E5DFD1";
+          const lineBg = i < stage ? "#5F5335" : "#E5DFD1";
           return (
             <div key={label} className="flex gap-3.5">
               <div className="flex flex-col items-center">
@@ -53,7 +75,7 @@ export function Status() {
       </div>
 
       <div className="mt-2.5 text-center text-[13.5px] opacity-70">
-        Για οποιαδήποτε ερώτηση: <a href={`tel:${store.phoneHref}`}>{store.phone}</a>
+        Για οποιαδήποτε ερώτηση: <a href={`tel:${settings.phoneHref}`}>{settings.phone}</a>
       </div>
     </main>
   );

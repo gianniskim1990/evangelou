@@ -1,9 +1,10 @@
 import { useApp } from "../AppContext";
-import { store } from "../data/menu";
+import { useSettings } from "../SettingsContext";
 import { fmt } from "../lib/format";
 
 export function Confirmation() {
   const { order, goStatus } = useApp();
+  const { settings } = useSettings();
 
   if (!order) return null;
 
@@ -50,7 +51,7 @@ export function Confirmation() {
         {etaLabel}: <strong className="text-espresso opacity-100">{etaText}</strong>
         <br />
         Για οποιαδήποτε ερώτηση:{" "}
-        <a href={`tel:${store.phoneHref}`}>{store.phone}</a>
+        <a href={`tel:${settings.phoneHref}`}>{settings.phone}</a>
       </div>
 
       <button
