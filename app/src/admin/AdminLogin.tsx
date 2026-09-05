@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { storePassword } from "./adminApi";
 
 export function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
@@ -31,8 +32,9 @@ export function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-cream px-4">
-      <form onSubmit={submit} className="w-full max-w-[360px] rounded-2xl bg-white p-8 shadow-[0_4px_24px_rgba(30,24,18,0.1)]">
+    <div className="relative flex min-h-screen items-center justify-center bg-cream px-4">
+      <ThemeToggle className="absolute top-4 right-4" />
+      <form onSubmit={submit} className="w-full max-w-[360px] rounded-2xl bg-surface p-8 shadow-[0_4px_24px_rgba(30,24,18,0.1)]">
         <img src="/logo-evaggelou-color.png" alt="Ζαχαροπλαστική Ευαγγέλου" className="mb-6 h-10 object-contain" />
         <h1 className="font-literata mb-1 text-lg font-semibold">Διαχείριση καταλόγου</h1>
         <p className="mb-5 text-sm text-espresso/60">Βάλε τον κωδικό διαχειριστή για να συνεχίσεις.</p>

@@ -80,7 +80,7 @@ export function AddCategoryForm({ groups, existingCategoryIds, onCreated, onAuth
   }
 
   return (
-    <div className="mb-6 rounded-xl border border-espresso/10 bg-white p-4">
+    <div className="mb-6 rounded-xl border border-espresso/10 bg-surface p-4">
       <h3 className="mb-3 text-sm font-semibold">Νέα κατηγορία</h3>
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start">
         <input

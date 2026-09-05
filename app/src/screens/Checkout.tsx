@@ -5,7 +5,7 @@ import { fmt } from "../lib/format";
 import { isStoreClosedNow, pickupSlotsForToday } from "../lib/hours";
 
 const inputClass =
-  "w-full rounded-xl border border-espresso/20 bg-white px-3.5 py-3.5 text-sm font-[Commissioner,sans-serif]";
+  "w-full rounded-xl border border-espresso/20 bg-surface px-3.5 py-3.5 text-sm font-[Commissioner,sans-serif]";
 
 export function Checkout() {
   const {
@@ -71,15 +71,15 @@ export function Checkout() {
       <div className="mb-5 flex gap-2">
         <button
           onClick={() => setFulfillment("pickup")}
-          className="flex-1 rounded-xl border-2 bg-white py-3 text-sm font-semibold text-espresso"
-          style={{ borderColor: !isDelivery ? "#5F5335" : "#E5DFD1" }}
+          className="flex-1 rounded-xl border-2 bg-surface py-3 text-sm font-semibold text-espresso"
+          style={{ borderColor: !isDelivery ? "var(--color-bronze-dark)" : "var(--color-hairline)" }}
         >
           Παραλαβή
         </button>
         <button
           onClick={() => setFulfillment("delivery")}
-          className="flex-1 rounded-xl border-2 bg-white py-3 text-sm font-semibold text-espresso"
-          style={{ borderColor: isDelivery ? "#5F5335" : "#E5DFD1" }}
+          className="flex-1 rounded-xl border-2 bg-surface py-3 text-sm font-semibold text-espresso"
+          style={{ borderColor: isDelivery ? "var(--color-bronze-dark)" : "var(--color-hairline)" }}
         >
           Delivery στην Καβάλα
         </button>
@@ -88,7 +88,7 @@ export function Checkout() {
       {!isDelivery && (
         <>
           {storeClosedNow && (
-            <div className="mb-3.5 rounded-xl bg-white px-3.5 py-3 text-[13px] text-espresso/80">
+            <div className="mb-3.5 rounded-xl bg-surface px-3.5 py-3 text-[13px] text-espresso/80">
               Το κατάστημα είναι κλειστό τώρα. Διάλεξε ώρα παραλαβής μέσα στο σημερινό ωράριο μας.
             </div>
           )}
@@ -114,7 +114,7 @@ export function Checkout() {
 
       {isDelivery && (
         <>
-          <div className="mb-3.5 rounded-xl bg-white px-3.5 py-3 text-[13px]">
+          <div className="mb-3.5 rounded-xl bg-surface px-3.5 py-3 text-[13px]">
             <div>
               Ελάχιστη παραγγελία: <strong>{fmt(settings.deliveryMinOrder)}</strong>
             </div>
@@ -156,7 +156,7 @@ export function Checkout() {
       )}
 
       {hasCakeInCart && (
-        <div className="mb-4.5 rounded-[14px] bg-white p-4">
+        <div className="mb-4.5 rounded-[14px] bg-surface p-4">
           <h3 className="m-0 mb-3 text-[15px] font-semibold">Στοιχεία για την τούρτα</h3>
           <label className="mb-1.5 block text-[13px] font-semibold">
             Ημερομηνία και ώρα παραλαβής (τουλάχιστον 24 ώρες πριν)
@@ -179,11 +179,11 @@ export function Checkout() {
           />
           <label className="mb-1.5 block text-[13px] font-semibold">Κεράκια</label>
           <div className="flex items-center gap-3.5">
-            <button onClick={decCandles} className="h-8.5 w-8.5 rounded-full border border-bronze bg-white">
+            <button onClick={decCandles} className="h-8.5 w-8.5 rounded-full border border-bronze bg-surface">
               −
             </button>
             <span className="min-w-5 text-center font-semibold">{candles}</span>
-            <button onClick={incCandles} className="h-8.5 w-8.5 rounded-full border border-bronze bg-white">
+            <button onClick={incCandles} className="h-8.5 w-8.5 rounded-full border border-bronze bg-surface">
               +
             </button>
           </div>
@@ -194,15 +194,15 @@ export function Checkout() {
       <div className="mb-3.5 flex gap-2">
         <button
           onClick={() => setPayment("cash")}
-          className="flex-1 rounded-xl border-2 bg-white py-3 text-sm font-semibold"
-          style={{ borderColor: payment === "cash" ? "#5F5335" : "#E5DFD1" }}
+          className="flex-1 rounded-xl border-2 bg-surface py-3 text-sm font-semibold"
+          style={{ borderColor: payment === "cash" ? "var(--color-bronze-dark)" : "var(--color-hairline)" }}
         >
           Μετρητά στην παράδοση
         </button>
         <button
           onClick={() => setPayment("card")}
-          className="flex-1 rounded-xl border-2 bg-white py-3 text-sm font-semibold"
-          style={{ borderColor: payment === "card" ? "#5F5335" : "#E5DFD1" }}
+          className="flex-1 rounded-xl border-2 bg-surface py-3 text-sm font-semibold"
+          style={{ borderColor: payment === "card" ? "var(--color-bronze-dark)" : "var(--color-hairline)" }}
         >
           Κάρτα
         </button>
@@ -253,7 +253,7 @@ export function Checkout() {
         </>
       )}
 
-      <div className="my-4.5 rounded-[14px] bg-white p-4">
+      <div className="my-4.5 rounded-[14px] bg-surface p-4">
         <div className="flex justify-between py-1.5">
           <span className="opacity-65">Υποσύνολο</span>
           <span>{fmt(cartTotal)}</span>

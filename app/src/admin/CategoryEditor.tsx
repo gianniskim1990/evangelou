@@ -95,7 +95,7 @@ export function CategoryEditor({ catId, initialName, initialProducts, onSaved, o
   };
 
   return (
-    <div className="mb-2 overflow-hidden rounded-xl border border-espresso/10 bg-white">
+    <div className="mb-2 overflow-hidden rounded-xl border border-espresso/10 bg-surface">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between px-4 py-3 text-left"
@@ -133,7 +133,7 @@ export function CategoryEditor({ catId, initialName, initialProducts, onSaved, o
                   onChange={(e) => updateItem(idx, { name: e.target.value })}
                   placeholder="Όνομα προϊόντος"
                   className="flex-1 rounded-lg border border-espresso/20 px-3 py-2 text-sm"
-                  style={{ borderColor: it.name.trim() ? undefined : "#7A2E3B" }}
+                  style={{ borderColor: it.name.trim() ? undefined : "var(--color-maroon)" }}
                 />
                 <input
                   type="number"
@@ -142,7 +142,7 @@ export function CategoryEditor({ catId, initialName, initialProducts, onSaved, o
                   value={it.price}
                   onChange={(e) => updateItem(idx, { price: parseFloat(e.target.value) })}
                   className="w-24 rounded-lg border border-espresso/20 px-3 py-2 text-sm"
-                  style={{ borderColor: Number.isFinite(it.price) && it.price >= 0 ? undefined : "#7A2E3B" }}
+                  style={{ borderColor: Number.isFinite(it.price) && it.price >= 0 ? undefined : "var(--color-maroon)" }}
                 />
                 <label className="flex items-center gap-1.5 text-xs whitespace-nowrap text-espresso/70">
                   <input type="checkbox" checked={!!it.perKilo} onChange={(e) => updateItem(idx, { perKilo: e.target.checked })} />
@@ -182,7 +182,7 @@ export function CategoryEditor({ catId, initialName, initialProducts, onSaved, o
             </button>
             {!allValid && <span className="text-xs text-maroon">Συμπλήρωσε όνομα και έγκυρη τιμή σε κάθε γραμμή.</span>}
             {message && (
-              <span className="text-xs" style={{ color: message.kind === "ok" ? "#86764F" : "#7A2E3B" }}>
+              <span className="text-xs" style={{ color: message.kind === "ok" ? "var(--color-bronze)" : "var(--color-maroon)" }}>
                 {message.text}
               </span>
             )}

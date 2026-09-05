@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Ζαχαροπλαστική Ευαγγέλου</title>
     <meta name="description" content="Παράγγειλε online από τη Ζαχαροπλαστική Ευαγγέλου στην Καβάλα — φτιάξε το δικό σου προφιτερόλ ή διάλεξε από τον κατάλογο." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -11,6 +12,15 @@
       href="https://fonts.googleapis.com/css2?family=Literata:wght@500;600;700&family=Commissioner:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("evaggelou-theme");
+          var isDark = stored === "dark" || (stored !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", isDark);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

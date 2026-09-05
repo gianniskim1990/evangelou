@@ -1,5 +1,6 @@
 import { useApp } from "../AppContext";
 import type { Screen } from "../types";
+import { ThemeToggle } from "./ThemeToggle";
 
 const TITLES: Partial<Record<Screen, string>> = {
   checkout: "Ολοκλήρωση παραγγελίας",
@@ -20,7 +21,7 @@ export function BackHeader() {
   };
 
   return (
-    <header className="sticky top-0 z-20 flex items-center gap-3 bg-white px-4 py-3.5 shadow-[0_2px_12px_rgba(30,24,18,0.10)]">
+    <header className="sticky top-0 z-20 flex items-center gap-3 bg-surface px-4 py-3.5 shadow-[0_2px_12px_rgba(30,24,18,0.10)]">
       <button
         onClick={onBack}
         aria-label="Πίσω"
@@ -30,7 +31,8 @@ export function BackHeader() {
           <path d="M15 5 8 12l7 7" />
         </svg>
       </button>
-      <div className="font-literata text-lg font-semibold">{TITLES[screen]}</div>
+      <div className="font-literata flex-1 text-lg font-semibold">{TITLES[screen]}</div>
+      <ThemeToggle />
     </header>
   );
 }

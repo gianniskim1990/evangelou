@@ -47,9 +47,9 @@ export function Catalog() {
               onClick={() => selectGroup(g.id)}
               className="mr-5 inline-block border-none bg-transparent py-3 text-[13px]"
               style={{
-                borderBottom: `2px solid ${active ? "#86764F" : "transparent"}`,
+                borderBottom: `2px solid ${active ? "var(--color-bronze)" : "transparent"}`,
                 fontWeight: active ? 700 : 500,
-                color: active ? "#1E1812" : "rgba(30,24,18,0.4)",
+                color: active ? "var(--color-espresso)" : "color-mix(in srgb, var(--color-espresso) 40%, transparent)",
               }}
             >
               {g.name}

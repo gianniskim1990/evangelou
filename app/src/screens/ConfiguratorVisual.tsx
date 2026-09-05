@@ -11,7 +11,7 @@ export function ConfiguratorVisual({ cfg }: { cfg: ConfiguratorState }) {
         className="absolute bottom-1.5 left-1.5 h-6.5 w-[240px] rounded-full"
         style={{ background: "radial-gradient(ellipse at center, rgba(30,24,18,0.16), transparent 75%)" }}
       />
-      <div className="absolute bottom-3.5 left-3.5 h-20 w-[222px] rounded-b-[110px] border-[1.5px] border-t-0 border-espresso bg-white opacity-55" />
+      <div className="absolute bottom-3.5 left-3.5 h-20 w-[222px] rounded-b-[110px] border-[1.5px] border-t-0 border-ink bg-paper opacity-55" />
 
       {BUN_POS.map((b, i) => (
         <div
@@ -45,7 +45,7 @@ export function ConfiguratorVisual({ cfg }: { cfg: ConfiguratorState }) {
         return (
           <div
             key={i}
-            className="animate-pop-in absolute h-2.5 w-2.5 rounded-full bg-espresso opacity-85"
+            className="animate-pop-in absolute h-2.5 w-2.5 rounded-full bg-ink opacity-85"
             style={{ left: pos.x, top: pos.y }}
           />
         );

@@ -9,15 +9,15 @@ export function CartDrawer() {
   return (
     <>
       <div onClick={closeCart} className="fixed inset-0 z-29 bg-espresso/45" />
-      <div className="fixed bottom-0 left-1/2 z-30 flex max-h-[78vh] w-full max-w-[480px] -translate-x-1/2 flex-col rounded-t-[20px] bg-white shadow-[0_-8px_30px_rgba(30,24,18,0.25)]">
+      <div className="fixed bottom-0 left-1/2 z-30 flex max-h-[78vh] w-full max-w-[480px] -translate-x-1/2 flex-col rounded-t-[20px] bg-surface shadow-[0_-8px_30px_rgba(30,24,18,0.25)]">
         <div className="flex items-center justify-between border-b border-cream px-4.5 pt-4 pb-2.5">
           <h2 className="m-0 font-literata text-lg font-semibold">Το καλάθι σου</h2>
           <button
             onClick={closeCart}
             aria-label="Κλείσιμο"
-            className="flex h-[30px] w-[30px] items-center justify-center rounded-full border-none bg-cream"
+            className="flex h-[30px] w-[30px] items-center justify-center rounded-full border-none bg-cream text-espresso"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1E1812" strokeWidth="2" strokeLinecap="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M6 6l12 12M18 6 6 18" />
             </svg>
           </button>
@@ -35,7 +35,7 @@ export function CartDrawer() {
                     closeCart();
                     goCatalog();
                   }}
-                  className="flex-1 rounded-[10px] border border-bronze bg-white py-2.5 text-[13.5px] font-semibold"
+                  className="flex-1 rounded-[10px] border border-bronze bg-surface py-2.5 text-[13.5px] font-semibold"
                 >
                   Δες τον κατάλογο
                 </button>
@@ -60,14 +60,14 @@ export function CartDrawer() {
                 <div className="mt-2 flex items-center gap-2.5">
                   <button
                     onClick={() => decCartItem(it.id)}
-                    className="flex h-6 w-6 items-center justify-center rounded-full border border-bronze bg-white text-[13px] leading-none"
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-bronze bg-surface text-[13px] leading-none"
                   >
                     −
                   </button>
                   <span className="min-w-3.5 text-center text-[13px] font-semibold">{it.qty}</span>
                   <button
                     onClick={() => incCartItem(it.id)}
-                    className="flex h-6 w-6 items-center justify-center rounded-full border border-bronze bg-white text-[13px] leading-none"
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-bronze bg-surface text-[13px] leading-none"
                   >
                     +
                   </button>

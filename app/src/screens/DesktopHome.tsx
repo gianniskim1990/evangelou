@@ -3,6 +3,7 @@ import { useApp } from "../AppContext";
 import { useMenu } from "../MenuContext";
 import { useSettings } from "../SettingsContext";
 import { StockImage } from "../components/StockImage";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { CAKE_CATEGORIES, offers, popular } from "../data/menu";
 import { isStoreClosedNow, periodForToday } from "../lib/hours";
 import { productImagePath } from "../lib/images";
@@ -109,24 +110,27 @@ export function DesktopHome() {
       <aside className="w-[280px] flex-none">
         <div className="mb-5 flex items-center justify-between">
           <img src="/logo-evaggelou-color.png" alt={settings.name} className="h-10 object-contain object-left" />
-          <button
-            onClick={openCart}
-            aria-label="Καλάθι"
-            className="relative flex h-9 w-9 items-center justify-center rounded-full border border-espresso/15 bg-white"
-          >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 8h12l-1 12H7L6 8Z" />
-              <path d="M9 8a3 3 0 0 1 6 0" />
-            </svg>
-            {cartCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-bronze-dark px-1 text-[10px] font-bold text-white">
-                {cartCount}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={openCart}
+              aria-label="Καλάθι"
+              className="relative flex h-9 w-9 items-center justify-center rounded-full border border-espresso/15 bg-surface"
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 8h12l-1 12H7L6 8Z" />
+                <path d="M9 8a3 3 0 0 1 6 0" />
+              </svg>
+              {cartCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-bronze-dark px-1 text-[10px] font-bold text-white">
+                  {cartCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
-        <div className="mb-5 text-[13px] font-semibold" style={{ color: closedNow ? "rgba(30,24,18,0.45)" : "#86764F" }}>
+        <div className={`mb-5 text-[13px] font-semibold ${closedNow ? "text-espresso/45" : "text-bronze"}`}>
           {closedNow
             ? "Κλειστά τώρα"
             : `Ανοιχτά · ${periodForToday(settings.hours).opensAt}–${periodForToday(settings.hours).closesAt}`}
@@ -135,23 +139,17 @@ export function DesktopHome() {
         <div className="mb-4 flex gap-2">
           <button
             onClick={() => setFulfillment("delivery")}
-            className="flex-1 rounded-full border py-2 text-[13px] font-semibold"
-            style={{
-              borderColor: fulfillment === "delivery" ? "#5F5335" : "rgba(30,24,18,0.15)",
-              background: fulfillment === "delivery" ? "#5F5335" : "#FFFFFF",
-              color: fulfillment === "delivery" ? "#FFFFFF" : "#1E1812",
-            }}
+            className={`flex-1 rounded-full border py-2 text-[13px] font-semibold ${
+              fulfillment === "delivery" ? "border-bronze-dark bg-bronze-dark text-white" : "border-espresso/15 bg-surface text-espresso"
+            }`}
           >
             Delivery
           </button>
           <button
             onClick={() => setFulfillment("pickup")}
-            className="flex-1 rounded-full border py-2 text-[13px] font-semibold"
-            style={{
-              borderColor: fulfillment === "pickup" ? "#5F5335" : "rgba(30,24,18,0.15)",
-              background: fulfillment === "pickup" ? "#5F5335" : "#FFFFFF",
-              color: fulfillment === "pickup" ? "#FFFFFF" : "#1E1812",
-            }}
+            className={`flex-1 rounded-full border py-2 text-[13px] font-semibold ${
+              fulfillment === "pickup" ? "border-bronze-dark bg-bronze-dark text-white" : "border-espresso/15 bg-surface text-espresso"
+            }`}
           >
             Παραλαβή
           </button>
@@ -163,7 +161,7 @@ export function DesktopHome() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Τι θα ήθελες να φας;"
-          className="mb-5 w-full rounded-xl border border-espresso/15 bg-white px-3.5 py-2.5 text-sm"
+          className="mb-5 w-full rounded-xl border border-espresso/15 bg-surface px-3.5 py-2.5 text-sm"
         />
 
         <button
@@ -179,11 +177,9 @@ export function DesktopHome() {
               setSelected(POPULAR_ID);
               setQuery("");
             }}
-            className="rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold"
-            style={{
-              background: !searching && selected === POPULAR_ID ? "#1E1812" : "transparent",
-              color: !searching && selected === POPULAR_ID ? "#FFFFFF" : "#1E1812",
-            }}
+            className={`rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold ${
+              !searching && selected === POPULAR_ID ? "bg-espresso text-cream" : "bg-transparent text-espresso"
+            }`}
           >
             Δημοφιλέστερα
           </button>
@@ -192,11 +188,9 @@ export function DesktopHome() {
               setSelected(OFFERS_ID);
               setQuery("");
             }}
-            className="rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold"
-            style={{
-              background: !searching && selected === OFFERS_ID ? "#1E1812" : "transparent",
-              color: !searching && selected === OFFERS_ID ? "#FFFFFF" : "#1E1812",
-            }}
+            className={`rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold ${
+              !searching && selected === OFFERS_ID ? "bg-espresso text-cream" : "bg-transparent text-espresso"
+            }`}
           >
             Προσφορές
           </button>
@@ -208,11 +202,9 @@ export function DesktopHome() {
                 setSelected(g.id);
                 setQuery("");
               }}
-              className="rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold"
-              style={{
-                background: !searching && selected === g.id ? "#1E1812" : "transparent",
-                color: !searching && selected === g.id ? "#FFFFFF" : "#1E1812",
-              }}
+              className={`rounded-xl px-3.5 py-2.5 text-left text-sm font-semibold ${
+                !searching && selected === g.id ? "bg-espresso text-cream" : "bg-transparent text-espresso"
+              }`}
             >
               {g.name}
             </button>
@@ -231,7 +223,7 @@ export function DesktopHome() {
 
         <div className="grid grid-cols-2 gap-5 xl:grid-cols-3">
           {cards.map((c) => (
-            <div key={c.key} className="overflow-hidden rounded-2xl bg-white shadow-[0_4px_18px_rgba(30,24,18,0.08)]">
+            <div key={c.key} className="overflow-hidden rounded-2xl bg-surface shadow-[0_4px_18px_rgba(30,24,18,0.08)]">
               <div className="relative">
                 <StockImage src={productImagePath(c.name, productImages)} alt={c.name} className="h-40 w-full" />
                 <span
@@ -256,7 +248,7 @@ export function DesktopHome() {
                   </div>
                   <button
                     onClick={c.onAdd}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-espresso text-white"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-espresso text-cream"
                     aria-label="Προσθήκη"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSettings } from "../SettingsContext";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { AdminDashboard } from "./AdminDashboard";
 import { AdminOrders } from "./AdminOrders";
 import { AdminOrderSoundControl } from "./AdminOrderSoundControl";
@@ -28,7 +29,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="min-h-screen bg-cream">
-      <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-espresso/12 bg-white px-6 py-4">
+      <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-espresso/12 bg-surface px-6 py-4">
         <div className="flex items-center gap-3">
           {section !== "dashboard" && (
             <button
@@ -48,6 +49,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
           <a href="/" className="mr-2 text-sm text-bronze-dark underline">
             Δες το site
           </a>
+          <ThemeToggle />
           <button onClick={logout} className="rounded-lg border border-espresso/20 px-3 py-2 text-sm">
             Αποσύνδεση
           </button>

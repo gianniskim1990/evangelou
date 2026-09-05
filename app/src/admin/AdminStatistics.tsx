@@ -10,7 +10,7 @@ const RANGE_LABELS: Record<(typeof ALLOWED_DAYS)[number], string> = {
   90: "90 ημέρες",
 };
 
-const cardClass = "rounded-2xl border border-espresso/10 bg-white p-5";
+const cardClass = "rounded-2xl border border-espresso/10 bg-surface p-5";
 
 export function AdminStatistics({ onAuthExpired }: { onAuthExpired: () => void }) {
   const [days, setDays] = useState<(typeof ALLOWED_DAYS)[number]>(30);
@@ -53,9 +53,9 @@ export function AdminStatistics({ onAuthExpired }: { onAuthExpired: () => void }
             onClick={() => setDays(d)}
             className="rounded-full border px-4 py-2 text-sm font-semibold"
             style={{
-              borderColor: days === d ? "#5F5335" : "rgba(30,24,18,0.15)",
-              background: days === d ? "#5F5335" : "#FFFFFF",
-              color: days === d ? "#FFFFFF" : "#1E1812",
+              borderColor: days === d ? "var(--color-bronze-dark)" : "color-mix(in srgb, var(--color-espresso) 15%, transparent)",
+              background: days === d ? "var(--color-bronze-dark)" : "var(--color-surface)",
+              color: days === d ? "#FFFFFF" : "var(--color-espresso)",
             }}
           >
             {RANGE_LABELS[d]}

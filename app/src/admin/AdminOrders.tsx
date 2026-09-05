@@ -74,9 +74,9 @@ export function AdminOrders({ onAuthExpired }: { onAuthExpired: () => void }) {
             onClick={() => setTab(t.key)}
             className="rounded-full border px-4 py-2 text-sm font-semibold"
             style={{
-              borderColor: tab === t.key ? "#5F5335" : "rgba(30,24,18,0.15)",
-              background: tab === t.key ? "#5F5335" : "#FFFFFF",
-              color: tab === t.key ? "#FFFFFF" : "#1E1812",
+              borderColor: tab === t.key ? "var(--color-bronze-dark)" : "color-mix(in srgb, var(--color-espresso) 15%, transparent)",
+              background: tab === t.key ? "var(--color-bronze-dark)" : "var(--color-surface)",
+              color: tab === t.key ? "#FFFFFF" : "var(--color-espresso)",
             }}
           >
             {t.label} ({counts[t.key]})
@@ -103,7 +103,7 @@ export function AdminOrders({ onAuthExpired }: { onAuthExpired: () => void }) {
           const isOpen = expanded === order.orderNumber;
           const next = NEXT_STATUS[order.status];
           return (
-            <div key={order.orderNumber} className="overflow-hidden rounded-xl border border-espresso/10 bg-white">
+            <div key={order.orderNumber} className="overflow-hidden rounded-xl border border-espresso/10 bg-surface">
               <button
                 onClick={() => setExpanded(isOpen ? null : order.orderNumber)}
                 className="flex w-full items-center justify-between px-4 py-3 text-left"

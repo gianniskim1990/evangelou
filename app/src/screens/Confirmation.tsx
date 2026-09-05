@@ -33,7 +33,7 @@ export function Confirmation() {
       <h2 className="font-literata mb-1.5 text-[21px] font-semibold">Η παραγγελία σου καταχωρήθηκε</h2>
       <div className="mb-5.5 text-sm opacity-70">Αριθμός παραγγελίας {order.orderNumber}</div>
 
-      <div className="mb-4.5 rounded-[14px] bg-white p-4 text-left">
+      <div className="mb-4.5 rounded-[14px] bg-surface p-4 text-left">
         {order.items.map((it) => (
           <div key={it.id} className="flex justify-between py-1.5 text-sm">
             <span>

@@ -63,7 +63,7 @@ export function AdminSettings({ onAuthExpired }: { onAuthExpired: () => void }) 
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="rounded-2xl border border-espresso/10 bg-white p-5">
+      <section className="rounded-2xl border border-espresso/10 bg-surface p-5">
         <h2 className="mb-4 text-sm font-semibold tracking-wide text-bronze uppercase">Κατάστημα</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="text-xs font-semibold text-espresso/60">
@@ -93,7 +93,7 @@ export function AdminSettings({ onAuthExpired }: { onAuthExpired: () => void }) 
         </div>
       </section>
 
-      <section className="rounded-2xl border border-espresso/10 bg-white p-5">
+      <section className="rounded-2xl border border-espresso/10 bg-surface p-5">
         <h2 className="mb-4 text-sm font-semibold tracking-wide text-bronze uppercase">Delivery</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="text-xs font-semibold text-espresso/60">
@@ -121,7 +121,7 @@ export function AdminSettings({ onAuthExpired }: { onAuthExpired: () => void }) 
         </div>
       </section>
 
-      <section className="rounded-2xl border border-espresso/10 bg-white p-5">
+      <section className="rounded-2xl border border-espresso/10 bg-surface p-5">
         <h2 className="mb-4 text-sm font-semibold tracking-wide text-bronze uppercase">Χρόνοι παράδοσης</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="text-xs font-semibold text-espresso/60">
@@ -164,7 +164,7 @@ export function AdminSettings({ onAuthExpired }: { onAuthExpired: () => void }) 
         </p>
       </section>
 
-      <section className="rounded-2xl border border-espresso/10 bg-white p-5">
+      <section className="rounded-2xl border border-espresso/10 bg-surface p-5">
         <h2 className="mb-4 text-sm font-semibold tracking-wide text-bronze uppercase">Ωράριο λειτουργίας</h2>
         <div className="flex flex-col gap-2">
           {WEEKDAY_DISPLAY_ORDER.map((weekday) => {
@@ -214,7 +214,7 @@ export function AdminSettings({ onAuthExpired }: { onAuthExpired: () => void }) 
         </button>
         {!hoursValid && <span className="text-xs text-maroon">Έλεγξε τις ώρες (μορφή ΩΩ:ΛΛ).</span>}
         {message && (
-          <span className="text-xs" style={{ color: message.kind === "ok" ? "#86764F" : "#7A2E3B" }}>
+          <span className="text-xs" style={{ color: message.kind === "ok" ? "var(--color-bronze)" : "var(--color-maroon)" }}>
             {message.text}
           </span>
         )}

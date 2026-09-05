@@ -1,5 +1,6 @@
 import { useApp } from "../AppContext";
 import { useSettings } from "../SettingsContext";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function TopHeader() {
   const { goHome, openCart, cartCount } = useApp();
@@ -14,6 +15,7 @@ export function TopHeader() {
         onClick={goHome}
       />
       <div className="flex items-center gap-4.5">
+        <ThemeToggle />
         <a
           href={`tel:${settings.phoneHref}`}
           aria-label="Κλήση καταστήματος"

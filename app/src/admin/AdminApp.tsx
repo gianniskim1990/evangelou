@@ -11,16 +11,18 @@ export function AdminApp() {
   const logout = () => setLoggedIn(false);
 
   return (
-    <MenuProvider>
-      <SettingsProvider>
-        {loggedIn ? (
-          <AdminOrderAlertsProvider onAuthExpired={logout}>
-            <AdminShell onLogout={logout} />
-          </AdminOrderAlertsProvider>
-        ) : (
-          <AdminLogin onSuccess={() => setLoggedIn(true)} />
-        )}
-      </SettingsProvider>
-    </MenuProvider>
+    <div className="admin-scope">
+      <MenuProvider>
+        <SettingsProvider>
+          {loggedIn ? (
+            <AdminOrderAlertsProvider onAuthExpired={logout}>
+              <AdminShell onLogout={logout} />
+            </AdminOrderAlertsProvider>
+          ) : (
+            <AdminLogin onSuccess={() => setLoggedIn(true)} />
+          )}
+        </SettingsProvider>
+      </MenuProvider>
+    </div>
   );
 }

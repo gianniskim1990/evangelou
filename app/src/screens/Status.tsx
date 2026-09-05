@@ -48,8 +48,8 @@ export function Status() {
           const done = i < stage;
           const active = i === stage;
           const hasLine = i < labels.length - 1;
-          const circleBg = i <= stage ? "#5F5335" : "#E5DFD1";
-          const lineBg = i < stage ? "#5F5335" : "#E5DFD1";
+          const circleBg = i <= stage ? "var(--color-bronze-dark)" : "var(--color-hairline)";
+          const lineBg = i < stage ? "var(--color-bronze-dark)" : "var(--color-hairline)";
           return (
             <div key={label} className="flex gap-3.5">
               <div className="flex flex-col items-center">

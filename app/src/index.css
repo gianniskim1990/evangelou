@@ -1,14 +1,48 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-bronze: #86764f;
   --color-bronze-dark: #5f5335;
+  /* Adaptive: light-mode values here, overridden under :root.dark below.
+   * Every utility using these (text-espresso, bg-cream, border-espresso/20,
+   * bg-surface, text-maroon…) re-colors automatically since it references
+   * the custom property, not a literal value. */
   --color-espresso: #1e1812;
   --color-cream: #faf8f3;
+  --color-surface: #ffffff;
   --color-maroon: #7a2e3b;
+  /* Unselected-state chip borders / inactive progress segments (was a
+   * literal #E5DFD1 scattered through Configurator/Checkout/Status). */
+  --color-hairline: #e5dfd1;
+  /* Disabled-button fill (was a literal #C9BFA8). */
+  --color-disabled: #c9bfa8;
+
+  /* Fixed brand tones — never flip with the theme. Only used for the
+   * profiterole illustration (ConfiguratorVisual) so it keeps looking like
+   * a photo of a pastry instead of inverting in dark mode. */
+  --color-ink: #1e1812;
+  --color-paper: #faf8f3;
 
   --font-literata: "Literata", serif;
   --font-commissioner: "Commissioner", sans-serif;
+}
+
+:root.dark {
+  --color-espresso: #f3ede3;
+  --color-cream: #17130f;
+  --color-surface: #241f18;
+  --color-maroon: #e08a95;
+  --color-hairline: #3a352c;
+  --color-disabled: #4a4436;
+}
+
+/* Scopes the admin panel to its own primary accent, independent of the
+ * customer-facing bronze brand color, by overriding the same tokens. */
+.admin-scope {
+  --color-bronze: #837041;
+  --color-bronze-dark: #5c4e2e;
 }
 
 @layer base {
