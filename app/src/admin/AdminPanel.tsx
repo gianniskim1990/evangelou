@@ -1,13 +1,15 @@
 import { useMemo, useState } from "react";
 import { useMenu } from "../MenuContext";
 import { AddCategoryForm } from "./AddCategoryForm";
-import { AdminAuthError, resetOverrides } from "./adminApi";
+import { AdminAuthError, resetOverrides, saveOverrides } from "./adminApi";
 import { CategoryEditor } from "./CategoryEditor";
 
 export function AdminPanel({ onAuthExpired }: { onAuthExpired: () => void }) {
   const { products, categoryNames, groups, loading, overridesUnavailable, refetch } = useMenu();
   const [resetting, setResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState("");
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
+  const [groupError, setGroupError] = useState("");
 
   const existingCategoryIds = useMemo(() => new Set(Object.keys(categoryNames)), [categoryNames]);
 
@@ -27,6 +29,28 @@ export function AdminPanel({ onAuthExpired }: { onAuthExpired: () => void }) {
       setResetMessage(err instanceof Error ? err.message : "Αποτυχία επαναφοράς.");
     } finally {
       setResetting(false);
+    }
+  };
+
+  const handleDeleteGroup = async (groupId: string, groupName: string, categoryIds: string[]) => {
+    const warning =
+      categoryIds.length > 0
+        ? `Να διαγραφεί η ενότητα "${groupName}" μαζί με ${categoryIds.length} κατηγορία/ες και όλα τα προϊόντα τους; Αυτό δεν αναιρείται (εκτός από "Επαναφορά όλων").`
+        : `Να διαγραφεί η ενότητα "${groupName}"; Αυτό δεν αναιρείται (εκτός από "Επαναφορά όλων").`;
+    if (!confirm(warning)) return;
+    setDeletingGroupId(groupId);
+    setGroupError("");
+    try {
+      await saveOverrides({ deletedGroups: [groupId], deletedCategories: categoryIds });
+      refetch();
+    } catch (err) {
+      if (err instanceof AdminAuthError) {
+        onAuthExpired();
+        return;
+      }
+      setGroupError(err instanceof Error ? err.message : "Αποτυχία διαγραφής ενότητας.");
+    } finally {
+      setDeletingGroupId(null);
     }
   };
 
@@ -59,12 +83,22 @@ export function AdminPanel({ onAuthExpired }: { onAuthExpired: () => void }) {
         </div>
       )}
       {resetMessage && <div className="mb-4 text-sm text-espresso/70">{resetMessage}</div>}
+      {groupError && <div className="mb-4 text-sm text-maroon">{groupError}</div>}
 
       {groups.map((g) => (
         <section key={g.id} className="mb-7">
-          <h2 className="font-literata mb-2 text-[13px] font-semibold tracking-[0.14em] text-bronze uppercase">
-            {g.name}
-          </h2>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="font-literata text-[13px] font-semibold tracking-[0.14em] text-bronze uppercase">
+              {g.name}
+            </h2>
+            <button
+              onClick={() => handleDeleteGroup(g.id, g.name, g.categories)}
+              disabled={deletingGroupId === g.id}
+              className="text-xs font-semibold text-maroon underline disabled:opacity-40"
+            >
+              {deletingGroupId === g.id ? "Διαγραφή…" : "Διαγραφή ενότητας"}
+            </button>
+          </div>
           {g.categories.map((catId) => (
             <CategoryEditor
               key={catId}

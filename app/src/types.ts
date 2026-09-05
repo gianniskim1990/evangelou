@@ -168,6 +168,11 @@ export interface MenuOverrides {
   newCategories: NewCategory[];
   productImages: Partial<Record<string, string>>;
   categoryImages: Partial<Record<string, string>>;
+  /** Group/category ids hidden from the customer app and admin (whether
+   * they came from data/menu.ts or were admin-created) — union-merged, so
+   * once deleted an id stays deleted until "Επαναφορά όλων". */
+  deletedGroups: string[];
+  deletedCategories: string[];
 }
 
 /** The payload a customer's checkout submits to POST /api/orders. */

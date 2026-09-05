@@ -38,6 +38,10 @@ function isValidNewCategory(c: unknown): c is StoredNewCategory {
   return isNonEmptyString(rec.id) && isNonEmptyString(rec.name) && isNonEmptyString(rec.groupId);
 }
 
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0);
+}
+
 function validateIncoming(body: unknown): OverridesPatch | null {
   if (!body || typeof body !== "object") return null;
   const rec = body as Record<string, unknown>;
@@ -71,6 +75,16 @@ function validateIncoming(body: unknown): OverridesPatch | null {
   if (rec.newCategories !== undefined) {
     if (!Array.isArray(rec.newCategories) || !rec.newCategories.every(isValidNewCategory)) return null;
     patch.newCategories = rec.newCategories;
+  }
+
+  if (rec.deletedGroups !== undefined) {
+    if (!isStringArray(rec.deletedGroups)) return null;
+    patch.deletedGroups = rec.deletedGroups;
+  }
+
+  if (rec.deletedCategories !== undefined) {
+    if (!isStringArray(rec.deletedCategories)) return null;
+    patch.deletedCategories = rec.deletedCategories;
   }
 
   return patch;

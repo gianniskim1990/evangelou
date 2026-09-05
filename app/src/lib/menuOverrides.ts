@@ -7,6 +7,8 @@ export const EMPTY_OVERRIDES: MenuOverrides = {
   newCategories: [],
   productImages: {},
   categoryImages: {},
+  deletedGroups: [],
+  deletedCategories: [],
 };
 
 export interface MergedMenu {
@@ -24,6 +26,8 @@ export interface MergedMenu {
  * - newGroups are appended as extra sticky-nav sections; newCategories are
  *   appended into their group's category list (creating the group first if
  *   it's one of newGroups) and get an empty product list unless overridden
+ * - deletedGroups/deletedCategories hide a group (and everything in it) or
+ *   a single category — from data/menu.ts or admin-created, doesn't matter
  * - productImages/categoryImages pass through untouched (just id -> version)
  *
  * Used by both the customer app (read-only) and the admin panel (which
@@ -42,7 +46,7 @@ export function mergeMenu(
   const categoryNames: Record<string, string> = { ...baseCategoryNames, ...overrides.categoryNames } as Record<string, string>;
   for (const c of overrides.newCategories) categoryNames[c.id] = c.name;
 
-  const groups: CatalogGroup[] = baseGroups.map((g) => ({ ...g, categories: [...g.categories] }));
+  let groups: CatalogGroup[] = baseGroups.map((g) => ({ ...g, categories: [...g.categories] }));
   for (const g of overrides.newGroups) {
     if (!groups.some((existing) => existing.id === g.id)) groups.push({ id: g.id, name: g.name, categories: [] });
   }
@@ -54,6 +58,16 @@ export function mergeMenu(
   const products: Record<string, Product[]> = { ...baseProducts, ...overrides.products } as Record<string, Product[]>;
   for (const c of overrides.newCategories) {
     if (!products[c.id]) products[c.id] = [];
+  }
+
+  const deletedGroups = new Set(overrides.deletedGroups);
+  const deletedCategories = new Set(overrides.deletedCategories);
+  groups = groups
+    .filter((g) => !deletedGroups.has(g.id))
+    .map((g) => ({ ...g, categories: g.categories.filter((c) => !deletedCategories.has(c)) }));
+  for (const catId of deletedCategories) {
+    delete categoryNames[catId];
+    delete products[catId];
   }
 
   return {

@@ -31,6 +31,8 @@ export interface StoredOverrides {
   newCategories: StoredNewCategory[];
   productImages: Record<string, string>;
   categoryImages: Record<string, string>;
+  deletedGroups: string[];
+  deletedCategories: string[];
 }
 
 export const EMPTY_OVERRIDES: StoredOverrides = {
@@ -40,6 +42,8 @@ export const EMPTY_OVERRIDES: StoredOverrides = {
   newCategories: [],
   productImages: {},
   categoryImages: {},
+  deletedGroups: [],
+  deletedCategories: [],
 };
 
 export async function getOverrides(redis: Redis): Promise<StoredOverrides> {
@@ -54,6 +58,10 @@ function upsertById<T extends { id: string }>(existing: T[], incoming: T[]): T[]
   return [...map.values()];
 }
 
+function unionDistinct(existing: string[], incoming: string[]): string[] {
+  return [...new Set([...existing, ...incoming])];
+}
+
 export interface OverridesPatch {
   products?: Record<string, StoredProduct[]>;
   categoryNames?: Record<string, string>;
@@ -61,10 +69,13 @@ export interface OverridesPatch {
   newCategories?: StoredNewCategory[];
   productImages?: Record<string, string>;
   categoryImages?: Record<string, string>;
+  deletedGroups?: string[];
+  deletedCategories?: string[];
 }
 
 /** Merges a partial delta into the stored overrides document (object fields
- * merge key-by-key, array fields upsert by id) and persists the result. */
+ * merge key-by-key, id-keyed arrays upsert by id, deletion lists union) and
+ * persists the result. */
 export async function patchOverrides(redis: Redis, patch: OverridesPatch): Promise<StoredOverrides> {
   const existing = await getOverrides(redis);
   const merged: StoredOverrides = {
@@ -74,6 +85,8 @@ export async function patchOverrides(redis: Redis, patch: OverridesPatch): Promi
     newCategories: upsertById(existing.newCategories, patch.newCategories ?? []),
     productImages: { ...existing.productImages, ...patch.productImages },
     categoryImages: { ...existing.categoryImages, ...patch.categoryImages },
+    deletedGroups: unionDistinct(existing.deletedGroups, patch.deletedGroups ?? []),
+    deletedCategories: unionDistinct(existing.deletedCategories, patch.deletedCategories ?? []),
   };
   await redis.set(OVERRIDES_KEY, merged);
   return merged;
