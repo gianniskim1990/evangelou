@@ -20,6 +20,9 @@ interface StoreSettings {
   deliveryMinOrder: number;
   deliveryFee: number;
   hours: OpeningPeriod[];
+  deliveryEtaMinMinutes: number;
+  deliveryEtaMaxMinutes: number;
+  pickupPrepMinutes: number;
 }
 
 function isValidPeriod(p: unknown): p is OpeningPeriod {
@@ -46,6 +49,9 @@ function isValidSettings(body: unknown): body is StoreSettings {
   if (typeof rec.deliveryMinOrder !== "number" || !Number.isFinite(rec.deliveryMinOrder) || rec.deliveryMinOrder < 0) return false;
   if (typeof rec.deliveryFee !== "number" || !Number.isFinite(rec.deliveryFee) || rec.deliveryFee < 0) return false;
   if (!Array.isArray(rec.hours) || rec.hours.length !== 7 || !rec.hours.every(isValidPeriod)) return false;
+  if (typeof rec.deliveryEtaMinMinutes !== "number" || !Number.isFinite(rec.deliveryEtaMinMinutes) || rec.deliveryEtaMinMinutes < 0) return false;
+  if (typeof rec.deliveryEtaMaxMinutes !== "number" || !Number.isFinite(rec.deliveryEtaMaxMinutes) || rec.deliveryEtaMaxMinutes < rec.deliveryEtaMinMinutes) return false;
+  if (typeof rec.pickupPrepMinutes !== "number" || !Number.isFinite(rec.pickupPrepMinutes) || rec.pickupPrepMinutes < 0) return false;
   return true;
 }
 

@@ -1,11 +1,18 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { categoryNames as baseCategoryNames, products as baseProducts } from "./data/menu";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { categoryNames as baseCategoryNames, groups as baseGroups, products as baseProducts } from "./data/menu";
 import { EMPTY_OVERRIDES, mergeMenu } from "./lib/menuOverrides";
-import type { MenuOverrides, Product } from "./types";
+import type { CatalogGroup, MenuOverrides, Product } from "./types";
 
 interface MenuContextValue {
   products: Record<string, Product[]>;
   categoryNames: Record<string, string>;
+  groups: CatalogGroup[];
+  productImages: Record<string, string>;
+  categoryImages: Record<string, string>;
+  /** Only true for the very first fetch — a later refetch() (e.g. after an
+   * admin save) updates data in place without flipping this back on, so
+   * consumers that gate rendering on `loading` don't get unmounted (and
+   * lose in-progress local edits) every time something is saved. */
   loading: boolean;
   /** True once we know the /api/overrides endpoint is unreachable (e.g. local `npm run dev`
    * without `vercel dev`, or the site deployed without the storage integration configured yet). */
@@ -19,9 +26,10 @@ export function MenuProvider({ children }: { children: ReactNode }) {
   const [overrides, setOverrides] = useState<MenuOverrides | null>(null);
   const [loading, setLoading] = useState(true);
   const [overridesUnavailable, setOverridesUnavailable] = useState(false);
+  const hasLoadedOnce = useRef(false);
 
   const load = useCallback(() => {
-    setLoading(true);
+    if (!hasLoadedOnce.current) setLoading(true);
     fetch("/api/overrides")
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
       .then((data: MenuOverrides) => {
@@ -34,18 +42,30 @@ export function MenuProvider({ children }: { children: ReactNode }) {
         setOverrides(EMPTY_OVERRIDES);
         setOverridesUnavailable(true);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        hasLoadedOnce.current = true;
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const merged = mergeMenu(baseProducts, baseCategoryNames, overrides);
+  const merged = mergeMenu(baseProducts, baseCategoryNames, baseGroups, overrides);
 
   return (
     <MenuContext.Provider
-      value={{ products: merged.products, categoryNames: merged.categoryNames, loading, overridesUnavailable, refetch: load }}
+      value={{
+        products: merged.products,
+        categoryNames: merged.categoryNames,
+        groups: merged.groups,
+        productImages: merged.productImages,
+        categoryImages: merged.categoryImages,
+        loading,
+        overridesUnavailable,
+        refetch: load,
+      }}
     >
       {children}
     </MenuContext.Provider>

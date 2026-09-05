@@ -1,4 +1,5 @@
 import { useApp } from "../AppContext";
+import { useMenu } from "../MenuContext";
 import { useSettings } from "../SettingsContext";
 import { StockImage } from "../components/StockImage";
 import { offers, popular } from "../data/menu";
@@ -9,6 +10,7 @@ import { fmt } from "../lib/format";
 export function Home() {
   const { goConfigurator, goCatalog, addToCart } = useApp();
   const { settings } = useSettings();
+  const { productImages } = useMenu();
 
   return (
     <main>
@@ -38,7 +40,7 @@ export function Home() {
         <div className="flex gap-5 overflow-x-auto px-4 pb-1.5">
           {offers.map((o) => (
             <div key={o.name} className="flex-none w-[168px] border-t-2 border-maroon pt-3">
-              <StockImage src={productImagePath(o.name)} alt={o.name} className="mb-3 h-28 w-full" />
+              <StockImage src={productImagePath(o.name, productImages)} alt={o.name} className="mb-3 h-28 w-full" />
               <span className="mb-2.5 block text-[11.5px] font-semibold text-maroon underline">Προσφορά</span>
               <div className="mb-3 min-h-9.5 text-[14.5px] leading-[1.3] font-semibold">{o.name}</div>
               <div className="mb-3 flex items-baseline gap-1.5">
@@ -66,7 +68,7 @@ export function Home() {
         <div className="grid grid-cols-2">
           {popular.map((p) => (
             <div key={p.name} className="border-t border-espresso/18 py-3 pr-3">
-              <StockImage src={productImagePath(p.name)} alt={p.name} className="mb-2.5 h-20 w-full" />
+              <StockImage src={productImagePath(p.name, productImages)} alt={p.name} className="mb-2.5 h-20 w-full" />
               <div className="mb-2.5 min-h-8.5 text-[13.5px] leading-[1.3] font-semibold">{p.name}</div>
               <div className="flex items-center justify-between">
                 <span className="font-literata text-[15px] font-semibold">{fmt(p.price)}</span>

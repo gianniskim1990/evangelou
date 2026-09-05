@@ -42,7 +42,7 @@ export function Checkout() {
 
   const isDelivery = fulfillment === "delivery";
   const isPayCard = payment === "card";
-  const slots = pickupSlotsForToday(settings.hours);
+  const slots = pickupSlotsForToday(settings.hours, settings.pickupPrepMinutes);
   const storeClosedNow = isStoreClosedNow(settings.hours);
   const [cakeMin] = useState(() => new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16));
   const total = cartTotal + (isDelivery ? settings.deliveryFee : 0);
@@ -92,7 +92,10 @@ export function Checkout() {
               Το κατάστημα είναι κλειστό τώρα. Διάλεξε ώρα παραλαβής μέσα στο σημερινό ωράριο μας.
             </div>
           )}
-          <label className="mb-2 block text-[13px] font-semibold">Ώρα παραλαβής</label>
+          <label className="mb-1 block text-[13px] font-semibold">Ώρα παραλαβής</label>
+          <div className="mb-2 text-xs text-espresso/55">
+            Χρειαζόμαστε τουλάχιστον {settings.pickupPrepMinutes} λεπτά για να ετοιμάσουμε την παραγγελία.
+          </div>
           <select
             value={pickupTime}
             onChange={(e) => setPickupTime(e.target.value)}

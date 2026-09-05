@@ -27,13 +27,18 @@ export function isStoreClosedNow(hours: OpeningPeriod[]): boolean {
   return nowMinutes < minutesOf(p.opensAt) || nowMinutes >= minutesOf(p.closesAt);
 }
 
-/** 15-minute pickup slots for today's opening period. */
-export function pickupSlotsForToday(hours: OpeningPeriod[]): string[] {
+/** 15-minute pickup slots for today's opening period, starting no sooner
+ * than `prepMinutes` from now (so a customer can't pick an unrealistically
+ * soon slot the kitchen has no time to prepare for). */
+export function pickupSlotsForToday(hours: OpeningPeriod[], prepMinutes = 0): string[] {
   const p = periodForToday(hours);
   if (p.isClosed) return [];
-  const slots: string[] = [];
-  let mins = minutesOf(p.opensAt);
+  const now = new Date();
+  const earliest = Math.max(minutesOf(p.opensAt), now.getHours() * 60 + now.getMinutes() + prepMinutes);
+  // Round up to the next 15-minute mark.
+  let mins = Math.ceil(earliest / 15) * 15;
   const close = minutesOf(p.closesAt);
+  const slots: string[] = [];
   while (mins < close) {
     slots.push(`${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`);
     mins += 15;

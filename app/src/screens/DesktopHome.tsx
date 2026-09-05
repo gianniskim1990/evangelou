@@ -3,7 +3,7 @@ import { useApp } from "../AppContext";
 import { useMenu } from "../MenuContext";
 import { useSettings } from "../SettingsContext";
 import { StockImage } from "../components/StockImage";
-import { CAKE_CATEGORIES, groups, offers, popular } from "../data/menu";
+import { CAKE_CATEGORIES, offers, popular } from "../data/menu";
 import { isStoreClosedNow, periodForToday } from "../lib/hours";
 import { productImagePath } from "../lib/images";
 import { fmt } from "../lib/format";
@@ -25,7 +25,7 @@ interface Card {
 
 export function DesktopHome() {
   const { addToCart, fulfillment, setFulfillment, goConfigurator, openCart, cartCount } = useApp();
-  const { products, categoryNames } = useMenu();
+  const { products, categoryNames, groups, productImages } = useMenu();
   const { settings } = useSettings();
   const [selected, setSelected] = useState<string>(POPULAR_ID);
   const [query, setQuery] = useState("");
@@ -83,7 +83,7 @@ export function DesktopHome() {
     const group = groups.find((g) => g.id === selected);
     if (!group) return [];
     return group.categories.flatMap((catId) =>
-      products[catId].map((p) => ({
+      (products[catId] ?? []).map((p) => ({
         key: `${catId}:${p.name}`,
         name: p.name,
         price: p.price,
@@ -94,7 +94,7 @@ export function DesktopHome() {
         onAdd: () => addToCart(p.name, p.price, "", CAKE_CATEGORIES.has(catId)),
       })),
     );
-  }, [selected, searching, query, allProducts, addToCart, products, categoryNames]);
+  }, [selected, searching, query, allProducts, addToCart, products, categoryNames, groups]);
 
   const heading = searching
     ? `Αποτελέσματα για «${query.trim()}»`
@@ -233,7 +233,7 @@ export function DesktopHome() {
           {cards.map((c) => (
             <div key={c.key} className="overflow-hidden rounded-2xl bg-white shadow-[0_4px_18px_rgba(30,24,18,0.08)]">
               <div className="relative">
-                <StockImage src={productImagePath(c.name)} alt={c.name} className="h-40 w-full" />
+                <StockImage src={productImagePath(c.name, productImages)} alt={c.name} className="h-40 w-full" />
                 <span
                   className="absolute top-3 left-3 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
                   style={{ background: c.badgeTone === "maroon" ? "#7A2E3B" : "#1E1812" }}

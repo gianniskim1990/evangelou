@@ -10,7 +10,9 @@ export function Confirmation() {
 
   const isDelivery = order.fulfillment === "delivery";
   let etaLabel = "Εκτιμώμενη ώρα";
-  let etaText = isDelivery ? "35–45 λεπτά" : order.pickupTime || "—";
+  let etaText = isDelivery
+    ? `${settings.deliveryEtaMinMinutes}–${settings.deliveryEtaMaxMinutes} λεπτά`
+    : order.pickupTime || "—";
   if (order.hasCake && order.cakeDateTime) {
     etaLabel = "Παραλαβή τούρτας";
     etaText = new Date(order.cakeDateTime).toLocaleString("el-GR", {

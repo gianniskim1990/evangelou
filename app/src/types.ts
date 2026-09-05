@@ -130,19 +130,44 @@ export interface StoreSettings {
   deliveryMinOrder: number;
   deliveryFee: number;
   hours: OpeningPeriod[];
+  /** Displayed on the confirmation screen for delivery orders, e.g. "35–45 λεπτά". */
+  deliveryEtaMinMinutes: number;
+  deliveryEtaMaxMinutes: number;
+  /** Minimum lead time before a pickup time slot is offered to a customer. */
+  pickupPrepMinutes: number;
 }
 
 export type OrderStatus = "new" | "in_progress" | "completed" | "cancelled";
+
+/** A brand-new leaf category added from /admin, inside an existing or new group. */
+export interface NewCategory {
+  id: string;
+  name: string;
+  groupId: string;
+}
+
+/** A brand-new top-level catalog section (sticky-nav group) added from /admin. */
+export interface NewGroup {
+  id: string;
+  name: string;
+}
 
 /**
  * Admin-edited deltas on top of the seed data in data/menu.ts, stored
  * server-side (see api/overrides.ts). A category key present here
  * replaces that category's product list entirely; categoryNames are
- * merged key-by-key.
+ * merged key-by-key. productImages/categoryImages map a product slug or
+ * category id to the timestamp its custom photo was last uploaded (also
+ * used as a cache-busting query value) — the images themselves live in
+ * separate Redis keys, served by api/images/*.
  */
 export interface MenuOverrides {
   products: Partial<Record<string, Product[]>>;
   categoryNames: Partial<Record<string, string>>;
+  newGroups: NewGroup[];
+  newCategories: NewCategory[];
+  productImages: Partial<Record<string, string>>;
+  categoryImages: Partial<Record<string, string>>;
 }
 
 /** The payload a customer's checkout submits to POST /api/orders. */

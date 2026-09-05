@@ -96,3 +96,19 @@ export interface AdminAnalytics {
 export async function fetchAnalytics(days: number): Promise<AdminAnalytics> {
   return adminFetch<AdminAnalytics>(`/api/analytics?days=${days}`);
 }
+
+export async function uploadProductImage(slug: string, dataUrl: string): Promise<string> {
+  const data = await adminFetch<{ updatedAt: string }>(`/api/images/product/${slug}`, {
+    method: "POST",
+    body: JSON.stringify({ dataUrl }),
+  });
+  return data.updatedAt;
+}
+
+export async function uploadCategoryImage(id: string, dataUrl: string): Promise<string> {
+  const data = await adminFetch<{ updatedAt: string }>(`/api/images/category/${id}`, {
+    method: "POST",
+    body: JSON.stringify({ dataUrl }),
+  });
+  return data.updatedAt;
+}

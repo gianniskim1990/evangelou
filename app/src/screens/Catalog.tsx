@@ -2,21 +2,22 @@ import { useEffect } from "react";
 import { useApp } from "../AppContext";
 import { useMenu } from "../MenuContext";
 import { StockImage } from "../components/StockImage";
-import { CAKE_CATEGORIES, groups } from "../data/menu";
+import { CAKE_CATEGORIES } from "../data/menu";
 import { categoryImagePath, productImagePath } from "../lib/images";
 import { fmt } from "../lib/format";
 
 export function Catalog() {
   const { activeGroup, setActiveGroup, addToCart } = useApp();
-  const { products, categoryNames } = useMenu();
+  const { products, categoryNames, groups, productImages, categoryImages } = useMenu();
 
   useEffect(() => {
-    if (!activeGroup) setActiveGroup(groups[0].id);
+    if (!activeGroup && groups.length > 0) setActiveGroup(groups[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [groups]);
 
   useEffect(() => {
     const onScroll = () => {
+      if (groups.length === 0) return;
       let current = groups[0].id;
       for (const g of groups) {
         const el = document.getElementById(`group-${g.id}`);
@@ -27,7 +28,7 @@ export function Catalog() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [groups]);
 
   const selectGroup = (id: string) => {
     setActiveGroup(id);
@@ -65,19 +66,19 @@ export function Catalog() {
           {g.categories.map((catId) => (
             <div key={catId} className="mb-5.5">
               <StockImage
-                src={categoryImagePath(catId)}
+                src={categoryImagePath(catId, categoryImages)}
                 alt={categoryNames[catId]}
                 className="mb-2.5 h-28 w-full rounded-lg"
               />
               <h3 className="m-0 mb-2.5 text-base font-semibold">{categoryNames[catId]}</h3>
               <div>
-                {products[catId].map((p) => (
+                {(products[catId] ?? []).map((p) => (
                   <div
                     key={p.name}
                     className="flex items-center justify-between gap-3 border-b border-espresso/10 py-3.5"
                   >
                     <StockImage
-                      src={productImagePath(p.name)}
+                      src={productImagePath(p.name, productImages)}
                       alt=""
                       className="h-11 w-11 flex-none rounded-md"
                     />

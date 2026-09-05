@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMenu } from "../MenuContext";
-import { groups } from "../data/menu";
+import { AddCategoryForm } from "./AddCategoryForm";
 import { AdminAuthError, resetOverrides } from "./adminApi";
 import { CategoryEditor } from "./CategoryEditor";
 
 export function AdminPanel({ onAuthExpired }: { onAuthExpired: () => void }) {
-  const { products, categoryNames, loading, overridesUnavailable, refetch } = useMenu();
+  const { products, categoryNames, groups, loading, overridesUnavailable, refetch } = useMenu();
   const [resetting, setResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState("");
+
+  const existingCategoryIds = useMemo(() => new Set(Object.keys(categoryNames)), [categoryNames]);
 
   const handleReset = async () => {
     if (!confirm("Να επαναφερθούν όλες οι κατηγορίες/προϊόντα στις προεπιλεγμένες τιμές; Αυτό δεν αναιρείται.")) return;
@@ -34,7 +36,13 @@ export function AdminPanel({ onAuthExpired }: { onAuthExpired: () => void }) {
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-end">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <AddCategoryForm
+          groups={groups}
+          existingCategoryIds={existingCategoryIds}
+          onCreated={refetch}
+          onAuthExpired={onAuthExpired}
+        />
         <button
           onClick={handleReset}
           disabled={resetting}

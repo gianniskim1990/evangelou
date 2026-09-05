@@ -28,11 +28,19 @@ export function AdminSettings({ onAuthExpired }: { onAuthExpired: () => void }) 
   };
 
   const hoursValid = draft.hours.every((h) => h.isClosed || (isValidTime(h.opensAt) && isValidTime(h.closesAt)));
+  const etaValid =
+    Number.isFinite(draft.deliveryEtaMinMinutes) &&
+    Number.isFinite(draft.deliveryEtaMaxMinutes) &&
+    draft.deliveryEtaMinMinutes >= 0 &&
+    draft.deliveryEtaMaxMinutes >= draft.deliveryEtaMinMinutes &&
+    Number.isFinite(draft.pickupPrepMinutes) &&
+    draft.pickupPrepMinutes >= 0;
   const canSave =
     draft.name.trim().length > 0 &&
     Number.isFinite(draft.deliveryMinOrder) &&
     Number.isFinite(draft.deliveryFee) &&
-    hoursValid;
+    hoursValid &&
+    etaValid;
 
   const save = async () => {
     if (!canSave) return;
@@ -111,6 +119,49 @@ export function AdminSettings({ onAuthExpired }: { onAuthExpired: () => void }) 
             />
           </label>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-espresso/10 bg-white p-5">
+        <h2 className="mb-4 text-sm font-semibold tracking-wide text-bronze uppercase">Χρόνοι παράδοσης</h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className="text-xs font-semibold text-espresso/60">
+            Delivery — από (λεπτά)
+            <input
+              type="number"
+              step="5"
+              min="0"
+              value={draft.deliveryEtaMinMinutes}
+              onChange={(e) => setDraft({ ...draft, deliveryEtaMinMinutes: parseInt(e.target.value, 10) })}
+              className={`${inputClass} mt-1`}
+            />
+          </label>
+          <label className="text-xs font-semibold text-espresso/60">
+            Delivery — έως (λεπτά)
+            <input
+              type="number"
+              step="5"
+              min="0"
+              value={draft.deliveryEtaMaxMinutes}
+              onChange={(e) => setDraft({ ...draft, deliveryEtaMaxMinutes: parseInt(e.target.value, 10) })}
+              className={`${inputClass} mt-1`}
+            />
+          </label>
+          <label className="text-xs font-semibold text-espresso/60">
+            Χρόνος προετοιμασίας παραλαβής (λεπτά)
+            <input
+              type="number"
+              step="5"
+              min="0"
+              value={draft.pickupPrepMinutes}
+              onChange={(e) => setDraft({ ...draft, pickupPrepMinutes: parseInt(e.target.value, 10) })}
+              className={`${inputClass} mt-1`}
+            />
+          </label>
+        </div>
+        <p className="mt-3 text-xs text-espresso/50">
+          Το "Delivery" εμφανίζεται σαν εκτιμώμενη ώρα στην επιβεβαίωση παραγγελίας. Το "Χρόνος προετοιμασίας
+          παραλαβής" καθορίζει την πιο κοντινή ώρα παραλαβής που μπορεί να διαλέξει ο πελάτης από τώρα.
+        </p>
       </section>
 
       <section className="rounded-2xl border border-espresso/10 bg-white p-5">
