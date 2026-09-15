@@ -138,8 +138,6 @@ npm run images:stock -- --force   # ξαναφέρνει τα πάντα
 
 **Πλήρες API contract:** το ακριβές REST συμβόλαιο (`evangelou-club/v1`) που θα πρέπει να υλοποιήσει το μελλοντικό WordPress plugin — endpoints, request/response schemas, HTTP statuses, error model, privacy κανόνες, idempotent redemption, source-of-truth mapping σε PMPro/FluentCRM/WooCommerce — είναι τεκμηριωμένο στο [`docs/evangelou-club-api.md`](docs/evangelou-club-api.md). Το `src/club/restClubService.ts` δείχνει ένα (ανενεργό, όχι wired) skeleton υλοποίησης — DTO types + mappers + τα endpoints ως comments — ώστε ο μελλοντικός developer να μην μαντεύει τι περιμένει το React app.
 
-**Το πραγματικό WordPress plugin** που υλοποιεί αυτό ακριβώς το contract υπάρχει πλέον στο [`wordpress/evangelou-club-api/`](../wordpress/evangelou-club-api/) — εκτός του `app/` (δεν είναι μέρος του Vite build, ξεχωριστός PHP κώδικας). **Δεν είναι ακόμα εγκατεστημένο σε πραγματικό WordPress ούτε συνδεδεμένο με αυτή την εφαρμογή** — το `/club` συνεχίζει να δουλεύει αποκλειστικά με το `mockClubService`. Βλ. το README του plugin για αρχιτεκτονική, οδηγίες εγκατάστασης, και τι χρειάζεται ακόμα επαλήθευση σε πραγματικό WordPress.
-
 ## Σχεδιαστικές αποφάσεις
 
 - **Καμία υπάρχουσα σκαλωσιά στο repo** — φτιάχτηκε από την αρχή Vite + React + TypeScript + Tailwind v4 στο `app/`, όπως ζητήθηκε στο brief ("React με Tailwind, mobile-first").

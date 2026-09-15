@@ -1,16 +1,10 @@
 # Evangelou Club API — v1 contract
 
-**Status:** implemented, not yet connected. A first WordPress plugin
-implementing this exact contract now exists at
-[`wordpress/evangelou-club-api/`](../../wordpress/evangelou-club-api/) (see
-its README for architecture, installation, and what still needs live
-verification). It has been statically verified — `php -l`, a standalone
-PHP test harness, and source greps for secrets/CORS/leaked internal IDs —
-but **not yet installed on a real WordPress site, and not yet connected to
-this React app.** The `/club` interface still runs entirely on
-`mockClubService` (`src/club/clubService.ts`) and will keep doing so until
-a separate, later task deliberately switches it over — no screen needs to
-change when that happens.
+**Status:** design only. No backend exists yet. This document specifies the
+REST API a future custom WordPress plugin must implement so the existing
+`/club` React interface (currently backed by `mockClubService`, see
+`src/club/clubService.ts`) can be pointed at it later by swapping one
+export — no screen should need to change.
 
 ## Architecture
 
