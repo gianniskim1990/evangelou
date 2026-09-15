@@ -81,6 +81,15 @@ no entry yet — those selections render the procedural illustration until a
 matching `states/{id}.webp` is added and wired into `STATE_IMAGES` in
 `app/src/configurator/previewAssets.ts`.
 
+`base.webp`/`milk.webp`/`strawberry.webp` are real photography, confirmed
+1000×840px RGB (opaque) each, with matching bowl position/crop/lighting
+across all three — they align correctly when crossfaded. All three currently
+have a thin (~1–1.5% of width) encoding-seam artifact along the right edge;
+`ProfiterolePreview.tsx` applies a small uniform overscale to every photo
+layer (`PHOTO_EDGE_TRIM_SCALE`) so the parent's clipped box crops it off
+without touching these files. If a future regeneration removes that seam,
+that scale can be dropped back to 1 — it's not load-bearing for alignment.
+
 ## `toppings/` — transparent sprite sheets for animated toppings
 
 A topping sprite is a **transparent WebP sprite sheet**: several loose,
@@ -88,18 +97,16 @@ individually-recognizable piece variants arranged in one horizontal strip
 of equal-width frames, sampled via CSS `background-position` steps (no
 per-frame JSON/coordinates needed — just equal-width tiles).
 
-| File | Topping (`id`) | Frames (current code) |
+| File | Topping (`id`) | Frames |
 |---|---|---|
-| `hazelnut-sprites.webp` | `hazelnut` | 4 |
+| `hazelnut-sprites.webp` | `hazelnut` | 4 (confirmed: real asset is 1024×256px, exactly 4×256px tiles) |
 
-**The frame count above is a placeholder assumption**
-(`app/src/configurator/previewAssets.ts`, the `sprite.frames` value on the
-`hazelnut` entry in `TOPPING_VISUALS`) — it must be updated to match
-whatever grid the real `hazelnut-sprites.webp` actually uses once that's
-confirmed, or the crops will sample the wrong regions of the sheet. Each
-tile should show one clearly separated cluster/piece of hazelnut crumble
-(shadow included) against full transparency around it — not a full bowl
-shot.
+The frame count is set in `app/src/configurator/previewAssets.ts`, the
+`sprite.frames` value on the `hazelnut` entry in `TOPPING_VISUALS` — it
+must always match the real file's actual grid or the crops will sample the
+wrong regions of the sheet. Each tile shows one clearly separated
+cluster/piece of hazelnut (shadow included) against full transparency
+around it — not a full bowl shot, confirmed against the real asset.
 
 Any topping without a `sprite` entry keeps rendering as the original
 procedural dot/crumb/drizzle-squiggle. Extending this to more toppings later

@@ -1,5 +1,5 @@
 import type { ConfiguratorState } from "../types";
-import { BUN_POS, TOP_POS, visualScaleFor } from "./previewAssets";
+import { BUN_POS, PHOTO_TOP_POS, TOP_POS, visualScaleFor } from "./previewAssets";
 import {
   chocolateVisual,
   stateImageFor,
@@ -70,19 +70,35 @@ export function ProfiterolePreview({
             <ProceduralLayers cfg={cfg} />
           )}
 
-          <ToppingLayer toppings={toppings} />
+          <ToppingLayer toppings={toppings} isPhoto={isPhoto} />
         </div>
       </div>
     </div>
   );
 }
 
+/**
+ * A hair over 100% scale on every state photo: the real assets have a
+ * thin (~1-1.5% of width) encoding-seam artifact along their right edge
+ * (visible on all three current state photos, same position on each), and
+ * the parent box already clips overflow — a tiny uniform overscale pushes
+ * that sliver off-frame on every edge without touching the source files
+ * or disturbing the object-cover framing/alignment between states.
+ */
+const PHOTO_EDGE_TRIM_SCALE = "scale(1.03)";
+
 /** The current full-frame state photo, with the previous one kept mounted underneath during a crossfade (see usePhotoPreviewState). */
 function PhotoLayers({ current, previous }: { current: string; previous: string | null }) {
   return (
     <>
       {previous && (
-        <img src={previous} alt="" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
+        <img
+          src={previous}
+          alt=""
+          draggable={false}
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+          style={{ transform: PHOTO_EDGE_TRIM_SCALE }}
+        />
       )}
       <img
         key={current}
@@ -90,6 +106,7 @@ function PhotoLayers({ current, previous }: { current: string; previous: string 
         alt="Προφιτερόλ"
         draggable={false}
         className="animate-state-crossfade-in pointer-events-none absolute inset-0 h-full w-full object-cover"
+        style={{ transform: PHOTO_EDGE_TRIM_SCALE }}
       />
     </>
   );
@@ -176,21 +193,22 @@ function ProceduralLayers({ cfg }: { cfg: ConfiguratorState }) {
   );
 }
 
-/** Toppings layer, shared by both photo and procedural modes: a piece with a loadable sprite renders as a cropped sprite frame (animated in, then left resting), everything else renders as the original colored dot/crumb/drizzle-squiggle. Toppings don't care whether the layer beneath them is a photo or the procedural illustration. */
-function ToppingLayer({ toppings }: { toppings: TrackedTopping[] }) {
+/** Toppings layer, shared by both photo and procedural modes: a piece with a loadable sprite renders as a cropped sprite frame (animated in, then left resting), everything else renders as the original colored dot/crumb/drizzle-squiggle. The rendering itself doesn't care whether the layer beneath is a photo or the procedural illustration — but the bun cluster sits in different coordinates in each, so `isPhoto` picks the matching position set (PHOTO_TOP_POS vs. TOP_POS). */
+function ToppingLayer({ toppings, isPhoto }: { toppings: TrackedTopping[]; isPhoto: boolean }) {
   return (
     <>
       {toppings.map((t, i) => (
-        <ToppingPiece key={t.id} id={t.id} index={i} exiting={t.exiting} />
+        <ToppingPiece key={t.id} id={t.id} index={i} exiting={t.exiting} isPhoto={isPhoto} />
       ))}
     </>
   );
 }
 
-function ToppingPiece({ id, index, exiting }: { id: string; index: number; exiting: boolean }) {
+function ToppingPiece({ id, index, exiting, isPhoto }: { id: string; index: number; exiting: boolean; isPhoto: boolean }) {
   const visual = toppingVisual(id);
   const spriteReady = useAssetAvailability(visual.sprite?.image);
-  const pos = TOP_POS[index % TOP_POS.length];
+  const slots = isPhoto ? PHOTO_TOP_POS : TOP_POS;
+  const pos = slots[index % slots.length];
   const motionClass = exiting ? "animate-topping-exit" : "animate-topping-fall";
   const rotStyle = { "--fall-rot": `${fallRotationFor(index)}deg` } as React.CSSProperties;
 

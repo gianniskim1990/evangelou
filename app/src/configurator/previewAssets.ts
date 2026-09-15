@@ -32,7 +32,7 @@ export const BUN_POS = [
   { x: 115, y: 85, size: 42 },
 ];
 
-/** Placement slots for topping pieces — cycled with modulo when more toppings are selected than slots. */
+/** Placement slots for topping pieces over the procedural illustration — cycled with modulo when more toppings are selected than slots. Calibrated against BUN_POS above; do not reuse for photo mode (see PHOTO_TOP_POS), the real photo's bun cluster sits in different coordinates. */
 export const TOP_POS = [
   { x: 30, y: 15 },
   { x: 175, y: 20 },
@@ -44,6 +44,26 @@ export const TOP_POS = [
   { x: 90, y: 100 },
   { x: 130, y: 105 },
   { x: 60, y: 105 },
+];
+
+/**
+ * Placement slots for topping pieces over a photo state image, in the same
+ * 250×210 design space. Measured directly against the real state photos
+ * (states/base.webp, milk.webp — the bun cluster sits in the same spot on
+ * both): each point sits on the top-facing surface of one visible bun,
+ * inside the bowl, clear of the rim, the background napkin/prop, and the
+ * counter. TOP_POS (above) is calibrated for the procedural illustration's
+ * own bun layout and lands on the napkin/background when reused here.
+ */
+export const PHOTO_TOP_POS = [
+  { x: 120, y: 32 },
+  { x: 50, y: 84 },
+  { x: 180, y: 63 },
+  { x: 125, y: 95 },
+  { x: 70, y: 130 },
+  { x: 145, y: 122 },
+  { x: 195, y: 101 },
+  { x: 95, y: 105 },
 ];
 
 export function visualScaleFor(sizeId: string | null): number {
