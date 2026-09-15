@@ -8,6 +8,58 @@ import {
   type ToppingVisual,
 } from "./previewAssets";
 
+/**
+ * Module-level cache of image-URL → loaded-successfully, shared by every
+ * useAssetAvailability() caller. A src is probed at most once for the
+ * whole session (not once per component instance), so mounting/unmounting
+ * the preview while switching configurator steps never re-triggers a
+ * network request for an asset already known to exist (or not).
+ */
+const assetAvailabilityCache = new Map<string, boolean>();
+const assetAvailabilityListeners = new Map<string, Set<() => void>>();
+
+function probeAsset(src: string): void {
+  if (assetAvailabilityCache.has(src)) return;
+  const img = new Image();
+  const settle = (ok: boolean) => {
+    assetAvailabilityCache.set(src, ok);
+    assetAvailabilityListeners.get(src)?.forEach((notify) => notify());
+    assetAvailabilityListeners.delete(src);
+  };
+  img.onload = () => settle(true);
+  img.onerror = () => settle(false);
+  img.src = src;
+}
+
+/**
+ * True once `src` is confirmed to load; false while unknown/pending and if
+ * it fails to load. This is how the preview chooses procedural vs. photo
+ * rendering: see BASE_IMAGE in previewAssets.ts for the base-image probe
+ * that switches the whole renderer, and the per-sauce/per-topping
+ * `overlayImage`/`image` probes that each independently opt a single
+ * layer into photo mode once its own asset is supplied.
+ */
+export function useAssetAvailability(src: string | undefined): boolean {
+  const [, bump] = useState(0);
+
+  useEffect(() => {
+    if (!src || assetAvailabilityCache.has(src)) return;
+    probeAsset(src);
+    let listeners = assetAvailabilityListeners.get(src);
+    if (!listeners) {
+      listeners = new Set();
+      assetAvailabilityListeners.set(src, listeners);
+    }
+    const notify = () => bump((n) => n + 1);
+    listeners.add(notify);
+    return () => {
+      listeners!.delete(notify);
+    };
+  }, [src]);
+
+  return src !== undefined && assetAvailabilityCache.get(src) === true;
+}
+
 export function chocolateVisual(chocId: string | null): ChocolateVisual {
   if (!chocId) return NO_CHOCOLATE_VISUAL;
   return CHOCOLATE_VISUALS[chocId] ?? NO_CHOCOLATE_VISUAL;

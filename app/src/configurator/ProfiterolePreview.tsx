@@ -1,13 +1,39 @@
+import { useState } from "react";
 import type { ConfiguratorState } from "../types";
-import { BUN_POS, TOP_POS, visualScaleFor } from "./previewAssets";
-import { chocolateVisual, toppingVisual, useToppingTransitions } from "./previewHelpers";
+import { BASE_IMAGE, BUN_POS, TOP_POS, visualScaleFor, type ChocolateVisual, type ToppingVisual } from "./previewAssets";
+import { chocolateVisual, toppingVisual, useAssetAvailability, useToppingTransitions, type TrackedTopping } from "./previewHelpers";
 
 /** A tasteful, deterministic wobble so falling pieces don't all land dead-straight — no Math.random(), so it never jitters between renders. */
 function fallRotationFor(index: number): number {
   return ((index % 5) - 2) * 7;
 }
 
+/**
+ * Public entry point: picks photo mode if a real base photo has been
+ * supplied (app/public/configurator/base/, see previewAssets.ts), else
+ * falls back to the procedural illustration below. With zero real assets
+ * in the repo (today), this always renders ProceduralProfiterolePreview —
+ * identical behavior to before photo mode existed. Props are intentionally
+ * unchanged so callers (Configurator.tsx) never need to know which mode
+ * rendered.
+ */
 export function ProfiterolePreview({
+  cfg,
+  variant = "compact",
+}: {
+  cfg: ConfiguratorState;
+  variant?: "compact" | "hero";
+}) {
+  const photoModeAvailable = useAssetAvailability(BASE_IMAGE);
+  return photoModeAvailable ? (
+    <PhotoProfiterolePreview cfg={cfg} variant={variant} />
+  ) : (
+    <ProceduralProfiterolePreview cfg={cfg} variant={variant} />
+  );
+}
+
+/** The original CSS/SVG illustration — gradients, clipped color caps, small shapes. Untouched other than being extracted into its own component. */
+function ProceduralProfiterolePreview({
   cfg,
   variant = "compact",
 }: {
@@ -155,6 +181,167 @@ export function ProfiterolePreview({
               />
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Photo-mode sauce layer: the static coat overlay (once its file is
+ * available) plus a brief transient pour-effect image on top of it, if
+ * one is supplied. Neither requires the other — a chocolate can ship with
+ * just the static overlay and no pour effect yet.
+ */
+function PhotoSauce({ choc, chocId }: { choc: ChocolateVisual; chocId: string | null }) {
+  const overlayReady = useAssetAvailability(choc.overlayImage);
+  const pourReady = useAssetAvailability(choc.pourEffectImage);
+  // Remounted via `key={chocId}` in the parent whenever the selection
+  // changes, so this always starts fresh at `true` — no effect needed to
+  // "reset" it on selection change.
+  const [showPour, setShowPour] = useState(true);
+
+  if (!chocId || !overlayReady || !choc.overlayImage) return null;
+
+  return (
+    <>
+      <img
+        key={`overlay-${chocId}`}
+        src={choc.overlayImage}
+        alt=""
+        draggable={false}
+        className="animate-pour-reveal pointer-events-none absolute inset-0 h-full w-full object-cover"
+      />
+      {pourReady && showPour && choc.pourEffectImage && (
+        <img
+          key={`pour-${chocId}`}
+          src={choc.pourEffectImage}
+          alt=""
+          draggable={false}
+          className="animate-pour-effect-fade pointer-events-none absolute inset-0 h-full w-full object-cover"
+          onAnimationEnd={() => setShowPour(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Photo-mode topping layer: a full-bowl photo of that topping sprinkled on
+ * (the final, permanent look), preceded on entrance by a handful of small
+ * circular crops of that same photo animated in with the existing
+ * topping-fall motion, so the piece appears to "land" before the full
+ * overlay settles. Reuses useToppingTransitions' enter/exit timing — see
+ * its `exiting` flag. No-ops entirely if this topping has no image yet.
+ */
+function PhotoTopping({ index, visual, exiting }: { index: number; visual: ToppingVisual; exiting: boolean }) {
+  const overlayReady = useAssetAvailability(visual.image);
+  const [justLanded, setJustLanded] = useState(false);
+
+  if (!overlayReady || !visual.image) return null;
+
+  if (exiting) {
+    return (
+      <img
+        src={visual.image}
+        alt=""
+        draggable={false}
+        className="animate-topping-exit pointer-events-none absolute inset-0 h-full w-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <>
+      {!justLanded &&
+        [0, 1, 2].map((piece) => {
+          const slot = TOP_POS[(index * 3 + piece) % TOP_POS.length];
+          const cropX = (piece * 37 + index * 11) % 100;
+          const cropY = (piece * 53 + index * 17) % 100;
+          return (
+            <div
+              key={piece}
+              className="animate-topping-fall pointer-events-none absolute overflow-hidden rounded-full"
+              style={
+                {
+                  left: (slot.x / 250) * 100 + "%",
+                  top: (slot.y / 210) * 100 + "%",
+                  width: 22,
+                  height: 22,
+                  "--fall-rot": `${fallRotationFor(index * 3 + piece)}deg`,
+                } as React.CSSProperties
+              }
+              onAnimationEnd={piece === 2 ? () => setJustLanded(true) : undefined}
+            >
+              <img
+                src={visual.image}
+                alt=""
+                draggable={false}
+                style={{
+                  width: 110,
+                  height: 110,
+                  objectFit: "cover",
+                  objectPosition: `${cropX}% ${cropY}%`,
+                  transform: "translate(-40%, -40%)",
+                }}
+              />
+            </div>
+          );
+        })}
+      <img
+        src={visual.image}
+        alt=""
+        draggable={false}
+        className="animate-pop-in pointer-events-none absolute inset-0 h-full w-full object-cover"
+      />
+    </>
+  );
+}
+
+/**
+ * Photo-mode renderer: the real base photo plus optional sauce/topping
+ * photo layers stacked on top, at the same fixed design-space box (and
+ * hero-scale transform) as the procedural version above, so both modes
+ * stay pixel-compatible with Configurator.tsx's layout.
+ */
+function PhotoProfiterolePreview({
+  cfg,
+  variant = "compact",
+}: {
+  cfg: ConfiguratorState;
+  variant?: "compact" | "hero";
+}) {
+  const choc = chocolateVisual(cfg.choc);
+  const toppings = useToppingTransitions(cfg.toppings);
+  const isHero = variant === "hero";
+
+  return (
+    <div
+      className={`relative mx-auto mb-6.5 ${isHero ? "animate-hero-in" : ""}`}
+      style={{ width: isHero ? 300 : 250, height: isHero ? 300 : 210 }}
+    >
+      {isHero && (
+        <div
+          className="absolute inset-0 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--color-bronze) 14%, transparent), transparent 70%)",
+          }}
+        />
+      )}
+
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div
+          className="relative overflow-hidden rounded-[18px]"
+          style={{ width: 250, height: 210, transform: isHero ? "scale(1.3)" : undefined }}
+        >
+          <img src={BASE_IMAGE} alt="Προφιτερόλ" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
+
+          <PhotoSauce key={cfg.choc} choc={choc} chocId={cfg.choc} />
+
+          {toppings.map((t: TrackedTopping, i: number) => (
+            <PhotoTopping key={t.id} index={i} visual={toppingVisual(t.id)} exiting={t.exiting} />
+          ))}
         </div>
       </div>
     </div>
