@@ -1,7 +1,7 @@
 import { useApp } from "../AppContext";
+import { ProfiterolePreview } from "../configurator/ProfiterolePreview";
 import { FREE_TOPPINGS, TOPPING_EXTRA_PRICE, bases, chocolates, sizes, toppingGroups } from "../data/menu";
 import { fmt } from "../lib/format";
-import { ConfiguratorVisual } from "./ConfiguratorVisual";
 
 const STEP_TITLES: Record<number, string> = {
   1: "Διάλεξε μέγεθος",
@@ -48,7 +48,7 @@ export function Configurator() {
       </div>
       <h2 className="font-literata mb-4.5 text-[22px] font-semibold">{STEP_TITLES[step]}</h2>
 
-      <ConfiguratorVisual cfg={cfg} />
+      <ProfiterolePreview cfg={cfg} variant={step === 5 ? "hero" : "compact"} />
 
       {step === 1 && (
         <div className="flex flex-col">
