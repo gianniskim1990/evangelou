@@ -1,11 +1,30 @@
-import type { ClubMember } from "./types";
+import type { MembershipStatus } from "./types";
+
+/**
+ * The raw record the mock "backend" holds — a stand-in for whatever the
+ * WordPress plugin will assemble from FluentCRM + Paid Memberships Pro.
+ * This is intentionally NOT the `ClubMember` type screens receive: it
+ * carries the full phone number and the QR lookup token, neither of
+ * which the public API ever returns (see clubService.ts's `toClubMember`
+ * mapper, which masks the phone and drops the token before handing a
+ * member to the UI — mirroring the production privacy rules in
+ * docs/evangelou-club-api.md §2 and §16).
+ */
+export interface MockMemberRecord {
+  id: string;
+  name: string;
+  phone: string;
+  status: MembershipStatus;
+  validUntil: string | null;
+  qrToken: string;
+}
 
 /**
  * Demo membership records only — this stands in for what a future
- * `GET /club/members` (backed by Paid Memberships Pro + FluentCRM data)
- * would return. Prices/dates here are illustrative, not real member data.
+ * `POST /members/lookup` (backed by Paid Memberships Pro + FluentCRM data)
+ * would resolve. Prices/dates here are illustrative, not real member data.
  */
-export const mockMembers: ClubMember[] = [
+export const mockMembers: MockMemberRecord[] = [
   {
     id: "member-1",
     name: "Μαρία Παπαδοπούλου",

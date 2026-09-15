@@ -1,13 +1,15 @@
-import { normalizeGreekPhone, todayKey } from "./format";
-import { DEMO_QR_TOKEN, SEEDED_USED_MEMBER_ID, SEEDED_USED_TIME, mockMembers } from "./mockMembers";
-import type { BenefitType, ClubMember, MemberBenefitStatus, MemberLookup } from "./types";
+import { maskPhone, normalizeGreekPhone, todayKey } from "./format";
+import { DEMO_QR_TOKEN, SEEDED_USED_MEMBER_ID, SEEDED_USED_TIME, mockMembers, type MockMemberRecord } from "./mockMembers";
+import { ClubApiError, type BenefitType, type ClubMember, type MemberBenefitStatus, type MemberLookup } from "./types";
 
 /**
  * The contract the UI talks to. Production will swap `mockClubService` for
  * an implementation that calls a custom Evangelou Club REST API (which in
  * turn talks to WordPress/Paid Memberships Pro/FluentCRM/WooCommerce) — the
  * screens only ever import `clubService` below, never the mock directly, so
- * that swap should not require touching any component.
+ * that swap should not require touching any component. See
+ * docs/evangelou-club-api.md for the exact REST contract this mirrors, and
+ * restClubService.ts for what the future implementation looks like.
  */
 export interface ClubService {
   findMemberByPhone(phone: string): Promise<MemberLookup>;
@@ -39,7 +41,11 @@ function writeRedemptions(store: RedemptionStore): void {
     localStorage.setItem(REDEMPTIONS_KEY, JSON.stringify(store));
   } catch {
     // localStorage unavailable (private mode etc.) — redemption just won't
-    // persist across a reload, which is an acceptable demo fallback.
+    // persist across a reload, which is an acceptable demo fallback. This
+    // whole read/write pair disappears in production: the WordPress plugin
+    // owns a real redemptions table instead (docs §20), enforced with a
+    // unique (member_ref, benefit_type, business_date) constraint so two
+    // tills redeeming at once can't both succeed.
   }
 }
 
@@ -58,14 +64,17 @@ function ensureSeedRedemption(): void {
   writeRedemptions(store);
 }
 
-function benefitStatusFor(member: ClubMember): MemberBenefitStatus {
-  if (member.status !== "active") return { state: "unavailable" };
+function benefitStatusFor(member: MockMemberRecord): MemberBenefitStatus {
+  const businessDate = todayKey();
+  if (member.status !== "active") {
+    return { state: "unavailable", businessDate, redeemedAt: null, reason: "membership_inactive" };
+  }
 
   const record = readRedemptions()[member.id];
-  if (record && record.dateKey === todayKey()) {
-    return { state: "used", redeemedAt: record.redeemedAtISO };
+  if (record && record.dateKey === businessDate) {
+    return { state: "used", businessDate, redeemedAt: record.redeemedAtISO };
   }
-  return { state: "available" };
+  return { state: "available", businessDate, redeemedAt: null };
 }
 
 /** Simulates realistic network latency so the demo shows its loading states. */
@@ -73,46 +82,71 @@ function delay<T>(value: T, ms = 350): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
 }
 
-function lookup(member: ClubMember | undefined): MemberLookup {
-  if (!member) return { member: null, benefit: null };
-  return { member, benefit: benefitStatusFor(member) };
+/** What `POST /members/lookup` would return as `member` — masks the phone
+ * and drops the QR token, exactly like the production API would (see
+ * docs/evangelou-club-api.md §2). This is the one place a raw
+ * `MockMemberRecord` is allowed to become a public `ClubMember`. */
+function toClubMember(record: MockMemberRecord): ClubMember {
+  return {
+    id: record.id,
+    name: record.name,
+    phoneMasked: maskPhone(record.phone),
+    status: record.status,
+    validUntil: record.validUntil,
+  };
+}
+
+function lookup(record: MockMemberRecord | undefined): MemberLookup {
+  if (!record) return { member: null, benefit: null };
+  return { member: toClubMember(record), benefit: benefitStatusFor(record) };
 }
 
 export const mockClubService: ClubService = {
   async findMemberByPhone(phone) {
     ensureSeedRedemption();
     const normalized = normalizeGreekPhone(phone);
-    const member = mockMembers.find((m) => m.phone === normalized);
-    return delay(lookup(member));
+    const record = mockMembers.find((m) => m.phone === normalized);
+    return delay(lookup(record));
   },
 
   async findMemberByQrToken(token) {
     ensureSeedRedemption();
-    const member = mockMembers.find((m) => m.qrToken === token);
-    return delay(lookup(member));
+    const record = mockMembers.find((m) => m.qrToken === token);
+    return delay(lookup(record));
   },
 
   async getMemberStatus(memberId) {
     ensureSeedRedemption();
-    const member = mockMembers.find((m) => m.id === memberId);
-    return delay(member ? benefitStatusFor(member) : null);
+    const record = mockMembers.find((m) => m.id === memberId);
+    return delay(record ? benefitStatusFor(record) : null);
   },
 
   async redeemBenefit(memberId, _benefitType) {
-    const member = mockMembers.find((m) => m.id === memberId);
-    if (!member) throw new Error("Το μέλος δεν βρέθηκε.");
-    if (member.status !== "active") throw new Error("Η συνδρομή δεν είναι ενεργή.");
+    const record = mockMembers.find((m) => m.id === memberId);
+    if (!record) throw new ClubApiError("member_not_found", "Το μέλος δεν βρέθηκε.");
+    if (record.status !== "active") {
+      throw new ClubApiError("membership_inactive", "Η συνδρομή δεν είναι ενεργή.");
+    }
 
     const store = readRedemptions();
     const existing = store[memberId];
-    if (existing && existing.dateKey === todayKey()) {
-      return delay({ state: "used", redeemedAt: existing.redeemedAtISO });
+    const businessDate = todayKey();
+    if (existing && existing.dateKey === businessDate) {
+      // Someone else (another till, or a retried request) already redeemed
+      // this today — the same domain error production returns on a race
+      // between two cash registers (docs §9). Carries the existing
+      // redemption's details so the caller can sync the UI to "used"
+      // instead of treating this as an unknown failure.
+      throw new ClubApiError("benefit_already_redeemed", "Η σημερινή παροχή έχει ήδη χρησιμοποιηθεί.", {
+        businessDate,
+        redeemedAt: existing.redeemedAtISO,
+      });
     }
 
     const redeemedAtISO = new Date().toISOString();
-    store[memberId] = { dateKey: todayKey(), redeemedAtISO };
+    store[memberId] = { dateKey: businessDate, redeemedAtISO };
     writeRedemptions(store);
-    return delay({ state: "used", redeemedAt: redeemedAtISO });
+    return delay({ state: "used", businessDate, redeemedAt: redeemedAtISO });
   },
 };
 

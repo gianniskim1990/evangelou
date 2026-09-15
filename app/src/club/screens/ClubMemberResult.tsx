@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CLUB_LOOKUP_ERROR_MESSAGE, clubService } from "../clubService";
-import { formatClockTime, formatGreekLongDate, maskPhone } from "../format";
-import type { ClubMember, MemberBenefitStatus } from "../types";
+import { formatClockTime, formatGreekLongDate, membershipBadgeLabel } from "../format";
+import { ClubApiError, type ClubMember, type MemberBenefitStatus } from "../types";
 
 function CoffeeIcon({ className }: { className?: string }) {
   return (
@@ -93,6 +93,19 @@ export function ClubMemberResult({
       setConfirming(false);
       setJustRedeemed(true);
     } catch (err) {
+      if (err instanceof ClubApiError && err.code === "benefit_already_redeemed") {
+        // Another till (or a retried request) already redeemed this today —
+        // sync the UI to the real "used" state instead of showing an error,
+        // per docs/evangelou-club-api.md §9.
+        const details = err.details as { businessDate?: string; redeemedAt?: string } | undefined;
+        onRedeemed({
+          state: "used",
+          businessDate: details?.businessDate ?? "",
+          redeemedAt: details?.redeemedAt ?? null,
+        });
+        setConfirming(false);
+        return;
+      }
       setError(err instanceof Error ? err.message : CLUB_LOOKUP_ERROR_MESSAGE);
     } finally {
       setRedeeming(false);
@@ -109,16 +122,24 @@ export function ClubMemberResult({
               isActive ? "bg-bronze-dark text-white" : "bg-hairline text-maroon"
             }`}
           >
-            {isActive ? "Ενεργό μέλος" : "Η συνδρομή έχει λήξει"}
+            {membershipBadgeLabel(member.status)}
           </span>
         </div>
 
         <div className="flex flex-col gap-1.5 text-[13.5px] text-espresso/70">
           <div>
-            {isActive ? "Ενεργό έως " : "Έληξε στις "}
-            <span className="font-semibold text-espresso">{formatGreekLongDate(member.validUntil)}</span>
+            {member.validUntil ? (
+              <>
+                {isActive ? "Ενεργό έως " : "Η συνδρομή έληξε στις "}
+                <span className="font-semibold text-espresso">{formatGreekLongDate(member.validUntil)}</span>
+              </>
+            ) : isActive ? (
+              "Ενεργή συνδρομή"
+            ) : (
+              "Η συνδρομή δεν είναι ενεργή"
+            )}
           </div>
-          <div>Τηλέφωνο <span className="font-semibold text-espresso">{maskPhone(member.phone)}</span></div>
+          <div>Τηλέφωνο <span className="font-semibold text-espresso">{member.phoneMasked}</span></div>
         </div>
       </div>
 
