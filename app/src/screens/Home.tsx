@@ -118,6 +118,9 @@ export function Home() {
             Pexels
           </a>
         </div>
+        <a href="/club" className="mt-4 block text-[11.5px] text-cream opacity-40">
+          Είσοδος προσωπικού
+        </a>
       </footer>
     </main>
   );

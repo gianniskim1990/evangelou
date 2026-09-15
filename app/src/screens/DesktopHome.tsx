@@ -210,6 +210,10 @@ export function DesktopHome() {
             </button>
           ))}
         </nav>
+
+        <a href="/club" className="mt-6 block text-[11.5px] text-espresso/35">
+          Είσοδος προσωπικού
+        </a>
       </aside>
 
       <main className="min-w-0 flex-1">
