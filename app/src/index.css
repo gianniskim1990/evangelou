@@ -193,18 +193,18 @@
   animation: hero-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Photo-mode sauce pour effect (transient layer above the static overlay,
-   see PhotoSauce in ProfiterolePreview.tsx) — fades itself out once, then
-   the component unmounts it and only the static coat overlay remains. */
-@keyframes pour-effect-fade {
+/* Photo-mode full-frame state crossfade (see useStateImageTransition /
+   PhotoProfiterolePreview) — the incoming state photo fades in on top of
+   the outgoing one, which stays static underneath until it's covered. */
+@keyframes state-crossfade-in {
   from {
-    opacity: 1;
+    opacity: 0;
   }
   to {
-    opacity: 0;
+    opacity: 1;
   }
 }
 
-.animate-pour-effect-fade {
-  animation: pour-effect-fade 0.5s ease-in both;
+.animate-state-crossfade-in {
+  animation: state-crossfade-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

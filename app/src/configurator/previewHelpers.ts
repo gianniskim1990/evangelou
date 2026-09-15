@@ -3,6 +3,7 @@ import {
   CHOCOLATE_VISUALS,
   DEFAULT_TOPPING_VISUAL,
   NO_CHOCOLATE_VISUAL,
+  STATE_IMAGES,
   TOPPING_VISUALS,
   type ChocolateVisual,
   type ToppingVisual,
@@ -31,15 +32,16 @@ function probeAsset(src: string): void {
   img.src = src;
 }
 
+export type AssetProbeStatus = "unknown" | "loaded" | "failed";
+
 /**
- * True once `src` is confirmed to load; false while unknown/pending and if
- * it fails to load. This is how the preview chooses procedural vs. photo
- * rendering: see BASE_IMAGE in previewAssets.ts for the base-image probe
- * that switches the whole renderer, and the per-sauce/per-topping
- * `overlayImage`/`image` probes that each independently opt a single
- * layer into photo mode once its own asset is supplied.
+ * Tri-state probe result for `src`: "unknown" while pending (or if `src`
+ * is undefined), "loaded"/"failed" once resolved. Used wherever telling
+ * "still loading" apart from "confirmed missing" matters (see
+ * usePhotoPreviewState below); useAssetAvailability is a thin boolean
+ * wrapper for callers that only care about the loaded case.
  */
-export function useAssetAvailability(src: string | undefined): boolean {
+export function useAssetProbeStatus(src: string | undefined): AssetProbeStatus {
   const [, bump] = useState(0);
 
   useEffect(() => {
@@ -57,7 +59,17 @@ export function useAssetAvailability(src: string | undefined): boolean {
     };
   }, [src]);
 
-  return src !== undefined && assetAvailabilityCache.get(src) === true;
+  if (!src || !assetAvailabilityCache.has(src)) return "unknown";
+  return assetAvailabilityCache.get(src) ? "loaded" : "failed";
+}
+
+/**
+ * True once `src` is confirmed to load; false while unknown/pending and if
+ * it fails to load (or if `src` is undefined). Used independently per
+ * topping to decide whether a sprite is available.
+ */
+export function useAssetAvailability(src: string | undefined): boolean {
+  return useAssetProbeStatus(src) === "loaded";
 }
 
 export function chocolateVisual(chocId: string | null): ChocolateVisual {
@@ -67,6 +79,67 @@ export function chocolateVisual(chocId: string | null): ChocolateVisual {
 
 export function toppingVisual(toppingId: string): ToppingVisual {
   return TOPPING_VISUALS[toppingId] ?? DEFAULT_TOPPING_VISUAL;
+}
+
+/** The full-frame state image URL for a chocolate selection (or the "base" state when none is chosen yet) — undefined if that selection has no photo state defined at all. Gate with useAssetAvailability() before rendering it. */
+export function stateImageFor(chocId: string | null): string | undefined {
+  return STATE_IMAGES[chocId ?? "base"];
+}
+
+const STATE_CROSSFADE_MS = 550;
+
+interface ShownState {
+  current: string;
+  previous: string | null;
+}
+
+export interface PhotoPreviewState {
+  mode: "photo" | "procedural";
+  current: string | null;
+  previous: string | null;
+}
+
+/**
+ * The single source of truth for "should the preview show a photo right
+ * now, and which one" for a given target state-image URL (from
+ * stateImageFor()). This intentionally does NOT flip to procedural the
+ * moment a newly-selected target is still probing — probing a real,
+ * existing file normally resolves within a frame or two, and flipping to
+ * procedural in that gap would flash the illustration on every single
+ * sauce switch. Instead it keeps showing the last confirmed-good photo
+ * (sticky) until the new target resolves — either becoming the new
+ * current photo (crossfade) once loaded, or, if genuinely absent
+ * (`status === "failed"`), dropping to procedural immediately so a
+ * stale photo of a *different* chocolate is never shown for a selection
+ * that has none. Only returns "procedural" before anything has ever
+ * loaded (first paint) or once a target is confirmed missing.
+ */
+export function usePhotoPreviewState(targetSrc: string | undefined): PhotoPreviewState {
+  const status = useAssetProbeStatus(targetSrc);
+  const [shown, setShown] = useState<ShownState | null>(() =>
+    targetSrc && assetAvailabilityCache.get(targetSrc) === true ? { current: targetSrc, previous: null } : null,
+  );
+
+  useEffect(() => {
+    if (!targetSrc || status !== "loaded") return;
+    setShown((prev) => {
+      if (prev && prev.current === targetSrc) return prev;
+      return { current: targetSrc, previous: prev ? prev.current : null };
+    });
+  }, [targetSrc, status]);
+
+  useEffect(() => {
+    if (!shown?.previous) return;
+    const settled = shown;
+    const handle = window.setTimeout(() => {
+      setShown((s) => (s === settled ? { current: s.current, previous: null } : s));
+    }, STATE_CROSSFADE_MS);
+    return () => window.clearTimeout(handle);
+  }, [shown]);
+
+  if (status === "failed") return { mode: "procedural", current: null, previous: null };
+  if (shown) return { mode: "photo", current: shown.current, previous: shown.previous };
+  return { mode: "procedural", current: null, previous: null };
 }
 
 export interface TrackedTopping {

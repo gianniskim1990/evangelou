@@ -2,178 +2,137 @@
 
 This folder is where real product photography for "Φτιάξε το δικό σου
 προφιτερόλ" (`app/src/screens/Configurator.tsx`) goes once it's shot/generated.
-**Nothing in here is a placeholder photo** — these folders are intentionally
-empty (only `.gitkeep` files) until real Evangelou photography is supplied.
-Until then, the app renders the existing procedural CSS/SVG illustration and
-looks and behaves exactly as it does today — see "How the fallback works"
-below.
+**Nothing in here is a placeholder photo** — `states/` and `toppings/` are
+intentionally near-empty (only `.gitkeep`, plus whatever real assets have
+landed so far) until real Evangelou photography/renders exist. With an
+asset missing, the app renders the existing procedural CSS/SVG illustration
+for that specific selection and looks/behaves exactly as it always has.
 
-Do not add stock photos, AI-generated mockups, or anything not actually shot
-of an Evangelou product to these folders "to fill them in." An empty folder
-here means the photo pipeline is ready and waiting, not broken.
+Do not add stock photos, AI mockups, or anything not an actual Evangelou
+product render "to fill folders in." A missing file here means the pipeline
+is ready and waiting for that one asset, not that something's broken.
+
+## Strategy: full-frame states, not stacked sauce layers
+
+Chocolate selection is **not** a transparent sauce layer stacked on a base
+photo. Each chocolate that has real photography gets one **complete,
+opaque, full-frame photo of the finished dessert** — bowl, buns, sauce,
+lighting, everything baked into a single image. Toppings are the one thing
+that *is* layered: a transparent sprite sheet of loose pieces, animated on
+top of whichever state photo (or procedural illustration) is currently
+showing.
 
 ## How the fallback works
 
-`app/src/configurator/ProfiterolePreview.tsx` probes `base/profiterole-base.webp`
-on mount. If it fails to load, the whole preview renders the original
-procedural illustration (gradients/SVG), unchanged. If it loads, the preview
-switches to photo mode: the base photo plus whichever sauce/topping overlays
-below *also* happen to be present — each one is probed independently and
-simply omits itself if its file is missing, so the asset set can be filled in
-gradually (e.g. ship the base + 2 chocolates first) without breaking anything
-that isn't ready yet.
+`app/src/configurator/ProfiterolePreview.tsx` looks up a state image for the
+current chocolate selection (`states/{chocId}.webp`, or `states/base.webp`
+when nothing is selected yet) and probes whether it loads. If it does, that
+photo renders full-frame. If it doesn't (file missing, or that chocolate
+simply has no photo yet), **only that selection** falls back to the
+procedural illustration — picking an unphotographed chocolate never breaks
+photo mode for the ones that do have real photography, and switching back
+to a photographed chocolate immediately returns to photo mode.
 
-This means: **adding `base/profiterole-base.webp` alone is enough to flip the
-whole preview into photo mode**, even with zero sauce/topping photos present
-— so add the base photo last, once at least the chocolate overlays exist, or
-you'll see a bare bowl with no coating options for any selection.
+Toppings follow the same per-asset rule, independently of the sauce/base
+layer: a topping with a loadable sprite sheet renders as real sprite pieces;
+any other topping renders as the original colored dot/crumb/drizzle-squiggle
+— on top of a photo state or the procedural illustration alike.
 
 ## Canvas — read this first
 
-Every image in every subfolder below must be shot/exported to the **exact
-same canvas**: same crop, same camera angle, same lighting direction, same
-bowl position and size in frame, same background. That's what lets the app
-stack a sauce photo directly on top of the base photo, and a topping photo
-directly on top of that, with zero repositioning — if any asset's bowl is a
-different size or the camera angle drifts even slightly, selections will
-visibly "jump" when switching options.
+Every state photo must be shot/exported to the **exact same canvas**: same
+crop, same camera angle, same lighting direction, same bowl position and
+size in frame, same background. That's what makes switching between two
+state photos read as "the same bowl, different sauce" rather than a jump
+cut — the app crossfades between them (see below), and a crossfade between
+two differently-framed photos looks like a mistake, not a transition.
 
 - **Canvas size:** 1000 × 840 px (25:21 aspect ratio — 4× the app's internal
   250×210 design unit box, so the hero step stays sharp at larger display
-  sizes). Export everything at this exact resolution.
-- **Format:** WebP. Use opaque WebP for the base photo (no transparency
-  needed — it's always the bottom layer). Use transparent WebP for every
-  overlay (sauce, topping, effect) so the base and any lower overlay show
-  through around the food.
+  sizes). Export every state photo at this exact resolution.
+- **Format:** WebP, opaque (no transparency needed or used — each state
+  photo is a complete, self-contained image, always the only/bottom layer
+  for that selection).
 - **Camera:** eye-level-to-slightly-elevated (~30–40° above the plate), bowl
-  centered, consistent focal length across every shot. Shoot all variants of
-  a series (all 7 chocolates, all 15 toppings) in one sitting with the camera
-  locked down (tripod, no repositioning between shots) — this is the single
-  most important thing for alignment.
-- **Lighting:** soft, direction-consistent key light from the upper-left
-  (matches how the rest of the site's product photography is lit), gentle
-  fill from the right so the far side of the bowl isn't a black silhouette.
-  Keep the same lighting setup across the whole series — a chocolate overlay
-  photographed under different lighting than the base will look pasted-on.
+  centered, consistent focal length across every shot. Shoot every chocolate
+  variant in one sitting with the camera locked down (tripod, no
+  repositioning) — this is the single most important thing for a clean
+  crossfade.
+- **Lighting:** soft, direction-consistent key light from the upper-left,
+  gentle fill from the right so the far side of the bowl isn't a black
+  silhouette. Identical setup across the whole series.
 - **Bowl / product position:** the bowl fills roughly the center 80% of the
   frame with even margin on all sides — leave a small safe border (~40px at
-  this resolution) so nothing is cropped at the canvas edge and there's room
-  for a topping piece to sit slightly outside the bowl's rim without leaving
-  the frame.
-- **Background:** identical, uncluttered surface/backdrop across every shot
-  in every subfolder (same table, same backdrop color, same crop) — it's the
-  thing most likely to give away misalignment if it isn't.
+  this resolution) so nothing crops at the canvas edge and there's room for
+  a topping sprite piece to sit slightly outside the bowl's rim.
+- **Background:** identical, uncluttered surface/backdrop across every
+  state photo — same table, same backdrop color, same crop.
 
-## `base/` — the plain bowl (required to enable photo mode at all)
+## `states/` — one full-frame photo per dessert state
 
-| File | Contents |
+| File | Meaning |
 |---|---|
-| `profiterole-base.webp` | The bowl with plain choux buns only — no chocolate coating, no toppings. Opaque WebP, 1000×840, per the canvas spec above. |
+| `base.webp` | Plain choux buns in the bowl, no chocolate, no toppings — shown whenever no chocolate is selected yet. |
+| `milk.webp` | The complete dessert with milk chocolate (`chocolates[].id === "milk"`). |
+| `strawberry.webp` | The complete dessert with strawberry glaze (`chocolates[].id === "strawberry"`). |
 
-## `sauces/` — one overlay per chocolate, keyed to `chocolates[].id` in `app/src/data/menu.ts`
+Any other chocolate id (`classic`, `white`, `dark`, `gianduia`, `bueno`) has
+no entry yet — those selections render the procedural illustration until a
+matching `states/{id}.webp` is added and wired into `STATE_IMAGES` in
+`app/src/configurator/previewAssets.ts`.
 
-Each is a **transparent WebP**, 1000×840, showing only the coated buns (chocolate
-coating + gloss + any drizzle) against transparency, aligned so it drops directly
-onto `base/profiterole-base.webp` with no offset. These must look *materially*
-different from each other in **texture**, not just hue — e.g. `white` should read as
-a matte/creamy coating, `dark` as a glossy near-black shell, `strawberry` as a
-pink, creamy (not just pink-tinted-brown) coating, `bueno`/`gianduia` as a
-hazelnut-flecked coating, distinct from plain `milk`/`classic`.
+## `toppings/` — transparent sprite sheets for animated toppings
 
-| File | Chocolate (`id`) | Name (Greek) |
+A topping sprite is a **transparent WebP sprite sheet**: several loose,
+individually-recognizable piece variants arranged in one horizontal strip
+of equal-width frames, sampled via CSS `background-position` steps (no
+per-frame JSON/coordinates needed — just equal-width tiles).
+
+| File | Topping (`id`) | Frames (current code) |
 |---|---|---|
-| `milk-coat.webp` | `milk` | Γάλακτος |
-| `classic-coat.webp` | `classic` | Κλασική |
-| `white-coat.webp` | `white` | Λευκή |
-| `dark-coat.webp` | `dark` | Υγείας |
-| `gianduia-coat.webp` | `gianduia` | Gianduia |
-| `strawberry-coat.webp` | `strawberry` | Φράουλα |
-| `bueno-coat.webp` | `bueno` | Bueno |
+| `hazelnut-sprites.webp` | `hazelnut` | 4 |
 
-## `effects/` — optional transient pour effect per chocolate
+**The frame count above is a placeholder assumption**
+(`app/src/configurator/previewAssets.ts`, the `sprite.frames` value on the
+`hazelnut` entry in `TOPPING_VISUALS`) — it must be updated to match
+whatever grid the real `hazelnut-sprites.webp` actually uses once that's
+confirmed, or the crops will sample the wrong regions of the sheet. Each
+tile should show one clearly separated cluster/piece of hazelnut crumble
+(shadow included) against full transparency around it — not a full bowl
+shot.
 
-Each is a **transparent WebP**, 1000×840, same alignment as `sauces/`. Shown
-briefly on top of the matching `sauces/*-coat.webp` right after a chocolate is
-selected (e.g. a glossy "just poured" sheen or a few extra drips), then faded
-out automatically, leaving the static coat overlay. **Fully optional per
-chocolate** — if a chocolate has a `sauces/*-coat.webp` but no matching file
-here, the app just shows the static overlay with no transient effect; nothing
-breaks.
+Any topping without a `sprite` entry keeps rendering as the original
+procedural dot/crumb/drizzle-squiggle. Extending this to more toppings later
+is the same pattern: add a sprite sheet under `toppings/`, add a `sprite: {
+image, frames }` entry to that topping in `TOPPING_VISUALS`.
 
-| File | Chocolate (`id`) |
-|---|---|
-| `milk-pour.webp` | `milk` |
-| `classic-pour.webp` | `classic` |
-| `white-pour.webp` | `white` |
-| `dark-pour.webp` | `dark` |
-| `gianduia-pour.webp` | `gianduia` |
-| `strawberry-pour.webp` | `strawberry` |
-| `bueno-pour.webp` | `bueno` |
+## Sauce transitions: crossfade, not simulation
 
-## `toppings/` — one overlay per topping, keyed to `toppingGroups[].items[].id` in `app/src/data/menu.ts`
+Switching chocolates is not a physically simulated pour. Selecting a new
+chocolate crossfades the previous full-frame state photo into the new one
+(the outgoing photo stays static underneath while the incoming one fades in
+on top, then the outgoing one is dropped) — see `useStateImageTransition` in
+`app/src/configurator/previewHelpers.ts`. This works identically for
+base → milk, base → strawberry, and milk ↔ strawberry, and needs no extra
+per-transition asset.
 
-Each is a **transparent WebP**, 1000×840, showing the topping sprinkled/placed
-on the coated bowl (shoot on top of any one chocolate coat — the app composites
-this layer on top of whichever sauce is selected, so the topping photo itself
-should contain *only* the topping pieces + shadow, not the coating). This same
-file is reused by the app for the brief "falling in" entrance animation (small
-circular crops of it animate in before the full overlay settles), so the
-topping pieces should be reasonably legible/recognizable in a tight crop, not
-just visible at full-image scale.
+## Topping animation
 
-| File | Topping (`id`) | Group | Name (Greek) |
-|---|---|---|---|
-| `walnut.webp` | `walnut` | Ξηροί καρποί | Καρύδι |
-| `hazelnut.webp` | `hazelnut` | Ξηροί καρποί | Φουντούκι |
-| `almond.webp` | `almond` | Ξηροί καρποί | Αμύγδαλο |
-| `oreo.webp` | `oreo` | Μπισκότα | Oreo |
-| `digestive.webp` | `digestive` | Μπισκότα | Digestive |
-| `lotusb.webp` | `lotusb` | Μπισκότα | Lotus Biscoff |
-| `strawberry.webp` | `strawberry` | Φρούτα | Φράουλα |
-| `banana.webp` | `banana` | Φρούτα | Μπανάνα |
-| `cherry.webp` | `cherry` | Φρούτα | Κεράσι |
-| `chocsyrup.webp` | `chocsyrup` | Σιρόπια | Σιρόπι σοκολάτας |
-| `caramel.webp` | `caramel` | Σιρόπια | Καραμέλα |
-| `strawsyrup.webp` | `strawsyrup` | Σιρόπια | Σιρόπι φράουλας |
-| `mms.webp` | `mms` | Καραμέλες | M&M's |
-| `marshmallow.webp` | `marshmallow` | Καραμέλες | Marshmallow |
-| `gummy.webp` | `gummy` | Καραμέλες | Ζελεδάκια |
+A topping with a sprite falls in as 1-3 small cropped sprite pieces (reusing
+the existing topping enter/exit timing — `useToppingTransitions` — and the
+same fall/exit CSS classes as the procedural dots) and then **stays in
+place** once landed; there's no separate "settle" swap to a different image.
+Removing the topping plays the existing exit animation on those same
+pieces.
 
-> Note: the chocolate `strawberry` (a sauce, in `sauces/`) and the fruit
-> topping `strawberry` (in `toppings/`) share an id but live in separate
-> folders/records — no collision, just don't cross the two up.
+## Performance notes
 
-## Falling-piece effect (no extra assets needed)
-
-The topping entrance animation ("piece falls in, then the full overlay
-settles") is generated entirely from each topping's single `toppings/*.webp`
-file — the app crops a few small circular regions out of it via CSS and
-animates them in before showing the full overlay. You don't need to supply
-separate "falling piece" sprites; one well-composed overlay photo per topping
-covers both uses.
-
-## Sauce transition (no liquid simulation)
-
-Selecting a chocolate is *not* physically simulated pouring. It's: the static
-`sauces/*-coat.webp` overlay fades/reveals in, and — only if
-`effects/*-pour.webp` exists for that chocolate — a brief extra sheen/drip
-layer flashes on top of it and fades out, leaving the static overlay. If no
-pour-effect asset exists for a chocolate, the reveal still happens with just
-the static overlay (this is the current state for every chocolate, since
-`effects/` is empty).
-
-## Performance notes for when these are filled in
-
-- Prefer WebP throughout (transparency only on overlay layers, per above).
-- The base photo and the currently-selected chocolate's overlay are the only
-  images needed to render the current preview state — don't eagerly load
-  every topping/chocolate photo on first paint. If adding preloading, prefer
-  warming the *next likely* selection (e.g. `<link rel="preload">` for the
-  first chocolate once the configurator opens) over the full set.
-- Keep each file reasonably compressed (target well under 200KB per overlay)
-  — these load into a small on-screen box (250×210 CSS px, scaled up for the
-  hero step), so the 1000×840 canvas gives headroom for sharpness on
-  high-DPI screens without needing print-resolution file sizes.
-- Reserve layout space via the fixed-size wrapper already in
-  `ProfiterolePreview.tsx` (unchanged by asset loading) so images popping in
-  never cause layout shift.
+- Only the base state and whichever chocolate is currently selected need to
+  be loaded at once — don't eagerly fetch every `states/*.webp` on first
+  paint. If adding preloading later, warm the *next likely* selection
+  rather than the full set.
+- Keep each state photo reasonably compressed (well under 300KB) — the
+  1000×840 canvas gives headroom for sharpness on high-DPI screens without
+  needing print-resolution file sizes.
+- The fixed-size wrapper in `ProfiterolePreview.tsx` reserves layout space
+  regardless of which image is loaded, so nothing causes layout shift.
