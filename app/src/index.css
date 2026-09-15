@@ -102,3 +102,20 @@
 .animate-pop-in {
   animation: pop-in 0.35s ease-out;
 }
+
+@keyframes scan-line {
+  0%, 100% {
+    transform: translateY(-90px);
+    opacity: 0;
+  }
+  10%, 90% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(90px);
+  }
+}
+
+.animate-scan-line {
+  animation: scan-line 2.6s ease-in-out infinite;
+}

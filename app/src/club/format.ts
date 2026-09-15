@@ -22,3 +22,18 @@ export function maskPhone(phone: string): string {
 export function todayKey(): string {
   return new Date().toLocaleDateString("sv-SE");
 }
+
+/**
+ * Normalizes the Greek mobile formats a cashier (or WooCommerce/FluentCRM
+ * data, eventually) might produce — spaces, a "+30" or "0030" country
+ * prefix — down to the bare 10-digit canonical form ("69XXXXXXXX") that
+ * mock (and future real) member records are keyed by. Returns whatever
+ * digits remain if the input doesn't match a recognizable prefix, so the
+ * caller can still judge completeness (e.g. "not yet 10 digits").
+ */
+export function normalizeGreekPhone(input: string): string {
+  let digits = input.replace(/\D/g, "");
+  if (digits.startsWith("0030")) digits = digits.slice(4);
+  else if (digits.startsWith("30") && digits.length > 10) digits = digits.slice(2);
+  return digits;
+}

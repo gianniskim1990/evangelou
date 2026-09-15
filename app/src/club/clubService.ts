@@ -1,4 +1,4 @@
-import { todayKey } from "./format";
+import { normalizeGreekPhone, todayKey } from "./format";
 import { DEMO_QR_TOKEN, SEEDED_USED_MEMBER_ID, SEEDED_USED_TIME, mockMembers } from "./mockMembers";
 import type { BenefitType, ClubMember, MemberBenefitStatus, MemberLookup } from "./types";
 
@@ -73,12 +73,6 @@ function delay<T>(value: T, ms = 350): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
 }
 
-function normalizePhone(input: string): string {
-  let digits = input.replace(/\D/g, "");
-  if (digits.length > 10 && digits.startsWith("30")) digits = digits.slice(2);
-  return digits;
-}
-
 function lookup(member: ClubMember | undefined): MemberLookup {
   if (!member) return { member: null, benefit: null };
   return { member, benefit: benefitStatusFor(member) };
@@ -87,7 +81,7 @@ function lookup(member: ClubMember | undefined): MemberLookup {
 export const mockClubService: ClubService = {
   async findMemberByPhone(phone) {
     ensureSeedRedemption();
-    const normalized = normalizePhone(phone);
+    const normalized = normalizeGreekPhone(phone);
     const member = mockMembers.find((m) => m.phone === normalized);
     return delay(lookup(member));
   },
@@ -125,3 +119,23 @@ export const mockClubService: ClubService = {
 export const clubService: ClubService = mockClubService;
 
 export { DEMO_QR_TOKEN };
+
+/** Presentation-only aid for the sales demo — a cheat sheet the presenter
+ * can open on the lookup screen instead of memorizing numbers. Safe to
+ * delete along with its one call site in ClubHome.tsx once this is no
+ * longer a sales demo. */
+export interface DemoPhoneHint {
+  phone: string;
+  label: string;
+}
+
+export const DEMO_PHONE_HINTS: DemoPhoneHint[] = [
+  { phone: mockMembers[0].phone, label: "Ενεργό · καφές διαθέσιμος" },
+  { phone: mockMembers[1].phone, label: "Ενεργό · καφές χρησιμοποιημένος" },
+  { phone: mockMembers[2].phone, label: "Ληγμένη συνδρομή" },
+];
+
+/** What the UI shows for any lookup failure — mock mode never actually
+ * throws here, but a future REST-backed service will, and the cashier
+ * should never see a raw technical error. */
+export const CLUB_LOOKUP_ERROR_MESSAGE = "Δεν ήταν δυνατός ο έλεγχος του μέλους. Δοκιμάστε ξανά.";
