@@ -163,20 +163,20 @@ export const TOPPING_VISUALS: Record<string, ToppingVisual> = {
   lotusb: { archetype: "crumb", color: "#C08A4E", size: 7, sprite: { image: "/configurator/toppings/lotusb-sprites.webp", frames: 4 } },
 
   // Φρούτα — soft drop-in pieces
-  strawberry: { archetype: "piece", color: "#D6495E", size: 9 },
-  banana: { archetype: "piece", color: "#E8D48A", size: 9 },
-  cherry: { archetype: "piece", color: "#A0233A", size: 8 },
+  strawberry: { archetype: "piece", color: "#D6495E", size: 9, sprite: { image: "/configurator/toppings/strawberry-sprites.webp", frames: 4 } },
+  banana: { archetype: "piece", color: "#E8D48A", size: 9, sprite: { image: "/configurator/toppings/banana-sprites.webp", frames: 4 } },
+  cherry: { archetype: "piece", color: "#A0233A", size: 8, sprite: { image: "/configurator/toppings/cherry-sprites.webp", frames: 4 } },
 
   // Σιρόπια — quick drizzle, rendered as a small squiggle instead of a dot
-  chocsyrup: { archetype: "drizzle", color: "#3A2313" },
-  caramel: { archetype: "drizzle", color: "#C17817" },
-  strawsyrup: { archetype: "drizzle", color: "#D6495E" },
+  chocsyrup: { archetype: "drizzle", color: "#3A2313", sprite: { image: "/configurator/toppings/chocsyrup-sprites.webp", frames: 4 } },
+  caramel: { archetype: "drizzle", color: "#C17817", sprite: { image: "/configurator/toppings/caramel-sprites.webp", frames: 4 } },
+  strawsyrup: { archetype: "drizzle", color: "#D6495E", sprite: { image: "/configurator/toppings/strawsyrup-sprites.webp", frames: 4 } },
 
   // Καραμέλες — kept to muted, brand-adjacent jewel tones rather than
   // literal bright candy colors, to stay premium rather than cartoonish.
-  mms: { archetype: "piece", color: "#8A6A45", size: 7 },
-  marshmallow: { archetype: "piece", color: "#FBF3E7", size: 8 },
-  gummy: { archetype: "piece", color: "#7A2E3B", size: 7 },
+  mms: { archetype: "piece", color: "#8A6A45", size: 7, sprite: { image: "/configurator/toppings/mms-sprites.webp", frames: 4 } },
+  marshmallow: { archetype: "piece", color: "#FBF3E7", size: 8, sprite: { image: "/configurator/toppings/marshmallow-sprites.webp", frames: 4 } },
+  gummy: { archetype: "piece", color: "#7A2E3B", size: 7, sprite: { image: "/configurator/toppings/gummy-sprites.webp", frames: 4 } },
 };
 
 export const DEFAULT_TOPPING_VISUAL: ToppingVisual = { archetype: "piece", color: "#86764F", size: 8 };
