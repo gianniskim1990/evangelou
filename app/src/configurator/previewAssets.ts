@@ -100,6 +100,11 @@ export const STATE_IMAGES: Record<string, string> = {
   base: "/configurator/states/base.webp",
   milk: "/configurator/states/milk.webp",
   strawberry: "/configurator/states/strawberry.webp",
+  classic: "/configurator/states/classic.webp",
+  white: "/configurator/states/white.webp",
+  dark: "/configurator/states/dark.webp",
+  gianduia: "/configurator/states/gianduia.webp",
+  bueno: "/configurator/states/bueno.webp",
 };
 
 /** What a chocolate coating looks like procedurally — a dip-cap color on each bun, a lighter gloss highlight, and a drizzle-line color. Always available; used whenever this chocolate has no entry in STATE_IMAGES (or its photo fails to load). */
@@ -148,14 +153,14 @@ export interface ToppingVisual {
 /** Keyed by data/menu.ts's toppingGroups[].items[].id. Grouped by archetype below to make the intent obvious; falls back to a generic bronze "piece" for any future topping added without a visual yet (see toppingVisual() in previewHelpers.ts). */
 export const TOPPING_VISUALS: Record<string, ToppingVisual> = {
   // Ξηροί καρποί — small falling pieces
-  walnut: { archetype: "piece", color: "#8B6F47", size: 9 },
+  walnut: { archetype: "piece", color: "#8B6F47", size: 9, sprite: { image: "/configurator/toppings/walnut-sprites.webp", frames: 4 } },
   hazelnut: { archetype: "piece", color: "#A47B4E", size: 8, sprite: { image: "/configurator/toppings/hazelnut-sprites.webp", frames: 4 } },
-  almond: { archetype: "piece", color: "#C9A876", size: 8 },
+  almond: { archetype: "piece", color: "#C9A876", size: 8, sprite: { image: "/configurator/toppings/almond-sprites.webp", frames: 4 } },
 
   // Μπισκότα — crumble pieces (slightly angular, see ProfiterolePreview's crumb rendering)
-  oreo: { archetype: "crumb", color: "#2B2420", size: 7 },
-  digestive: { archetype: "crumb", color: "#B08A5C", size: 7 },
-  lotusb: { archetype: "crumb", color: "#C08A4E", size: 7 },
+  oreo: { archetype: "crumb", color: "#2B2420", size: 7, sprite: { image: "/configurator/toppings/oreo-sprites.webp", frames: 4 } },
+  digestive: { archetype: "crumb", color: "#B08A5C", size: 7, sprite: { image: "/configurator/toppings/digestive-sprites.webp", frames: 4 } },
+  lotusb: { archetype: "crumb", color: "#C08A4E", size: 7, sprite: { image: "/configurator/toppings/lotusb-sprites.webp", frames: 4 } },
 
   // Φρούτα — soft drop-in pieces
   strawberry: { archetype: "piece", color: "#D6495E", size: 9 },
