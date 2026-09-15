@@ -56,14 +56,14 @@ export const TOP_POS = [
  * own bun layout and lands on the napkin/background when reused here.
  */
 export const PHOTO_TOP_POS = [
-  { x: 120, y: 32 },
-  { x: 50, y: 84 },
-  { x: 180, y: 63 },
-  { x: 125, y: 95 },
-  { x: 70, y: 130 },
-  { x: 145, y: 122 },
-  { x: 195, y: 101 },
-  { x: 95, y: 105 },
+  { x: 120, y: 35 },
+  { x: 65, y: 88 },
+  { x: 178, y: 80 },
+  { x: 125, y: 102 },
+  { x: 78, y: 130 },
+  { x: 150, y: 132 },
+  { x: 195, y: 115 },
+  { x: 100, y: 50 },
 ];
 
 export function visualScaleFor(sizeId: string | null): number {

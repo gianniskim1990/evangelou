@@ -215,14 +215,21 @@ function ToppingPiece({ id, index, exiting, isPhoto }: { id: string; index: numb
   if (visual.sprite && spriteReady) {
     const frames = visual.sprite.frames;
     const frameIndex = index % frames;
+    const isDrizzle = visual.archetype === "drizzle";
+    // Syrup sprite frames are a wide, short wavy squiggle (same shape as the
+    // procedural drizzle SVG below), not a roundish piece — the square 22×22
+    // box every other topping uses would squash it into an unrecognizable
+    // dot. Use a wide/short box instead so it still reads as a drizzle.
+    const w = isDrizzle ? 27 : 22;
+    const h = isDrizzle ? 10 : 22;
     return (
       <div
         className={`pointer-events-none absolute ${motionClass}`}
         style={{
-          left: pos.x - 7,
-          top: pos.y - 7,
-          width: 22,
-          height: 22,
+          left: pos.x - w / 2,
+          top: pos.y - h / 2,
+          width: w,
+          height: h,
           backgroundImage: `url(${visual.sprite.image})`,
           backgroundSize: `${frames * 100}% 100%`,
           backgroundPosition: `${(frameIndex / Math.max(frames - 1, 1)) * 100}% 0%`,
