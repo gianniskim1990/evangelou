@@ -106,6 +106,37 @@ export const STATE_IMAGES: Record<string, string> = {
   gianduia: "/configurator/states/gianduia.webp",
   bueno: "/configurator/states/bueno.webp",
 };
+/**
+ * Full-frame photorealistic state-image families by selected profiterole base.
+ * Every family uses the same state keys as STATE_IMAGES:
+ * base, milk, classic, white, dark, gianduia, strawberry, bueno.
+ *
+ * `classic` deliberately reuses the original STATE_IMAGES so the existing
+ * verified visual set remains untouched.
+ */
+export const BASE_STATE_IMAGES: Record<string, Record<string, string>> = {
+  classic: STATE_IMAGES,
+  icecream: {
+    base: "/configurator/bases/icecream/base.webp",
+    milk: "/configurator/bases/icecream/milk.webp",
+    classic: "/configurator/bases/icecream/classic.webp",
+    white: "/configurator/bases/icecream/white.webp",
+    dark: "/configurator/bases/icecream/dark.webp",
+    gianduia: "/configurator/bases/icecream/gianduia.webp",
+    strawberry: "/configurator/bases/icecream/strawberry.webp",
+    bueno: "/configurator/bases/icecream/bueno.webp",
+  },
+  dubai: {
+    base: "/configurator/bases/dubai/base.webp",
+    milk: "/configurator/bases/dubai/milk.webp",
+    classic: "/configurator/bases/dubai/classic.webp",
+    white: "/configurator/bases/dubai/white.webp",
+    dark: "/configurator/bases/dubai/dark.webp",
+    gianduia: "/configurator/bases/dubai/gianduia.webp",
+    strawberry: "/configurator/bases/dubai/strawberry.webp",
+    bueno: "/configurator/bases/dubai/bueno.webp",
+  },
+};
 
 /** What a chocolate coating looks like procedurally — a dip-cap color on each bun, a lighter gloss highlight, and a drizzle-line color. Always available; used whenever this chocolate has no entry in STATE_IMAGES (or its photo fails to load). */
 export interface ChocolateVisual {

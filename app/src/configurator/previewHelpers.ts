@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  BASE_STATE_IMAGES,
   CHOCOLATE_VISUALS,
   DEFAULT_TOPPING_VISUAL,
   NO_CHOCOLATE_VISUAL,
@@ -82,8 +83,15 @@ export function toppingVisual(toppingId: string): ToppingVisual {
 }
 
 /** The full-frame state image URL for a chocolate selection (or the "base" state when none is chosen yet) — undefined if that selection has no photo state defined at all. Gate with useAssetAvailability() before rendering it. */
-export function stateImageFor(chocId: string | null): string | undefined {
-  return STATE_IMAGES[chocId ?? "base"];
+export function stateImageFor(chocId: string | null, baseId: string | null = null): string | undefined {
+  const stateKey = chocId ?? "base";
+
+  if (baseId) {
+    const familySrc = BASE_STATE_IMAGES[baseId]?.[stateKey];
+    if (familySrc) return familySrc;
+  }
+
+  return STATE_IMAGES[stateKey];
 }
 
 const STATE_CROSSFADE_MS = 550;

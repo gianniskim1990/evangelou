@@ -34,7 +34,7 @@ export function ProfiterolePreview({
   cfg: ConfiguratorState;
   variant?: "compact" | "hero";
 }) {
-  const targetSrc = stateImageFor(cfg.choc);
+  const targetSrc = stateImageFor(cfg.choc, cfg.base);
   const photo = usePhotoPreviewState(targetSrc);
   const toppings = useToppingTransitions(cfg.toppings);
   const isHero = variant === "hero";
