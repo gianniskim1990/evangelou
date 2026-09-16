@@ -1,9 +1,14 @@
 import { useMemo, useState } from "react";
 import type { OrderStatus, StoredOrder } from "../types";
 import { fmt } from "../lib/format";
+import { bases, chocolates, sizes, toppingGroups } from "../data/menu";
 import { FULFILLMENT_LABELS_EL, ORDER_STATUS_LABELS_EL, PAYMENT_LABELS_EL, formatAthensDateTime } from "../lib/orderConstants";
 import { AdminAuthError, updateOrderStatus } from "./adminApi";
 import { useAdminOrderAlerts } from "./AdminOrderAlertsProvider";
+
+const adminToppingNameById = new Map(
+  toppingGroups.flatMap((group) => group.items).map((item) => [item.id, item.name]),
+);
 
 const TABS: { key: OrderStatus; label: string }[] = [
   { key: "new", label: "Νέες" },
@@ -16,6 +21,42 @@ const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
   new: "in_progress",
   in_progress: "completed",
 };
+
+function AdminOrderItemDetails({ item }: { item: StoredOrder["items"][number] }) {
+  const custom = item.customConfig;
+
+  if (!custom) {
+    return (
+      <div className="flex justify-between gap-3 py-1.5">
+        <span>
+          {item.name}
+          {item.meta ? ` (${item.meta})` : ""} × {item.qty}
+        </span>
+        <span className="flex-none font-semibold">{fmt(item.qty * item.unitPrice)}</span>
+      </div>
+    );
+  }
+
+  const size = sizes.find((entry) => entry.id === custom.size);
+  const chocolate = chocolates.find((entry) => entry.id === custom.choc);
+  const base = bases.find((entry) => entry.id === custom.base);
+  const toppings = custom.toppings.map((id) => adminToppingNameById.get(id) ?? id);
+
+  return (
+    <div className="border-b border-cream py-2.5 last:border-b-0">
+      <div className="flex justify-between gap-3">
+        <span className="font-semibold">Το προφιτερόλ σου × {item.qty}</span>
+        <span className="flex-none font-semibold">{fmt(item.qty * item.unitPrice)}</span>
+      </div>
+      <div className="mt-1 grid gap-0.5 text-xs text-espresso/65 sm:grid-cols-2">
+        <div><span className="font-semibold text-espresso/80">Μέγεθος:</span> {size?.name ?? custom.size}</div>
+        <div><span className="font-semibold text-espresso/80">Σοκολάτα:</span> {chocolate?.name ?? custom.choc}</div>
+        <div><span className="font-semibold text-espresso/80">Βάση:</span> {base?.name ?? custom.base}</div>
+        <div className="sm:col-span-2"><span className="font-semibold text-espresso/80">Υλικά:</span> {toppings.length ? toppings.join(", ") : "Χωρίς toppings"}</div>
+      </div>
+    </div>
+  );
+}
 
 function matchesSearch(order: StoredOrder, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -148,13 +189,7 @@ export function AdminOrders({ onAuthExpired }: { onAuthExpired: () => void }) {
 
                   <div className="mb-3 border-t border-cream pt-3">
                     {order.items.map((it) => (
-                      <div key={it.id} className="flex justify-between py-1">
-                        <span>
-                          {it.name}
-                          {it.meta ? ` (${it.meta})` : ""} × {it.qty}
-                        </span>
-                        <span className="font-semibold">{fmt(it.qty * it.unitPrice)}</span>
-                      </div>
+                      <AdminOrderItemDetails key={it.id} item={it} />
                     ))}
                     <div className="mt-1 flex justify-between border-t border-cream pt-2 font-bold">
                       <span>Σύνολο</span>

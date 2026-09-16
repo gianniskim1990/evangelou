@@ -1,14 +1,57 @@
 import { useState } from "react";
 import { useApp } from "../AppContext";
 import { useSettings } from "../SettingsContext";
+import { bases, chocolates, sizes, toppingGroups } from "../data/menu";
 import { fmt } from "../lib/format";
 import { isStoreClosedNow, pickupSlotsForToday } from "../lib/hours";
+import type { CartItem } from "../types";
 
 const inputClass =
   "w-full rounded-xl border border-espresso/20 bg-surface px-3.5 py-3.5 text-sm font-[Commissioner,sans-serif]";
 
+const checkoutToppingNameById = new Map(
+  toppingGroups.flatMap((group) => group.items).map((item) => [item.id, item.name]),
+);
+
+function CheckoutOrderItem({ item }: { item: CartItem }) {
+  const custom = item.customConfig;
+
+  if (!custom) {
+    return (
+      <div className="flex items-start justify-between gap-3 border-b border-cream py-2.5 last:border-b-0">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold">{item.name} × {item.qty}</div>
+          {item.meta && <div className="mt-0.5 text-[11.5px] text-espresso/55">{item.meta}</div>}
+        </div>
+        <span className="flex-none text-[13px] font-semibold">{fmt(item.qty * item.unitPrice)}</span>
+      </div>
+    );
+  }
+
+  const size = sizes.find((entry) => entry.id === custom.size);
+  const chocolate = chocolates.find((entry) => entry.id === custom.choc);
+  const base = bases.find((entry) => entry.id === custom.base);
+  const toppings = custom.toppings.map((id) => checkoutToppingNameById.get(id) ?? id);
+
+  return (
+    <div className="border-b border-cream py-3 last:border-b-0">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-[13px] font-semibold">Το προφιτερόλ σου × {item.qty}</div>
+        <span className="flex-none text-[13px] font-semibold">{fmt(item.qty * item.unitPrice)}</span>
+      </div>
+      <div className="mt-1.5 space-y-0.5 text-[11.5px] leading-[1.45] text-espresso/60">
+        <div><span className="font-semibold text-espresso/80">Μέγεθος:</span> {size?.name ?? custom.size}</div>
+        <div><span className="font-semibold text-espresso/80">Σοκολάτα:</span> {chocolate?.name ?? custom.choc}</div>
+        <div><span className="font-semibold text-espresso/80">Βάση:</span> {base?.name ?? custom.base}</div>
+        <div><span className="font-semibold text-espresso/80">Υλικά:</span> {toppings.length ? toppings.join(", ") : "Χωρίς toppings"}</div>
+      </div>
+    </div>
+  );
+}
+
 export function Checkout() {
   const {
+    cart,
     customer,
     setCustomerName,
     setCustomerPhone,
@@ -189,6 +232,14 @@ export function Checkout() {
           </div>
         </div>
       )}
+
+
+      <h3 className="m-0 mb-3 text-[15px] font-semibold">Η παραγγελία σου</h3>
+      <div className="mb-5 rounded-[14px] bg-surface px-4 py-1">
+        {cart.map((item) => (
+          <CheckoutOrderItem key={item.id} item={item} />
+        ))}
+      </div>
 
       <h3 className="m-0 mb-3 text-[15px] font-semibold">Πληρωμή</h3>
       <div className="mb-3.5 flex gap-2">
