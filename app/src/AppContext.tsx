@@ -13,6 +13,7 @@ import type {
   Address,
   CardDetails,
   CartItem,
+  CustomProfiteroleConfig,
   ConfiguratorState,
   Customer,
   Fulfillment,
@@ -45,6 +46,7 @@ interface AppContextValue {
   addToCart: (name: string, unitPrice: number, meta?: string, isCake?: boolean) => void;
   incCartItem: (id: string) => void;
   decCartItem: (id: string) => void;
+  editConfiguredCartItem: (id: string) => void;
 
   activeGroup: string | null;
   setActiveGroup: (id: string) => void;
@@ -59,6 +61,7 @@ interface AppContextValue {
   cfgNext: () => void;
   cfgPrev: () => void;
   addConfiguredToCart: () => void;
+  isEditingConfiguredItem: boolean;
 
   customer: Customer;
   setCustomerName: (v: string) => void;
@@ -106,6 +109,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
   const [cfg, setCfg] = useState<ConfiguratorState>(EMPTY_CFG);
+  const [editingConfiguredItemId, setEditingConfiguredItemId] = useState<string | null>(null);
 
   const [customer, setCustomer] = useState<Customer>(EMPTY_CUSTOMER);
   const [fulfillment, setFulfillment] = useState<Fulfillment>("pickup");
@@ -127,13 +131,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const goHome = useCallback(() => setScreen("home"), []);
-  const goCatalog = useCallback(() => setScreen("catalog"), []);
+  const goHome = useCallback(() => {
+    setEditingConfiguredItemId(null);
+    setScreen("home");
+  }, []);
+  const goCatalog = useCallback(() => {
+    setEditingConfiguredItemId(null);
+    setScreen("catalog");
+  }, []);
   const goConfigurator = useCallback(() => {
+    setEditingConfiguredItemId(null);
     setCfg(EMPTY_CFG);
     setScreen("configurator");
   }, []);
   const goCheckout = useCallback(() => {
+    setEditingConfiguredItemId(null);
     setCartOpen(false);
     setScreen("checkout");
   }, []);
@@ -160,6 +172,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const editConfiguredCartItem = useCallback(
+    (id: string) => {
+      const item = cart.find((it) => it.id === id);
+      if (!item?.customConfig) return;
+
+      setCfg({
+        step: 1,
+        size: item.customConfig.size,
+        choc: item.customConfig.choc,
+        base: item.customConfig.base,
+        toppings: [...item.customConfig.toppings],
+      });
+      setEditingConfiguredItemId(id);
+      setCartOpen(false);
+      setScreen("configurator");
+    },
+    [cart],
+  );
+
   const cartCount = cart.reduce((s, it) => s + it.qty, 0);
   const cartTotal = cart.reduce((s, it) => s + it.qty * it.unitPrice, 0);
 
@@ -168,6 +199,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const chocObj = chocolates.find((c) => c.id === cfg.choc) ?? null;
   const baseObj = bases.find((b) => b.id === cfg.base) ?? null;
   const extraToppings = Math.max(0, cfg.toppings.length - FREE_TOPPINGS);
+  const isEditingConfiguredItem = editingConfiguredItemId !== null;
   const cfgTotal = (sizeObj ? sizeObj.price : 0) + (baseObj ? baseObj.extra : 0) + extraToppings * TOPPING_EXTRA_PRICE;
   const cfgCanProceed =
     (cfg.step === 1 && !!cfg.size) || (cfg.step === 2 && !!cfg.choc) || (cfg.step === 3 && !!cfg.base) || cfg.step === 4;
@@ -192,11 +224,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addConfiguredToCart = useCallback(() => {
     if (!sizeObj || !chocObj || !baseObj) return;
+
     const meta = `${sizeObj.name} · ${chocObj.name} · ${baseObj.name}`;
-    addToCart("Το προφιτερόλ σου", cfgTotal, meta);
+    const customConfig: CustomProfiteroleConfig = {
+      size: sizeObj.id,
+      choc: chocObj.id,
+      base: baseObj.id,
+      toppings: [...cfg.toppings],
+    };
+
+    setCart((prev) => {
+      if (editingConfiguredItemId) {
+        const found = prev.some((it) => it.id === editingConfiguredItemId && it.customConfig);
+        if (found) {
+          return prev.map((it) =>
+            it.id === editingConfiguredItemId
+              ? {
+                  ...it,
+                  name: "Το προφιτερόλ σου",
+                  unitPrice: cfgTotal,
+                  meta,
+                  isCake: false,
+                  customConfig,
+                }
+              : it,
+          );
+        }
+      }
+
+      return [
+        ...prev,
+        {
+          id: Math.random().toString(36).slice(2),
+          name: "Το προφιτερόλ σου",
+          unitPrice: cfgTotal,
+          qty: 1,
+          meta,
+          isCake: false,
+          customConfig,
+        },
+      ];
+    });
+
+    const wasEditing = editingConfiguredItemId !== null;
+    setEditingConfiguredItemId(null);
     setCfg(EMPTY_CFG);
     setScreen("home");
-  }, [sizeObj, chocObj, baseObj, cfgTotal, addToCart]);
+    if (wasEditing) setCartOpen(true);
+  }, [sizeObj, chocObj, baseObj, cfg.toppings, cfgTotal, editingConfiguredItemId]);
 
   // --- Checkout ---
   const setCustomerName = useCallback((v: string) => setCustomer((c) => ({ ...c, name: v })), []);
@@ -336,6 +411,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addToCart,
     incCartItem,
     decCartItem,
+    editConfiguredCartItem,
     activeGroup,
     setActiveGroup,
     cfg,
@@ -348,6 +424,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cfgNext,
     cfgPrev,
     addConfiguredToCart,
+    isEditingConfiguredItem,
     customer,
     setCustomerName,
     setCustomerPhone,

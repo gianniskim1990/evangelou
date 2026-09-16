@@ -35,6 +35,13 @@ export interface ToppingGroup {
   items: ToppingItem[];
 }
 
+export interface CustomProfiteroleConfig {
+  size: string;
+  choc: string;
+  base: string;
+  toppings: string[];
+}
+
 export interface CatalogGroup {
   id: string;
   name: string;
@@ -81,6 +88,7 @@ export interface CartItem {
   qty: number;
   meta: string;
   isCake: boolean;
+  customConfig?: CustomProfiteroleConfig;
 }
 
 export interface ConfiguratorState {

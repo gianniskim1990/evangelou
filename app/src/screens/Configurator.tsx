@@ -23,6 +23,7 @@ export function Configurator() {
     cfgNext,
     cfgPrev,
     addConfiguredToCart,
+    isEditingConfiguredItem,
   } = useApp();
 
   const step = cfg.step;
@@ -47,6 +48,12 @@ export function Configurator() {
         </div>
       </div>
       <h2 className="font-literata mb-4.5 text-[22px] font-semibold">{STEP_TITLES[step]}</h2>
+
+      {isEditingConfiguredItem && (
+        <div className="mx-auto mb-3 w-fit rounded-full bg-bronze/10 px-3 py-1 text-[12px] font-semibold text-bronze-dark">
+          Επεξεργάζεσαι προϊόν από το καλάθι
+        </div>
+      )}
 
       <ProfiterolePreview cfg={cfg} variant={step === 5 ? "hero" : "compact"} />
 
@@ -200,7 +207,7 @@ export function Configurator() {
             onClick={addConfiguredToCart}
             className="flex-1 rounded-xl border-none bg-bronze-dark py-3.5 text-[15px] font-semibold text-white"
           >
-            Προσθήκη στο καλάθι
+            {isEditingConfiguredItem ? "Αποθήκευση αλλαγών" : "Προσθήκη στο καλάθι"}
           </button>
         ) : (
           <button

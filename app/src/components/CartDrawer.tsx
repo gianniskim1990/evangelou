@@ -1,8 +1,74 @@
 import { useApp } from "../AppContext";
+import { FREE_TOPPINGS, TOPPING_EXTRA_PRICE, bases, chocolates, sizes, toppingGroups } from "../data/menu";
 import { fmt } from "../lib/format";
+import type { CartItem } from "../types";
+
+const toppingNameById = new Map(toppingGroups.flatMap((group) => group.items).map((item) => [item.id, item.name]));
+
+function CustomProfiteroleDetails({
+  item,
+  onEdit,
+}: {
+  item: CartItem;
+  onEdit: () => void;
+}) {
+  const custom = item.customConfig;
+  if (!custom) return null;
+
+  const size = sizes.find((entry) => entry.id === custom.size);
+  const chocolate = chocolates.find((entry) => entry.id === custom.choc);
+  const base = bases.find((entry) => entry.id === custom.base);
+  const toppingNames = custom.toppings.map((id) => toppingNameById.get(id) ?? id);
+  const extraToppings = Math.max(0, custom.toppings.length - FREE_TOPPINGS);
+  const extraToppingsCost = extraToppings * TOPPING_EXTRA_PRICE;
+
+  return (
+    <div className="mt-1.5 space-y-0.5 text-[12px] leading-[1.45] text-espresso/70">
+      <div>
+        <span className="font-semibold text-espresso/85">Μέγεθος:</span> {size?.name ?? custom.size}
+      </div>
+      <div>
+        <span className="font-semibold text-espresso/85">Σοκολάτα:</span> {chocolate?.name ?? custom.choc}
+      </div>
+      <div>
+        <span className="font-semibold text-espresso/85">Βάση:</span> {base?.name ?? custom.base}
+        {base && base.extra > 0 ? ` (+${fmt(base.extra)})` : ""}
+      </div>
+      <div>
+        <span className="font-semibold text-espresso/85">Υλικά:</span>{" "}
+        {toppingNames.length > 0 ? toppingNames.join(", ") : "Χωρίς toppings"}
+      </div>
+
+      {extraToppings > 0 && (
+        <div className="pt-0.5 text-[11.5px] text-bronze-dark">
+          {FREE_TOPPINGS} δωρεάν · {extraToppings} επιπλέον (+{fmt(extraToppingsCost)})
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={onEdit}
+        className="mt-1.5 border-none bg-transparent p-0 text-[12px] font-semibold text-bronze-dark underline underline-offset-2"
+      >
+        Επεξεργασία
+      </button>
+    </div>
+  );
+}
 
 export function CartDrawer() {
-  const { cartOpen, closeCart, cart, cartTotal, incCartItem, decCartItem, goCatalog, goConfigurator, goCheckout } = useApp();
+  const {
+    cartOpen,
+    closeCart,
+    cart,
+    cartTotal,
+    incCartItem,
+    decCartItem,
+    editConfiguredCartItem,
+    goCatalog,
+    goConfigurator,
+    goCheckout,
+  } = useApp();
 
   if (!cartOpen) return null;
 
@@ -53,11 +119,17 @@ export function CartDrawer() {
           )}
 
           {cart.map((it) => (
-            <div key={it.id} className="flex items-center justify-between border-b border-cream py-3">
-              <div className="flex-1 pr-2.5">
+            <div key={it.id} className="flex items-start justify-between border-b border-cream py-3.5">
+              <div className="min-w-0 flex-1 pr-3">
                 <div className="text-sm font-semibold">{it.name}</div>
-                {it.meta && <div className="mt-0.5 text-xs opacity-60">{it.meta}</div>}
-                <div className="mt-2 flex items-center gap-2.5">
+
+                {it.customConfig ? (
+                  <CustomProfiteroleDetails item={it} onEdit={() => editConfiguredCartItem(it.id)} />
+                ) : (
+                  it.meta && <div className="mt-0.5 text-xs opacity-60">{it.meta}</div>
+                )}
+
+                <div className="mt-2.5 flex items-center gap-2.5">
                   <button
                     onClick={() => decCartItem(it.id)}
                     className="flex h-6 w-6 items-center justify-center rounded-full border border-bronze bg-surface text-[13px] leading-none"
@@ -73,7 +145,11 @@ export function CartDrawer() {
                   </button>
                 </div>
               </div>
-              <span className="text-sm font-semibold">{fmt(it.qty * it.unitPrice)}</span>
+
+              <div className="flex-none text-right">
+                <div className="text-sm font-semibold">{fmt(it.qty * it.unitPrice)}</div>
+                {it.qty > 1 && <div className="mt-0.5 text-[11px] opacity-55">{fmt(it.unitPrice)} / τεμ.</div>}
+              </div>
             </div>
           ))}
         </div>
