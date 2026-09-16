@@ -229,6 +229,11 @@ function ToppingLayer({
 }) {
   const activeCount = toppings.filter((t) => !t.exiting).length;
 
+  // A running counter across every rendered piece (not just per-topping) —
+  // see ToppingPiece's slotIndex below for why this needs to be globally
+  // unique rather than derived from toppingIndex alone.
+  let pieceSeed = 0;
+
   return (
     <>
       {toppings.flatMap((t, toppingIndex) => {
@@ -240,6 +245,7 @@ function ToppingLayer({
             id={t.id}
             toppingIndex={toppingIndex}
             copyIndex={copyIndex}
+            slotSeed={pieceSeed++}
             exiting={t.exiting}
             isPhoto={isPhoto}
           />
@@ -272,12 +278,14 @@ function ToppingPiece({
   id,
   toppingIndex,
   copyIndex,
+  slotSeed,
   exiting,
   isPhoto,
 }: {
   id: string;
   toppingIndex: number;
   copyIndex: number;
+  slotSeed: number;
   exiting: boolean;
   isPhoto: boolean;
 }) {
@@ -285,11 +293,18 @@ function ToppingPiece({
   const spriteReady = useAssetAvailability(visual.sprite?.image);
   const slots = isPhoto ? PHOTO_TOP_POS : TOP_POS;
 
-  // Duplicate Family pieces fan out deterministically instead of stacking
-  // on the original piece. The +3 stride keeps copies on different bun
-  // surfaces and works with both the 8-slot photo map and 10-slot
-  // procedural map.
-  const slotIndex = (toppingIndex + copyIndex * 3) % slots.length;
+  // Every rendered piece (across every topping, not just each topping's own
+  // copies) gets a slot from a single shared running count. A per-topping
+  // formula like `toppingIndex + copyIndex*stride` looks fine in isolation
+  // but two *different* toppings can land on the exact same slot once
+  // enough toppings are selected (e.g. topping 0's 2nd copy and topping 3's
+  // 1st copy both resolving to slot 3) — invisible in the math, but two
+  // different sprites rendering centered on the identical spot in the
+  // photo. A shared counter guarantees every piece gets a distinct slot as
+  // long as the total piece count fits the slot list (it does up to the
+  // ~10-piece Family cap on the 8-slot photo map only in the sense that
+  // slots start repeating gracefully past that, same as before).
+  const slotIndex = slotSeed % slots.length;
   const pos = slots[slotIndex];
   const motionClass = exiting ? "animate-topping-exit" : "animate-topping-fall";
   const rotationIndex = toppingIndex + copyIndex * 2;
