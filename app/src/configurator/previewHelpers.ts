@@ -122,6 +122,22 @@ export interface PhotoPreviewState {
  * that has none. Only returns "procedural" before anything has ever
  * loaded (first paint) or once a target is confirmed missing.
  */
+function photoFamilyFor(src: string): string {
+  const baseMatch = src.match(/^\/configurator\/bases\/([^/]+)\//);
+  if (baseMatch) return baseMatch[1];
+
+  // The original /configurator/states/* family is the classic base.
+  if (src.startsWith("/configurator/states/")) return "classic";
+
+  return src;
+}
+
+/**
+ * Crossfade only between chocolate states that belong to the SAME base
+ * family. Different base families use different photography/composition;
+ * keeping the outgoing family underneath the incoming one creates visible
+ * colour/shape ghosting (especially the pink Chilly image behind Lotus).
+ */
 export function usePhotoPreviewState(targetSrc: string | undefined): PhotoPreviewState {
   const status = useAssetProbeStatus(targetSrc);
   const [shown, setShown] = useState<ShownState | null>(() =>
@@ -132,7 +148,13 @@ export function usePhotoPreviewState(targetSrc: string | undefined): PhotoPrevie
     if (!targetSrc || status !== "loaded") return;
     setShown((prev) => {
       if (prev && prev.current === targetSrc) return prev;
-      return { current: targetSrc, previous: prev ? prev.current : null };
+
+      const previous =
+        prev && photoFamilyFor(prev.current) === photoFamilyFor(targetSrc)
+          ? prev.current
+          : null;
+
+      return { current: targetSrc, previous };
     });
   }, [targetSrc, status]);
 
