@@ -83,7 +83,7 @@ export function ProfiterolePreview({
             <ProceduralLayers cfg={cfg} />
           )}
 
-          <ToppingLayer toppings={toppings} isPhoto={isPhoto} />
+          <ToppingLayer toppings={toppings} isPhoto={isPhoto} sizeId={cfg.size} />
         </div>
       </div>
     </div>
@@ -206,35 +206,108 @@ function ProceduralLayers({ cfg }: { cfg: ConfiguratorState }) {
   );
 }
 
-/** Toppings layer, shared by both photo and procedural modes: a piece with a loadable sprite renders as a cropped sprite frame (animated in, then left resting), everything else renders as the original colored dot/crumb/drizzle-squiggle. The rendering itself doesn't care whether the layer beneath is a photo or the procedural illustration — but the bun cluster sits in different coordinates in each, so `isPhoto` picks the matching position set (PHOTO_TOP_POS vs. TOP_POS). */
-function ToppingLayer({ toppings, isPhoto }: { toppings: TrackedTopping[]; isPhoto: boolean }) {
+/** Toppings layer, shared by both photo and procedural modes.
+ *
+ * Portion-size density rules:
+ * - Solo: one visual piece per selected topping. The whole composition is
+ *   already scaled to 0.85, so the result naturally reads lighter.
+ * - Duo: one visual piece per selected topping — this preserves the
+ *   existing visual baseline exactly.
+ * - Family: selected toppings gain extra visual pieces, but the renderer
+ *   uses an adaptive budget so a user who selects many toppings does not
+ *   turn the dessert into an unreadable pile. This affects presentation
+ *   only; cart selections/pricing remain one topping per selected id.
+ */
+function ToppingLayer({
+  toppings,
+  isPhoto,
+  sizeId,
+}: {
+  toppings: TrackedTopping[];
+  isPhoto: boolean;
+  sizeId: string | null;
+}) {
+  const activeCount = toppings.filter((t) => !t.exiting).length;
+
   return (
     <>
-      {toppings.map((t, i) => (
-        <ToppingPiece key={t.id} id={t.id} index={i} exiting={t.exiting} isPhoto={isPhoto} />
-      ))}
+      {toppings.flatMap((t, toppingIndex) => {
+        const copies = toppingVisualCopies(sizeId, toppingIndex, activeCount);
+
+        return Array.from({ length: copies }, (_, copyIndex) => (
+          <ToppingPiece
+            key={`${t.id}:${copyIndex}`}
+            id={t.id}
+            toppingIndex={toppingIndex}
+            copyIndex={copyIndex}
+            exiting={t.exiting}
+            isPhoto={isPhoto}
+          />
+        ));
+      })}
     </>
   );
 }
 
-function ToppingPiece({ id, index, exiting, isPhoto }: { id: string; index: number; exiting: boolean; isPhoto: boolean }) {
+/**
+ * Family gets richer topping coverage without exploding when many toppings
+ * are selected:
+ *   1-2 selected => 3 visual pieces each
+ *   3-5 selected => 2 visual pieces each
+ *   6+ selected  => only enough duplicates to reach ~10 visible pieces
+ *
+ * Solo/Duo deliberately stay at one piece per selected topping.
+ */
+function toppingVisualCopies(sizeId: string | null, toppingIndex: number, selectedCount: number): number {
+  if (sizeId !== "family") return 1;
+
+  if (selectedCount <= 2) return 3;
+  if (selectedCount <= 5) return 2;
+
+  const extraBudget = Math.max(0, 10 - selectedCount);
+  return toppingIndex < extraBudget ? 2 : 1;
+}
+
+function ToppingPiece({
+  id,
+  toppingIndex,
+  copyIndex,
+  exiting,
+  isPhoto,
+}: {
+  id: string;
+  toppingIndex: number;
+  copyIndex: number;
+  exiting: boolean;
+  isPhoto: boolean;
+}) {
   const visual = toppingVisual(id);
   const spriteReady = useAssetAvailability(visual.sprite?.image);
   const slots = isPhoto ? PHOTO_TOP_POS : TOP_POS;
-  const pos = slots[index % slots.length];
+
+  // Duplicate Family pieces fan out deterministically instead of stacking
+  // on the original piece. The +3 stride keeps copies on different bun
+  // surfaces and works with both the 8-slot photo map and 10-slot
+  // procedural map.
+  const slotIndex = (toppingIndex + copyIndex * 3) % slots.length;
+  const pos = slots[slotIndex];
   const motionClass = exiting ? "animate-topping-exit" : "animate-topping-fall";
-  const rotStyle = { "--fall-rot": `${fallRotationFor(index)}deg` } as React.CSSProperties;
+  const rotationIndex = toppingIndex + copyIndex * 2;
+  const rotStyle = { "--fall-rot": `${fallRotationFor(rotationIndex)}deg` } as React.CSSProperties;
+
+  // Extra Family pieces are subtly smaller so the result reads like a
+  // natural scatter rather than cloned identical stickers.
+  const copyScale = copyIndex === 0 ? 1 : copyIndex === 1 ? 0.88 : 0.76;
 
   if (visual.sprite && spriteReady) {
     const frames = visual.sprite.frames;
-    const frameIndex = index % frames;
+    const frameIndex = (toppingIndex + copyIndex) % frames;
     const isDrizzle = visual.archetype === "drizzle";
-    // Syrup sprite frames are a wide, short wavy squiggle (same shape as the
-    // procedural drizzle SVG below), not a roundish piece — the square 22×22
-    // box every other topping uses would squash it into an unrecognizable
-    // dot. Use a wide/short box instead so it still reads as a drizzle.
-    const w = isDrizzle ? 27 : 22;
-    const h = isDrizzle ? 10 : 22;
+    const baseW = isDrizzle ? 27 : 22;
+    const baseH = isDrizzle ? 10 : 22;
+    const w = baseW * copyScale;
+    const h = baseH * copyScale;
+
     return (
       <div
         className={`pointer-events-none absolute ${motionClass}`}
@@ -254,12 +327,15 @@ function ToppingPiece({ id, index, exiting, isPhoto }: { id: string; index: numb
   }
 
   if (visual.archetype === "drizzle") {
+    const w = 20 * copyScale;
+    const h = 10 * copyScale;
+
     return (
       <svg
         className={`pointer-events-none absolute ${motionClass}`}
-        style={{ left: pos.x - 9, top: pos.y - 4, ...rotStyle }}
-        width="20"
-        height="10"
+        style={{ left: pos.x - w / 2, top: pos.y - h / 2, ...rotStyle }}
+        width={w}
+        height={h}
         viewBox="0 0 20 10"
       >
         <path d="M1 5 Q5 1 9 5 T18 5" stroke={visual.color} strokeWidth="2.4" fill="none" strokeLinecap="round" />
@@ -267,13 +343,14 @@ function ToppingPiece({ id, index, exiting, isPhoto }: { id: string; index: numb
     );
   }
 
-  const size = visual.size ?? 8;
+  const size = (visual.size ?? 8) * copyScale;
+
   return (
     <div
       className={`pointer-events-none absolute ${motionClass}`}
       style={{
-        left: pos.x,
-        top: pos.y,
+        left: pos.x - size / 2,
+        top: pos.y - size / 2,
         width: size,
         height: size,
         background: visual.color,
