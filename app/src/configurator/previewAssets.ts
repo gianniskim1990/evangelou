@@ -136,6 +136,26 @@ export const BASE_STATE_IMAGES: Record<string, Record<string, string>> = {
     strawberry: "/configurator/bases/dubai/strawberry.webp",
     bueno: "/configurator/bases/dubai/bueno.webp",
   },
+  chilly: {
+    base: "/configurator/bases/chilly/base.webp",
+    milk: "/configurator/bases/chilly/milk.webp",
+    classic: "/configurator/bases/chilly/classic.webp",
+    white: "/configurator/bases/chilly/white.webp",
+    dark: "/configurator/bases/chilly/dark.webp",
+    gianduia: "/configurator/bases/chilly/gianduia.webp",
+    strawberry: "/configurator/bases/chilly/strawberry.webp",
+    bueno: "/configurator/bases/chilly/bueno.webp",
+  },
+  lotus: {
+    base: "/configurator/bases/lotus/base.webp",
+    milk: "/configurator/bases/lotus/milk.webp",
+    classic: "/configurator/bases/lotus/classic.webp",
+    white: "/configurator/bases/lotus/white.webp",
+    dark: "/configurator/bases/lotus/dark.webp",
+    gianduia: "/configurator/bases/lotus/gianduia.webp",
+    strawberry: "/configurator/bases/lotus/strawberry.webp",
+    bueno: "/configurator/bases/lotus/bueno.webp",
+  },
 };
 
 /** What a chocolate coating looks like procedurally — a dip-cap color on each bun, a lighter gloss highlight, and a drizzle-line color. Always available; used whenever this chocolate has no entry in STATE_IMAGES (or its photo fails to load). */
