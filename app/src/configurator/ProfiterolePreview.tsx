@@ -40,6 +40,13 @@ export function ProfiterolePreview({
   const isHero = variant === "hero";
   const isPhoto = photo.mode === "photo";
 
+  // In procedural mode, visualScaleFor() is already applied to each bun.
+  // In photo mode, scale the entire finished composition instead so the
+  // photo and every topping stay perfectly aligned as the portion changes.
+  const photoPortionScale = isPhoto ? visualScaleFor(cfg.size) : 1;
+  const heroScale = isHero ? 1.3 : 1;
+  const compositionScale = heroScale * photoPortionScale;
+
   return (
     <div
       className={`relative mx-auto mb-6.5 ${isHero ? "animate-hero-in" : ""}`}
@@ -62,7 +69,13 @@ export function ProfiterolePreview({
       <div className="absolute inset-0 flex items-center justify-center">
         <div
           className={`relative ${isPhoto ? "overflow-hidden rounded-[18px]" : ""}`}
-          style={{ width: 250, height: 210, transform: isHero ? "scale(1.3)" : undefined }}
+          style={{
+            width: 250,
+            height: 210,
+            transform: `scale(${compositionScale})`,
+            transformOrigin: "center center",
+            transition: "transform 420ms cubic-bezier(0.22, 1, 0.36, 1)",
+          }}
         >
           {isPhoto ? (
             <PhotoLayers current={photo.current!} previous={photo.previous} />
