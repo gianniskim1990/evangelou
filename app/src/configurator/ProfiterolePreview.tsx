@@ -78,7 +78,7 @@ export function ProfiterolePreview({
           }}
         >
           {isPhoto ? (
-            <PhotoLayers current={photo.current!} previous={photo.previous} />
+            <PhotoLayers current={photo.current!} previous={photo.previous} baseId={cfg.base} />
           ) : (
             <ProceduralLayers cfg={cfg} />
           )}
@@ -100,8 +100,32 @@ export function ProfiterolePreview({
  */
 const PHOTO_EDGE_TRIM_SCALE = "scale(1.03)";
 
+/**
+ * Chilly and Lotus source photos contain a soft background artifact near
+ * the upper edge. Crop only those two families slightly tighter and shift
+ * the source upward so that artifact stays outside the clipped preview.
+ *
+ * All other base families preserve the existing scale(1.03) treatment.
+ */
+function photoImageTransformForBase(baseId: string | null): string {
+  if (baseId === "chilly" || baseId === "lotus") {
+    return "translateY(-7px) scale(1.12)";
+  }
+  return PHOTO_EDGE_TRIM_SCALE;
+}
+
 /** The current full-frame state photo, with the previous one kept mounted underneath during a crossfade (see usePhotoPreviewState). */
-function PhotoLayers({ current, previous }: { current: string; previous: string | null }) {
+function PhotoLayers({
+  current,
+  previous,
+  baseId,
+}: {
+  current: string;
+  previous: string | null;
+  baseId: string | null;
+}) {
+  const imageTransform = photoImageTransformForBase(baseId);
+
   return (
     <>
       {previous && (
@@ -110,7 +134,7 @@ function PhotoLayers({ current, previous }: { current: string; previous: string 
           alt=""
           draggable={false}
           className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-          style={{ transform: PHOTO_EDGE_TRIM_SCALE }}
+          style={{ transform: imageTransform }}
         />
       )}
       <img
@@ -119,7 +143,7 @@ function PhotoLayers({ current, previous }: { current: string; previous: string 
         alt="Προφιτερόλ"
         draggable={false}
         className="animate-state-crossfade-in pointer-events-none absolute inset-0 h-full w-full object-cover"
-        style={{ transform: PHOTO_EDGE_TRIM_SCALE }}
+        style={{ transform: imageTransform }}
       />
     </>
   );
