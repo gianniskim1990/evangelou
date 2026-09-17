@@ -31,6 +31,14 @@ export function Configurator() {
   const chocObj = chocolates.find((c) => c.id === cfg.choc) ?? null;
   const baseObj = bases.find((b) => b.id === cfg.base) ?? null;
 
+  // In the base-selection step, Chilly and Lotus use their dedicated
+  // family hero images. This keeps the two base previews visually clean
+  // while preserving chocolate-specific images on all following steps.
+  const previewCfg =
+    step === 3 && (cfg.base === "chilly" || cfg.base === "lotus")
+      ? { ...cfg, choc: null }
+      : cfg;
+
   const toppingNames = cfg.toppings.length
     ? cfg.toppings
         .map((tid) => toppingGroups.flatMap((g) => g.items).find((it) => it.id === tid)?.name)
@@ -55,7 +63,7 @@ export function Configurator() {
         </div>
       )}
 
-      <ProfiterolePreview cfg={cfg} variant={step === 5 ? "hero" : "compact"} />
+      <ProfiterolePreview cfg={previewCfg} variant={step === 5 ? "hero" : "compact"} />
 
       {step === 1 && (
         <div className="flex flex-col">
