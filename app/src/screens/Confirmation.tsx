@@ -41,7 +41,7 @@ function ConfirmationOrderItem({ item }: { item: CartItem }) {
 
   return (
     <div className="border-b border-cream py-4 last:border-b-0">
-      <div className="mb-1 text-center">
+      <div className="mb-7 text-center">
         <div className="font-literata text-[16px] font-semibold">Η δημιουργία σου</div>
         {item.qty > 1 && <div className="mt-0.5 text-xs text-espresso/55">Ποσότητα: {item.qty}</div>}
       </div>
