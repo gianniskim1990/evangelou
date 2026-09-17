@@ -31,11 +31,11 @@ export function Configurator() {
   const chocObj = chocolates.find((c) => c.id === cfg.choc) ?? null;
   const baseObj = bases.find((b) => b.id === cfg.base) ?? null;
 
-  // In the base-selection step, Chilly and Lotus use their dedicated
-  // family hero images. This keeps the two base previews visually clean
-  // while preserving chocolate-specific images on all following steps.
+  // Chilly still uses its clean family hero on the base-selection step.
+  // Lotus now has a complete chocolate-specific image family, so it keeps
+  // the customer's selected chocolate visible immediately.
   const previewCfg =
-    step === 3 && (cfg.base === "chilly" || cfg.base === "lotus")
+    step === 3 && cfg.base === "chilly"
       ? { ...cfg, choc: null }
       : cfg;
 
