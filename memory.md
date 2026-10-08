@@ -130,3 +130,13 @@ The WordPress Installed Plugins screenshot shows **12 total plugins**. Among the
 - The exact paid subscription/rebilling/membership mechanism **has not yet been confirmed**. Inspect FluentCart products, subscription capability, payment gateway/settings, custom code and licenses before selecting the integration.
 - The exact Amazon/AWS service **has not yet been confirmed**. Amazon may only be the email-delivery provider while contact tags remain in FluentCRM; inspect FluentCRM email and contact/tag settings before deciding integration logic.
 - Next read-only audit targets: FluentCart product/catalog and subscription/payment settings; FluentCRM tags and email provider (mask secrets); Fluent Forms registration forms. Avoid showing real customer personal data.
+
+## Read-only WordPress audit — 2026-10-08 (second screenshot set)
+
+- Full Installed Plugins view confirms 12 visible standard plugins, 9 active, 3 inactive. Inactive: Carousel Slider, Hello Dolly, LayerSlider WP. No WooCommerce or PMPro appears in the visible installed plugins list. This does not rule out hidden plugins, MU-plugins, multisite network plugins, or an external platform.
+- FluentCart 1.7.0 dashboard has initial setup banner **"Set up your pages first to get started"**, and a Getting Started checklist showing Setup Pages, Add Details to Store, Add Your First Product, Setup Payment Methods, Install Elementor Addon all unchecked.
+- Dashboard shows **Total Products: 0**, **Orders: 0** (Last 30 Days header), **Revenue: $0**, and zero recent activities. This strongly suggests FluentCart has not been configured as the active subscription checkout, but requires checking Products, Subscriptions, and Settings; do not assert final subscription setup without checking.
+- FluentCart has a **Subscriptions** navigation tab. Presence of tab does NOT confirm recurring payments are enabled, configured or licensed.
+- WordPress top bar previously showed **Test Mode**, but source/status still need confirmation.
+- Priority audit next: FluentCart → Subscriptions (prefer aggregate/empty state without personal info), Products, Settings → payment setup; FluentCRM Tags and email sending integration with any secrets masked.
+- Do not configure live payment integrations, run test transactions, install/update plugins, or access/disclose real customer records during read-only audit.
