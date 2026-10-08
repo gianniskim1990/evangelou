@@ -192,3 +192,10 @@ The WordPress Installed Plugins screenshot shows **12 total plugins**. Among the
 - Other displayed form configuration: no login requirement, scheduling or entry maximum restriction; advanced validation is Pro only. Avoid inferring actual CRM sync until Configure Integrations tab/feed is inspected.
 - Important design decision: consent to receive marketing emails/SMS must be separate from Club subscription terms/payment and freely given; do not condition paid membership on promotional marketing consent. Mobile-only registrations may not have an email, so design robust unique identity/account linking and an intentional QR delivery/recovery flow; do not assume matching names or form entry IDs are sufficient for paid membership identity.
 - Next safest read-only step: Fluent Forms → edit form ID 3 → **Settings & Integrations → Configure Integrations**; screenshot integrations/feed names and tag mapping, masking all tokens and personal data. Also inspect form field choices/confirmation only if needed; do not save or change live form.
+
+## Read-only audit — Evangelou Club form FluentCRM integration feed, 2026-10-08
+
+- Screenshot: Fluent Forms ID 3 ("Ευαγγέλου Club") → Settings & Integrations → Configure Integrations shows a **single enabled "FluentCRM Integration Feed"**.
+- It establishes an enabled connection between the form and FluentCRM, but does not yet show whether all fields map correctly, whether the CRM tag is applied, whether a double-opt-in/consent condition is configured, or whether individual submissions successfully synced. Do not claim 186 submissions = 178 unique subscribed members.
+- No separate Amazon/AWS integration is listed for this form; Amazon SES mention elsewhere appears related to mail sending/bounce handling, which still needs verification.
+- Next read-only action: click the **green gear/configure icon** of the FluentCRM Integration Feed; inspect field mappings, selected list/tag, contact status and any conditional logic. **Do not click the blue duplicate icon, red delete icon, Enabled toggle or Save.** Mask any PII/secrets before sharing screenshots.
