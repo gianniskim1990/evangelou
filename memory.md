@@ -109,3 +109,24 @@ Before final production implementation, confirm:
 ## Product principle
 
 Do not duplicate existing WordPress/CRM/newsletter data without a clear need. Keep each system the source of truth for the data it already owns, and use the custom integration layer to synchronize only the statuses and operational data the app requires.
+
+## Contract and implementation scope — October 2026
+
+- The client accepted **Phase 1 Evangelou Club only**, for **€1,500 + VAT**. Online customer ordering, menu, cart, delivery and ordering admin are explicitly **out of scope** and may be a later Phase 2.
+- The intended Club launch target is **early December 2026**, subject to integration discoveries and timely access/approvals.
+- The first year of technical support was offered at no extra charge; from year 2 the proposed support is **€300 + VAT/year**. Hosting/backend/provider costs, if later needed, are separate and must be approved by the client.
+- Site technician offered WordPress **Administrator** credentials and **SFTP** username/password, but **not Plesk** access because it hosts sensitive content. Technician can create a database if needed. Prefer to assess custom tables in the existing WordPress database first; no separate database is assumed necessary yet.
+- All initial production-site auditing must be **read-only**. No updates, installs, data edits, credentials sharing, or production migrations before a backup/staging and approval.
+
+## Verified WordPress admin plugin inventory — screenshot 2026-10-08
+
+The WordPress Installed Plugins screenshot shows **12 total plugins**. Among them:
+
+- **FluentCart 1.7.0 — active.** This is the observed e-commerce plugin.
+- **FluentCRM – Marketing Automation for WordPress 3.2.5 — active.** Candidate system for newsletter contacts, tags and segments.
+- **Fluent Forms 6.2.15 — active.** Candidate for signup forms.
+- Also active: Elementor, DFD Theme Extensions, Really Simple Security, Slider Revolution, WordPress Importer, WPBakery Page Builder.
+- WooCommerce and Paid Memberships Pro **do not appear in the complete 12-plugin list**; prior references in the earlier brief to WooCommerce and PMPro were assumptions and **must not be treated as confirmed installed infrastructure**.
+- The exact paid subscription/rebilling/membership mechanism **has not yet been confirmed**. Inspect FluentCart products, subscription capability, payment gateway/settings, custom code and licenses before selecting the integration.
+- The exact Amazon/AWS service **has not yet been confirmed**. Amazon may only be the email-delivery provider while contact tags remain in FluentCRM; inspect FluentCRM email and contact/tag settings before deciding integration logic.
+- Next read-only audit targets: FluentCart product/catalog and subscription/payment settings; FluentCRM tags and email provider (mask secrets); Fluent Forms registration forms. Avoid showing real customer personal data.
