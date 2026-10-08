@@ -212,3 +212,19 @@ The WordPress Installed Plugins screenshot shows **12 total plugins**. Among the
 - No changes made, do not save/modify/delete existing production form or feed while auditing. Do not infer mail delivery or every contact sync succeeds without inspection.
 - Architecture implications: use FluentCRM as contact/marketing source, **actual subscription/billing system** for entitlements, custom WordPress Club plugin for opaque QR IDs and daily redemption locking/history. Do not treat the legacy "Ευαγγέλου Club" list/tag as Active Paying Member. Consider distinct tags for newsletter-only, active, and lapsed members after mapping and approval, and keep opt-out/consent status independent of billing membership status.
 - Next read-only inspection: FluentCRM → Contacts → Lists (list titles/aggregate counts only) and/or inspect public placement of Fluent Forms ID 3. Need client's technician response for existing billing, AWS sending and staging.
+
+## TECHNICIAN CONFIRMED ARCHITECTURE — 2026-10-08 (supersedes assumptions)
+
+Received a direct reply from the existing website developer:
+
+- The intended e-commerce platform is **WooCommerce, NOT FluentCart**. WooCommerce is **not yet installed** in the inspected WP plugin list. Do not implement Club payments on FluentCart.
+- They intend to install and use **Paid Memberships Pro (PMPro)** together with **WooCommerce** to sell the €20/month Club subscription. PMPro also **not yet installed** on audited site. The setup will be created by the website developer.
+- **No paid memberships, paying members, or live subscription billing exist yet.** All legacy 178 FluentCRM contacts are **newsletter subscribers only** and must never receive daily free coffee entitlement solely for being in the original list/tag.
+- The developer proposes payment methods **Viva, PayPal, bank transfer, cash at the shop**. There is currently **no Stripe or other existing merchant setup** identified for subscriptions. Automatic recurring billing for Viva/PayPal is NOT yet confirmed.
+- Newsletter registration currently uses **Fluent Forms → FluentCRM**. Contact lists and tags are managed **only in FluentCRM**. No other contact-sync automation exists.
+- Amazon service is **Amazon SES**, for email delivery. Do NOT try to manage CRM tags in Amazon SES; use FluentCRM.
+- Need confirmation who installs/configures WooCommerce, PMPro, WooCommerce Integration add-on, gateway plugins, and whether WooCommerce Subscriptions is purchased/used.
+- Official PMPro documentation for selling PMPro memberships through WooCommerce says to install their free WooCommerce Integration add-on and map WooCommerce membership products to PMPro levels, and requires WooCommerce Subscriptions (or another stated supported recurring billing path) for recurring WooCommerce membership charging. WooCommerce completion/paid status should control when PMPro level is granted. Avoid granting membership on pending bank transfer or cash orders.
+- Official Viva developer docs describe recurring support via WooCommerce Subscriptions, but current WooCommerce.com documentation may differ on recurring compatibility; validate against the EXACT selected gateway extension/version via end-to-end staging test, not assumption. Bank transfer and cash are manual-payment channels and need deliberate paid verification, renewal and expiration handling.
+- The Club plugin must check effective, verified paid membership status from authoritative PMPro/WooCommerce lifecycle, never FluentCRM tags alone. Prevent duplicate coffee redemption via atomic per-member per-Athens-day records with a unique constraint; no real data mutations during audit.
+- Ask technician for specific integration architecture/ownership and timeline; then work in staging/backup before custom plugin development. Scope remains Phase 1 Club only, €1,500 + VAT, aiming early December 2026.
