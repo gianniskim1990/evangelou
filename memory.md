@@ -156,3 +156,12 @@ The WordPress Installed Plugins screenshot shows **12 total plugins**. Among the
 - FluentCRM → Settings → General Settings screenshot shows unchecked: auto-sync WordPress user data with FluentCRM contact data; create new FluentCRM contacts on WP user registration; FluentCart checkout newsletter subscription checkbox. No changes made.
 - User could not find payment settings because screenshots showed **FluentCRM Settings**, not **FluentCart Settings**. To inspect checkout payments, navigate **FluentCart → Settings → Payment Settings** (according to official FluentCart docs, product/version menu may vary). Inspect only, no gateway activation. FluentCart admin top bar showed Test Mode in screenshots, exact status source to confirm.
 - Important product decision: implement subscription status from actual billing platform, not CRM subscription/tag status. Plan separate membership lifecycle tags only after existing contacts and consent meaning are established. Newsletter signup must use appropriate marketing consent.
+
+## Read-only audit — FluentCart Payment Settings, 2026-10-08
+
+- Screenshot from FluentCart → Settings → Payment Settings shows **Stripe = Disabled**, **PayPal = Disabled**, **Cash on Delivery = Disabled**.
+- Other gateways listed (e.g. Paystack, Razorpay, Mercado Pago, Flutterwave, SSLCommerz; Pro-badged Paddle, Mollie, Authorize.Net, Square), but the screenshot does not prove any of them are installed, configured, or enabled.
+- FluentCart products and subscriptions remain empty by user's earlier inspection. No working recurring billing has yet been demonstrated, and WordPress admin bar previously displayed Test Mode.
+- Official FluentCart feature comparison says **subscription products are supported in the Free version** (fluentcart.com/free-vs-pro/); official docs describe monthly subscription products, Stripe setup, and Gateway Billing vs Store Billing. However, do not assume any particular capability or Pro-dependent option is configured for this site.
+- Decide with client whether **automatic monthly recurring card charges** are expected or whether customers should **manually renew via payment link**; this choice affects gateway/configuration and membership status logic.
+- Next read-only inspections: FluentCart → Settings → Store Settings (subscriptions/billing mode if present); FluentCart → Settings → Features & addon if needed; do not enable Stripe, insert credentials, switch Test Mode, or create paid products without staging/approval.
