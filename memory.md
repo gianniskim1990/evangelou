@@ -165,3 +165,13 @@ The WordPress Installed Plugins screenshot shows **12 total plugins**. Among the
 - Official FluentCart feature comparison says **subscription products are supported in the Free version** (fluentcart.com/free-vs-pro/); official docs describe monthly subscription products, Stripe setup, and Gateway Billing vs Store Billing. However, do not assume any particular capability or Pro-dependent option is configured for this site.
 - Decide with client whether **automatic monthly recurring card charges** are expected or whether customers should **manually renew via payment link**; this choice affects gateway/configuration and membership status logic.
 - Next read-only inspections: FluentCart → Settings → Store Settings (subscriptions/billing mode if present); FluentCart → Settings → Features & addon if needed; do not enable Stripe, insert credentials, switch Test Mode, or create paid products without staging/approval.
+
+## Read-only WordPress audit — FluentCart Store Setup and Subscription Settings, 2026-10-08
+
+- User showed FluentCart → Settings → Store Settings → Subscriptions.
+- **Renewal Billing = Gateway Billing**: screen states Stripe, PayPal, and other subscription-ready gateways automatically charge renewals. This is the **selected mode**, not proof of a configured gateway; earlier audit showed Stripe and PayPal both Disabled.
+- **Staging Protection = checked**, wording: do not bill live subscriptions from site while in test mode. This is appropriate for auditing, should not be switched without approval.
+- **Early Payment** marked as FluentCart Pro feature, grayed out; not in agreed core Club requirement.
+- FluentCart → Settings → Store Settings → Store Setup screenshot shows **Store Name blank**, **Store Mode = Test**, **Store Address/Business Details blank**, **Checkout Currency = United States Dollar**, **Timezone = Browser**, while Date & Time Format = WordPress. Strong evidence that FluentCart is not production-configured yet.
+- Important before go-live: set EUR, store/merchant identity and billing details, configure recurring-compatible gateway, verify webhooks/renewal/failure handling, and ensure every coffee redemption day boundary is server-defined in Europe/Athens timezone, NOT client/browser timezone.
+- **No settings changed.** Keep test mode and staging protection during audit. Before creating subscription product, confirm desired automatic recurring billing with client, whether merchant already has Stripe/PayPal, whether FluentCart checkout can be fully configured and tested in staging, and applicable pricing/licenses/tax/legal checkout details. Use actual paid subscription billing state as source of truth, not newsletter tag.
