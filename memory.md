@@ -140,3 +140,10 @@ The WordPress Installed Plugins screenshot shows **12 total plugins**. Among the
 - WordPress top bar previously showed **Test Mode**, but source/status still need confirmation.
 - Priority audit next: FluentCart → Subscriptions (prefer aggregate/empty state without personal info), Products, Settings → payment setup; FluentCRM Tags and email sending integration with any secrets masked.
 - Do not configure live payment integrations, run test transactions, install/update plugins, or access/disclose real customer records during read-only audit.
+
+## Read-only WordPress audit — FluentCRM and FluentCart, 2026-10-08
+
+- User verified **FluentCart Products and Subscriptions are empty** in their respective admin screens. Do not assume the paid €20/month subscription currently exists or that recurring billing is configured; inspect FluentCart settings/features/licensing.
+- FluentCRM dashboard screenshot shows **Active Contacts: 178**, **Campaigns: 0**, **Emails Sent: 0**, and **Active Automations: 0**. Getting Started indicators mark **Create a Tag**, **Import Contacts**, and **Create a Form** completed (3 of 5). The screenshot shows recent contacts with 'Subscribed' badges, but marketing consent for all contacts remains unverified. No names or emails should be copied into project documentation.
+- Dashboard has an **SMTP** navigation entry and a promotional **Set Up FluentSMTP** panel; neither proves which email provider or AWS service is configured.
+- Follow-up audit: screenshot FluentCRM → Contacts → Tags (without exposing customer records); FluentCRM → Settings/email sending or SMTP configuration showing provider but redacting secrets; FluentCart → Settings → Payment Methods to establish test/live mode and recurring billing readiness. Never modify production settings until staging/backup and explicit approval.
