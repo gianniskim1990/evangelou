@@ -6,7 +6,7 @@ final class EntitlementTest extends TestCase {
     const FUTURE = '2026-11-09T10:00:00Z';
     const PAST = '2026-10-01T00:00:00Z';
 
-    private static function at(string $instant): DateTimeImmutable {
+    private static function instant(string $instant): DateTimeImmutable {
         return EVC_Clock::to_utc(new DateTimeImmutable($instant));
     }
 
@@ -30,7 +30,7 @@ final class EntitlementTest extends TestCase {
     /** @dataProvider scenarios */
     public function test_eligibility_matrix(string $status, bool $paid, ?string $expiry, ?string $denial, string $public): void {
         $e = new EVC_Entitlement($status, $paid, $expiry === null ? null : new DateTimeImmutable($expiry), 'club_monthly', 'mock');
-        $now = self::at(self::NOW);
+        $now = self::instant(self::NOW);
         $this->assertSame($denial, $e->denial_reason($now));
         $this->assertSame($denial === null, $e->is_eligible_at($now));
         $this->assertSame($public, $e->public_status($now));
@@ -38,18 +38,18 @@ final class EntitlementTest extends TestCase {
 
     public function test_expiry_instant_is_exclusive(): void {
         $e = new EVC_Entitlement('active', true, new DateTimeImmutable('2026-10-15T21:00:00Z'), null, 'mock');
-        $this->assertTrue($e->is_eligible_at(self::at('2026-10-15T20:59:59.999999Z')));
-        $this->assertFalse($e->is_eligible_at(self::at('2026-10-15T21:00:00Z')), 'expiring exactly now is NOT eligible');
-        $this->assertSame('expired', $e->denial_reason(self::at('2026-10-15T21:00:00Z')));
-        $this->assertFalse($e->is_eligible_at(self::at('2026-10-15T21:00:01Z')));
+        $this->assertTrue($e->is_eligible_at(self::instant('2026-10-15T20:59:59.999999Z')));
+        $this->assertFalse($e->is_eligible_at(self::instant('2026-10-15T21:00:00Z')), 'expiring exactly now is NOT eligible');
+        $this->assertSame('expired', $e->denial_reason(self::instant('2026-10-15T21:00:00Z')));
+        $this->assertFalse($e->is_eligible_at(self::instant('2026-10-15T21:00:01Z')));
     }
 
     public function test_expiry_compares_instants_across_timezones(): void {
         // 23:59:59 Athens (+03:00) on 15 Oct == 20:59:59Z.
         $e = new EVC_Entitlement('active', true, new DateTimeImmutable('2026-10-15 23:59:59', new DateTimeZone('Europe/Athens')), null, 'mock');
         $this->assertSame('2026-10-15 20:59:59.000000', $e->expires_at_utc()->format('Y-m-d H:i:s.u'));
-        $this->assertTrue($e->is_eligible_at(self::at('2026-10-15T20:59:58Z')));
-        $this->assertFalse($e->is_eligible_at(self::at('2026-10-15T20:59:59Z')));
+        $this->assertTrue($e->is_eligible_at(self::instant('2026-10-15T20:59:58Z')));
+        $this->assertFalse($e->is_eligible_at(self::instant('2026-10-15T20:59:59Z')));
     }
 
     public function test_unknown_status_is_rejected(): void {
@@ -69,13 +69,13 @@ final class EntitlementTest extends TestCase {
 
     public function test_none_factory_is_never_eligible(): void {
         $e = EVC_Entitlement::none('mock');
-        $this->assertFalse($e->is_eligible_at(self::at(self::NOW)));
+        $this->assertFalse($e->is_eligible_at(self::instant(self::NOW)));
         $this->assertNull($e->expires_at_utc());
     }
 
     public function test_mock_adapter_fails_closed_for_unknown_users(): void {
         $adapter = new EVC_Mock_Membership_Adapter();
-        $this->assertSame('none', $adapter->entitlement_for(42, self::at(self::NOW))->status());
+        $this->assertSame('none', $adapter->entitlement_for(42, self::instant(self::NOW))->status());
         $this->assertSame(array(array('wp_user_id' => 42, 'at' => '2026-10-09 10:00:00.000000')), $adapter->calls);
     }
 }
