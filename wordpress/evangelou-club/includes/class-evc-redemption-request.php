@@ -19,13 +19,27 @@ final class EVC_Redemption_Request {
     private $request_id;
     /** @var mixed */
     private $staff_wp_user_id;
+    /** @var mixed */
+    private $session_ref;
 
-    public function __construct($member_public_id, $benefit_type, $coffee_code, $request_id, $staff_wp_user_id) {
+    /**
+     * @param mixed $session_ref Optional one-way keyed reference to the staff
+     *   login session (32 lowercase hex), recorded in audit details ONLY.
+     *   It never takes part in the idempotency fingerprint, so a retry after
+     *   re-login stays a replay. It identifies a session of the shared Club
+     *   account, never a human employee.
+     */
+    public function __construct($member_public_id, $benefit_type, $coffee_code, $request_id, $staff_wp_user_id, $session_ref = null) {
         $this->member_public_id = $member_public_id;
         $this->benefit_type = $benefit_type;
         $this->coffee_code = $coffee_code;
         $this->request_id = $request_id;
         $this->staff_wp_user_id = $staff_wp_user_id;
+        $this->session_ref = $session_ref;
+    }
+
+    public function session_ref() {
+        return $this->session_ref;
     }
 
     public function member_public_id() {
