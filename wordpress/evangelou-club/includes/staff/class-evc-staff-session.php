@@ -40,12 +40,12 @@ final class EVC_Staff_Session {
 
     /** 12 h for the staff role regardless of "remember me"; others unchanged. */
     public static function filter_cookie_expiration($length, $user_id, $remember) {
-        return EVC_Staff_Role::is_staff_user(get_userdata((int) $user_id)) ? self::ABSOLUTE_SECONDS : $length;
+        return EVC_Staff_Role::has_staff_role(get_userdata((int) $user_id)) ? self::ABSOLUTE_SECONDS : $length;
     }
 
     /** Marks sessions created under this policy. */
     public static function filter_attach_session($session, $user_id) {
-        if (EVC_Staff_Role::is_staff_user(get_userdata((int) $user_id))) {
+        if (EVC_Staff_Role::has_staff_role(get_userdata((int) $user_id))) {
             $session[self::POLICY_FLAG] = self::POLICY_VERSION;
         }
         return $session;

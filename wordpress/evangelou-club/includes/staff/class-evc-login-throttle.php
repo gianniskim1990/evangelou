@@ -52,7 +52,7 @@ final class EVC_Login_Throttle {
     }
 
     public static function on_login_success($user_login, $user = null): void {
-        if (EVC_Staff_Role::is_staff_user($user)) {
+        if (EVC_Staff_Role::has_staff_role($user)) {
             delete_transient(self::ip_key((int) $user->ID, self::client_ip()));
         }
     }
@@ -102,7 +102,7 @@ final class EVC_Login_Throttle {
         if (!$user && is_email($username)) {
             $user = get_user_by('email', $username);
         }
-        return EVC_Staff_Role::is_staff_user($user) ? $user : null;
+        return EVC_Staff_Role::has_staff_role($user) ? $user : null;
     }
 
     public static function client_ip(): string {

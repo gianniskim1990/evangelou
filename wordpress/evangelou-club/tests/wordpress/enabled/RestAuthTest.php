@@ -58,6 +58,36 @@ final class RestAuthTest extends EVC_WP_Test_Case {
         }
     }
 
+    public function test_privileged_staff_tagged_accounts_are_forbidden_at_the_endpoint(): void {
+        $variants = array(
+            'staff + administrator role' => function (WP_User $u) {
+                $u->add_role('administrator');
+            },
+            'staff + editor role' => function (WP_User $u) {
+                $u->add_role('editor');
+            },
+            'staff + direct manage_options' => function (WP_User $u) {
+                $u->add_cap('manage_options');
+            },
+            'staff + direct plugin cap' => function (WP_User $u) {
+                $u->add_cap('manage_woocommerce');
+            },
+        );
+        foreach ($variants as $label => $mutate) {
+            $id = $this->create_staff_user();
+            $mutate(new WP_User($id));
+            clean_user_cache($id);
+            $this->login_as($id);
+            $response = $this->rest('POST', $this->redeem_route(self::MEMBER), $this->body(), $this->nonce());
+            $this->assertSame(403, $response->get_status(), $label);
+            $this->assertSame('forbidden', $response->get_data()['error']['code'], $label);
+        }
+        // The properly restricted shared account still passes authorization
+        // (and then hits the fail-closed production backend).
+        $this->login_as($this->create_staff_user());
+        $this->assertEnvelope($this->rest('POST', $this->redeem_route(self::MEMBER), $this->body(), $this->nonce()), 503, 'server_error');
+    }
+
     public function test_disabled_shared_account_is_forbidden(): void {
         $staff = $this->create_staff_user();
         $this->login_as($staff);

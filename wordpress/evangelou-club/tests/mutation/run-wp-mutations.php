@@ -12,7 +12,7 @@ $staff = 'includes/staff/';
 
 $mutants = array(
     array('W1-capability-check-bypassed', 'enabled', $staff . 'class-evc-staff-auth.php',
-        'if (!EVC_Staff_Role::is_staff_user($user) || !user_can($user, $capability)) {', 'if (false) {'),
+        'if (!EVC_Staff_Role::is_restricted_staff_account($user) || !user_can($user, $capability)) {', 'if (false) {'),
     array('W2-own-nonce-check-removed', 'enabled', $staff . 'class-evc-staff-auth.php',
         "if (!is_string(\$nonce) || \$nonce === '' || !wp_verify_nonce(\$nonce, 'wp_rest')) {", 'if (false) {'),
     array('W3-flag-enabled-when-undefined', 'disabled', $staff . 'class-evc-staff-feature.php',
@@ -40,6 +40,24 @@ $mutants = array(
         'if (self::is_locked((int) $staff->ID, self::client_ip(), time())) {', 'if (false) {'),
     array('W14-session-check-skipped', 'enabled', $staff . 'class-evc-staff-auth.php',
         'if (EVC_Staff_Session::verify_current((int) $user->ID) !== EVC_Staff_Session::OK) {', 'if (false) {'),
+    // Task 1C-C.R1: exclusive least-privilege account policy + safe disable targets.
+    array('W15-authorize-uses-lifecycle-role-check', 'enabled', $staff . 'class-evc-staff-auth.php',
+        'if (!EVC_Staff_Role::is_restricted_staff_account($user) || !user_can($user, $capability)) {',
+        'if (!EVC_Staff_Role::has_staff_role($user) || !user_can($user, $capability)) {'),
+    array('W16-extra-role-guard-removed', 'enabled', $staff . 'class-evc-staff-role.php',
+        'if (array_values((array) $user->roles) !== array(self::ROLE)) {', 'if (false) {'),
+    array('W17-direct-capability-guard-removed', 'enabled', $staff . 'class-evc-staff-role.php',
+        'if ((array) $user->caps !== array(self::ROLE => true)) {', 'if (false) {'),
+    array('W18-capability-allowlist-removed', 'enabled', $staff . 'class-evc-staff-role.php',
+        'if ($granted && !in_array((string) $cap, $allowed, true)) {', 'if (false) {'),
+    array('W19-dynamic-privilege-probe-removed', 'enabled', $staff . 'class-evc-staff-role.php',
+        'if (user_can($user, $cap)) {', 'if (false) {'),
+    array('W20-disable-target-validation-removed', 'enabled', $staff . 'class-evc-staff-auth.php',
+        'if (!($target instanceof WP_User) || !EVC_Staff_Role::has_staff_role($target)) {', 'if (false) {'),
+    array('W21-disable-target-accepts-any-user', 'enabled', $staff . 'class-evc-staff-auth.php',
+        'if (!($target instanceof WP_User) || !EVC_Staff_Role::has_staff_role($target)) {', 'if (!($target instanceof WP_User)) {'),
+    array('W22-throttle-limited-to-strict-accounts', 'enabled', $staff . 'class-evc-login-throttle.php',
+        'return EVC_Staff_Role::has_staff_role($user) ? $user : null;', 'return EVC_Staff_Role::is_restricted_staff_account($user) ? $user : null;'),
 );
 
 function evc_wp_suite(string $root, string $mode): int {

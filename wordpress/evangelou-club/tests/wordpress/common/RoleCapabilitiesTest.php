@@ -48,7 +48,7 @@ final class RoleCapabilitiesTest extends EVC_WP_Test_Case {
     public function test_administrators_get_manage_but_never_staff_caps(): void {
         $admin = get_userdata($this->create_user_with_role('administrator'));
         $this->assertTrue(user_can($admin, EVC_Staff_Role::CAP_MANAGE));
-        $this->assertFalse(EVC_Staff_Role::is_staff_user($admin));
+        $this->assertFalse(EVC_Staff_Role::has_staff_role($admin));
         $this->assertArrayNotHasKey(EVC_Staff_Role::CAP_REDEEM, get_role('administrator')->capabilities);
     }
 

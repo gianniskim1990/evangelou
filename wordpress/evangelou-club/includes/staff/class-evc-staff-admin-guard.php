@@ -18,12 +18,12 @@ final class EVC_Staff_Admin_Guard {
     }
 
     public static function filter_show_admin_bar($show) {
-        return EVC_Staff_Role::is_staff_user(wp_get_current_user()) ? false : $show;
+        return EVC_Staff_Role::has_staff_role(wp_get_current_user()) ? false : $show;
     }
 
     /** Pure decision: where (if anywhere) to send this user away from wp-admin. */
     public static function redirect_target($user, bool $doing_ajax): ?string {
-        if ($doing_ajax || !EVC_Staff_Role::is_staff_user($user)) {
+        if ($doing_ajax || !EVC_Staff_Role::has_staff_role($user)) {
             return null;
         }
         return home_url(self::STAFF_PATH);
@@ -38,6 +38,6 @@ final class EVC_Staff_Admin_Guard {
     }
 
     public static function filter_login_redirect($redirect_to, $requested, $user) {
-        return EVC_Staff_Role::is_staff_user($user) ? home_url(self::STAFF_PATH) : $redirect_to;
+        return EVC_Staff_Role::has_staff_role($user) ? home_url(self::STAFF_PATH) : $redirect_to;
     }
 }

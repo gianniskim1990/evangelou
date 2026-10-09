@@ -75,6 +75,20 @@ EVC_Migrator                   versioned + checksummed migrations, drift detecti
   role is created on plugin activation (idempotent, extra caps stripped) and
   removed on deactivation; users and history are never deleted. Administrators
   get `evc_manage_club` only. **No user is created by the plugin.**
+- **Exclusive least privilege (Task 1C-C.R1):** Club access requires
+  `EVC_Staff_Role::is_restricted_staff_account()`: exactly one role
+  (`evc_club_staff`), raw user caps exactly `{evc_club_staff: true}` (no direct
+  grants or denials), every effective capability on an allowlist (the three
+  Club caps), not a super admin, and no dynamically granted privilege
+  (`user_has_cap`) on a probe set. Anything else (e.g. staff + administrator,
+  staff + direct `manage_options`, a tampered role) gets 403. Defensive
+  lifecycle protections (12 h cookies, session marker, login throttling,
+  admin guard, emergency revocation, disabling) use the broader
+  `has_staff_role()` so a misconfigured staff-tagged account stays protected.
+- **Disabling** (`EVC_Staff_Auth::set_disabled`) requires `evc_manage_club` and
+  a target that exists and carries the staff role; any other user (admins,
+  editors, subscribers, customers, unknown ids) gets `evc_invalid_target` and
+  nothing is changed.
 - **Login:** core `wp-login.php`, core auth cookies and session tokens; no
   second password store. Staff-role logins are redirected to `/club-admin/`,
   the admin bar is hidden and `/wp-admin` (except `admin-ajax.php`)

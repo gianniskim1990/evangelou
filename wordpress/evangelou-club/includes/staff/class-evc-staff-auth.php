@@ -39,7 +39,7 @@ final class EVC_Staff_Auth {
         if (!is_string($nonce) || $nonce === '' || !wp_verify_nonce($nonce, 'wp_rest')) {
             return self::unauthorized();
         }
-        if (!EVC_Staff_Role::is_staff_user($user) || !user_can($user, $capability)) {
+        if (!EVC_Staff_Role::is_restricted_staff_account($user) || !user_can($user, $capability)) {
             return self::forbidden();
         }
         if (self::is_disabled((int) $user->ID)) {
@@ -56,13 +56,25 @@ final class EVC_Staff_Auth {
     }
 
     /**
-     * Administrator-only: disable/enable the shared account. Disabling also
-     * destroys all of its sessions.
+     * Club-manager-only: disable/enable the shared Club staff account.
+     * Disabling also destroys all of its sessions.
+     *
+     * The target must be an existing user that carries the Club staff role
+     * (the same population emergency revocation acts on, so a misconfigured
+     * staff-tagged account can still be locked down). Administrators,
+     * editors, subscribers, WooCommerce customers and any other user WITHOUT
+     * the staff role are refused with a WP_Error, and on every refusal no
+     * user meta and no session is touched.
+     *
      * @return true|WP_Error
      */
     public static function set_disabled(int $user_id, bool $disabled) {
         if (!current_user_can(EVC_Staff_Role::CAP_MANAGE)) {
             return self::forbidden();
+        }
+        $target = $user_id > 0 ? get_userdata($user_id) : false;
+        if (!($target instanceof WP_User) || !EVC_Staff_Role::has_staff_role($target)) {
+            return new WP_Error('evc_invalid_target', 'Not a Club staff account.', array('status' => 400));
         }
         if ($disabled) {
             update_user_meta($user_id, self::DISABLED_META, '1');
