@@ -259,3 +259,17 @@ The existing website developer replied explicitly:
 - Primary identity/status sources: WooCommerce/PMPro for verified payment and eligibility, FluentCRM for newsletter marketing consent & segmentation, separate Club database for opaque QR tokens and redemption/history. Daily one-redemption-per-member-per-Europe/Athens-calendar-day must be protected atomically at DB level; no access granted solely by CRM tag.
 - Scope and finances unchanged: Evangelou Club Phase 1 ONLY, **€1,500 + VAT**, first year support free, thereafter €300 + VAT/year, and potential infrastructure charged only if approved. Deadline target early December 2026 subject to staging and proper access.
 - Plan: ask developer to tell us once WooCommerce + PMPro + WooCommerce Integration mapping are installed in staging, staging URL/access is ready, and separate database is provisioned, including sanitized configuration and test accounts (never share credentials in chat). Meanwhile build isolated plugin scaffold with mock membership adapter and migration/redeem QA tests without touching production.
+
+## Club plugin implementation milestone — 2026-10-09
+
+- **Development started** on isolated branch feat/evangelou-club-plugin-foundation, PR #1 (draft; not merged). Frontend ordering/demo not modified.
+- Added new folder wordpress/evangelou-club/ with: inert plugin bootstrap, Europe/Athens business-day helper, random opaque QR token helper with SHA-256 hash, DRAFT SQL schema for technician-provided separate database (member map, redemption ledger, coffee history), README/deployment gates, and 11 PHP smoke assertions.
+- Added scoped GitHub Actions workflow .github/workflows/evangelou-club.yml; both branch push and PR GitHub Actions tests **completed successfully** on 2026-10-09.
+- **No staging or production WordPress installation, SQL migration, external account access, or payment changes performed.** This is only Milestone 0 foundation; production REST auth, membership adapter, QR assignment, CRM synchronization, coffee redeem and history operations not yet implemented.
+- Project source of truth remains main branch until draft PR reviewed and merged. Protect the existing /club mock demo and ordering flow.
+
+## Active development milestone — 2026-10-09
+- Task 1A active: Claude Code Opus architecture review of the Club backend/redemption engine; user approved starting while staging and separate DB are pending.
+- Milestone 0 is code-complete in open draft PR #1 but is not merged, deployed or connected to any real data.
+- Task 1A is review-only: inspect current source, memory, REST contract, staff auth, token handling, per-day uniqueness, retry safety, separate DB, membership gating and test strategy. Return findings and a bounded plan for Task 1B; leave working tree unchanged.
+- After user shares the review, ChatGPT checks evidence and prepares the implementation prompt. Existing ordering demo and production WP are out of scope.
