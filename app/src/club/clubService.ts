@@ -1,163 +1,210 @@
+import { clubError } from "./errors";
 import { maskPhone, normalizeGreekPhone, todayKey } from "./format";
+import { DEMO_COFFEE_OPTIONS } from "./mockCoffeeCatalog";
 import { DEMO_QR_TOKEN, SEEDED_USED_MEMBER_ID, SEEDED_USED_TIME, mockMembers, type MockMemberRecord } from "./mockMembers";
-import { ClubApiError, type BenefitType, type ClubMember, type MemberBenefitStatus, type MemberLookup } from "./types";
+import {
+  browserStorage,
+  dayKey,
+  mockFingerprint,
+  readMockStore,
+  writeMockStore,
+  type MockRedemptionRecord,
+  type MockStorage,
+} from "./mockRedemptionStore";
+import { isValidRequestId } from "./requestId";
+import type {
+  ClubMember,
+  CoffeeOption,
+  MemberBenefitStatus,
+  MemberLookup,
+  RedeemBenefitRequest,
+  RedemptionOutcome,
+} from "./types";
 
 /**
- * The contract the UI talks to. Production will swap `mockClubService` for
- * an implementation that calls a custom Evangelou Club REST API (which in
- * turn talks to WordPress/Paid Memberships Pro/FluentCRM/WooCommerce) — the
- * screens only ever import `clubService` below, never the mock directly, so
- * that swap should not require touching any component. See
- * docs/evangelou-club-api.md for the exact REST contract this mirrors, and
- * restClubService.ts for what the future implementation looks like.
+ * The contract the UI talks to. The screens only ever import `clubService`
+ * below, never an implementation directly. See docs/evangelou-club-api.md
+ * for the REST contract this mirrors, and restClubService.ts for the
+ * (not yet enabled) REST implementation.
  */
 export interface ClubService {
   findMemberByPhone(phone: string): Promise<MemberLookup>;
   findMemberByQrToken(token: string): Promise<MemberLookup>;
   getMemberStatus(memberId: string): Promise<MemberBenefitStatus | null>;
-  redeemBenefit(memberId: string, benefitType: BenefitType): Promise<MemberBenefitStatus>;
+  /** Coffees staff may record. The server stays authoritative (invalid_coffee). */
+  getCoffeeOptions(): Promise<CoffeeOption[]>;
+  /**
+   * Redeems one benefit. `request.requestId` is owned by the CALLER and must
+   * be reused for every retry of the same intent (redemptionIntent.ts).
+   * Throws ClubApiError on any failure.
+   */
+  redeemBenefit(request: RedeemBenefitRequest): Promise<RedemptionOutcome>;
 }
 
-const REDEMPTIONS_KEY = "evaggelou-club-redemptions";
-
-interface RedemptionRecord {
-  dateKey: string;
-  redeemedAtISO: string;
+export interface MockClubServiceOptions {
+  /** Defaults to browser localStorage (or none outside a browser). */
+  storage?: MockStorage | null;
+  now?: () => Date;
+  /** Simulated latency so the demo shows loading states. */
+  latencyMs?: number;
 }
 
-type RedemptionStore = Partial<Record<string, RedemptionRecord>>;
+/**
+ * Sales-demo implementation. Simulates the Task 1B engine's rules —
+ * selected coffee, one per member per Athens day, same-request replay,
+ * idempotency_key_reused, inactive membership — in localStorage.
+ * MOCK ONLY: not concurrency-safe and not shared between devices.
+ */
+export function createMockClubService(options: MockClubServiceOptions = {}): ClubService {
+  const storage = () => (options.storage === undefined ? browserStorage() : options.storage);
+  const now = options.now ?? (() => new Date());
+  const latencyMs = options.latencyMs ?? 350;
 
-function readRedemptions(): RedemptionStore {
-  try {
-    const raw = localStorage.getItem(REDEMPTIONS_KEY);
-    return raw ? (JSON.parse(raw) as RedemptionStore) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeRedemptions(store: RedemptionStore): void {
-  try {
-    localStorage.setItem(REDEMPTIONS_KEY, JSON.stringify(store));
-  } catch {
-    // localStorage unavailable (private mode etc.) — redemption just won't
-    // persist across a reload, which is an acceptable demo fallback. This
-    // whole read/write pair disappears in production: the WordPress plugin
-    // owns a real redemptions table instead (docs §20), enforced with a
-    // unique (member_ref, benefit_type, business_date) constraint so two
-    // tills redeeming at once can't both succeed.
-  }
-}
-
-/** Member 2 always starts each new calendar day already having used today's
- * coffee, so the demo can show that state without a live redemption first. */
-function ensureSeedRedemption(): void {
-  const store = readRedemptions();
-  const existing = store[SEEDED_USED_MEMBER_ID];
-  if (existing && existing.dateKey === todayKey()) return;
-
-  const [hours, minutes] = SEEDED_USED_TIME.split(":").map(Number);
-  const seededAt = new Date();
-  seededAt.setHours(hours, minutes, 0, 0);
-
-  store[SEEDED_USED_MEMBER_ID] = { dateKey: todayKey(), redeemedAtISO: seededAt.toISOString() };
-  writeRedemptions(store);
-}
-
-function benefitStatusFor(member: MockMemberRecord): MemberBenefitStatus {
-  const businessDate = todayKey();
-  if (member.status !== "active") {
-    return { state: "unavailable", businessDate, redeemedAt: null, reason: "membership_inactive" };
+  function delay<T>(value: T): Promise<T> {
+    if (latencyMs <= 0) return Promise.resolve(value);
+    return new Promise((resolve) => setTimeout(() => resolve(value), latencyMs));
   }
 
-  const record = readRedemptions()[member.id];
-  if (record && record.dateKey === businessDate) {
-    return { state: "used", businessDate, redeemedAt: record.redeemedAtISO };
+  /** Member 2 always starts each new day already having used today's coffee. */
+  function ensureSeedRedemption(): void {
+    const today = todayKey(now());
+    const store = readMockStore(storage());
+    const key = dayKey(SEEDED_USED_MEMBER_ID, "free_coffee", today);
+    if (store.byDay[key]) return;
+    const [hours, minutes] = SEEDED_USED_TIME.split(":").map(Number);
+    const seededAt = new Date(now().getTime());
+    seededAt.setHours(hours, minutes, 0, 0);
+    store.byDay[key] = {
+      memberId: SEEDED_USED_MEMBER_ID,
+      benefitType: "free_coffee",
+      businessDate: today,
+      redeemedAt: seededAt.toISOString(),
+      coffeeCode: "freddo_espresso",
+      requestId: null,
+      fingerprint: null,
+    };
+    writeMockStore(storage(), store, today);
   }
-  return { state: "available", businessDate, redeemedAt: null };
-}
 
-/** Simulates realistic network latency so the demo shows its loading states. */
-function delay<T>(value: T, ms = 350): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
-}
+  function benefitStatusFor(member: MockMemberRecord): MemberBenefitStatus {
+    const businessDate = todayKey(now());
+    if (member.status !== "active") {
+      return { state: "unavailable", businessDate, redeemedAt: null, reason: "membership_inactive", coffeeCode: null };
+    }
+    const record = readMockStore(storage()).byDay[dayKey(member.id, "free_coffee", businessDate)];
+    if (record) {
+      return { state: "used", businessDate, redeemedAt: record.redeemedAt, coffeeCode: record.coffeeCode };
+    }
+    return { state: "available", businessDate, redeemedAt: null, coffeeCode: null };
+  }
 
-/** What `POST /members/lookup` would return as `member` — masks the phone
- * and drops the QR token, exactly like the production API would (see
- * docs/evangelou-club-api.md §2). This is the one place a raw
- * `MockMemberRecord` is allowed to become a public `ClubMember`. */
-function toClubMember(record: MockMemberRecord): ClubMember {
+  /** Masks the phone and drops the QR token, exactly like the production API. */
+  function toClubMember(record: MockMemberRecord): ClubMember {
+    return {
+      id: record.id,
+      name: record.name,
+      phoneMasked: maskPhone(record.phone),
+      status: record.status,
+      validUntil: record.validUntil,
+    };
+  }
+
+  function lookup(record: MockMemberRecord | undefined): MemberLookup {
+    if (!record) return { member: null, benefit: null };
+    return { member: toClubMember(record), benefit: benefitStatusFor(record) };
+  }
+
+  function outcomeFrom(record: MockRedemptionRecord, requestId: string, replayed: boolean): RedemptionOutcome {
+    return {
+      benefit: { state: "used", businessDate: record.businessDate, redeemedAt: record.redeemedAt, coffeeCode: record.coffeeCode },
+      requestId,
+      replayed,
+    };
+  }
+
   return {
-    id: record.id,
-    name: record.name,
-    phoneMasked: maskPhone(record.phone),
-    status: record.status,
-    validUntil: record.validUntil,
+    async findMemberByPhone(phone) {
+      ensureSeedRedemption();
+      const normalized = normalizeGreekPhone(phone);
+      return delay(lookup(mockMembers.find((m) => m.phone === normalized)));
+    },
+
+    async findMemberByQrToken(token) {
+      ensureSeedRedemption();
+      return delay(lookup(mockMembers.find((m) => m.qrToken === token)));
+    },
+
+    async getMemberStatus(memberId) {
+      ensureSeedRedemption();
+      const record = mockMembers.find((m) => m.id === memberId);
+      return delay(record ? benefitStatusFor(record) : null);
+    },
+
+    async getCoffeeOptions() {
+      return delay(DEMO_COFFEE_OPTIONS.map((o) => ({ ...o })));
+    },
+
+    async redeemBenefit({ memberId, benefitType, coffeeCode, requestId }) {
+      // Same order as the PHP engine: validate → coffee → idempotency →
+      // member → membership → one-per-day insert.
+      await delay(null);
+      if (!isValidRequestId(requestId) || benefitType !== "free_coffee" || typeof memberId !== "string") {
+        throw clubError("invalid_request");
+      }
+      if (!DEMO_COFFEE_OPTIONS.some((o) => o.code === coffeeCode)) {
+        throw clubError("invalid_coffee");
+      }
+
+      const fingerprint = mockFingerprint(memberId, benefitType, coffeeCode);
+      const store = readMockStore(storage());
+      const previous = store.byRequest[requestId];
+      if (previous) {
+        if (previous.fingerprint === fingerprint) return outcomeFrom(previous, requestId, true);
+        throw clubError("idempotency_key_reused");
+      }
+
+      const member = mockMembers.find((m) => m.id === memberId);
+      if (!member) throw clubError("member_not_found");
+      if (member.status !== "active") throw clubError("membership_inactive", { status: member.status });
+
+      const instant = now();
+      const businessDate = todayKey(instant);
+      const key = dayKey(memberId, benefitType, businessDate);
+      const winner = store.byDay[key];
+      if (winner) {
+        throw clubError("benefit_already_redeemed", {
+          businessDate: winner.businessDate,
+          redeemedAt: winner.redeemedAt,
+          ...(winner.coffeeCode ? { coffeeCode: winner.coffeeCode } : {}),
+        });
+      }
+
+      const record: MockRedemptionRecord = {
+        memberId,
+        benefitType,
+        businessDate,
+        redeemedAt: instant.toISOString(),
+        coffeeCode,
+        requestId,
+        fingerprint,
+      };
+      store.byDay[key] = record;
+      store.byRequest[requestId] = record;
+      writeMockStore(storage(), store, businessDate);
+      return outcomeFrom(record, requestId, false);
+    },
   };
 }
 
-function lookup(record: MockMemberRecord | undefined): MemberLookup {
-  if (!record) return { member: null, benefit: null };
-  return { member: toClubMember(record), benefit: benefitStatusFor(record) };
-}
+export const mockClubService: ClubService = createMockClubService();
 
-export const mockClubService: ClubService = {
-  async findMemberByPhone(phone) {
-    ensureSeedRedemption();
-    const normalized = normalizeGreekPhone(phone);
-    const record = mockMembers.find((m) => m.phone === normalized);
-    return delay(lookup(record));
-  },
-
-  async findMemberByQrToken(token) {
-    ensureSeedRedemption();
-    const record = mockMembers.find((m) => m.qrToken === token);
-    return delay(lookup(record));
-  },
-
-  async getMemberStatus(memberId) {
-    ensureSeedRedemption();
-    const record = mockMembers.find((m) => m.id === memberId);
-    return delay(record ? benefitStatusFor(record) : null);
-  },
-
-  async redeemBenefit(memberId, _benefitType) {
-    const record = mockMembers.find((m) => m.id === memberId);
-    if (!record) throw new ClubApiError("member_not_found", "Το μέλος δεν βρέθηκε.");
-    if (record.status !== "active") {
-      throw new ClubApiError("membership_inactive", "Η συνδρομή δεν είναι ενεργή.");
-    }
-
-    const store = readRedemptions();
-    const existing = store[memberId];
-    const businessDate = todayKey();
-    if (existing && existing.dateKey === businessDate) {
-      // Someone else (another till, or a retried request) already redeemed
-      // this today — the same domain error production returns on a race
-      // between two cash registers (docs §9). Carries the existing
-      // redemption's details so the caller can sync the UI to "used"
-      // instead of treating this as an unknown failure.
-      throw new ClubApiError("benefit_already_redeemed", "Η σημερινή παροχή έχει ήδη χρησιμοποιηθεί.", {
-        businessDate,
-        redeemedAt: existing.redeemedAtISO,
-      });
-    }
-
-    const redeemedAtISO = new Date().toISOString();
-    store[memberId] = { dateKey: businessDate, redeemedAtISO };
-    writeRedemptions(store);
-    return delay({ state: "used", businessDate, redeemedAt: redeemedAtISO });
-  },
-};
-
+/** The one switch point. Stays on the mock until auth, same-origin routing
+ * and staging are in place (docs §3, deployment blockers). */
 export const clubService: ClubService = mockClubService;
 
 export { DEMO_QR_TOKEN };
 
-/** Presentation-only aid for the sales demo — a cheat sheet the presenter
- * can open on the lookup screen instead of memorizing numbers. Safe to
- * delete along with its one call site in ClubHome.tsx once this is no
- * longer a sales demo. */
+/** Presentation-only aid for the sales demo. */
 export interface DemoPhoneHint {
   phone: string;
   label: string;
@@ -169,7 +216,5 @@ export const DEMO_PHONE_HINTS: DemoPhoneHint[] = [
   { phone: mockMembers[2].phone, label: "Ληγμένη συνδρομή" },
 ];
 
-/** What the UI shows for any lookup failure — mock mode never actually
- * throws here, but a future REST-backed service will, and the cashier
- * should never see a raw technical error. */
+/** What the UI shows for any lookup failure — never a raw technical error. */
 export const CLUB_LOOKUP_ERROR_MESSAGE = "Δεν ήταν δυνατός ο έλεγχος του μέλους. Δοκιμάστε ξανά.";

@@ -1,17 +1,28 @@
 import type { MembershipStatus } from "./types";
 
-/** "2026-10-15" -> "15 Οκτωβρίου 2026" */
-export function formatGreekLongDate(isoDate: string): string {
-  return new Date(`${isoDate}T00:00:00`).toLocaleDateString("el-GR", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+/**
+ * "2026-10-15" or an ISO instant such as "2026-10-15T23:59:59+03:00"
+ * -> "15 Οκτωβρίου 2026". A plain date is shown as-is; an instant is shown
+ * as its Europe/Athens calendar day (the REST API sends instants).
+ */
+export function formatGreekLongDate(isoDateOrInstant: string): string {
+  const options: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric" };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoDateOrInstant)) {
+    return new Date(`${isoDateOrInstant}T12:00:00Z`).toLocaleDateString("el-GR", { ...options, timeZone: "UTC" });
+  }
+  return new Date(isoDateOrInstant).toLocaleDateString("el-GR", { ...options, timeZone: "Europe/Athens" });
 }
 
-/** ISO timestamp -> "10:42" in the viewer's local time. */
+/** The shop's business timezone: the daily benefit resets at Athens midnight. */
+export const BUSINESS_TIME_ZONE = "Europe/Athens";
+
+/** ISO timestamp (with offset) -> "10:42" in Athens time, whatever the device's zone. */
 export function formatClockTime(isoTimestamp: string): string {
-  return new Date(isoTimestamp).toLocaleTimeString("el-GR", { hour: "2-digit", minute: "2-digit" });
+  return new Date(isoTimestamp).toLocaleTimeString("el-GR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: BUSINESS_TIME_ZONE,
+  });
 }
 
 /** "6900000001" -> "69••••••01" — shows just enough to confirm identity.
@@ -33,9 +44,20 @@ export function membershipBadgeLabel(status: MembershipStatus): string {
   return "Μη ενεργό μέλος";
 }
 
-/** Local calendar-day key (not UTC) — a redemption "expires" when this rolls over. */
-export function todayKey(): string {
-  return new Date().toLocaleDateString("sv-SE");
+/** Europe/Athens calendar day (YYYY-MM-DD) of an instant — the benefit's
+ * business date. Independent of the device's own timezone. */
+export function athensBusinessDate(instant: Date): string {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(instant);
+}
+
+/** Today's Athens business date — a redemption "expires" when this rolls over. */
+export function todayKey(now: Date = new Date()): string {
+  return athensBusinessDate(now);
 }
 
 /**

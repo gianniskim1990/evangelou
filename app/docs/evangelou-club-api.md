@@ -1,36 +1,38 @@
 # Evangelou Club API — v1 contract
 
-**Status:** design only. No backend exists yet. This document specifies the
-REST API a future custom WordPress plugin must implement so the existing
-`/club` React interface (currently backed by `mockClubService`, see
-`src/club/clubService.ts`) can be pointed at it later by swapping one
-export — no screen should need to change.
+**Status:** pre-release design. No WordPress REST controller exists yet. The
+PHP domain engine behind the redeem endpoint exists and is tested in
+isolation (Task 1B, `wordpress/evangelou-club/`), but it is not wired to
+WordPress. The React `/club` screens run on `mockClubService`; the REST
+adapter (`src/club/restClubService.ts`) is implemented and tested against a
+fake `fetch` only, and is **not enabled**.
 
-## Architecture
+There is no live v1 consumer, so pre-release changes are allowed — every
+change is listed in §15 rather than made silently.
+
+## Architecture and translation boundary
 
 ```text
-Evangelou React App  (/club, Vercel)
-        │  authenticated staff session (see §7 Authentication)
-        ▼
-Custom Evangelou Club REST API   ── OUR contract, this document ──
-  namespace: evangelou-club/v1
-        │  in-process PHP calls (same WordPress install — no HTTP
-        │  round-trip back to itself)
-        ▼
-Custom WordPress plugin (integration layer)
-        │
-        ├── Paid Memberships Pro   → membership status, dates
-        ├── FluentCRM              → contact identity (name/phone/email)
-        ├── WooCommerce            → customer/order context where relevant
-        └── Club redemptions table → OUR data, owned by the plugin (§10)
+React /club screens            camelCase domain types (src/club/types.ts)
+      ▲
+React DTO mapper               src/club/restClubService.ts — the ONLY code that
+      ▲                        sees wire JSON; validates, then maps snake → camel
+Public JSON (this document)    namespace evangelou-club/v1, snake_case
+      ▲
+WordPress REST controller      FUTURE: auth, nonce, rate limit, HTTP status,
+      ▲                        UTC → ISO 8601, field renaming (§12)
+PHP domain engine              EVC_Redemption_Service → EVC_Redemption_Result
+      ▲                        (Task 1B, internal field names)
+Separate Club database         ledger, idempotency, audit (Task 1B schema)
 ```
 
+The PHP result fields are **internal**; they are not the public API. The
+controller translates them (§12), and the React mapper translates the
+public JSON into domain types. Neither side leaks its internal names.
+
 The React app **only ever calls `evangelou-club/v1`**. It never calls
-FluentCRM's, Paid Memberships Pro's, or WooCommerce's REST APIs directly,
-and never holds credentials for any of them. Because the plugin runs
-inside the same WordPress process as those systems, it should prefer their
-internal PHP APIs/functions/models over making WordPress issue HTTP
-requests back to itself.
+FluentCRM, Paid Memberships Pro or WooCommerce APIs and never holds
+credentials for them.
 
 ---
 
@@ -40,110 +42,73 @@ requests back to itself.
 https://<store-domain>/wp-json/evangelou-club/v1
 ```
 
-All endpoints below are relative to this base. The namespace is versioned
-(`v1`) precisely so it doesn't have to stay this way forever: **a breaking
-change to any request/response shape, status code, or error code ships as
-`evangelou-club/v2`, not as a silent change to `v1`.** Additive,
-backward-compatible changes (a new optional field, a new error `code` the
-client doesn't recognize yet) are fine within `v1`.
+A breaking change to a request/response shape, status code or error code
+after first release ships as `evangelou-club/v2`. Additive changes (a new
+optional field, a new error code) are fine within v1. Clients must ignore
+unknown response fields.
 
 ## 2. Opaque identifiers
 
-The frontend never needs to know a WordPress user ID, FluentCRM subscriber
-ID, PMPro membership ID, or WooCommerce customer ID. The plugin mints and
-owns one opaque, application-level identifier per member:
-
 ```json
-{ "member_id": "mem_7gH29xQ4kR" }
+{ "member_id": "mem_0123456789abcdef0123456789abcdef" }
 ```
 
-`member_id` may internally map to a WordPress user (and probably will),
-but the client must treat it purely as an opaque string — never parse it,
-never assume a format beyond "string." The same applies to QR identity
-(§14): a scanned token is just another opaque string the client passes
-back verbatim.
+`member_id` is the stable public id minted by the Club plugin
+(`evc_members.member_public_id`: `mem_` + 32 lowercase hex). It never
+changes for a member and never reveals a WordPress, FluentCRM, PMPro or
+WooCommerce id. Clients treat it as an opaque string (URL-encoded in paths).
+QR tokens (§11) are likewise opaque strings passed back verbatim.
 
-## 3. Authentication
+## 3. Authentication (not implemented — release blocker)
 
-**In production, no endpoint below is public.** Both `/members/lookup` and
-the redeem endpoint expose membership information and can create a
-real-world side effect (giving away a free coffee), so both require an
-authenticated staff session:
+**No endpoint is public in production.** Every endpoint requires an
+authenticated staff session with the right capability:
 
-```text
-React Club Staff App
-        │  authenticated staff session
-        ▼
-Evangelou Club API
-```
-
-`Authentication required in production.` applies to every endpoint in
-this document. The exact mechanism (WordPress cookie session via a staff
-login screen, a short-lived token issued after login, etc.) is an
-implementation decision left for the phase that builds real staff auth —
-**out of scope here.** What's already decided, and non-negotiable:
-
-- **No static WordPress Application Password, API key, or any other
-  long-lived secret may ever ship inside the Vercel/browser bundle.**
-  Anything in frontend JavaScript is public by definition.
-- The skeleton in `src/club/restClubService.ts` calls `fetch(..., {
-  credentials: "include" })`, i.e. it assumes a same-site session cookie
-  set by a real login flow — not an `Authorization` header holding a
-  fixed value.
-- Unauthenticated or expired-session requests return `401` with
-  `error.code: "unauthorized"`; authenticated-but-not-permitted requests
-  (wrong role) return `403` with `"forbidden"`.
-
-The demo (`mockClubService`) has no auth at all — that's expected and
-fine for a sales demo; it stops being fine the moment this API is real.
+- `401 unauthorized`: no or expired staff session.
+- `403 forbidden`: authenticated but not permitted.
+- **No static Application Password, API key or other secret may ever ship
+  in the browser bundle.** The adapter sends no `Authorization` header.
+- The adapter uses `credentials: "include"` (cookie session). This only
+  works if the staff app is served same-origin with WordPress (or same-site
+  with an explicit CORS allowlist) **and** a WordPress REST nonce is sent.
+  Neither exists yet.
+- **Deferred blockers (owner decisions D1/D2):** the current Vercel
+  deployment rewrites `/wp-json/*` to `index.html` (so the relative base
+  URL cannot reach WordPress), and WordPress cookie auth needs an
+  `X-WP-Nonce`. The adapter treats an HTML 200 reply as `invalid_response`
+  so this misrouting can never be mistaken for success.
 
 ## 4. Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/members/lookup` | Resolve a member by phone or QR token |
-| `POST` | `/members/{member_id}/benefits/{benefit_type}/redeem` | Redeem today's benefit |
+| `POST` | `/members/{member_id}/benefits/{benefit_type}/redeem` | Redeem today's benefit with a selected coffee |
+| `GET`  | `/coffee-options` | Coffees staff may record (proposed, §7.1) |
 
 ### 4.1 `POST /members/lookup`
 
-Phone numbers are **never** put in a URL query string — they'd end up in
-server access logs and browser history. Both lookup methods are `POST`
-with a JSON body, and the body supports **exactly one** method at a time;
-sending both `phone` and `qr_token` (or neither) is a `400
-invalid_request`.
-
-**By phone:**
+Phone numbers are **never** put in a URL. The body carries exactly one
+method; both or neither is `400 invalid_request`.
 
 ```json
-{
-  "method": "phone",
-  "phone": "+30 690 000 0001"
-}
+{ "method": "phone", "phone": "+30 690 000 0001" }
 ```
-
-**By QR:**
 
 ```json
-{
-  "method": "qr",
-  "qr_token": "evc_opaque_token_here"
-}
+{ "method": "qr", "qr_token": "evc_<48 lowercase hex>" }
 ```
 
-The plugin normalizes Greek mobile numbers server-side regardless of what
-the client sent (see §13). The frontend's own `normalizeGreekPhone()`
-(`src/club/format.ts`) exists purely so the search button/hint text feels
-responsive — **it is UX only and must never be trusted as the
-authoritative validation layer.** A malformed phone after server-side
-normalization is a `400` with `error.code: "invalid_phone"`; an
-unrecognized/malformed QR token is `400 invalid_qr`.
+The server normalises Greek mobiles; the frontend's `normalizeGreekPhone()`
+is UX only. Malformed phone → `400 invalid_phone`; malformed QR →
+`400 invalid_qr`.
 
-**Success — `200 OK`:**
+**`200 OK`:**
 
 ```json
 {
   "member": {
-    "member_id": "mem_abc123",
+    "member_id": "mem_0123456789abcdef0123456789abcdef",
     "display_name": "Μαρία Παπαδοπούλου",
     "phone_masked": "69••••••01"
   },
@@ -154,88 +119,87 @@ unrecognized/malformed QR token is `400 invalid_qr`.
   },
   "benefits": {
     "free_coffee": {
-      "state": "available",
-      "business_date": "2026-09-15",
-      "redeemed_at": null
+      "state": "used",
+      "business_date": "2026-10-09",
+      "redeemed_at": "2026-10-09T10:42:16+03:00",
+      "coffee_code": "freddo_espresso"
     }
   }
 }
 ```
 
-- Timestamps are ISO 8601 with an explicit offset (`+03:00` for
-  Europe/Athens; `+02:00` in winter — always compute and send the offset,
-  never assume the client will).
-- `business_date` fields are plain `YYYY-MM-DD`, computed in the
-  **Europe/Athens** business timezone, not UTC and not the client's local
-  date. This matters for "today's benefit" logic close to midnight.
-- The response returns **only** what the Club UI needs. No email, no full
-  phone, no WordPress/PMPro/FluentCRM/WooCommerce internal IDs, no raw
-  PMPro objects — see §13.
+- `business_date`: `YYYY-MM-DD`, Europe/Athens calendar day.
+- Every instant carries an explicit offset (§12). The React mapper
+  **rejects** offset-less timestamps as `invalid_response`.
+- `coffee_code` is present when `state` is `used` (may be `null` for
+  legacy records); omitted or `null` otherwise.
+- No email, full phone, internal ids or raw PMPro objects (§13).
 
-**Member not found — `404 Not Found`:**
-
-```json
-{
-  "error": {
-    "code": "member_not_found",
-    "message": "Δεν βρέθηκε μέλος."
-  }
-}
-```
-
-Production returns a real `404` here, **not** `200` with `member: null`.
-(`mockClubService` currently resolves to `{ member: null, benefit: null }`
-instead of throwing — that's an acceptable mock-only shortcut documented
-in §11, not something to replicate in the real API. The
-`restClubService.ts` skeleton shows the adapter that absorbs this
-difference so every screen's existing `if (!member)` check keeps working
-unchanged either way.)
+**Member not found — `404`** with `error.code: "member_not_found"`. The
+React adapter turns exactly this (envelope + 404) into `{ member: null }`;
+a bare 404 without the envelope (missing route, proxy page) is
+`invalid_response`, never "not found".
 
 ### 4.2 `POST /members/{member_id}/benefits/{benefit_type}/redeem`
 
 ```text
-POST /wp-json/evangelou-club/v1/members/mem_abc123/benefits/free_coffee/redeem
+POST /wp-json/evangelou-club/v1/members/mem_0123…cdef/benefits/free_coffee/redeem
 ```
-
-`benefit_type` is `free_coffee` today; the path segment exists so adding a
-second benefit later doesn't change the URL shape.
 
 **Request:**
 
 ```json
-{ "request_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6" }
-```
-
-`request_id` is a client-generated UUID (`crypto.randomUUID()`) and is
-**required** — it makes the operation idempotent. If a till's network
-times out after the redemption actually succeeded server-side and it
-retries the exact same request, the server must recognize the repeated
-`request_id` and return the **original** result rather than creating a
-second redemption. See §5 for how this is enforced at the data level.
-
-**Success:** choose one HTTP convention and hold to it across the whole
-API — this contract uses **`200 OK`** for the redeem endpoint (it's
-updating/reading the state of an existing benefit resource, not creating
-a new "thing" from the caller's perspective; `201 Created` is reserved for
-endpoints that mint a brand-new resource, which this one conceptually
-doesn't — a redemption row is an implementation detail, not something the
-client addresses afterward).
-
-```json
 {
-  "member_id": "mem_abc123",
-  "benefit_type": "free_coffee",
-  "state": "used",
-  "business_date": "2026-09-15",
-  "redeemed_at": "2026-09-15T12:08:22+03:00"
+  "request_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "coffee_code": "freddo_espresso"
 }
 ```
 
-**Already redeemed today — `409 Conflict`:**
+| Field | Rule |
+|---|---|
+| `request_id` | Required. Lowercase RFC 4122 **v4** UUID. One per logical redemption intent; reused unchanged on every retry of that intent (§5). |
+| `coffee_code` | Required. Must be in the server's allowlist (§7.1), else `400 invalid_coffee`. |
 
-If a different till (or a retried request with a *different*
-`request_id` — a genuinely separate attempt, not a retry) already redeemed
-this member's coffee today:
+The staff actor is taken from the authenticated session server-side —
+**never** from the request body.
+
+**Success — `200 OK`** (also for a replay of an already-committed request):
+
+```json
+{
+  "member_id": "mem_0123456789abcdef0123456789abcdef",
+  "benefit_type": "free_coffee",
+  "state": "used",
+  "business_date": "2026-10-09",
+  "redeemed_at": "2026-10-09T13:00:00+03:00",
+  "coffee_code": "freddo_espresso",
+  "request_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "replayed": false
+}
+```
+
+- `replayed: true` means the server recognised a retry of a committed
+  request and returned the **original** result (same `business_date`,
+  `redeemed_at`, `coffee_code`), even if the retry arrives after Athens
+  midnight or after the membership lapsed.
+- The React mapper checks that `member_id`, `benefit_type`, `request_id`
+  and `coffee_code` echo the request; any mismatch is `invalid_response`.
+
+**Failures** (envelope §8):
+
+| HTTP | `code` | Meaning for this request | `details` |
+|---|---|---|---|
+| 400 | `invalid_request` | Malformed body / ids | — |
+| 400 | `invalid_coffee` | Coffee not in allowlist | — |
+| 404 | `member_not_found` | Unknown or disabled member | — |
+| 409 | `membership_inactive` | Not an active, verified-paid, unexpired membership at server time | `status` |
+| 409 | `benefit_already_redeemed` | Today's benefit already used by **another** request | `business_date`, `redeemed_at`, optional `coffee_code` |
+| 409 | `idempotency_key_reused` | `request_id` was already used with a **different** payload (member, coffee or staff actor) | none — never another request's data |
+| 401 / 403 | `unauthorized` / `forbidden` | §3 | — |
+| 429 | `rate_limited` | Not processed; retry later | optional `retry_after_seconds` (+ `Retry-After` header) |
+| 500 | `server_error` | Includes an **unknown COMMIT outcome**: retry with the same `request_id` | — |
+
+`benefit_already_redeemed` example:
 
 ```json
 {
@@ -243,86 +207,52 @@ this member's coffee today:
     "code": "benefit_already_redeemed",
     "message": "Η σημερινή παροχή έχει ήδη χρησιμοποιηθεί.",
     "details": {
-      "business_date": "2026-09-15",
-      "redeemed_at": "2026-09-15T10:42:16+03:00"
+      "business_date": "2026-10-09",
+      "redeemed_at": "2026-10-09T10:42:16+03:00",
+      "coffee_code": "cappuccino"
     }
   }
 }
 ```
 
-**How the frontend must interpret this:** this is not an unknown failure.
-`ClubMemberResult.tsx`'s `confirmRedeem` already demonstrates the correct
-handling — on `benefit_already_redeemed`, read `error.details` and call
-`onRedeemed({ state: "used", ... })` to sync the UI to the real state
-(closing the confirm dialog gracefully) instead of showing a scary error.
-The mock reproduces this exact code path today (see `clubService.ts`'s
-`redeemBenefit`, which throws `ClubApiError("benefit_already_redeemed",
-...)` when a second redemption attempt hits an existing same-day record).
+The UI syncs to the "used" state using these details. If `redeemed_at` is
+absent or malformed, the UI shows "used" **without** a time — it never
+invents one. (The Task 1B engine does not currently return the winner's
+coffee in its result details, so `coffee_code` is optional.)
 
-**Inactive membership — `409 Conflict`:**
+**The backend re-checks eligibility at redemption time**, regardless of
+what lookup said earlier.
 
-```json
-{
-  "error": {
-    "code": "membership_inactive",
-    "message": "Η συνδρομή δεν είναι ενεργή.",
-    "details": { "status": "expired" }
-  }
-}
-```
+## 5. Idempotency, retries and concurrency
 
-`409` (not `403`) because the *request itself* is well-formed and the
-caller is authorized to attempt it — the conflict is with the current
-state of the membership resource, same category as
-`benefit_already_redeemed`. **The backend always re-checks eligibility at
-redemption time**, regardless of what the lookup response said a moment
-earlier or what the UI button's disabled state implies. This is what
-protects against:
-
-- a stale UI (member's tab open for minutes before pressing redeem),
-- multiple devices/tills racing each other,
-- a membership expiring in the gap between lookup and redemption.
-
-The frontend must never treat "the button was rendered enabled" as proof
-the redemption will succeed.
-
-## 5. Concurrency: one-per-day enforcement is server-authoritative
-
-Production correctness must **not** rely on frontend state — `localStorage`
-is a demo-only stand-in (`src/club/clubService.ts`) and disappears
-entirely once this API is real. The invariant the plugin must enforce:
+Invariant (database-enforced in Task 1B by
+`UNIQUE (member_id, benefit_type, business_date)`):
 
 ```text
-one member + one benefit type + one business date
-  = maximum one successful redemption
+one member + one benefit type + one Europe/Athens business date
+  = at most one successful redemption
 ```
 
-This must be **concurrency-safe**: two tills pressing "Καταχώρηση" within
-the same second must not both succeed. The naive approach —
+`request_id` (UNIQUE in the ledger, bound to a SHA-256 fingerprint of
+member + benefit + coffee + staff actor; **no date**) makes retries safe.
 
-```php
-if (!$already_used) {
-    insert_redemption();
-}
-```
+**Client rules** (`src/club/redemptionIntent.ts`):
 
-— has a race condition (both requests can read `$already_used = false`
-before either writes). **Recommended fix: a database-level unique
-constraint**, not an application-level check-then-insert:
-
-```text
-UNIQUE (member_ref, benefit_type, business_date)
-```
-
-Let the second concurrent `INSERT` fail on the constraint, catch that
-specific failure, and translate it into the `409 benefit_already_redeemed`
-response above (looking up the winning row's `redeemed_at` for the
-`details`). This is the only fully race-free approach; anything based on a
-prior `SELECT` is not.
-
-`request_id` gets its own uniqueness handling too (§7/§20) — it protects
-against the *same* logical attempt being retried by a flaky network,
-which is a different failure mode than two *different* tills racing.
+- Exactly one UUID per logical intent (member + benefit + coffee). The
+  caller owns it; `redeemBenefit` never generates one.
+- Re-renders never regenerate it; it is independent of the clock, so a
+  retry after Athens midnight reuses it.
+- Outcome unknown → keep the intent open and retry with the **same** id:
+  `network_error`, `invalid_response`, `server_error`, `rate_limited`,
+  `unauthorized`.
+- Definitive answer → close the intent: success, `benefit_already_redeemed`,
+  `membership_inactive`, `invalid_coffee`, `idempotency_key_reused`,
+  `invalid_request`, `member_not_found`, `forbidden`.
+- Changing the coffee or the member opens a **new** intent with a new id.
+  If the abandoned intent had committed, the server answers
+  `benefit_already_redeemed` — no double coffee.
+- No automatic retries. Retry is an explicit staff action ("Επανάληψη").
+- One attempt in flight per screen; double taps are ignored.
 
 ## 6. Membership status contract
 
@@ -330,315 +260,164 @@ which is a different failure mode than two *different* tills racing.
 type MembershipStatus = "active" | "expired" | "cancelled" | "inactive";
 ```
 
-This is the **backend-authoritative** status — Paid Memberships Pro is the
-source of truth for it, and the plugin should pass through whatever PMPro
-state machine produces (mapped into these four buckets; PMPro's own
-statuses may be more granular internally, e.g. distinguishing an
-admin-cancelled membership from a payment-failed one — both land on
-`"cancelled"` or `"inactive"` here unless a real product reason emerges
-to split them further).
+Mapped by the controller from the engine's `EVC_Entitlement`
+(`public_status()`):
 
-This is deliberately richer than what a cashier needs to *see*. The
-**cashier UI state** is a presentation-level simplification of this value,
-not a separate wire type:
-
-| Backend `status` | Cashier sees |
+| Engine state | Public `status` |
 |---|---|
-| `active` | "Ενεργό μέλος" badge; benefit section is live |
-| `expired` | "Η συνδρομή έχει λήξει" badge + expiry date |
-| `cancelled` | falls back to a generic "Μη ενεργό μέλος" treatment (same as `inactive`) |
-| `inactive` | same generic "Μη ενεργό μέλος" treatment |
+| active + verified payment + known expiry + now < expiry | `active` |
+| expired, or active past its end date | `expired` |
+| cancelled | `cancelled` |
+| pending payment, payment failed, refunded, unverified payment, unknown expiry, no membership | `inactive` |
 
-(`src/club/format.ts`'s `membershipBadgeLabel()` implements exactly this
-table.) **Only `"active"` may redeem a benefit** — everything else is a
-`membership_inactive` redemption failure regardless of which of the three
-non-active values it is.
-
-**`valid_until` is nullable — this is load-bearing, not an edge case.**
-Paid Memberships Pro supports an active recurring membership with no fixed
-end date at all. The API must be able to return:
-
-```json
-{ "status": "active", "valid_until": null }
-```
-
-and the UI renders this as **"Ενεργή συνδρομή"** rather than assuming
-every active member has an expiration date to show. The three presentation
-cases the UI actually implements (`ClubMemberResult.tsx`):
-
-| `status` | `valid_until` | Cashier sees |
-|---|---|---|
-| `active` | a date | "Ενεργό έως 15 Οκτωβρίου 2026" |
-| `active` | `null` | "Ενεργή συνδρομή" |
-| `expired` | a date | "Η συνδρομή έληξε στις 31 Αυγούστου 2026" |
-
-(A non-`active`, non-`expired` status with a `null` `valid_until` falls
-back to a generic "Η συνδρομή δεν είναι ενεργή" — not a scenario any demo
-member currently exercises, but the component handles it.)
+Only `active` may redeem. The engine's finer `reason`
+(`pending_payment`, `payment_unverified`, …) is **not** exposed publicly.
+`valid_until` is nullable in the schema, but Phase 1 manual one-month
+memberships always have one; a missing expiry is never eligible.
 
 ## 7. Benefit contract
 
 ```ts
 type BenefitType = "free_coffee";
-```
-
-One value today, but every endpoint above is already shaped around
-`benefit_type` as a path/response field specifically so a second benefit
-doesn't change the contract's *shape* later — only its data.
-
-```ts
 type BenefitState = "available" | "used" | "unavailable";
-```
-
-```ts
-// The UI must never invent a reason string — this is the closed set.
 type BenefitUnavailableReason = "membership_inactive";
 ```
 
-**Available:**
+`business_date` and `redeemed_at` are always present (`redeemed_at: null`
+until used). `coffee_code` accompanies `used`.
 
-```json
-{ "state": "available", "business_date": "2026-09-15", "redeemed_at": null }
+### 7.1 Coffee options (proposed)
+
+```text
+GET /coffee-options  →  200 { "coffee_options": [ { "code": "espresso", "label": "Espresso" } ] }
 ```
 
-**Used:**
-
-```json
-{
-  "state": "used",
-  "business_date": "2026-09-15",
-  "redeemed_at": "2026-09-15T10:42:16+03:00"
-}
-```
-
-**Unavailable** (membership isn't active — `state` and `reason` are
-independent fields precisely so a future second reason doesn't require a
-new `state` value):
-
-```json
-{
-  "state": "unavailable",
-  "business_date": "2026-09-15",
-  "redeemed_at": null,
-  "reason": "membership_inactive"
-}
-```
-
-Note `business_date` and `redeemed_at` are **always present** in every
-shape above (never an omitted key) — `redeemed_at` is `null` until the
-benefit is actually used. This is also how the TypeScript domain type
-models it (`MemberBenefitStatus.redeemedAt: string | null`, not optional).
+The server's allowlist is authoritative; the client never validates codes
+beyond "came from this list". **The production list is not decided (D3).**
+The demo uses `src/club/mockCoffeeCatalog.ts`, clearly marked as demo data,
+with the same codes as the Task 1B PHP test fixture.
 
 ## 8. Standard error envelope
 
-Every error response across the whole API, regardless of endpoint or
-status code, uses exactly one shape:
-
 ```json
-{
-  "error": {
-    "code": "machine_readable_code",
-    "message": "Safe Greek cashier-facing message",
-    "details": {}
-  }
-}
+{ "error": { "code": "machine_readable_code", "message": "Greek text", "details": {} } }
 ```
 
-`code` is what the frontend branches on (`ClubApiError.code` in
-`src/club/types.ts`); `message` is copy-ready Greek text the UI can
-display as-is; `details` is optional, structured, and code-specific (e.g.
-`benefit_already_redeemed`'s `redeemed_at`).
+- `details` keys are **snake_case** on the wire, always. Known keys:
+  `business_date`, `redeemed_at`, `coffee_code`, `status`,
+  `retry_after_seconds`.
+- The React adapter maps them to camelCase (`businessDate`, `redeemedAt`,
+  `coffeeCode`, `status`, `retryAfterSeconds`), validates each, and drops
+  unknown or malformed ones.
+- The adapter shows its **own** Greek message per code. Server `message`
+  text is never displayed, so PHP/SQL/proxy text cannot reach staff.
+- An envelope code is trusted only with its expected HTTP status (table in
+  §4.2); otherwise the status alone decides (`401`→`unauthorized`,
+  `403`→`forbidden`, `429`→`rate_limited`, `5xx`→`server_error`, anything
+  else → `invalid_response`).
 
-| HTTP | `code` | When |
-|---|---|---|
-| 400 | `invalid_request` | Malformed body — both/neither lookup method, missing `request_id`, etc. |
-| 400 | `invalid_phone` | Phone doesn't normalize to a plausible Greek mobile number |
-| 400 | `invalid_qr` | QR token isn't a recognizable token shape |
-| 404 | `member_not_found` | No member matches the phone/QR |
-| 409 | `membership_inactive` | Redemption attempted on a non-active membership |
-| 409 | `benefit_already_redeemed` | Redemption attempted on an already-used-today benefit |
-| — | `benefit_not_available` | Reserved for a future benefit-level gate beyond membership status (unused by `free_coffee` today — nothing currently returns it) |
-| 401 | `unauthorized` | No/expired staff session |
-| 403 | `forbidden` | Authenticated but not permitted |
-| 429 | `rate_limited` | Too many requests (brute-force phone/QR guessing protection) |
-| 500 | `server_error` | Anything unexpected |
+| HTTP | `code` |
+|---|---|
+| 400 | `invalid_request`, `invalid_phone`, `invalid_qr`, `invalid_coffee` |
+| 401 | `unauthorized` |
+| 403 | `forbidden` |
+| 404 | `member_not_found` |
+| 409 | `membership_inactive`, `benefit_already_redeemed`, `idempotency_key_reused`, `benefit_not_available` (reserved, unused) |
+| 429 | `rate_limited` |
+| 5xx | `server_error` |
 
-**The React UI must never display a raw PHP error, stack trace, SQL error,
-PMPro error, or FluentCRM error.** Every failure path funnels through this
-envelope; anything the plugin can't cleanly map becomes `500
-server_error` with a generic Greek message, never the underlying
-exception text.
+**Client-only codes** (never sent by the server): `network_error` (no
+response — outcome unknown) and `invalid_response` (non-JSON, wrong shape,
+echo mismatch, offset-less timestamp — outcome unknown).
 
 ## 9. Source-of-truth mapping
 
-**Customer/contact identity** — FluentCRM (contact record: name, email,
-phone, linked WordPress `user_id`) is primary, with WordPress user data
-and WooCommerce billing data as secondary/fallback sources depending on
-how a given member originally became known to the store. **The React app
-must never know which of these the phone was actually found in** — the
-plugin's lookup strategy is entirely its own implementation detail. It
-returns one normalized `member` object; that's the whole contract.
+- **Identity** — WordPress user, linked to FluentCRM contact. The lookup
+  strategy is the plugin's internal detail.
+- **Eligibility** — Paid Memberships Pro + WooCommerce (verified payment),
+  through the membership adapter. Never FluentCRM tags.
+- **Redemptions, coffee, idempotency, audit** — the separate Club database
+  (Task 1B schema). Not stored in CRM or PMPro meta.
 
-**Membership eligibility** — Paid Memberships Pro is authoritative for
-active/inactive, status, start date, and end date (when one exists). The
-plugin translates PMPro's structures into the stable `membership` schema
-in §6. **Raw PMPro objects are never returned to React.**
+## 10. Data model
 
-**Club benefit redemption** — this is Evangelou Club's own business logic,
-not FluentCRM's or PMPro's. Daily coffee usage is **not** stored as a
-FluentCRM custom field or a PMPro meta value merely because those plugins
-happen to be present — the plugin owns a dedicated redemptions table for
-it (§10). Mixing this into CRM/membership plugin data would make it
-fragile against those plugins' own updates and unrelated to what they're
-actually for.
+Implemented as migration `001_initial.sql` (Task 1B, CI-only so far):
+`evc_members`, `evc_qr_tokens`, `evc_redemptions` (ledger row includes
+`coffee_code`, `request_id`, `request_fingerprint`, staff id, membership
+snapshot, `redeemed_at_utc`), `evc_audit_events`, `evc_schema_migrations`.
+See `wordpress/evangelou-club/README.md`.
 
-## 10. Recommended data model (design only — no migration yet)
+## 11. QR architecture (design only)
 
-A dedicated table the plugin owns, conceptually:
+A QR encodes only an opaque token `evc_` + 48 lowercase hex (192-bit
+random). Only its SHA-256 is stored; at most one active token per member;
+rotation/revocation is a later task.
 
-```text
-evc_redemptions
-  id              bigint, PK
-  member_ref      varchar   -- however the plugin internally identifies a
-                             -- member (e.g. wp_users.ID) — never the
-                             -- public member_id directly if that's
-                             -- deliberately a separate opaque value
-  benefit_type    varchar   -- "free_coffee", ...
-  business_date   date      -- Europe/Athens business date, not UTC
-  redeemed_at     datetime  -- exact timestamp, with timezone handling
-  request_id      varchar   -- the idempotency key from §7
-  staff_user_id   bigint    -- which till/staff session redeemed it
-  created_at      datetime
+## 12. Controller translation rules (future WordPress REST controller)
 
-  UNIQUE (member_ref, benefit_type, business_date)   -- §5's race-free guarantee
-  UNIQUE (request_id)                                -- idempotent retries
-```
+| Engine (`EVC_Redemption_Result`) | HTTP | Public JSON |
+|---|---|---|
+| `redeemed` | 200 | success body, `replayed: false` |
+| `replayed` | 200 | success body, `replayed: true` |
+| `invalid_request` | 400 | `invalid_request` |
+| `invalid_coffee` | 400 | `invalid_coffee` |
+| `member_not_found` | 404 | `member_not_found` |
+| `membership_inactive` | 409 | `membership_inactive`, `details.status` (drop engine `reason`) |
+| `benefit_already_redeemed` | 409 | `details.business_date`, `details.redeemed_at` |
+| `idempotency_key_reused` | 409 | no details |
+| `server_error` | 500 | no details, generic message |
 
-The two unique constraints solve two different problems: the first
-enforces "max one redemption per member per benefit per day" even under
-concurrent requests; the second makes a retried request with the same
-`request_id` a safe no-op (catch the duplicate-key error, return the
-original row's result) rather than a second attempt that then correctly
-fails on the first constraint anyway — belt and suspenders, and the
-`request_id` one is what makes a *client-side* timeout-and-retry safe
-specifically.
+Field renames: `member_public_id` → `member_id`; `redeemed_at_utc` →
+`redeemed_at`.
 
-## 11. QR architecture (design only — no generation implemented yet)
+**Timestamps:** the engine stores and returns `redeemed_at_utc` as
+`Y-m-d H:i:s.u` **in UTC without a zone designator**. The controller must
+parse it explicitly as UTC and emit RFC 3339 with an explicit offset —
+Europe/Athens local time with its offset (e.g. `2026-10-09T13:00:00+03:00`),
+or UTC with `Z`. It must never emit the raw database string. Formatting must
+be deterministic so a replay returns byte-identical values.
 
-A member's QR encodes **only** an opaque, high-entropy token:
+The controller also: takes the staff id from the session; validates the
+nonce; rate-limits; maps any unexpected exception to `500 server_error`.
 
-```text
-evc_qr_9fJ2kX7mQpL4...
-```
+## 13. Privacy and logging
 
-It must **not** encode name, email, phone, WordPress user ID, membership
-expiry, or FluentCRM ID — anyone who photographs or screenshots the QR
-gets nothing but an opaque string. The backend resolves that token to a
-member via `/members/lookup` (`method: "qr"`, §4.1). Tokens should be:
+- No full phone numbers, emails or internal ids in responses or logs.
+- Phone numbers and QR tokens never in URLs, analytics or error trackers.
+- No full request/response payload logging.
 
-- **difficult to guess** — long, random, not derived from the member ID
-  or anything else guessable,
-- **revocable** — issuing a new token for a member must invalidate the
-  old one (lost card, compromised token),
-- **replaceable** — a member should be able to get a fresh QR without
-  losing their membership history.
+## 14. TypeScript domain types
 
-Nothing about token generation, storage, or the physical/digital card
-itself is implemented in this phase — this section specifies the contract
-the eventual generator must satisfy, not the generator.
+`src/club/types.ts` is the camelCase mirror: `ClubMember`,
+`MemberBenefitStatus` (with optional `coffeeCode`), `CoffeeOption`,
+`RedeemBenefitRequest` (`memberId`, `benefitType`, `coffeeCode`,
+caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
+`replayed`), `ClubErrorCode` (API codes + client codes),
+`ClubErrorDetails` (camelCase, validated), and `ClubApiError`.
 
-## 12. Privacy and logging
+## 15. Pre-release changelog
 
-- Never log full phone numbers unless there's a specific operational need
-  (and then, redact all but the digits already visible to the cashier —
-  i.e. log at most what `phone_masked` shows).
-- Phone numbers never appear in a URL (§4.1) — they can't end up in access
-  logs or browser history if they're never in a URL to begin with.
-- Email addresses are never sent to the Club UI at all — the interface
-  has no use for them, so the API simply never includes an `email` field
-  anywhere in this contract.
-- QR tokens are identifiers/secrets, not analytics data — don't write them
-  to analytics events, error trackers, or logs casually.
-- Every response returns only the fields the Club interface actually
-  needs (§2, §4.1) — resist the temptation to pass through "the whole
-  PMPro/FluentCRM object, just in case."
-- Server logs should avoid logging full request/response payloads where
-  practical, specifically because those payloads contain the same
-  phone/membership data this section is protecting.
+**Task 1C-A (2026-10-09):**
 
-## 13. TypeScript domain types
+- Redeem request now requires `coffee_code` (was only `request_id`).
+- Redeem success adds `coffee_code`, `request_id` and `replayed`.
+- Lookup benefit adds `coffee_code` for used benefits.
+- New error codes: `invalid_coffee` (400), `idempotency_key_reused` (409).
+- `details` defined as snake_case on the wire, camelCase in the client
+  (fixes the earlier mismatch where the UI read camelCase keys that the
+  wire never sent).
+- `request_id` ownership moved to the caller; the adapter no longer creates
+  a new UUID per call (fixes retries defeating idempotency).
+- All instants must carry an explicit offset; the client rejects others.
+- Proposed `GET /coffee-options`.
+- Client-only codes `network_error`, `invalid_response` documented.
+- Broken internal section references fixed.
 
-`src/club/types.ts` is the frontend's idiomatic (camelCase) mirror of this
-contract — screens consume these types, never raw REST JSON field names.
-`src/club/restClubService.ts` (currently inert, not wired into the running
-app) shows the exact DTO interfaces and mapper functions that translate
-between the two, e.g. `valid_until` (wire) ↔ `validUntil` (domain).
+## 16. Demo-only shortcuts (deliberate)
 
-```ts
-type MembershipStatus = "active" | "expired" | "cancelled" | "inactive";
-
-interface ClubMember {
-  id: string;
-  name: string;
-  phoneMasked: string;
-  status: MembershipStatus;
-  validUntil: string | null;
-}
-
-// Mirrors the REST response's nested `membership` object one-to-one;
-// used by the DTO mapper, not currently embedded in ClubMember itself.
-interface MembershipInfo {
-  status: MembershipStatus;
-  startedAt: string | null;
-  validUntil: string | null;
-}
-
-type BenefitType = "free_coffee";
-type BenefitState = "available" | "used" | "unavailable";
-type BenefitUnavailableReason = "membership_inactive";
-
-interface MemberBenefitStatus {
-  state: BenefitState;
-  businessDate: string;
-  redeemedAt: string | null;
-  reason?: BenefitUnavailableReason;
-}
-
-interface MemberLookup {
-  member: ClubMember | null;
-  benefit: MemberBenefitStatus | null;
-}
-
-type ApiErrorCode =
-  | "invalid_request" | "invalid_phone" | "invalid_qr"
-  | "member_not_found" | "membership_inactive" | "benefit_already_redeemed"
-  | "benefit_not_available" | "unauthorized" | "forbidden"
-  | "rate_limited" | "server_error";
-
-interface ApiError {
-  code: ApiErrorCode;
-  message: string;
-  details?: Record<string, unknown>;
-}
-
-// Thrown by both the mock and the future REST client, so UI code
-// branches on `.code` the same way regardless of which is active.
-class ClubApiError extends Error implements ApiError { code, details, ... }
-```
-
-## 14. What stays a demo-only shortcut
-
-Documented explicitly so nobody "fixes" these back into `mockClubService`
-by accident — they're deliberate simplifications of a mock, not bugs:
-
-- **Member-not-found returns `{ member: null }` instead of throwing.**
-  Production is a real `404` (§4.1); `restClubService.ts`'s adapter
-  absorbs the difference so the UI doesn't need to know which is active.
-- **"Already used today" is tracked in `localStorage`.** Production is
-  server-authoritative (§5); this disappears entirely once
-  `restClubService` replaces the mock.
-- **No authentication at all.** Production requires a staff session on
-  every endpoint (§3); the demo's `/club` entry gate is cosmetic.
-- **No real network calls, ever.** The mock simulates latency with
-  `setTimeout` so the UI's loading states are demonstrable, but nothing
-  leaves the browser.
+- Mock "member not found" returns `{ member: null }` (production: 404).
+- Mock redemptions live in `localStorage` (`mockRedemptionStore.ts`):
+  per-browser, **not concurrency-safe**, not shared between devices.
+  Production enforcement is the database (§5).
+- No authentication in the demo; the `/club` entry gate is cosmetic.
+- No network calls in the demo.
