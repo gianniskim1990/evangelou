@@ -12,9 +12,18 @@ on:
 permissions:
   contents: read
 
+env:
+  # Disposable, job-local database container. Not a real credential.
+  EVC_TEST_DB_HOST: 127.0.0.1
+  EVC_TEST_DB_PORT: '13306'
+  EVC_TEST_DB_USER: root
+  EVC_TEST_DB_PASSWORD: evc-ci-disposable-container-only
+  # Integration tests must FAIL (not skip) if the DB is missing.
+  EVC_REQUIRE_DB: '1'
+
 jobs:
   php-check:
-    name: php ${{ matrix.php }} / ${{ matrix.db }}
+    name: engine php ${{ matrix.php }} / ${{ matrix.db }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -26,13 +35,6 @@ jobs:
       run:
         working-directory: wordpress/evangelou-club
     env:
-      # Disposable, job-local database container. Not a real credential.
-      EVC_TEST_DB_HOST: 127.0.0.1
-      EVC_TEST_DB_PORT: '13306'
-      EVC_TEST_DB_USER: root
-      EVC_TEST_DB_PASSWORD: evc-ci-disposable-container-only
-      # Integration tests must FAIL (not skip) if the DB is missing.
-      EVC_REQUIRE_DB: '1'
       EVC_CONCURRENCY_ROUNDS: '25'
       EVC_CONCURRENCY_WORKERS: '8'
     steps:
@@ -64,8 +66,22 @@ jobs:
       - name: Dependency-free smoke checks
         run: php tests/smoke.php
 
-      - name: Install dev-only test tooling (PHPUnit)
-        run: composer update --no-interaction --no-progress --prefer-dist
+      - name: Install locked dev-only test tooling
+        run: |
+          if [ -f composer.lock ]; then
+            composer validate --no-check-publish --no-check-all
+            composer install --no-interaction --no-progress --prefer-dist
+          else
+            echo "::warning::composer.lock missing - resolving once to generate it (bootstrap run only)"
+            composer update --no-interaction --no-progress --prefer-dist
+          fi
+
+      - name: Publish generated composer.lock (bootstrap run only)
+        if: matrix.php == '8.2' && matrix.db == 'mysql:8.0' && hashFiles('wordpress/evangelou-club/composer.lock') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: composer-lock
+          path: wordpress/evangelou-club/composer.lock
 
       - name: Wait for test database
         run: php tests/bin/wait-for-db.php
@@ -79,6 +95,76 @@ jobs:
       - name: Mutation tests (critical business rules)
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-mutations.php
+
+      - name: Confirm sources unchanged by test runs
+        working-directory: .
+        run: git diff --exit-code -- wordpress/evangelou-club
+
+  wordpress:
+    name: wordpress php ${{ matrix.php }} / ${{ matrix.db }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { php: '7.4', db: 'mysql:8.0' }
+          - { php: '8.2', db: 'mysql:8.0' }
+          - { php: '8.4', db: 'mysql:8.0' }
+          - { php: '8.2', db: 'mariadb:10.11' }
+    defaults:
+      run:
+        working-directory: wordpress/evangelou-club
+    env:
+      EVC_WP_TEST_DB_NAME: evc_wp_tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start isolated ${{ matrix.db }} container
+        working-directory: .
+        run: |
+          extra=""
+          case "${{ matrix.db }}" in
+            mysql:*) extra="--default-authentication-plugin=mysql_native_password" ;;
+          esac
+          docker run -d --name evc-test-db -p 127.0.0.1:13306:3306 \
+            -e MYSQL_ROOT_PASSWORD="$EVC_TEST_DB_PASSWORD" \
+            -e MARIADB_ROOT_PASSWORD="$EVC_TEST_DB_PASSWORD" \
+            "${{ matrix.db }}" $extra
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql, mysqli
+          coverage: none
+          tools: composer:v2
+          ini-values: error_reporting=E_ALL, display_errors=On
+
+      - name: Install locked dev-only test tooling (WordPress core + test library)
+        run: |
+          if [ -f composer.lock ]; then
+            composer install --no-interaction --no-progress --prefer-dist
+          else
+            echo "::warning::composer.lock missing - resolving once (bootstrap run only)"
+            composer update --no-interaction --no-progress --prefer-dist
+          fi
+          composer show johnpbloch/wordpress-core wp-phpunit/wp-phpunit phpunit/phpunit | grep -E '^(name|versions)'
+
+      - name: Wait for test database
+        run: php tests/bin/wait-for-db.php
+
+      - name: Create disposable WordPress test database
+        run: php tests/bin/create-wp-test-db.php
+
+      - name: WordPress suite - staff feature flag DISABLED (default)
+        run: EVC_TEST_STAFF_FLAG=disabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-common,wp-disabled
+
+      - name: WordPress suite - staff feature flag ENABLED (test environment only)
+        run: EVC_TEST_STAFF_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-common,wp-enabled
+
+      - name: Authorization mutation tests (real WordPress)
+        if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
+        run: php tests/mutation/run-wp-mutations.php
 
       - name: Confirm sources unchanged by test runs
         working-directory: .

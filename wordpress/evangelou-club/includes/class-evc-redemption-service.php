@@ -32,6 +32,7 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
 final class EVC_Redemption_Service {
     const BENEFIT_FREE_COFFEE = 'free_coffee';
     const MAX_TRANSACTION_ATTEMPTS = 3;
+    const SESSION_REF_PATTERN = '/^[0-9a-f]{32}$/D';
     const REQUEST_ID_PATTERN = '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D';
 
     /** @var EVC_Redemption_Store */
@@ -46,6 +47,8 @@ final class EVC_Redemption_Service {
     private $clock;
     /** @var callable|null function (array $diagnostic): void */
     private $error_reporter;
+    /** @var string|null Session reference of the current call (audit only). */
+    private $session_ref = null;
 
     public function __construct(
         EVC_Redemption_Store $store,
@@ -78,14 +81,18 @@ final class EVC_Redemption_Service {
         $coffee_code = $request->coffee_code();
         $request_id = $request->request_id();
         $staff_wp_user_id = $request->staff_wp_user_id();
+        $session_ref = $request->session_ref();
+        $this->session_ref = null;
 
         if (!EVC_Member_Id::is_valid_format($member_public_id)
             || $benefit_type !== self::BENEFIT_FREE_COFFEE
             || !is_string($request_id) || !preg_match(self::REQUEST_ID_PATTERN, $request_id)
             || !is_int($staff_wp_user_id) || $staff_wp_user_id < 1
-            || !is_string($coffee_code)) {
+            || !is_string($coffee_code)
+            || ($session_ref !== null && !(is_string($session_ref) && preg_match(self::SESSION_REF_PATTERN, $session_ref)))) {
             return EVC_Redemption_Result::failure(EVC_Redemption_Result::INVALID_REQUEST);
         }
+        $this->session_ref = $session_ref;
         if (!$this->catalog->contains($coffee_code)) {
             return EVC_Redemption_Result::failure(EVC_Redemption_Result::INVALID_COFFEE);
         }
@@ -115,7 +122,7 @@ final class EVC_Redemption_Service {
                 'request_id' => $request_id,
                 'staff_wp_user_id' => $staff_wp_user_id,
                 'occurred_at_utc' => $now_sql,
-                'details' => array('reason' => $denial, 'source' => $entitlement->source()),
+                'details' => $this->audit_details(array('reason' => $denial, 'source' => $entitlement->source())),
             ));
             return EVC_Redemption_Result::failure(EVC_Redemption_Result::MEMBERSHIP_INACTIVE, array(
                 'status' => $entitlement->public_status($now),
@@ -152,11 +159,11 @@ final class EVC_Redemption_Service {
                         'request_id' => $ledger_row['request_id'],
                         'staff_wp_user_id' => $ledger_row['staff_wp_user_id'],
                         'occurred_at_utc' => $ledger_row['redeemed_at_utc'],
-                        'details' => array(
+                        'details' => $this->audit_details(array(
                             'benefit_type' => $ledger_row['benefit_type'],
                             'coffee_code' => $ledger_row['coffee_code'],
                             'business_date' => $ledger_row['business_date'],
-                        ),
+                        )),
                     ));
                     return $redemption_id;
                 });
@@ -202,7 +209,7 @@ final class EVC_Redemption_Service {
                 'request_id' => $request_id,
                 'staff_wp_user_id' => $staff_wp_user_id,
                 'occurred_at_utc' => $now_sql,
-                'details' => array('business_date' => $business_date),
+                'details' => $this->audit_details(array('business_date' => $business_date)),
             ));
             return EVC_Redemption_Result::failure(EVC_Redemption_Result::ALREADY_REDEEMED, array(
                 'business_date' => $winner['business_date'],
@@ -230,8 +237,17 @@ final class EVC_Redemption_Service {
             'request_id' => $stored['request_id'],
             'staff_wp_user_id' => $staff_wp_user_id,
             'occurred_at_utc' => EVC_Clock::to_utc($this->clock->now())->format('Y-m-d H:i:s.u'),
+            'details' => $this->audit_details(array()),
         ));
         return EVC_Redemption_Result::failure(EVC_Redemption_Result::IDEMPOTENCY_CONFLICT);
+    }
+
+    /** Adds the optional session reference to audit details (never to the fingerprint). */
+    private function audit_details(array $details): array {
+        if ($this->session_ref !== null) {
+            $details['session_ref'] = $this->session_ref;
+        }
+        return $details;
     }
 
     /**
