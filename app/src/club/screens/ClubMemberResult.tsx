@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { CLUB_LOOKUP_ERROR_MESSAGE, clubService } from "../clubService";
+import { clubService } from "../clubService";
 import { formatClockTime, formatGreekLongDate, membershipBadgeLabel } from "../format";
-import { ClubApiError, type ClubMember, type MemberBenefitStatus } from "../types";
+import { coffeeLabel } from "../mockCoffeeCatalog";
+import { RedemptionIntentTracker, submitRedemption } from "../redemptionIntent";
+import type { ClubMember, CoffeeOption, MemberBenefitStatus } from "../types";
 
 function CoffeeIcon({ className }: { className?: string }) {
   return (
@@ -56,8 +58,36 @@ export function ClubMemberResult({
   const [confirming, setConfirming] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const [error, setError] = useState("");
+  const [retryPending, setRetryPending] = useState(false);
   const [justRedeemed, setJustRedeemed] = useState(false);
+  const [coffeeOptions, setCoffeeOptions] = useState<CoffeeOption[] | null>(null);
+  const [coffeeOptionsFailed, setCoffeeOptionsFailed] = useState(false);
+  const [selectedCoffee, setSelectedCoffee] = useState<string | null>(null);
+  // One tracker per mounted result screen. It survives re-renders, so a
+  // retry reuses the same request_id (see redemptionIntent.ts).
+  const [tracker] = useState(() => new RedemptionIntentTracker());
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const memberId = member?.id ?? null;
+
+  // A different member never inherits another member's pending intent.
+  useEffect(() => {
+    tracker.reset();
+  }, [memberId, tracker]);
+
+  useEffect(() => {
+    let cancelled = false;
+    clubService.getCoffeeOptions().then(
+      (options) => {
+        if (!cancelled) setCoffeeOptions(options);
+      },
+      () => {
+        if (!cancelled) setCoffeeOptionsFailed(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (confirming) cancelRef.current?.focus();
@@ -83,32 +113,68 @@ export function ClubMemberResult({
   }
 
   const isActive = member.status === "active";
+  const options = coffeeOptions ?? [];
+  const selectedLabel = coffeeLabel(options, selectedCoffee);
+  const canConfirm = selectedCoffee !== null && selectedLabel !== null;
+  const usedCoffeeLabel = coffeeLabel(options, benefit.coffeeCode);
+
+  const selectCoffee = (code: string) => {
+    if (redeeming) return;
+    setSelectedCoffee(code);
+    // A different coffee is a new intent: the next attempt gets a new
+    // request_id, so the retry state of the old intent no longer applies.
+    setRetryPending(false);
+    setError("");
+  };
+
+  const openConfirm = () => {
+    if (!canConfirm) return;
+    setError("");
+    setConfirming(true);
+  };
 
   const confirmRedeem = async () => {
+    if (!selectedCoffee || !canConfirm) return;
     setRedeeming(true);
     setError("");
-    try {
-      const result = await clubService.redeemBenefit(member.id, "free_coffee");
-      onRedeemed(result);
-      setConfirming(false);
-      setJustRedeemed(true);
-    } catch (err) {
-      if (err instanceof ClubApiError && err.code === "benefit_already_redeemed") {
-        // Another till (or a retried request) already redeemed this today —
-        // sync the UI to the real "used" state instead of showing an error,
-        // per docs/evangelou-club-api.md §9.
-        const details = err.details as { businessDate?: string; redeemedAt?: string } | undefined;
+    const attempt = await submitRedemption(clubService, tracker, {
+      memberId: member.id,
+      benefitType: "free_coffee",
+      coffeeCode: selectedCoffee,
+    });
+    setRedeeming(false);
+
+    switch (attempt.kind) {
+      case "redeemed":
+        setRetryPending(false);
+        onRedeemed(attempt.outcome.benefit);
+        setConfirming(false);
+        setJustRedeemed(true);
+        return;
+      case "already_redeemed": {
+        // Another till / earlier intent already used today's benefit: show the
+        // real "used" state. Never invent a timestamp the server didn't send.
+        const d = attempt.error.details;
+        setRetryPending(false);
         onRedeemed({
           state: "used",
-          businessDate: details?.businessDate ?? "",
-          redeemedAt: details?.redeemedAt ?? null,
+          businessDate: d?.businessDate ?? benefit.businessDate,
+          redeemedAt: d?.redeemedAt ?? null,
+          coffeeCode: d?.coffeeCode ?? null,
         });
         setConfirming(false);
         return;
       }
-      setError(err instanceof Error ? err.message : CLUB_LOOKUP_ERROR_MESSAGE);
-    } finally {
-      setRedeeming(false);
+      case "rejected":
+        setRetryPending(false);
+        setError(attempt.error.message);
+        return;
+      case "retry_needed":
+        setRetryPending(true);
+        setError(attempt.error.message);
+        return;
+      case "busy":
+        return;
     }
   };
 
@@ -159,23 +225,70 @@ export function ClubMemberResult({
         </div>
 
         {isActive && benefit.state === "available" && (
-          <button
-            onClick={() => setConfirming(true)}
-            className="w-full rounded-xl border-none bg-bronze-dark py-3.5 text-sm font-semibold text-white"
-          >
-            Καταχώρηση δωρεάν καφέ
-          </button>
+          <>
+            <fieldset className="mb-4" disabled={redeeming}>
+              <legend className="mb-2 text-[13px] font-semibold text-espresso/70">Επιλογή καφέ</legend>
+              {coffeeOptions === null && !coffeeOptionsFailed && (
+                <p className="text-[13px] text-espresso/50">Φόρτωση επιλογών…</p>
+              )}
+              {coffeeOptionsFailed && (
+                <p className="text-[13px] text-maroon">Δεν ήταν δυνατή η φόρτωση των καφέδων. Δοκιμάστε ξανά.</p>
+              )}
+              {coffeeOptions !== null && (
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                  {coffeeOptions.map((option) => {
+                    const selected = option.code === selectedCoffee;
+                    return (
+                      <button
+                        key={option.code}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => selectCoffee(option.code)}
+                        className={`min-h-11 rounded-xl border px-3 py-2.5 text-left text-[13.5px] font-semibold ${
+                          selected ? "border-bronze-dark bg-bronze/12 text-bronze-dark" : "border-espresso/15 bg-surface text-espresso"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="mt-2 text-[11px] text-espresso/40">Ενδεικτική λίστα demo — όχι το τελικό μενού.</p>
+            </fieldset>
+
+            <button
+              onClick={openConfirm}
+              disabled={!canConfirm}
+              className="w-full rounded-xl border-none bg-bronze-dark py-3.5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {canConfirm ? `Καταχώρηση: ${selectedLabel}` : "Επιλέξτε καφέ για καταχώρηση"}
+            </button>
+            {retryPending && !confirming && (
+              <p className="mt-2 text-xs text-maroon">
+                Η προηγούμενη καταχώρηση δεν επιβεβαιώθηκε. Πατήστε ξανά για επανάληψη του ίδιου αιτήματος.
+              </p>
+            )}
+          </>
         )}
 
-        {isActive && benefit.state === "used" && benefit.redeemedAt && (
-          justRedeemed ? (
-            <div className="flex items-center gap-2.5 rounded-xl bg-bronze/12 px-4 py-3.5 text-[13px] font-semibold text-bronze-dark">
-              <CheckIcon />
-              Ο καφές καταχωρήθηκε στις {formatClockTime(benefit.redeemedAt)}
-            </div>
+        {isActive && benefit.state === "used" && (
+          benefit.redeemedAt ? (
+            justRedeemed ? (
+              <div className="flex items-center gap-2.5 rounded-xl bg-bronze/12 px-4 py-3.5 text-[13px] font-semibold text-bronze-dark">
+                <CheckIcon />
+                Ο καφές καταχωρήθηκε στις {formatClockTime(benefit.redeemedAt)}
+                {usedCoffeeLabel && ` · ${usedCoffeeLabel}`}
+              </div>
+            ) : (
+              <div className="rounded-xl bg-hairline px-4 py-3.5 text-[13px] text-espresso/70">
+                Χρησιμοποιήθηκε σήμερα στις <span className="font-semibold text-espresso">{formatClockTime(benefit.redeemedAt)}</span>
+                {usedCoffeeLabel && ` · ${usedCoffeeLabel}`}.
+              </div>
+            )
           ) : (
             <div className="rounded-xl bg-hairline px-4 py-3.5 text-[13px] text-espresso/70">
-              Χρησιμοποιήθηκε σήμερα στις <span className="font-semibold text-espresso">{formatClockTime(benefit.redeemedAt)}</span>.
+              Η σημερινή παροχή έχει ήδη χρησιμοποιηθεί.
             </div>
           )
         )}
@@ -198,8 +311,16 @@ export function ClubMemberResult({
             className="w-full max-w-[400px] rounded-t-2xl bg-surface p-6 sm:rounded-2xl"
           >
             <h2 id="redeem-dialog-title" className="font-literata mb-2 text-lg font-semibold">Καταχώρηση παροχής</h2>
-            <p className="mb-5 text-sm text-espresso/70">«Να καταχωρηθεί δωρεάν καφές στο μέλος {member.name};»</p>
-            {error && <p className="mb-4 text-sm text-maroon">{error}</p>}
+            <p className="mb-3 text-sm text-espresso/70">«Να καταχωρηθεί δωρεάν καφές στο μέλος {member.name};»</p>
+            <p className="mb-5 rounded-xl bg-hairline px-3.5 py-2.5 text-sm">
+              Καφές: <span className="font-semibold">{selectedLabel}</span>
+            </p>
+            {error && (
+              <p role="alert" className="mb-4 text-sm text-maroon">
+                {error}
+                {retryPending && " Η «Επανάληψη» στέλνει το ίδιο αίτημα — δεν καταχωρείται δεύτερος καφές."}
+              </p>
+            )}
             <div className="flex gap-2.5">
               <button
                 ref={cancelRef}
@@ -211,10 +332,10 @@ export function ClubMemberResult({
               </button>
               <button
                 onClick={confirmRedeem}
-                disabled={redeeming}
+                disabled={redeeming || !canConfirm}
                 className="min-w-0 flex-1 rounded-xl border-none bg-bronze-dark py-3 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {redeeming ? "Καταχώρηση…" : "Καταχώρηση"}
+                {redeeming ? "Καταχώρηση…" : retryPending ? "Επανάληψη" : "Καταχώρηση"}
               </button>
             </div>
           </div>

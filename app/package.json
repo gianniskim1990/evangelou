@@ -9,7 +9,9 @@
     "typecheck": "tsc -b",
     "lint": "oxlint",
     "preview": "vite preview",
-    "images:stock": "node scripts/fetch-stock-images.mjs"
+    "images:stock": "node scripts/fetch-stock-images.mjs",
+    "test:club": "node scripts/run-club-tests.mjs",
+    "test:club:mutation": "node scripts/run-club-mutations.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.4",

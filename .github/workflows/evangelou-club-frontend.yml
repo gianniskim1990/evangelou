@@ -1,0 +1,54 @@
+name: Evangelou Club frontend
+on:
+  push:
+    paths:
+      - 'app/src/club/**'
+      - 'app/tests/club/**'
+      - 'app/scripts/run-club-*.mjs'
+      - 'app/docs/evangelou-club-api.md'
+      - 'app/package.json'
+      - 'app/package-lock.json'
+      - 'app/tsconfig*.json'
+      - '.github/workflows/evangelou-club-frontend.yml'
+  pull_request:
+    paths:
+      - 'app/src/club/**'
+      - 'app/tests/club/**'
+      - 'app/scripts/run-club-*.mjs'
+      - 'app/docs/evangelou-club-api.md'
+      - 'app/package.json'
+      - 'app/package-lock.json'
+      - 'app/tsconfig*.json'
+      - '.github/workflows/evangelou-club-frontend.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  club-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Typecheck (app + api + node + Club tests)
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+      - name: Club tests (fake fetch, no network, TZ=UTC+14)
+        run: npm run test:club
+      - name: Club mutation tests (retry / idempotency / error mapping)
+        run: npm run test:club:mutation
+      - name: Confirm sources unchanged by test runs
+        working-directory: .
+        run: git diff --exit-code -- app/src app/tests
