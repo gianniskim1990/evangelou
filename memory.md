@@ -259,3 +259,9 @@ The existing website developer replied explicitly:
 - Primary identity/status sources: WooCommerce/PMPro for verified payment and eligibility, FluentCRM for newsletter marketing consent & segmentation, separate Club database for opaque QR tokens and redemption/history. Daily one-redemption-per-member-per-Europe/Athens-calendar-day must be protected atomically at DB level; no access granted solely by CRM tag.
 - Scope and finances unchanged: Evangelou Club Phase 1 ONLY, **€1,500 + VAT**, first year support free, thereafter €300 + VAT/year, and potential infrastructure charged only if approved. Deadline target early December 2026 subject to staging and proper access.
 - Plan: ask developer to tell us once WooCommerce + PMPro + WooCommerce Integration mapping are installed in staging, staging URL/access is ready, and separate database is provisioned, including sanitized configuration and test accounts (never share credentials in chat). Meanwhile build isolated plugin scaffold with mock membership adapter and migration/redeem QA tests without touching production.
+
+## Active development milestone — 2026-10-09
+- Task 1A active: Claude Code Opus architecture review of the Club backend/redemption engine; user approved starting while staging and separate DB are pending.
+- Milestone 0 is code-complete in open draft PR #1 but is not merged, deployed or connected to any real data.
+- Task 1A is review-only: inspect current source, memory, REST contract, staff auth, token handling, per-day uniqueness, retry safety, separate DB, membership gating and test strategy. Return findings and a bounded plan for Task 1B; leave working tree unchanged.
+- After user shares the review, ChatGPT checks evidence and prepares the implementation prompt. Existing ordering demo and production WP are out of scope.
