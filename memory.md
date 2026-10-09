@@ -267,3 +267,9 @@ The existing website developer replied explicitly:
 - Added scoped GitHub Actions workflow .github/workflows/evangelou-club.yml; both branch push and PR GitHub Actions tests **completed successfully** on 2026-10-09.
 - **No staging or production WordPress installation, SQL migration, external account access, or payment changes performed.** This is only Milestone 0 foundation; production REST auth, membership adapter, QR assignment, CRM synchronization, coffee redeem and history operations not yet implemented.
 - Project source of truth remains main branch until draft PR reviewed and merged. Protect the existing /club mock demo and ordering flow.
+
+## Active development milestone — 2026-10-09
+- Task 1A active: Claude Code Opus architecture review of the Club backend/redemption engine; user approved starting while staging and separate DB are pending.
+- Milestone 0 is code-complete in open draft PR #1 but is not merged, deployed or connected to any real data.
+- Task 1A is review-only: inspect current source, memory, REST contract, staff auth, token handling, per-day uniqueness, retry safety, separate DB, membership gating and test strategy. Return findings and a bounded plan for Task 1B; leave working tree unchanged.
+- After user shares the review, ChatGPT checks evidence and prepares the implementation prompt. Existing ordering demo and production WP are out of scope.
