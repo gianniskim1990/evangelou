@@ -66,22 +66,11 @@ jobs:
       - name: Dependency-free smoke checks
         run: php tests/smoke.php
 
-      - name: Install locked dev-only test tooling
+      - name: Install locked dev-only test tooling (composer.lock is mandatory)
         run: |
-          if [ -f composer.lock ]; then
-            composer validate --no-check-publish --no-check-all
-            composer install --no-interaction --no-progress --prefer-dist
-          else
-            echo "::warning::composer.lock missing - resolving once to generate it (bootstrap run only)"
-            composer update --no-interaction --no-progress --prefer-dist
-          fi
-
-      - name: Publish generated composer.lock (bootstrap run only)
-        if: matrix.php == '8.2' && matrix.db == 'mysql:8.0' && hashFiles('wordpress/evangelou-club/composer.lock') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: composer-lock
-          path: wordpress/evangelou-club/composer.lock
+          test -f composer.lock || { echo "::error::composer.lock missing"; exit 1; }
+          composer validate --no-check-publish --no-check-all
+          composer install --no-interaction --no-progress --prefer-dist
 
       - name: Wait for test database
         run: php tests/bin/wait-for-db.php
@@ -142,13 +131,11 @@ jobs:
 
       - name: Install locked dev-only test tooling (WordPress core + test library)
         run: |
-          if [ -f composer.lock ]; then
-            composer install --no-interaction --no-progress --prefer-dist
-          else
-            echo "::warning::composer.lock missing - resolving once (bootstrap run only)"
-            composer update --no-interaction --no-progress --prefer-dist
-          fi
-          composer show johnpbloch/wordpress-core wp-phpunit/wp-phpunit phpunit/phpunit | grep -E '^(name|versions)'
+          test -f composer.lock || { echo "::error::composer.lock missing"; exit 1; }
+          composer install --no-interaction --no-progress --prefer-dist
+          for p in johnpbloch/wordpress-core wp-phpunit/wp-phpunit phpunit/phpunit yoast/phpunit-polyfills; do
+            composer show "$p" | grep -E '^(name|versions)'
+          done
 
       - name: Wait for test database
         run: php tests/bin/wait-for-db.php

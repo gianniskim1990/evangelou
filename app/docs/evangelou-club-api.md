@@ -59,24 +59,41 @@ changes for a member and never reveals a WordPress, FluentCRM, PMPro or
 WooCommerce id. Clients treat it as an opaque string (URL-encoded in paths).
 QR tokens (§11) are likewise opaque strings passed back verbatim.
 
-## 3. Authentication (not implemented — release blocker)
+## 3. Authentication (server side implemented in Task 1C-C, disabled by default)
 
-**No endpoint is public in production.** Every endpoint requires an
-authenticated staff session with the right capability:
+**Owner decisions:** D1 = Option A (staff app served by the plugin on the
+WordPress origin at `/club-admin/`); D2 = ONE shared, restricted Club staff
+WordPress account for all employees/tablets. Audit identifies the shared
+account and a session reference, **never a human employee**.
 
-- `401 unauthorized`: no or expired staff session.
-- `403 forbidden`: authenticated but not permitted.
+**No endpoint is public.** The routes exist only when wp-config.php defines
+`EVC_CLUB_STAFF_ENABLED` as boolean `true`; every request must then pass:
+
+1. WordPress cookie session (core `wp-login.php`, auth cookie, session token);
+2. `X-WP-Nonce` header with a valid `wp_rest` nonce (core drops the cookie
+   user without it; the plugin verifies it again);
+3. role `evc_club_staff` + the endpoint's capability (`evc_redeem_benefit`, …);
+4. shared account not disabled;
+5. session policy: 12 h absolute lifetime, 30 min server inactivity (per
+   session; tablets never extend each other).
+
+Failures: `401 unauthorized` (no/expired/idle session, missing or invalid
+nonce — core's `rest_cookie_invalid_nonce` is mapped to this envelope) and
+`403 forbidden` (wrong role/capability, disabled account). The staff id is
+taken from the session, never from the body; path ids only from the URL.
+
 - **No static Application Password, API key or other secret may ever ship
-  in the browser bundle.** The adapter sends no `Authorization` header.
-- The adapter uses `credentials: "include"` (cookie session). This only
-  works if the staff app is served same-origin with WordPress (or same-site
-  with an explicit CORS allowlist) **and** a WordPress REST nonce is sent.
-  Neither exists yet.
-- **Deferred blockers (owner decisions D1/D2):** the current Vercel
-  deployment rewrites `/wp-json/*` to `index.html` (so the relative base
-  URL cannot reach WordPress), and WordPress cookie auth needs an
-  `X-WP-Nonce`. The adapter treats an HTML 200 reply as `invalid_response`
-  so this misrouting can never be mistaken for success.
+  in the browser bundle.** Application Passwords are refused by the Club
+  routes. The adapter sends no `Authorization` header.
+- Club responses carry `Cache-Control: no-store, private`, `nosniff`,
+  `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and a JSON CSP; the
+  CORS headers core reflects are removed for this namespace (same origin only).
+- **Still open (client side, later task):** the plugin-served staff bundle
+  with an absolute same-origin base URL, nonce bootstrap from the protected
+  PHP shell, refreshed nonce from the `X-WP-Nonce` response header, and the
+  5-minute tablet screen lock. The public Vercel deployment still rewrites
+  `/wp-json/*` to `index.html`; the adapter treats that HTML as
+  `invalid_response`.
 
 ## 4. Endpoints
 
@@ -198,6 +215,7 @@ The staff actor is taken from the authenticated session server-side —
 | 401 / 403 | `unauthorized` / `forbidden` | §3 | — |
 | 429 | `rate_limited` | Not processed; retry later | optional `retry_after_seconds` (+ `Retry-After` header) |
 | 500 | `server_error` | Includes an **unknown COMMIT outcome**: retry with the same `request_id` | — |
+| 503 | `server_error` | Redemption backend unavailable (no production membership adapter yet): fails closed, grants nothing | — |
 
 `benefit_already_redeemed` example:
 
@@ -412,6 +430,16 @@ caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
 - Proposed `GET /coffee-options`.
 - Client-only codes `network_error`, `invalid_response` documented.
 - Broken internal section references fixed.
+
+**Task 1C-C (2026-10-09):**
+
+- §3 rewritten for the approved D1/D2 design and the implemented (flag-off)
+  server authorization; no wire-shape changes for existing endpoints.
+- Redeem may answer `503 server_error` while no production membership
+  adapter exists (fail closed). Clients already map any 5xx to
+  `server_error`.
+- WordPress-native auth/param errors inside the namespace are returned in
+  the v1 envelope (`unauthorized`, `forbidden`, `invalid_request`).
 
 ## 16. Demo-only shortcuts (deliberate)
 
