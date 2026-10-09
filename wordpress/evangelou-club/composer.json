@@ -1,0 +1,17 @@
+{
+    "name": "evangelou/evangelou-club",
+    "description": "Evangelou Club WordPress plugin. Composer is used for development/test tooling only; the plugin has no runtime Composer dependencies.",
+    "type": "wordpress-plugin",
+    "license": "proprietary",
+    "require": {
+        "php": ">=7.4",
+        "ext-pdo": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6.22"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {}
+    }
+}

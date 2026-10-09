@@ -8,16 +8,78 @@ on:
     paths:
       - 'wordpress/evangelou-club/**'
       - '.github/workflows/evangelou-club.yml'
+
+permissions:
+  contents: read
+
 jobs:
   php-check:
+    name: php ${{ matrix.php }} / ${{ matrix.db }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.2', '8.4']
+        db: ['mysql:8.0', 'mariadb:10.11']
+    defaults:
+      run:
+        working-directory: wordpress/evangelou-club
+    env:
+      # Disposable, job-local database container. Not a real credential.
+      EVC_TEST_DB_HOST: 127.0.0.1
+      EVC_TEST_DB_PORT: '13306'
+      EVC_TEST_DB_USER: root
+      EVC_TEST_DB_PASSWORD: evc-ci-disposable-container-only
+      # Integration tests must FAIL (not skip) if the DB is missing.
+      EVC_REQUIRE_DB: '1'
+      EVC_CONCURRENCY_ROUNDS: '25'
+      EVC_CONCURRENCY_WORKERS: '8'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Start isolated ${{ matrix.db }} container
+        working-directory: .
+        run: |
+          extra=""
+          case "${{ matrix.db }}" in
+            mysql:*) extra="--default-authentication-plugin=mysql_native_password" ;;
+          esac
+          docker run -d --name evc-test-db -p 127.0.0.1:13306:3306 \
+            -e MYSQL_ROOT_PASSWORD="$EVC_TEST_DB_PASSWORD" \
+            -e MARIADB_ROOT_PASSWORD="$EVC_TEST_DB_PASSWORD" \
+            "${{ matrix.db }}" $extra
+
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
-      - name: Lint plugin PHP
-        run: |
-          find wordpress/evangelou-club -name '*.php' -print0 | xargs -0 -n1 php -l
-      - name: Smoke tests
-        run: php wordpress/evangelou-club/tests/smoke.php
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql
+          coverage: none
+          tools: composer:v2
+          ini-values: error_reporting=E_ALL, display_errors=On, zend.assertions=1
+
+      - name: Lint plugin PHP (no vendor)
+        run: find . -path ./vendor -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Dependency-free smoke checks
+        run: php tests/smoke.php
+
+      - name: Install dev-only test tooling (PHPUnit)
+        run: composer update --no-interaction --no-progress --prefer-dist
+
+      - name: Wait for test database
+        run: php tests/bin/wait-for-db.php
+
+      - name: Unit tests
+        run: vendor/bin/phpunit --testsuite unit
+
+      - name: Integration tests (real DB, incl. concurrency, idempotency, rollback, DST)
+        run: vendor/bin/phpunit --testsuite integration
+
+      - name: Mutation tests (critical business rules)
+        if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
+        run: php tests/mutation/run-mutations.php
+
+      - name: Confirm sources unchanged by test runs
+        working-directory: .
+        run: git diff --exit-code -- wordpress/evangelou-club

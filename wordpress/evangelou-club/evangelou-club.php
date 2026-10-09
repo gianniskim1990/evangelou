@@ -10,8 +10,9 @@ defined('ABSPATH') || exit;
 
 define('EVC_CLUB_VERSION', '0.1.0-dev');
 define('EVC_CLUB_PATH', plugin_dir_path(__FILE__));
-require_once EVC_CLUB_PATH . 'includes/class-evc-clock.php';
-require_once EVC_CLUB_PATH . 'includes/class-evc-qr-token.php';
+require_once EVC_CLUB_PATH . 'includes/bootstrap.php';
 
-// Intentionally inert until the staging DB, authenticated staff API, PMPro
-// entitlement adapter and end-to-end tests are ready. No data writes.
+// Intentionally inert: classes are loaded but no hooks, REST routes,
+// database connections or migrations are registered. Activation waits for
+// the staging DB, authenticated staff API, PMPro entitlement adapter and
+// end-to-end tests. No data writes.
