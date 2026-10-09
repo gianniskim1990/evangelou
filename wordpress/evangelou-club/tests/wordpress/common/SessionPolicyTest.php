@@ -71,6 +71,7 @@ final class SessionPolicyTest extends EVC_WP_Test_Case {
     public function test_valid_session_is_accepted_and_activity_is_throttled(): void {
         $staff = $this->create_staff_user();
         $token = $this->login_as($staff);
+        $this->age_session($staff, $token, 600); // activity values below must not predate login
         $key = EVC_Staff_Session::activity_key($token);
         $this->assertSame('ok', EVC_Staff_Session::verify_current($staff));
         $first = get_user_meta($staff, $key, true);
