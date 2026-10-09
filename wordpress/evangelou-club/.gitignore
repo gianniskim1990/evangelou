@@ -1,0 +1,5 @@
+# Dev/test tooling only — never committed or deployed.
+/vendor/
+# No lock file: CI resolves PHPUnit per PHP version in the test matrix.
+/composer.lock
+.phpunit.result.cache
