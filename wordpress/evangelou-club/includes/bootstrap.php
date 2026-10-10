@@ -28,6 +28,16 @@ require_once $evc_includes . 'interface-evc-pmpro-reader.php';
 require_once $evc_includes . 'class-evc-pmpro-mapper-config.php';
 require_once $evc_includes . 'class-evc-pmpro-entitlement-mapper.php';
 require_once $evc_includes . 'class-evc-pmpro-membership-adapter.php';
+// Task 1D-E: pure payment-provenance recorder core. Definitions only; no
+// store, hook or gateway is wired anywhere.
+require_once $evc_includes . 'class-evc-movement-alias.php';
+require_once $evc_includes . 'class-evc-verified-movement.php';
+require_once $evc_includes . 'class-evc-funded-period.php';
+require_once $evc_includes . 'class-evc-movement-correction.php';
+require_once $evc_includes . 'class-evc-provenance-write.php';
+require_once $evc_includes . 'interface-evc-provenance-store.php';
+require_once $evc_includes . 'class-evc-record-outcome.php';
+require_once $evc_includes . 'class-evc-provenance-recorder.php';
 require_once $evc_includes . 'class-evc-coffee-catalog.php';
 require_once $evc_includes . 'class-evc-request-fingerprint.php';
 require_once $evc_includes . 'class-evc-redemption-request.php';
