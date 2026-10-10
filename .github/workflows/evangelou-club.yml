@@ -101,6 +101,10 @@ jobs:
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-mutations.php
 
+      - name: Membership entitlement mutation tests (Task 1D-B, DB-free, every PHP version)
+        if: matrix.db == 'mysql:8.0'
+        run: php tests/mutation/run-membership-mutations.php
+
       - name: Confirm sources unchanged by test runs
         working-directory: .
         run: git diff --exit-code -- wordpress/evangelou-club

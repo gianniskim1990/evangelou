@@ -30,7 +30,7 @@ React ordering demo and the mock `/club` flow are unchanged.
 EVC_Redemption_Service  (validation → idempotency → member → eligibility → atomic insert)
   ├─ EVC_Clock_Source          injected "now" (EVC_System_Clock in production), read ONCE per request
   ├─ EVC_Clock                 Europe/Athens business date, independent of PHP default timezone
-  ├─ EVC_Membership_Adapter    interface; only a TEST mock exists (tests/support). PMPro adapter = later task
+  ├─ EVC_Membership_Adapter    interface; TEST mock + EVC_Pmpro_Membership_Adapter (Task 1D-B, pure, NOT wired)
   ├─ EVC_Entitlement           fail-closed eligibility: active AND verified payment AND known expiry AND now < expiry
   ├─ EVC_Coffee_Catalog        explicit allowlist; NO production menu yet (fixtures are test-only)
   ├─ EVC_Request_Fingerprint   SHA-256 of member + benefit + coffee + staff (no date, so retries after midnight replay)
@@ -39,6 +39,120 @@ EVC_Redemption_Service  (validation → idempotency → member → eligibility �
   └─ EVC_Club_Db               PDO gateway: native prepares, message-free exceptions, rollback-first transactions
 EVC_Migrator                   versioned + checksummed migrations, drift detection, GET_LOCK
 ```
+
+## Membership entitlement v2 & PMPro normalisation core (Task 1D-B — pure PHP, NOT wired)
+
+Production still has **no** membership backend: `EVC_Unavailable_Redemption_Backend`
+supplies no engine (503), no concrete PMPro/WooCommerce reader exists, no
+PMPro or WooCommerce code is called, and nothing here can activate a
+membership or a coffee.
+
+**Owner-approved rules (2026-10-10), implemented in `EVC_Membership_Calendar`:**
+
+- **D1 exact expiry.** A verified paid period ends at the exact Europe/Athens
+  wall-clock time one calendar month after it starts (15 Oct 12:00 → 15 Nov
+  12:00). The end is **exclusive**: at that instant eligibility is false. No
+  extension to end of day.
+- **D5 calendar month with clamp.** One month = one calendar month in the
+  Athens calendar, clamped to the last valid day (31 Jan → 28 Feb, or 29 Feb in
+  a leap year); never PHP's `+1 month` overflow (31 Jan → 3 Mar), never 30 days.
+  Each period is computed from the previous paid **end**, so month-end
+  anniversaries drift (31 Jan → 28 Feb → 28 Mar → 28 Apr). This drift is the
+  approved rule as specified and is documented/tested; a separate "billing
+  anniversary" policy would be a new owner decision.
+- **D2 renewals.** A payment confirmed while the current paid period still runs
+  (early) adds one month to the current paid end; a payment confirmed at or
+  after that end (late) starts a new period at the payment-**confirmation**
+  instant (not order creation). A pending or unpaid renewal grants nothing.
+- **DST.** Instants are UTC internally. A computed Athens wall-clock time that
+  does not exist (spring gap) or occurs twice (autumn) resolves to the first
+  instant at which the Athens clock shows that time or later: the transition
+  instant, or the first occurrence. This never grants more time than any
+  reading of the wall-clock time (PHP's own normalisation would add 30 min to
+  a 03:30 gap end).
+
+**Contract and mapper:**
+
+```text
+EVC_Pmpro_Reader (interface)        future trusted WordPress reader; only a test fake exists
+  └─ EVC_Pmpro_Snapshot             normalised FACTS: contract version, PMPro availability + version,
+     ├─ EVC_Pmpro_Membership_Row    site timezone, user exists, raw PMPro rows (site-local date strings),
+     └─ EVC_Pmpro_Payment_Fact      payment facts with recorded provenance, reader-detected conflicts
+EVC_Pmpro_Entitlement_Mapper        pure decision -> EVC_Entitlement (v2); unknown => never active
+EVC_Pmpro_Mapper_Config             approved Club level ids + supported PMPro version range (no defaults)
+EVC_Pmpro_Membership_Adapter        EVC_Membership_Adapter: reader + mapper; reader error => exception (engine: server_error)
+EVC_Payment_Evidence / EVC_Evidence_Ref   opaque, period-bound evidence; HMAC helper for the future reader
+```
+
+`EVC_Entitlement` v2 is additive: optional `started_at_utc`, `payment_evidence`
+and internal `diagnostic_flags`, plus status `indeterminate` (never eligible,
+public bucket `inactive`). The five-argument constructor, `public_status`, the
+ledger snapshot columns and all DB constraints are unchanged.
+
+**Payment-to-period binding (security-critical).** The mapper replays the
+CONFIRMED payments in confirmation order with D1/D2/D5 and requires that each
+payment's RECORDED provenance (PMPro row + paid period) equals the replayed
+period, and that the last period ends exactly where the single active Club row
+ends. Therefore an old payment cannot justify a later unpaid period, a pending
+renewal neither extends nor invalidates a paid period, repeated notifications
+of one payment (same opaque de-duplication key, identical facts) count once,
+and inconsistent duplicates, two payments claiming one period, or payments at
+the same instant fail closed. Missing provenance is never inferred from user
+id, amount or timestamps.
+
+**Fail closed (never active):** unsupported snapshot contract or PMPro
+version, PMPro unavailable, non-named or non-Athens site timezone (incl. fixed
+offsets), unknown user, reader-reported conflict, non-Club level, more than
+one active Club row, unknown PMPro status, missing/zero/"magic"/invalid end,
+cancellation with unknown effective time, pending/failed only, malformed,
+sandbox/unknown-environment, future-dated or non-de-duplicable payments,
+unlinked or mismatching provenance, full refund (`refunded`), partial refund
+or reversal in the current paid run (owner decisions open → `indeterminate`),
+evaluation instant at/after the paid end (PMPro "active" status and its
+~15-minute expiry cron are never trusted), and any unexpected mapper error.
+A reader exception propagates as `EVC_Membership_Source_Exception` → the engine
+returns `server_error` and grants nothing.
+
+**Task 1D-B.R1 hardening (identity, level, start):**
+
+- *Identity.* Every PMPro row reference must identify exactly one row, and
+  every underlying payment reference must always carry the same
+  de-duplication key and identical facts. One payment can therefore never be
+  replayed as two money movements (e.g. under a second de-duplication key),
+  checked before any period is replayed. Identical repeats still count once;
+  different payments are never merged because amounts or times match.
+- *Level binding.* A payment may only fund a row of its own level
+  (`payment.level_id === row.level_id`), and one continuous paid run may not
+  mix levels, so money paid for one approved Club level never funds another.
+  Several approved levels remain supported when configured explicitly;
+  historical rows of another level in a lapsed earlier run are fine.
+- *Membership start.* The active row's PMPro start must be a real date
+  (missing / zero / "magic" / malformed / impossible → `indeterminate`), must
+  be before its end, must have been reached (start is inclusive), and must lie
+  inside the current continuous paid run (`run start <= row start`). PMPro
+  and the WooCommerce add-on may keep an ORIGINAL start across early renewals
+  or restart it at a renewal, so the row start is not required to equal the
+  latest funded period; but a row start before the paid run (e.g. spanning an
+  unpaid lapse) is a contradiction and fails closed. Starts are resolved with
+  the LATEST DST reading (ends with the earliest), so both directions only
+  shrink a period. Limitation: there is no tolerance — if the real source
+  stamps a row start seconds before the payment-confirmation instant, it will
+  be rejected until staging shows the actual behaviour and an explicit,
+  reviewed rule is approved.
+
+**What the pure mapper CANNOT verify** (needs the installed plugins and
+staging): that a future reader maps PMPro/WooCommerce/gateway states correctly
+(confirmed vs pending/processing/on-hold, refunds, chargebacks); that a
+trustworthy per-payment period is recorded at confirmation time (PMPro orders
+do not carry one; a recorder hook is a future task); that the WooCommerce
+add-on follows D2/D5 (its source truncates end times to the minute and uses
+PHP `+1 month`, so it would currently be reported as a mismatch); gateway
+duplicate-notification behaviour; the real PMPro version range and Club level
+ids.
+
+**Open owner decisions (not implemented as policy):** partial refunds, coffees
+already served before a refund, who may confirm cash/bank payments, registration
+without e-mail, QR delivery, GDPR retention, mid-period cancellation.
 
 ### Redemption guarantees
 
@@ -299,6 +413,7 @@ Tooling is pinned by the committed `composer.lock` (resolved for PHP 7.4.33 via
     vendor/bin/phpunit --testsuite unit
     vendor/bin/phpunit --testsuite integration
     php tests/mutation/run-mutations.php   # Linux/LF checkouts; restores sources afterwards
+    php tests/mutation/run-membership-mutations.php   # Task 1D-B rules, unit suite only, no DB
 
 The test harness only accepts a loopback DB host, creates a fresh
 `evc_test_<random>` database per test and drops it afterwards. Without
@@ -316,7 +431,8 @@ database; the installer DROPS all tables in `evc_wp_tests`):
 
 CI (`.github/workflows/evangelou-club.yml`): engine job PHP 7.4 / 8.2 / 8.4 ×
 MySQL 8.0 / MariaDB 10.11 (lint, smoke, unit, integration incl. multi-process
-concurrency 25 × 8, engine mutations on 8.2 + MySQL); WordPress job PHP 7.4 /
+concurrency 25 × 8, engine mutations on 8.2 + MySQL, membership-entitlement
+mutations on every PHP version with MySQL); WordPress job PHP 7.4 /
 8.2 / 8.4 × MySQL 8.0 plus 8.2 × MariaDB 10.11 (both flag modes, auth
 mutations on 8.2 + MySQL).
 
@@ -335,9 +451,10 @@ mutations on 8.2 + MySQL).
 - Separate Club DB + least-privilege users + backup/restore, provided by technician.
 - Staging WordPress with WooCommerce + PMPro configured (1-month expiry,
   completed-payment activation, renewal extension, refund handling).
-- PMPro membership adapter (not implemented), plugin-served staff app and
-  PHP shell (later task), lookup/history endpoints, final coffee list (D3),
-  membership end boundary (D4), QR delivery (D5), retention policy (D7),
+- Concrete PMPro/WooCommerce reader + per-payment period provenance recorder
+  (not implemented; only the pure mapper exists), Club level ids and supported
+  PMPro version range, lookup/history endpoints, final coffee list (D3),
+  QR delivery (D5), retention policy (D7),
   recovery mailbox for the shared account.
 - Staging verification of login throttling, CORS/cache/WAF, cookie flags and
   multi-tablet sessions (see Activation prerequisites).
@@ -348,7 +465,8 @@ mutations on 8.2 + MySQL).
 2. Plugin-served `/club-admin/` staff app + protected PHP shell (5-minute
    client lock, nonce bootstrap, no-store); the auth foundation is Task 1C-C.
 3. Lookup and history REST endpoints.
-4. PMPro membership adapter verified on staging.
+4. Concrete PMPro reader on top of the Task 1D-B mapper, verified against the
+   installed plugin versions in disposable CI and then on staging.
 5. Member enrollment, QR issuance/rotation/recovery.
 6. FluentCRM tag sync with consent kept separate from eligibility.
 7. Switch React `/club` from the mock only after auth, staging tests, backups and UAT.

@@ -1,11 +1,13 @@
 # Evangelou Club API — v1 contract
 
-**Status:** pre-release design. No WordPress REST controller exists yet. The
-PHP domain engine behind the redeem endpoint exists and is tested in
-isolation (Task 1B, `wordpress/evangelou-club/`), but it is not wired to
-WordPress. The React `/club` screens run on `mockClubService`; the REST
-adapter (`src/club/restClubService.ts`) is implemented and tested against a
-fake `fetch` only, and is **not enabled**.
+**Status:** pre-release. The WordPress plugin (`wordpress/evangelou-club/`,
+feature flag OFF by default) implements the staff session endpoints (§4.3) and
+a redeem route that **fails closed with 503** in production: there is no
+production membership backend. The pure PMPro entitlement mapper (Task 1D-B)
+exists but has no concrete reader and is not wired. Member lookup (§4.1) is
+not implemented. The React `/club` screens run on `mockClubService`; the REST
+adapter (`src/club/restClubService.ts`) is tested against a fake `fetch` only
+and is **not enabled**.
 
 There is no live v1 consumer, so pre-release changes are allowed — every
 change is listed in §15 rather than made silently.
@@ -133,8 +135,8 @@ is UX only. Malformed phone → `400 invalid_phone`; malformed QR →
   },
   "membership": {
     "status": "active",
-    "started_at": "2026-09-15T00:00:00+03:00",
-    "valid_until": "2026-10-15T23:59:59+03:00"
+    "started_at": "2026-09-15T12:00:00+03:00",
+    "valid_until": "2026-10-15T12:00:00+03:00"
   },
   "benefits": {
     "free_coffee": {
@@ -325,12 +327,19 @@ Mapped by the controller from the engine's `EVC_Entitlement`
 | active + verified payment + known expiry + now < expiry | `active` |
 | expired, or active past its end date | `expired` |
 | cancelled | `cancelled` |
-| pending payment, payment failed, refunded, unverified payment, unknown expiry, no membership | `inactive` |
+| pending payment, payment failed, refunded, unverified payment, unknown expiry, no membership, indeterminate (untrusted/conflicting facts) | `inactive` |
 
 Only `active` may redeem. The engine's finer `reason`
 (`pending_payment`, `payment_unverified`, …) is **not** exposed publicly.
 `valid_until` is nullable in the schema, but Phase 1 manual one-month
 memberships always have one; a missing expiry is never eligible.
+
+`valid_until` is the **exact, exclusive** end instant (owner decision D1,
+2026-10-10): a period started 15 Oct 12:00 Athens is valid until 15 Nov 12:00
+Athens and NOT at that instant — not until the end of that day. One month is a
+calendar month clamped to the last valid day (D5); early renewal adds a month
+to the paid end, late renewal starts at payment confirmation (D2). See the
+plugin README, "Membership entitlement v2".
 
 ## 7. Benefit contract
 
@@ -391,8 +400,10 @@ echo mismatch, offset-less timestamp — outcome unknown).
 
 - **Identity** — WordPress user, linked to FluentCRM contact. The lookup
   strategy is the plugin's internal detail.
-- **Eligibility** — Paid Memberships Pro + WooCommerce (verified payment),
-  through the membership adapter. Never FluentCRM tags.
+- **Eligibility** — Paid Memberships Pro + WooCommerce (verified payment
+  bound to the current paid period), through the membership adapter and the
+  fail-closed PMPro mapper (Task 1D-B). Never FluentCRM tags or newsletter
+  state.
 - **Redemptions, coffee, idempotency, audit** — the separate Club database
   (Task 1B schema). Not stored in CRM or PMPro meta.
 
@@ -487,6 +498,15 @@ caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
   and nonce supplied by the protected shell; it uses `credentials:
   "same-origin"` and adopts refreshed `X-WP-Nonce` headers. No changes to
   existing request/response shapes.
+
+**Task 1D-B (2026-10-10):**
+
+- No wire-shape change. `valid_until` is documented as the exact, exclusive
+  end instant (owner D1); the §4.1 example no longer suggests end-of-day
+  validity. A new internal engine state `indeterminate` maps to the existing
+  public `inactive` bucket; its reason and diagnostics are not exposed.
+- Status header corrected: session endpoints and a fail-closed (503) redeem
+  route exist behind the feature flag; member lookup does not.
 
 ## 16. Demo-only shortcuts (deliberate)
 
