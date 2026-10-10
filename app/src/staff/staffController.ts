@@ -1,3 +1,4 @@
+import { ClubApiError } from "../club/types";
 import type { StaffConfig } from "./config";
 import { StaffApiError, type SessionStatus, type StaffApi } from "./staffApi";
 
@@ -16,6 +17,22 @@ import { StaffApiError, type SessionStatus, type StaffApi } from "./staffApi";
  * in-flight requests and clears sensitive state, so a late response can never
  * restore member details after loss of authorization, lock, expiry, offline
  * or error.
+ *
+ * Authorization loss on PROTECTED operations (Task 1D-C): a trustworthy
+ * 401 / 403 (see authLossOf: only our own StaffApiError or a ClubApiError
+ * built from a real HTTP response, with code AND status agreeing) moves the
+ * app to "expired" / "forbidden" through the same invalidation, so every
+ * other in-flight request and any late success is discarded and only a real
+ * WordPress login can continue. Business answers (400, 404, 409 inactive /
+ * already redeemed / idempotency conflict, 429), network failures, timeouts
+ * and 5xx are returned to the caller unchanged and never end the session.
+ * Nothing is retried automatically.
+ *
+ * Session status checks are latest-request-wins: a newer check supersedes
+ * (and aborts) an older one, whose success or ordinary failure is then
+ * ignored. A 401 / 403 is the exception: it always fails closed, even from
+ * a superseded check, because wrongly locking costs only a re-login while
+ * wrongly keeping a revoked session open could expose member data.
  *
  * Lock / logout:
  * - lock() invalidates as above, records a per-session marker in
@@ -51,6 +68,43 @@ export type RunResult<T> =
   | { status: "error"; error: StaffApiError }
   | { status: "stale" };
 
+/** Errors a protected operation can report to its caller. */
+export type ProtectedError = StaffApiError | ClubApiError;
+
+export type AuthLoss = "unauthorized" | "forbidden";
+
+export type ProtectedResult<T> =
+  | { status: "ok"; value: T }
+  | { status: "error"; error: ProtectedError }
+  /** The session ended (401) or permission was withdrawn (403); the app already left "ready". */
+  | { status: "auth_lost"; reason: AuthLoss }
+  | { status: "stale" };
+
+/**
+ * The ONLY place that decides whether a failure means "this staff session is
+ * no longer authorized". Narrow on purpose: arbitrary thrown objects (even
+ * ones with a matching `code`/`status` field) are never trusted, and a
+ * ClubApiError counts only when its code and HTTP status agree, which is how
+ * restClubService.mapErrorResponse builds it from a real response.
+ */
+export function authLossOf(error: unknown): AuthLoss | null {
+  if (error instanceof StaffApiError) {
+    if (error.kind === "unauthorized" && error.status === 401) return "unauthorized";
+    if (error.kind === "forbidden" && error.status === 403) return "forbidden";
+    return null;
+  }
+  if (error instanceof ClubApiError) {
+    if (error.code === "unauthorized" && error.httpStatus === 401) return "unauthorized";
+    if (error.code === "forbidden" && error.httpStatus === 403) return "forbidden";
+  }
+  return null;
+}
+
+/** Keeps a known error as is; anything unexpected becomes a non-auth "network" error. */
+function toProtectedError(error: unknown): ProtectedError {
+  return error instanceof StaffApiError || error instanceof ClubApiError ? error : new StaffApiError("network");
+}
+
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem" | "removeItem">;
 
 export interface StaffControllerDeps {
@@ -68,6 +122,9 @@ export class StaffController {
   private readonly listeners = new Set<() => void>();
   private epoch = 0;
   private readonly inflight = new Set<AbortController>();
+  /** Sequence of session status checks; only the newest may apply its result. */
+  private statusSeq = 0;
+  private statusRequest: AbortController | null = null;
   private sensitive: unknown = null;
   private ending: Promise<boolean> | null = null;
   private readonly deps: StaffControllerDeps;
@@ -131,49 +188,84 @@ export class StaffController {
    * verified the session.
    */
   async refreshStatus(): Promise<void> {
-    const result = await this.runSession((signal) => this.deps.api.getSession(signal));
+    const seq = ++this.statusSeq;
+    const result = await this.runSession(
+      (signal) => this.deps.api.getSession(signal),
+      (request) => {
+        // A newer check supersedes the older one: stop waiting for it.
+        this.statusRequest?.abort();
+        this.statusRequest = request;
+      },
+    );
+    const superseded = seq !== this.statusSeq;
+    if (!superseded) this.statusRequest = null;
     if (result.status === "ok") {
-      this.setState({ phase: "ready", session: result.value });
+      if (!superseded) this.setState({ phase: "ready", session: result.value });
     } else if (result.status === "error") {
-      this.handleError(result.error);
+      // Authorization loss always fails closed; anything else only from the newest check.
+      if (!superseded || authLossOf(result.error) !== null) this.handleError(result.error);
     }
   }
 
   /** Session bootstrap / recovery request; discarded if the state moved on. */
-  async runSession<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<RunResult<T>> {
+  async runSession<T>(fn: (signal: AbortSignal) => Promise<T>, onStart?: (request: AbortController) => void): Promise<RunResult<T>> {
     if (!SESSION_PHASES.has(this.state.phase)) return { status: "stale" };
-    return this.track(fn, () => SESSION_PHASES.has(this.state.phase));
+    const result = await this.track(fn, () => SESSION_PHASES.has(this.state.phase), onStart);
+    if (result.status === "error") {
+      return { status: "error", error: result.error instanceof StaffApiError ? result.error : new StaffApiError("network") };
+    }
+    return result;
   }
 
-  /** Protected (member-data) operation: ONLY in a verified ready state. */
-  async runProtected<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<RunResult<T>> {
+  /**
+   * Protected (member-data) operation: ONLY in a verified ready state. A
+   * trustworthy 401/403 ends the session here (fail closed); every other
+   * failure is handed back unchanged. Never retried automatically.
+   */
+  async runProtected<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<ProtectedResult<T>> {
     if (!this.isReady) return { status: "stale" };
-    return this.track(fn, () => this.isReady);
+    const result = await this.track(fn, () => this.isReady);
+    if (result.status !== "error") return result;
+    const loss = authLossOf(result.error);
+    if (loss !== null) {
+      this.loseAuthorization(loss);
+      return { status: "auth_lost", reason: loss };
+    }
+    return { status: "error", error: toProtectedError(result.error) };
   }
 
-  private async track<T>(fn: (signal: AbortSignal) => Promise<T>, stillValid: () => boolean): Promise<RunResult<T>> {
+  private async track<T>(
+    fn: (signal: AbortSignal) => Promise<T>,
+    stillValid: () => boolean,
+    onStart?: (request: AbortController) => void,
+  ): Promise<{ status: "ok"; value: T } | { status: "error"; error: unknown } | { status: "stale" }> {
     const epoch = this.epoch;
     const controller = new AbortController();
     this.inflight.add(controller);
+    onStart?.(controller);
     try {
       const value = await fn(controller.signal);
       if (epoch !== this.epoch || !stillValid()) return { status: "stale" };
       return { status: "ok", value };
     } catch (err) {
       if (epoch !== this.epoch || !stillValid()) return { status: "stale" };
-      return { status: "error", error: err instanceof StaffApiError ? err : new StaffApiError("network") };
+      return { status: "error", error: err };
     } finally {
       this.inflight.delete(controller);
     }
   }
 
+  /** 401 -> expired, 403 -> forbidden; both clear data and drop every in-flight request. */
+  private loseAuthorization(loss: AuthLoss): void {
+    this.invalidate();
+    this.setState({ phase: loss === "unauthorized" ? "expired" : "forbidden" });
+  }
+
   private handleError(error: StaffApiError): void {
     if (error.kind === "unauthorized") {
-      this.invalidate();
-      this.setState({ phase: "expired" });
+      this.loseAuthorization("unauthorized");
     } else if (error.kind === "forbidden") {
-      this.invalidate();
-      this.setState({ phase: "forbidden" });
+      this.loseAuthorization("forbidden");
     } else if (error.kind === "network" || error.kind === "timeout") {
       this.setState({ phase: "offline" });
     } else if (error.kind !== "aborted") {

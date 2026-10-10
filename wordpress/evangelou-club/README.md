@@ -345,6 +345,19 @@ aborts in-flight requests and clears sensitive data, so a late response is
 discarded — also after offline → ready recovery. Offline/error return to ready
 only after a successful `GET /session`.
 
+**Authorization-failure gate (Task 1D-C):** a protected (future member) call
+that receives a trustworthy 401 or 403 moves the app to "expired" or
+"forbidden" with the same invalidation (data cleared, in-flight requests
+aborted, late results discarded); only a real WordPress login continues.
+"Trustworthy" means our own `StaffApiError` or a `ClubApiError` built from a
+real response, with code and HTTP status agreeing — never an arbitrary thrown
+object. 400 / 404 / 409 (inactive, already redeemed, idempotency) / 429,
+network, timeout and 5xx are returned to the caller and never end the
+session; nothing is retried automatically. Session status checks are
+latest-request-wins (an older check is aborted and its success or ordinary
+failure ignored); a 401/403 from any check still fails closed. No member
+endpoint is connected yet.
+
 **Shell headers:** `Cache-Control: no-store, private`, `Pragma: no-cache`,
 `nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
 `X-Robots-Tag: noindex, nofollow`, and `EVC_Rest_Security::SHELL_CSP`
