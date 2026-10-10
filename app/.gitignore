@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Club staff build + plugin package (Task 1C-D)
+dist-staff
+dist-plugin

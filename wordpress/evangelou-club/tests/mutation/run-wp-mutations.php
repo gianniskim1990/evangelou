@@ -12,7 +12,7 @@ $staff = 'includes/staff/';
 
 $mutants = array(
     array('W1-capability-check-bypassed', 'enabled', $staff . 'class-evc-staff-auth.php',
-        'if (!EVC_Staff_Role::is_restricted_staff_account($user) || !user_can($user, $capability)) {', 'if (false) {'),
+        'if (!EVC_Staff_Role::is_restricted_staff_account($user) || ($capability !== null && !user_can($user, $capability))) {', 'if (false) {'),
     array('W2-own-nonce-check-removed', 'enabled', $staff . 'class-evc-staff-auth.php',
         "if (!is_string(\$nonce) || \$nonce === '' || !wp_verify_nonce(\$nonce, 'wp_rest')) {", 'if (false) {'),
     array('W3-flag-enabled-when-undefined', 'disabled', $staff . 'class-evc-staff-feature.php',
@@ -39,11 +39,11 @@ $mutants = array(
     array('W13-login-throttle-disabled', 'enabled', $staff . 'class-evc-login-throttle.php',
         'if (self::is_locked((int) $staff->ID, self::client_ip(), time())) {', 'if (false) {'),
     array('W14-session-check-skipped', 'enabled', $staff . 'class-evc-staff-auth.php',
-        'if (EVC_Staff_Session::verify_current((int) $user->ID) !== EVC_Staff_Session::OK) {', 'if (false) {'),
+        'if (EVC_Staff_Session::verify_current((int) $user->ID, null, $touch) !== EVC_Staff_Session::OK) {', 'if (false) {'),
     // Task 1C-C.R1: exclusive least-privilege account policy + safe disable targets.
     array('W15-authorize-uses-lifecycle-role-check', 'enabled', $staff . 'class-evc-staff-auth.php',
-        'if (!EVC_Staff_Role::is_restricted_staff_account($user) || !user_can($user, $capability)) {',
-        'if (!EVC_Staff_Role::has_staff_role($user) || !user_can($user, $capability)) {'),
+        'if (!EVC_Staff_Role::is_restricted_staff_account($user) || ($capability !== null && !user_can($user, $capability))) {',
+        'if (!EVC_Staff_Role::has_staff_role($user) || ($capability !== null && !user_can($user, $capability))) {'),
     array('W16-extra-role-guard-removed', 'enabled', $staff . 'class-evc-staff-role.php',
         'if (array_values((array) $user->roles) !== array(self::ROLE)) {', 'if (false) {'),
     array('W17-direct-capability-guard-removed', 'enabled', $staff . 'class-evc-staff-role.php',
@@ -58,6 +58,25 @@ $mutants = array(
         'if (!($target instanceof WP_User) || !EVC_Staff_Role::has_staff_role($target)) {', 'if (!($target instanceof WP_User)) {'),
     array('W22-throttle-limited-to-strict-accounts', 'enabled', $staff . 'class-evc-login-throttle.php',
         'return EVC_Staff_Role::has_staff_role($user) ? $user : null;', 'return EVC_Staff_Role::is_restricted_staff_account($user) ? $user : null;'),
+    // Task 1C-D: protected /club-admin/ shell, assets and session endpoints.
+    array('W23-shell-feature-gate-removed', 'disabled', $staff . 'class-evc-staff-shell.php',
+        "if (!EVC_Staff_Feature::enabled()) {\n            return self::error_page(404", "if (false) {\n            return self::error_page(404"),
+    array('W24-shell-account-check-skipped', 'enabled', $staff . 'class-evc-staff-shell.php',
+        '$error = EVC_Staff_Auth::check_account($user, null, true);', '$error = null;'),
+    array('W25-shell-anonymous-not-redirected', 'enabled', $staff . 'class-evc-staff-shell.php',
+        'if (!$user->exists()) {', 'if (false) {'),
+    array('W26-nonce-leaked-on-denied-pages', 'enabled', $staff . 'class-evc-staff-shell.php',
+        "'<title>Ευαγγέλου Club</title></head><body><p>'", "'<title>Ευαγγέλου Club</title></head><body><p>' . wp_create_nonce('wp_rest')"),
+    array('W27-status-endpoint-extends-inactivity', 'enabled', $staff . 'class-evc-staff-auth.php',
+        'return self::authorize_rest($request, null, false);', 'return self::authorize_rest($request, null, true);'),
+    array('W28-asset-name-validation-removed', 'enabled', $staff . 'class-evc-staff-assets.php',
+        'if (!is_string($relative) || !preg_match(self::ASSET_PATTERN, $relative)) {', 'if (!is_string($relative)) {'),
+    array('W29-asset-existence-check-removed', 'enabled', $staff . 'class-evc-staff-assets.php',
+        'if ($real === false || $base === false || strpos($real, $base . DIRECTORY_SEPARATOR) !== 0 || !is_file($real)) {', 'if (false) {'),
+    array('W30-session-end-leaves-session-alive', 'enabled', $staff . 'class-evc-rest-session-controller.php',
+        "        EVC_Staff_Session::revoke_current();\n", ''),
+    array('W31-rewrite-flushed-on-every-request', 'enabled', $staff . 'class-evc-staff-shell.php',
+        "        if (\$current === \$state) {\n            return;\n        }\n", ''),
 );
 
 function evc_wp_suite(string $root, string $mode): int {

@@ -2,3 +2,5 @@
 /vendor/
 .phpunit.result.cache
 # composer.lock IS committed: CI uses `composer install` for reproducible tooling.
+# Club staff build output (built + packaged by app/scripts/package-club-plugin.mjs; never committed)
+/staff-app/

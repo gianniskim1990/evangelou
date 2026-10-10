@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "images:stock": "node scripts/fetch-stock-images.mjs",
     "test:club": "node scripts/run-club-tests.mjs",
-    "test:club:mutation": "node scripts/run-club-mutations.mjs"
+    "test:club:mutation": "node scripts/run-club-mutations.mjs",
+    "build:staff": "vite build --config vite.staff.config.ts",
+    "package:club-plugin": "node scripts/package-club-plugin.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.4",

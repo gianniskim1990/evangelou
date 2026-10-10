@@ -88,7 +88,7 @@ final class EVC_Staff_Session {
      * non-OK result destroys that session (and only that session). On
      * success, records activity at most once per TOUCH_INTERVAL_SECONDS.
      */
-    public static function verify_current(int $user_id, ?int $now = null): string {
+    public static function verify_current(int $user_id, ?int $now = null, bool $touch = true): string {
         $now = $now === null ? time() : $now;
         $token = wp_get_session_token();
         if (!is_string($token) || $token === '' || $user_id <= 0) {
@@ -105,10 +105,28 @@ final class EVC_Staff_Session {
             delete_user_meta($user_id, $key);
             return $status;
         }
-        if ($activity === null || $now - $activity >= self::TOUCH_INTERVAL_SECONDS) {
+        // $touch = false (status checks, logout) NEVER extends inactivity, so
+        // an unattended tablet cannot keep its session alive by itself.
+        if ($touch && ($activity === null || $now - $activity >= self::TOUCH_INTERVAL_SECONDS)) {
             update_user_meta($user_id, $key, (string) $now);
         }
         return self::OK;
+    }
+
+    /**
+     * Absolute end (Unix time) of the CURRENT cookie session, or null when
+     * there is no valid policy session. Read-only: never touches activity.
+     */
+    public static function current_expiry(int $user_id): ?int {
+        $token = wp_get_session_token();
+        if (!is_string($token) || $token === '' || $user_id <= 0) {
+            return null;
+        }
+        $session = WP_Session_Tokens::get_instance($user_id)->get($token);
+        if (!is_array($session) || !isset($session['login'], $session['expiration']) || !is_int($session['login']) || !is_int($session['expiration'])) {
+            return null;
+        }
+        return min($session['login'] + self::ABSOLUTE_SECONDS, $session['expiration']);
     }
 
     /** One-way keyed reference to a session, safe for audit records (32 hex). */

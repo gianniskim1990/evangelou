@@ -3,7 +3,13 @@ on:
   push:
     paths:
       - 'app/src/club/**'
+      - 'app/src/staff/**'
       - 'app/tests/club/**'
+      - 'app/tests/staff/**'
+      - 'app/staff.html'
+      - 'app/vite.staff.config.ts'
+      - 'app/scripts/package-club-plugin.mjs'
+      - 'app/src/index.css'
       - 'app/scripts/run-club-*.mjs'
       - 'app/docs/evangelou-club-api.md'
       - 'app/package.json'
@@ -13,7 +19,13 @@ on:
   pull_request:
     paths:
       - 'app/src/club/**'
+      - 'app/src/staff/**'
       - 'app/tests/club/**'
+      - 'app/tests/staff/**'
+      - 'app/staff.html'
+      - 'app/vite.staff.config.ts'
+      - 'app/scripts/package-club-plugin.mjs'
+      - 'app/src/index.css'
       - 'app/scripts/run-club-*.mjs'
       - 'app/docs/evangelou-club-api.md'
       - 'app/package.json'
@@ -45,10 +57,12 @@ jobs:
         run: npm run lint
       - name: Build
         run: npm run build
-      - name: Club tests (fake fetch, no network, TZ=UTC+14)
+      - name: Build REAL staff app (separate bundle) and verify plugin package
+        run: npm run package:club-plugin
+      - name: Club + staff tests (fake fetch/clock, no network, TZ=UTC+14)
         run: npm run test:club
       - name: Club mutation tests (retry / idempotency / error mapping)
         run: npm run test:club:mutation
       - name: Confirm sources unchanged by test runs
         working-directory: .
-        run: git diff --exit-code -- app/src app/tests
+        run: git diff --exit-code -- app/src app/tests app/scripts

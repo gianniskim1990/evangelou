@@ -4,10 +4,15 @@ export function ClubShell({
   onBack,
   onExit,
   children,
+  logoSrc = "/logo-evaggelou-color.png",
+  exitLabel = "Αποχώρηση",
 }: {
   onBack?: () => void;
   onExit: () => void;
   children: ReactNode;
+  /** Defaults keep the public /club demo unchanged; the staff app passes its bundled logo. */
+  logoSrc?: string;
+  exitLabel?: string;
 }) {
   return (
     <div className="min-h-screen bg-cream">
@@ -24,13 +29,13 @@ export function ClubShell({
               </svg>
             </button>
           )}
-          <img src="/logo-evaggelou-color.png" alt="" className="h-7 object-contain" />
+          <img src={logoSrc} alt="" className="h-7 object-contain" />
           <span className="font-literata text-[15px] font-semibold">
             Club <span className="font-normal text-espresso/50">· προσωπικό</span>
           </span>
         </div>
         <button onClick={onExit} className="flex-none rounded-lg border border-espresso/20 px-3 py-2.5 text-[13px] font-semibold">
-          Αποχώρηση
+          {exitLabel}
         </button>
       </header>
 
