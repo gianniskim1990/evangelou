@@ -79,8 +79,9 @@ function config_of(string $body): ?array {
     return is_array($c) ? $c : null;
 }
 
+/** No staff bootstrap and no staff bundle (themes may legitimately load their own module scripts). */
 function no_bootstrap(array $r): bool {
-    return strpos($r['body'], 'evc-staff-config') === false && strpos($r['body'], 'type="module"') === false;
+    return strpos($r['body'], 'evc-staff-config') === false && strpos($r['body'], 'staff-app/assets/') === false;
 }
 
 if ($mode === 'on') {

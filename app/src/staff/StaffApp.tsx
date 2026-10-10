@@ -78,7 +78,7 @@ function Dashboard({ state, controller }: { state: Extract<StaffState, { phase: 
             <h2 className="text-[15px] font-semibold text-espresso">Σύνδεση προσωπικού</h2>
           </div>
           <p className="text-[13.5px] text-espresso/70">
-            Ενεργή έως <span className="font-semibold text-espresso">{formatClockTime(state.session.expiresAt)}</span>.
+            Ενεργή έως <span className="font-semibold text-espresso">{formatClockTime(state.session.expiresAt)}</span>
           </p>
           <p className="mt-1 text-[12.5px] text-espresso/50">Η οθόνη κλειδώνει αυτόματα μετά από 5 λεπτά αδράνειας.</p>
         </section>
