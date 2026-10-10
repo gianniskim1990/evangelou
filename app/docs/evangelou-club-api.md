@@ -268,6 +268,14 @@ extend the inactivity window**. No personal or customer data is returned.
 session token and clears the auth cookie (logout, 5-minute lock). Other
 tablets' sessions are unaffected. Without a valid nonce → `401`, nothing ends.
 
+Client behaviour (staff app): both session requests are bounded to 10 s
+(headers and body). The staff app treats only `200 {"ended": true}` as
+revocation confirmed; a timeout, network error, `5xx` and also `401`/`403`
+(a missing/stale nonce returns these while the session may still be alive) are
+**unconfirmed** — it stays locked, does not claim the session ended and
+offers an explicit retry. No server change: the server-side 30-minute
+inactivity limit bounds an unconfirmed session.
+
 There is **no** endpoint that hands out a nonce: the `wp_rest` nonce reaches
 the staff app only inside the protected `/club-admin/` HTML shell, and
 WordPress refreshes it through the `X-WP-Nonce` response header.

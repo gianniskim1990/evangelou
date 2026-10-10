@@ -48,76 +48,246 @@ function setup(storage = new MemoryStorage()) {
   return { api, controller, navigations, storage };
 }
 
-describe("StaffController", () => {
-  it("boots to ready from the real session endpoint", async () => {
-    const { controller } = setup();
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const fail = (kind: "unauthorized" | "forbidden" | "network" | "timeout" | "server") => async () => {
+  throw new StaffApiError(kind);
+};
+
+describe("StaffController — session bootstrap and recovery", () => {
+  it("boots from loading by verifying the real session (I)", async () => {
+    const { api, controller } = setup();
+    assert.equal(controller.getState().phase, "loading");
     await controller.boot();
     assert.deepEqual(controller.getState(), { phase: "ready", session: SESSION });
+    assert.equal(api.sessionCalls, 1);
   });
 
-  it("maps 401 to expired, 403 to forbidden, network to offline", async () => {
-    for (const [kind, phase] of [["unauthorized", "expired"], ["forbidden", "forbidden"], ["network", "offline"], ["server", "error"]] as const) {
+  it("maps 401 to expired, 403 to forbidden, network/timeout to offline, 5xx to error", async () => {
+    const cases = [["unauthorized", "expired"], ["forbidden", "forbidden"], ["network", "offline"], ["timeout", "offline"], ["server", "error"]] as const;
+    for (const [kind, phase] of cases) {
       const { api, controller } = setup();
-      api.sessionResult = async () => {
-        throw new StaffApiError(kind);
-      };
+      api.sessionResult = fail(kind);
       await controller.boot();
       assert.equal(controller.getState().phase, phase, kind);
     }
   });
 
-  it("lock clears sensitive data, records the marker and ends the server session", async () => {
+  it("offline/error recover to ready ONLY after a successful session check (M)", async () => {
+    for (const first of ["network", "server"] as const) {
+      const { api, controller } = setup();
+      api.sessionResult = fail(first);
+      await controller.boot();
+      assert.notEqual(controller.getState().phase, "ready");
+      api.sessionResult = fail("timeout");
+      await controller.refreshStatus();
+      assert.equal(controller.getState().phase, "offline", "still not ready while unverified");
+      api.sessionResult = async () => SESSION;
+      await controller.refreshStatus();
+      assert.equal(controller.getState().phase, "ready");
+    }
+  });
+
+  it("recovery from offline can discover an expired session", async () => {
+    const { api, controller } = setup();
+    api.sessionResult = fail("network");
+    await controller.boot();
+    api.sessionResult = fail("unauthorized");
+    await controller.refreshStatus();
+    assert.equal(controller.getState().phase, "expired");
+  });
+
+  it("forbidden, expired and locked do not run session checks", async () => {
+    for (const kind of ["forbidden", "unauthorized"] as const) {
+      const { api, controller } = setup();
+      api.sessionResult = fail(kind);
+      await controller.boot();
+      api.sessionResult = async () => SESSION;
+      await controller.refreshStatus();
+      assert.notEqual(controller.getState().phase, "ready", kind);
+      assert.equal(api.sessionCalls, 1);
+    }
+  });
+});
+
+describe("StaffController — protected operations are ready-only (fail closed)", () => {
+  it("non-ready states never run protected operations (J)", async () => {
+    const states: [string, () => Promise<StaffController>][] = [
+      ["loading", async () => setup().controller],
+      ["forbidden", async () => { const s = setup(); s.api.sessionResult = fail("forbidden"); await s.controller.boot(); return s.controller; }],
+      ["offline", async () => { const s = setup(); s.api.sessionResult = fail("network"); await s.controller.boot(); return s.controller; }],
+      ["error", async () => { const s = setup(); s.api.sessionResult = fail("server"); await s.controller.boot(); return s.controller; }],
+      ["expired", async () => { const s = setup(); s.api.sessionResult = fail("unauthorized"); await s.controller.boot(); return s.controller; }],
+      ["locked", async () => { const s = setup(); await s.controller.boot(); await s.controller.lock(); return s.controller; }],
+    ];
+    for (const [name, make] of states) {
+      const controller = await make();
+      assert.equal(controller.getState().phase, name);
+      let called = false;
+      const result = await controller.runProtected(async () => {
+        called = true;
+        return "member data";
+      });
+      assert.deepEqual(result, { status: "stale" }, name);
+      assert.equal(called, false, `${name}: protected operation never started`);
+    }
+  });
+
+  it("non-ready states can neither accept nor reveal sensitive data (K)", async () => {
+    const { api, controller } = setup();
+    assert.equal(controller.setSensitive({ member: "x" }), false, "loading");
+    await controller.boot();
+    assert.equal(controller.setSensitive({ member: "x" }), true, "ready");
+    assert.deepEqual(controller.getSensitive(), { member: "x" });
+
+    api.sessionResult = fail("network");
+    await controller.refreshStatus();
+    assert.equal(controller.getState().phase, "offline");
+    assert.equal(controller.getSensitive(), null, "not revealed offline");
+    assert.equal(controller.setSensitive({ member: "y" }), false, "not accepted offline");
+
+    api.sessionResult = async () => SESSION;
+    await controller.refreshStatus();
+    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.getSensitive(), null, "data cleared on leaving ready; NOT restored on recovery");
+  });
+
+  it("a late protected response after authorization loss is discarded (L)", async () => {
+    for (const kind of ["forbidden", "unauthorized", "network", "server"] as const) {
+      const { api, controller } = setup();
+      await controller.boot();
+      const late = deferred<string>();
+      let aborted = false;
+      const pending = controller.runProtected((signal) => {
+        signal.addEventListener("abort", () => (aborted = true));
+        return late.promise;
+      });
+      api.sessionResult = fail(kind);
+      await controller.refreshStatus();
+      assert.notEqual(controller.getState().phase, "ready", kind);
+      late.resolve("private member data");
+      assert.deepEqual(await pending, { status: "stale" }, kind);
+      assert.equal(aborted, true, `${kind}: in-flight request aborted`);
+      assert.equal(controller.getSensitive(), null);
+    }
+  });
+
+  it("a late protected response is discarded even after offline → ready recovery", async () => {
+    const { api, controller } = setup();
+    await controller.boot();
+    const late = deferred<string>();
+    const pending = controller.runProtected(() => late.promise);
+    api.sessionResult = fail("network");
+    await controller.refreshStatus();
+    api.sessionResult = async () => SESSION;
+    await controller.refreshStatus();
+    assert.equal(controller.getState().phase, "ready");
+    late.resolve("private member data from the previous epoch");
+    assert.deepEqual(await pending, { status: "stale" });
+  });
+
+  it("a late protected response cannot survive a lock", async () => {
+    const { controller } = setup();
+    await controller.boot();
+    const late = deferred<string>();
+    const pending = controller.runProtected(() => late.promise);
+    await controller.lock();
+    late.resolve("private member data");
+    assert.deepEqual(await pending, { status: "stale" });
+  });
+
+  it("a late session-status success after lock does not reopen the app", async () => {
+    const { api, controller } = setup();
+    await controller.boot();
+    const slow = deferred<SessionStatus>();
+    api.sessionResult = () => slow.promise;
+    const check = controller.refreshStatus();
+    await controller.lock();
+    slow.resolve(SESSION);
+    await check;
+    assert.equal(controller.getState().phase, "locked");
+  });
+});
+
+describe("StaffController — lock, bounded logout and real re-authentication", () => {
+  it("lock clears sensitive data, records the marker and confirms revocation", async () => {
     const { api, controller, storage } = setup();
     await controller.boot();
-    assert.equal(controller.setSensitive({ member: "x" }), true);
+    controller.setSensitive({ member: "x" });
     await controller.lock();
-    assert.deepEqual(controller.getState(), { phase: "locked", serverEnded: true, ending: false });
+    assert.deepEqual(controller.getState(), { phase: "locked", revocation: "confirmed" });
     assert.equal(controller.getSensitive(), null);
-    assert.equal(controller.setSensitive({ member: "y" }), false, "nothing sensitive can be stored while locked");
     assert.equal(storage.getItem(LOCK_MARKER_KEY), CONFIG.sessionRef);
     assert.ok(!JSON.stringify([...storage.data.values()]).includes(CONFIG.nonce), "nonce never persisted");
     assert.equal(api.endCalls, 1);
   });
 
-  it("aborts in-flight requests and discards their late responses after lock", async () => {
-    const { controller } = setup();
+  it("while ending is pending the app is locked and re-login is still possible (C)", async () => {
+    const { api, controller, navigations } = setup();
     await controller.boot();
-    let release!: (v: string) => void;
-    let aborted = false;
-    const pending = controller.run(
-      (signal) =>
-        new Promise<string>((resolve) => {
-          signal.addEventListener("abort", () => (aborted = true));
-          release = resolve;
-        }),
-    );
-    await controller.lock();
-    release("private member data");
-    assert.deepEqual(await pending, { status: "stale" });
-    assert.equal(aborted, true);
-    assert.equal(controller.getSensitive(), null);
+    const hang = deferred<void>();
+    api.endResult = () => hang.promise;
+    const locking = controller.lock();
+    assert.deepEqual(controller.getState(), { phase: "locked", revocation: "pending" });
+    controller.reauthenticate(); // never waits on the pending request
+    assert.deepEqual(navigations, [CONFIG.loginUrl]);
+    hang.reject(new StaffApiError("timeout"));
+    await locking;
+    assert.deepEqual(controller.getState(), { phase: "locked", revocation: "unconfirmed" });
   });
 
-  it("discards a late response once the account lost access (forbidden) mid-flight", async () => {
+  it("a failed/unknown logout is reported unconfirmed, never as success, and never unlocks (D, E)", async () => {
+    // 401/403 included: a missing or stale nonce yields them while the session may still be alive.
+    for (const kind of ["timeout", "network", "server", "unauthorized", "forbidden"] as const) {
+      const { api, controller } = setup();
+      await controller.boot();
+      api.endResult = fail(kind);
+      await controller.lock();
+      assert.deepEqual(controller.getState(), { phase: "locked", revocation: "unconfirmed" }, kind);
+      assert.equal(controller.isReady, false);
+    }
+  });
+
+  it("an explicit retry of ending the session can succeed (F)", async () => {
     const { api, controller } = setup();
     await controller.boot();
-    let release!: (v: string) => void;
-    const pending = controller.run(() => new Promise<string>((resolve) => (release = resolve)));
-    api.sessionResult = async () => {
-      throw new StaffApiError("forbidden");
-    };
-    await controller.refreshStatus();
-    assert.equal(controller.getState().phase, "forbidden");
-    release("private member data");
-    assert.deepEqual(await pending, { status: "stale" }, "older-epoch result is never applied");
+    api.endResult = fail("timeout");
+    await controller.lock();
+    assert.equal((controller.getState() as { revocation: string }).revocation, "unconfirmed");
+    api.endResult = async () => undefined;
+    await controller.retryEndSession();
+    assert.deepEqual(controller.getState(), { phase: "locked", revocation: "confirmed" });
+    assert.equal(api.endCalls, 2);
+    await controller.retryEndSession();
+    assert.equal(api.endCalls, 2, "no further calls once confirmed");
   });
 
-  it("refuses new requests while locked (no redemption possible)", async () => {
+  it("concurrent lock/retry share one in-flight end request", async () => {
+    const { api, controller } = setup();
+    await controller.boot();
+    const hang = deferred<void>();
+    api.endResult = () => hang.promise;
+    const a = controller.lock();
+    const b = controller.retryEndSession();
+    hang.resolve();
+    await Promise.all([a, b]);
+    assert.equal(api.endCalls, 1);
+  });
+
+  it("refuses protected work while locked (no redemption possible)", async () => {
     const { controller } = setup();
     await controller.boot();
     await controller.lock();
     let called = false;
-    const result = await controller.run(async () => {
+    const result = await controller.runProtected(async () => {
       called = true;
       return "redeemed";
     });
@@ -145,29 +315,13 @@ describe("StaffController", () => {
   });
 
   it("unlocking always goes through a real WordPress re-login (reauth=1)", async () => {
-    const { api, controller, navigations } = setup();
+    const { controller, navigations } = setup();
     await controller.boot();
-    api.endResult = async () => {
-      throw new StaffApiError("network");
-    };
     await controller.lock();
-    assert.deepEqual(controller.getState(), { phase: "locked", serverEnded: false, ending: false });
-    api.endResult = async () => undefined;
-    await controller.reauthenticate();
-    assert.equal(api.endCalls, 2, "retries ending the server session first");
+    controller.reauthenticate();
     assert.deepEqual(navigations, [CONFIG.loginUrl]);
     assert.ok(navigations[0].includes("reauth=1"));
     assert.equal(controller.getState().phase, "locked", "never unlocks in place");
-  });
-
-  it("a session already gone server-side counts as ended", async () => {
-    const { api, controller } = setup();
-    await controller.boot();
-    api.endResult = async () => {
-      throw new StaffApiError("unauthorized");
-    };
-    await controller.lock();
-    assert.deepEqual(controller.getState(), { phase: "locked", serverEnded: true, ending: false });
   });
 
   it("logout locks, ends the session and navigates to login", async () => {
@@ -175,20 +329,6 @@ describe("StaffController", () => {
     await controller.boot();
     await controller.logout();
     assert.equal(api.endCalls, 1);
-    assert.deepEqual(navigations, [CONFIG.loginUrl]);
-  });
-
-  it("an expired session clears data and offers only a real login", async () => {
-    const { api, controller, navigations } = setup();
-    await controller.boot();
-    controller.setSensitive({ member: "x" });
-    api.sessionResult = async () => {
-      throw new StaffApiError("unauthorized");
-    };
-    await controller.refreshStatus();
-    assert.equal(controller.getState().phase, "expired");
-    assert.equal(controller.getSensitive(), null);
-    await controller.reauthenticate();
     assert.deepEqual(navigations, [CONFIG.loginUrl]);
   });
 

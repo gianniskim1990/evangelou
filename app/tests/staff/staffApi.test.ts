@@ -118,3 +118,139 @@ describe("staff API transport", () => {
     assert.equal(new Headers(fetchImpl.calls[0].init.headers).get("X-WP-Nonce"), CONFIG.nonce);
   });
 });
+
+class FakeTimers {
+  private next = 1;
+  readonly pending = new Map<number, { fn: () => void; ms: number }>();
+  setTimeout = (fn: () => void, ms: number): unknown => {
+    const id = this.next++;
+    this.pending.set(id, { fn, ms });
+    return id;
+  };
+  clearTimeout = (id: unknown): void => {
+    this.pending.delete(id as number);
+  };
+  fireAll(): void {
+    for (const [id, t] of [...this.pending]) {
+      this.pending.delete(id);
+      t.fn();
+    }
+  }
+}
+
+/** A fetch that never settles and ignores its AbortSignal (worst case). */
+const hangingFetch = (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+
+/** Headers arrive, then the body stalls forever. */
+function stalledBodyFetch(): typeof fetch {
+  return (async () =>
+    new Response(new ReadableStream<Uint8Array>({ start() {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as unknown as typeof fetch;
+}
+
+function countingSignal() {
+  const controller = new AbortController();
+  const counts = { added: 0, removed: 0 };
+  const add = controller.signal.addEventListener.bind(controller.signal);
+  const remove = controller.signal.removeEventListener.bind(controller.signal);
+  controller.signal.addEventListener = ((...args: Parameters<AbortSignal["addEventListener"]>) => {
+    counts.added++;
+    add(...args);
+  }) as AbortSignal["addEventListener"];
+  controller.signal.removeEventListener = ((...args: Parameters<AbortSignal["removeEventListener"]>) => {
+    counts.removed++;
+    remove(...args);
+  }) as AbortSignal["removeEventListener"];
+  return { controller, counts };
+}
+
+// Bounded so a missing request timeout FAILS fast instead of hanging the run.
+describe("staff API — bounded session requests", { timeout: 5_000 }, () => {
+  it("uses a 10 s bound by default", async () => {
+    const timers = new FakeTimers();
+    const api = createStaffApi(CONFIG, hangingFetch, { timers });
+    const pending = kind(api.getSession());
+    assert.deepEqual([...timers.pending.values()].map((t) => t.ms), [10_000]);
+    timers.fireAll();
+    assert.equal(await pending, "timeout");
+  });
+
+  it("a session request that never resolves times out (A)", async () => {
+    for (const op of ["getSession", "endSession"] as const) {
+      const timers = new FakeTimers();
+      const api = createStaffApi(CONFIG, hangingFetch, { timers, timeoutMs: 50 });
+      const pending = kind(api[op]());
+      timers.fireAll();
+      assert.equal(await pending, "timeout", op);
+    }
+  });
+
+  it("a body that stalls after headers times out (B)", async () => {
+    const timers = new FakeTimers();
+    const api = createStaffApi(CONFIG, stalledBodyFetch(), { timers, timeoutMs: 50 });
+    const pending = kind(api.getSession());
+    await new Promise((r) => setImmediate(r)); // headers delivered, body read started
+    timers.fireAll();
+    assert.equal(await pending, "timeout");
+  });
+
+  it("times out with the real timer implementation too", async () => {
+    const api = createStaffApi(CONFIG, stalledBodyFetch(), { timeoutMs: 20 });
+    assert.equal(await kind(api.endSession()), "timeout");
+  });
+
+  it("passes an abortable signal to fetch and aborts it on timeout", async () => {
+    const timers = new FakeTimers();
+    let seen: AbortSignal | undefined;
+    const api = createStaffApi(
+      CONFIG,
+      ((_: unknown, init?: RequestInit) => {
+        seen = init?.signal ?? undefined;
+        return new Promise<Response>(() => undefined);
+      }) as unknown as typeof fetch,
+      { timers },
+    );
+    const pending = kind(api.getSession());
+    assert.equal(seen?.aborted, false);
+    timers.fireAll();
+    assert.equal(await pending, "timeout");
+    assert.equal(seen?.aborted, true);
+  });
+
+  it("caller cancellation is reported as aborted, not timeout (G)", async () => {
+    const timers = new FakeTimers();
+    const api = createStaffApi(CONFIG, hangingFetch, { timers });
+    const caller = new AbortController();
+    const pending = kind(api.getSession(caller.signal));
+    caller.abort();
+    assert.equal(await pending, "aborted");
+
+    const already = new AbortController();
+    already.abort();
+    assert.equal(await kind(api.endSession(already.signal)), "aborted");
+  });
+
+  it("leaves no timers or caller listeners behind (H)", async () => {
+    const timers = new FakeTimers();
+    const outcomes: [string, typeof fetch][] = [
+      ["success", fakeFetch(() => json(200, SESSION_OK))],
+      ["http error", fakeFetch(() => json(500, { error: { code: "x", message: "m" } }))],
+      ["network", (async () => { throw new TypeError("offline"); }) as unknown as typeof fetch],
+      ["timeout", hangingFetch],
+      ["caller abort", hangingFetch],
+    ];
+    for (const [name, impl] of outcomes) {
+      const api = createStaffApi(CONFIG, impl, { timers });
+      const { controller, counts } = countingSignal();
+      const pending = api.getSession(controller.signal).catch(() => undefined);
+      if (name === "timeout") timers.fireAll();
+      if (name === "caller abort") controller.abort();
+      await pending;
+      assert.equal(timers.pending.size, 0, `${name}: timer cleared`);
+      assert.equal(counts.added, counts.removed, `${name}: listener removed`);
+      assert.ok(counts.added >= 1, `${name}: caller signal was linked`);
+    }
+  });
+});

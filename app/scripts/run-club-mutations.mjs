@@ -148,8 +148,8 @@ const mutants = [
   {
     id: "S7-lock-keeps-server-session",
     file: "staff/staffController.ts",
-    search: "    const ended = await this.endServerSession();\n    if (this.getState().phase === \"locked\")",
-    replace: "    const ended = false;\n    if (this.getState().phase === \"locked\")",
+    search: "        await this.deps.api.endSession();\n",
+    replace: "",
   },
   {
     id: "S8-unlock-in-place-without-login",
@@ -187,12 +187,50 @@ const mutants = [
     search: '    if (url.origin !== origin) throw new StaffApiError("invalid_response");\n',
     replace: "",
   },
+  {
+    id: "S14-session-request-timeout-removed",
+    file: "staff/staffApi.ts",
+    search: "    const timer = timers.setTimeout(() => {\n      timedOut = true;\n      controller.abort();\n    }, timeoutMs);\n",
+    replace: "    const timer = undefined;\n",
+  },
+  {
+    id: "S15-sensitive-data-in-forbidden-offline",
+    file: "staff/staffController.ts",
+    search: "    if (!this.isReady) return false;\n",
+    replace: "",
+  },
+  {
+    id: "S16-protected-op-runs-when-not-ready",
+    file: "staff/staffController.ts",
+    search: '    if (!this.isReady) return { status: "stale" };\n    return this.track(fn, () => this.isReady);',
+    replace: "    return this.track(fn, () => true);",
+  },
+  {
+    id: "S17-late-private-response-restored",
+    file: "staff/staffController.ts",
+    search: '      if (epoch !== this.epoch || !stillValid()) return { status: "stale" };\n      return { status: "ok", value };',
+    replace: '      return { status: "ok", value };',
+  },
+  {
+    id: "S18-unknown-logout-reported-as-success",
+    file: "staff/staffController.ts",
+    search: "      } catch {\n        // Outcome unknown (or session possibly still alive): never claim it.\n",
+    replace: "      } catch {\n        confirmed = true;\n",
+  },
+  {
+    id: "S19-timeout-reported-as-network",
+    file: "staff/staffApi.ts",
+    search: '      if (timedOut) throw new StaffApiError("timeout");\n',
+    replace: "",
+  },
 ];
 
 const runSuite = () =>
   spawnSync(process.execPath, [join(appDir, "scripts", "run-club-tests.mjs")], {
     env: { ...process.env, EVC_QUIET_TESTS: "1" },
     stdio: "ignore",
+    // A mutant that hangs the suite (e.g. a removed timeout) counts as killed.
+    timeout: 180_000,
   }).status;
 
 const sha = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");

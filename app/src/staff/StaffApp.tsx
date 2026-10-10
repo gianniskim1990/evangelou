@@ -133,7 +133,7 @@ function Dashboard({ state, controller }: { state: Extract<StaffState, { phase: 
 
 export function StaffApp({ controller }: { controller: StaffController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
-  const login = () => void controller.reauthenticate();
+  const login = () => controller.reauthenticate();
 
   let content: ReactNode;
   switch (state.phase) {
@@ -153,14 +153,25 @@ export function StaffApp({ controller }: { controller: StaffController }) {
           <p className="text-sm text-espresso/65">
             Για λόγους ασφαλείας η οθόνη κλειδώνει μετά από 5 λεπτά αδράνειας. Συνδεθείτε ξανά για να συνεχίσετε.
           </p>
-          {!state.ending && !state.serverEnded && (
-            <p className="mt-3 text-[12.5px] text-maroon">
-              Δεν ήταν δυνατή η επικοινωνία με τον διακομιστή. Η συνεδρία θα λήξει αυτόματα.
+          <p role="status" aria-live="polite" className="mt-3 min-h-5 text-[12.5px] text-espresso/55">
+            {state.revocation === "pending" && "Τερματισμός συνεδρίας…"}
+            {state.revocation === "confirmed" && "Η συνεδρία τερματίστηκε."}
+          </p>
+          {state.revocation === "unconfirmed" && (
+            <p className="mt-1 text-[12.5px] text-maroon">
+              Δεν επιβεβαιώθηκε ο τερματισμός της συνεδρίας στον διακομιστή. Η οθόνη παραμένει κλειδωμένη και η
+              συνεδρία λήγει αυτόματα το αργότερο σε 30 λεπτά. Δοκιμάστε ξανά ή συνδεθείτε ξανά.
             </p>
           )}
-          <PrimaryButton onClick={login} disabled={state.ending}>
-            {state.ending ? "Τερματισμός συνεδρίας…" : "Σύνδεση ξανά"}
-          </PrimaryButton>
+          <PrimaryButton onClick={login}>Σύνδεση ξανά</PrimaryButton>
+          {state.revocation === "unconfirmed" && (
+            <button
+              onClick={() => void controller.retryEndSession()}
+              className="mt-3 min-h-12 w-full max-w-[320px] rounded-xl border border-espresso/20 bg-surface px-6 py-3 text-sm font-semibold"
+            >
+              Τερματισμός συνεδρίας ξανά
+            </button>
+          )}
         </Centered>
       );
       break;

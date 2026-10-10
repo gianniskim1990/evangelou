@@ -212,6 +212,25 @@ a reload of the same session re-locks. Unlocking is only possible through a
 real WordPress login at `wp-login.php?reauth=1`, which shows the login form
 even if a cookie were still valid. No PIN, no second password store.
 
+**Bounded session requests and honest logout:** every `/session` and
+`/session/end` request (headers AND body) is aborted after 10 seconds
+(`SESSION_REQUEST_TIMEOUT_MS`); a caller's abort signal is honoured and no
+timer or listener outlives the request. The locked screen reports the server
+outcome truthfully: "pending", "confirmed" (only a verified `200 {"ended":
+true}`) or "unconfirmed" (timeout / network / 5xx — outcome unknown — and also
+401/403, since a missing or stale nonce returns them while the session may
+still be alive). Unconfirmed keeps the screen locked, says the session will
+expire on its own within 30 minutes, and offers an explicit "end session again"
+action. The "log in again" button is never disabled. A timeout never unlocks.
+
+**Fail-closed state:** session requests (bootstrap, status re-check, recovery)
+may run in loading/ready/offline/error; protected member-data operations and
+sensitive data are allowed ONLY in a verified `ready` state. Every transition
+out of `ready` (lock, expired, forbidden, offline, error) bumps the epoch,
+aborts in-flight requests and clears sensitive data, so a late response is
+discarded — also after offline → ready recovery. Offline/error return to ready
+only after a successful `GET /session`.
+
 **Shell headers:** `Cache-Control: no-store, private`, `Pragma: no-cache`,
 `nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
 `X-Robots-Tag: noindex, nofollow`, and `EVC_Rest_Security::SHELL_CSP`
@@ -224,7 +243,9 @@ are shown as disabled ("Η λειτουργία θα ενεργοποιηθεί 
 Club."). The redeem route still returns 503 with the production backend.
 
 **Tests:** frontend `npm run test:club` (staff config, transport/nonce,
-idle-lock boundaries, controller lock/reauth/stale-response rules, import-graph
+idle-lock boundaries, bounded session requests (never-settling fetch, stalled
+body, caller abort, timer/listener cleanup), controller ready-only/stale-response
+and lock/revocation/reauth rules, import-graph
 isolation); real WordPress suites (`StaffShellTest`, `RestSessionTest`,
 `StaffShellDisabledTest`); and a CI-only real HTTP run (`tests/http/`) that
 installs a disposable WordPress, serves it with `php -S`, installs the

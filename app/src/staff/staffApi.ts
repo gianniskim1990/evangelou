@@ -30,7 +30,49 @@ export class NonceStore {
   }
 }
 
-export type StaffErrorKind = "unauthorized" | "forbidden" | "network" | "invalid_response" | "server" | "aborted";
+/**
+ * timeout: the session request did not complete (headers AND body) within
+ * SESSION_REQUEST_TIMEOUT_MS. The outcome on the server is UNKNOWN.
+ */
+export type StaffErrorKind = "unauthorized" | "forbidden" | "network" | "invalid_response" | "server" | "aborted" | "timeout";
+
+/** Upper bound for one staff session request (status / end), headers + body. */
+export const SESSION_REQUEST_TIMEOUT_MS = 10_000;
+
+export interface StaffTimers {
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(id: unknown): void;
+}
+
+export interface StaffApiOptions {
+  timeoutMs?: number;
+  /** Injected for deterministic tests. */
+  timers?: StaffTimers;
+}
+
+const defaultTimers: StaffTimers = {
+  setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
+  clearTimeout: (id) => globalThis.clearTimeout(id as ReturnType<typeof setTimeout>),
+};
+
+/** Rejects as soon as `signal` aborts, even if `promise` never settles. */
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error("aborted"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error("aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
 
 export class StaffApiError extends Error {
   kind: StaffErrorKind;
@@ -60,7 +102,13 @@ export interface StaffApi {
 
 const INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
-export function createStaffApi(config: StaffConfig, fetchImpl: typeof fetch = (i, init) => globalThis.fetch(i, init)): StaffApi {
+export function createStaffApi(
+  config: StaffConfig,
+  fetchImpl: typeof fetch = (i, init) => globalThis.fetch(i, init),
+  options: StaffApiOptions = {},
+): StaffApi {
+  const timeoutMs = options.timeoutMs ?? SESSION_REQUEST_TIMEOUT_MS;
+  const timers = options.timers ?? defaultTimers;
   const nonce = new NonceStore(config.nonce);
   const origin = new URL(config.restBase).origin;
 
@@ -81,16 +129,37 @@ export function createStaffApi(config: StaffConfig, fetchImpl: typeof fetch = (i
     return res;
   };
 
+  /**
+   * One BOUNDED session request: a single internal AbortController is
+   * aborted by the timeout or by the caller's signal; both the fetch and the
+   * body read are raced against it, so neither can hang forever even if the
+   * fetch implementation ignores the signal. Timer and listener are always
+   * removed in finally.
+   */
   async function call(path: string, method: "GET" | "POST", signal?: AbortSignal): Promise<unknown> {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = timers.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    const onCallerAbort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", onCallerAbort, { once: true });
+
     let res: Response;
     let text: string;
     try {
-      res = await staffFetch(`${config.restBase}${path}`, { method, signal });
-      text = await res.text();
+      res = await raceAbort(staffFetch(`${config.restBase}${path}`, { method, signal: controller.signal }), controller.signal);
+      text = await raceAbort(res.text(), controller.signal);
     } catch (err) {
       if (err instanceof StaffApiError) throw err;
+      if (timedOut) throw new StaffApiError("timeout");
       if (signal?.aborted) throw new StaffApiError("aborted");
       throw new StaffApiError("network");
+    } finally {
+      timers.clearTimeout(timer);
+      signal?.removeEventListener("abort", onCallerAbort);
     }
     if (res.status === 401) throw new StaffApiError("unauthorized", 401);
     if (res.status === 403) throw new StaffApiError("forbidden", 403);
