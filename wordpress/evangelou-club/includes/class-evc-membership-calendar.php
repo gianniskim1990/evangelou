@@ -23,6 +23,11 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  * than any reading of the wall-clock time (PHP's own normalisation would move
  * 03:30 in the gap to 04:30, granting extra time), and loses at most the
  * skipped part of the hour.
+ *
+ * A wall-clock START (e.g. a PMPro row start date, Task 1D-B.R1) is resolved
+ * the other way round (LATEST): the LAST occurrence of a repeated time, and
+ * the transition instant for a skipped one (the first instant at which the
+ * membership could have begun). Both directions only ever shrink a period.
  */
 final class EVC_Membership_Calendar {
     const ZONE = 'Europe/Athens';
@@ -30,6 +35,11 @@ final class EVC_Membership_Calendar {
     const RESOLVED_EXACT = 'exact';
     const RESOLVED_REPEATED_FIRST = 'repeated_first';
     const RESOLVED_SKIPPED_TRANSITION = 'skipped_transition';
+    const RESOLVED_REPEATED_LAST = 'repeated_last';
+
+    /** Resolution modes: an END resolves to its earliest reading, a START to its latest. */
+    const EARLIEST = 'earliest';
+    const LATEST = 'latest';
 
     /** Exclusive end of the period that starts at $start (D1 + D5). */
     public static function add_calendar_month(DateTimeImmutable $start): DateTimeImmutable {
@@ -83,7 +93,10 @@ final class EVC_Membership_Calendar {
      *
      * @return array{instant:DateTimeImmutable,resolution:string}
      */
-    public static function resolve_local_time(int $year, int $month, int $day, int $hour, int $minute, int $second, int $microsecond = 0): array {
+    public static function resolve_local_time(int $year, int $month, int $day, int $hour, int $minute, int $second, int $microsecond = 0, string $mode = self::EARLIEST): array {
+        if ($mode !== self::EARLIEST && $mode !== self::LATEST) {
+            throw new InvalidArgumentException('Unknown resolution mode.');
+        }
         if ($year < 1970 || $year > 2200 || $month < 1 || $month > 12 || $day < 1 || $day > self::days_in_month($year, $month)
             || $hour < 0 || $hour > 23 || $minute < 0 || $minute > 59 || $second < 0 || $second > 59
             || $microsecond < 0 || $microsecond > 999999) {
@@ -113,6 +126,9 @@ final class EVC_Membership_Calendar {
             return array('instant' => self::instant($valid[0], $microsecond), 'resolution' => self::RESOLVED_EXACT);
         }
         if (count($valid) > 1) {
+            if ($mode === self::LATEST) {
+                return array('instant' => self::instant(max($valid), $microsecond), 'resolution' => self::RESOLVED_REPEATED_LAST);
+            }
             return array('instant' => self::instant(min($valid), $microsecond), 'resolution' => self::RESOLVED_REPEATED_FIRST);
         }
 

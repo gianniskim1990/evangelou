@@ -76,12 +76,19 @@ final class SessionPolicyTest extends EVC_WP_Test_Case {
         $this->assertSame('ok', EVC_Staff_Session::verify_current($staff));
         $first = get_user_meta($staff, $key, true);
         $this->assertNotSame('', $first);
-        update_user_meta($staff, $key, (string) (time() - 30));
-        $this->assertSame('ok', EVC_Staff_Session::verify_current($staff));
-        $this->assertSame((string) (time() - 30), get_user_meta($staff, $key, true), 'no rewrite within 60 s');
-        update_user_meta($staff, $key, (string) (time() - 120));
-        $this->assertSame('ok', EVC_Staff_Session::verify_current($staff));
-        $this->assertGreaterThanOrEqual(time() - 2, (int) get_user_meta($staff, $key, true), 'refreshed after 60 s');
+        // One captured instant for both the stored values and the checks, so a
+        // wall-clock second boundary between calls cannot change expectations.
+        $now = time();
+        $recent = (string) ($now - 30);
+        update_user_meta($staff, $key, $recent);
+        $this->assertSame('ok', EVC_Staff_Session::verify_current($staff, $now));
+        $this->assertSame($recent, get_user_meta($staff, $key, true), 'no rewrite within 60 s');
+        update_user_meta($staff, $key, (string) ($now - 60));
+        $this->assertSame('ok', EVC_Staff_Session::verify_current($staff, $now));
+        $this->assertSame((string) $now, get_user_meta($staff, $key, true), 'refreshed exactly at the 60 s throttle boundary');
+        update_user_meta($staff, $key, (string) ($now - 59));
+        $this->assertSame('ok', EVC_Staff_Session::verify_current($staff, $now));
+        $this->assertSame((string) ($now - 59), get_user_meta($staff, $key, true), 'not refreshed one second before the boundary');
         $this->assertStringNotContainsString($token, $key, 'raw token never used as a key');
     }
 

@@ -10,18 +10,27 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *  1. the snapshot contract, PMPro version and named site timezone
  *     (Europe/Athens) are supported, the user exists and the reader reports
  *     no cross-system conflict;
- *  2. exactly one ACTIVE row on an approved Club level, with a valid end date
- *     and no cancellation of unknown effect;
- *  3. every Club payment fact is live, well-formed and de-duplicable; repeated
- *     notifications of one payment are identical (else conflict);
+ *  2. exactly one ACTIVE row on an approved Club level, with valid start and
+ *     end dates (start < end) and no cancellation of unknown effect; every
+ *     row reference identifies exactly one row;
+ *  3. every Club payment fact is live, well-formed and de-duplicable; one
+ *     underlying payment reference always carries the same de-duplication key
+ *     and identical facts, and repeated notifications of one money movement
+ *     are identical (else conflict); each payment funds a row of the SAME
+ *     level as the payment;
  *  4. replaying the CONFIRMED payments in confirmation order with the
  *     owner-approved rules (EVC_Membership_Calendar: D1 exact Athens time,
  *     D2 early/late renewal, D5 clamped calendar month) reproduces EXACTLY
  *     the paid period each payment's recorded provenance claims, and the
  *     last period ends exactly where the active PMPro row ends;
  *  5. no payment in the current continuous paid run was refunded, partly
- *     refunded or reversed;
- *  6. evaluation instant < end of the last paid period (exclusive).
+ *     refunded or reversed, and all of them are for the active row's level;
+ *  6. the active row's PMPro start lies inside the current continuous paid
+ *     run (run start <= row start < row end) and has been reached. PMPro may
+ *     keep an older start across early renewals, so the row start is NOT
+ *     required to equal the latest renewal, but it may never claim time
+ *     before the paid run began;
+ *  7. evaluation instant < end of the last paid period (exclusive).
  *
  * Consequences: an old payment cannot justify a later unpaid period (the
  * replayed chain would end before the PMPro end date -> mismatch); a pending
@@ -93,6 +102,26 @@ final class EVC_Pmpro_Entitlement_Mapper {
             return $this->indeterminate('source_conflict');
         }
 
+        // ---- Identity: one row per row reference, one payment per payment reference
+        $rows_by_ref = array();
+        foreach ($s->memberships as $row) {
+            if (isset($rows_by_ref[$row->row_ref])) {
+                return $this->indeterminate('membership_row_identity_conflict');
+            }
+            $rows_by_ref[$row->row_ref] = $row;
+        }
+        $payments_by_ref = array();
+        foreach ($s->payments as $p) {
+            if (isset($payments_by_ref[$p->payment_ref])) {
+                $first = $payments_by_ref[$p->payment_ref];
+                if ($first->dedupe_key !== $p->dedupe_key || !$this->same_payment($first, $p)) {
+                    return $this->indeterminate('payment_identity_conflict');
+                }
+                continue;
+            }
+            $payments_by_ref[$p->payment_ref] = $p;
+        }
+
         // ---- Membership rows -------------------------------------------
         $club_rows = array();
         foreach ($s->memberships as $row) {
@@ -131,14 +160,22 @@ final class EVC_Pmpro_Entitlement_Mapper {
         if ($row->cancellation_pending) {
             return $this->indeterminate('cancellation_effective_time_unknown');
         }
-        $row_end = $this->local_instant($row->enddate_local);
+        $row_end = $this->local_instant($row->enddate_local, 'expiry_missing', EVC_Membership_Calendar::EARLIEST);
         if (is_string($row_end)) {
             return $this->indeterminate($row_end);
         }
+        $row_start = $this->local_instant($row->startdate_local, 'start_missing', EVC_Membership_Calendar::LATEST);
+        if (is_string($row_start)) {
+            return $this->indeterminate($row_start);
+        }
+        if ($row_start >= $row_end) {
+            return $this->indeterminate('membership_start_after_end');
+        }
         $level_ref = 'pmpro:' . $row->level_id;
-        $club_row_refs = array_map(function (EVC_Pmpro_Membership_Row $r) {
-            return $r->row_ref;
-        }, $club_rows);
+        $club_rows_by_ref = array();
+        foreach ($club_rows as $club_row) {
+            $club_rows_by_ref[$club_row->row_ref] = $club_row;
+        }
 
         // ---- Payment facts (approved Club levels only) -------------------
         $confirmed = array();
@@ -221,8 +258,11 @@ final class EVC_Pmpro_Entitlement_Mapper {
         $previous_end = null;
         foreach ($unique as $p) {
             if ($p->membership_row_ref === null || $p->period_start_utc === null || $p->period_end_utc === null
-                || !in_array($p->membership_row_ref, $club_row_refs, true)) {
+                || !isset($club_rows_by_ref[$p->membership_row_ref])) {
                 return $this->indeterminate('payment_period_unlinked');
+            }
+            if ($club_rows_by_ref[$p->membership_row_ref]->level_id !== $p->level_id) {
+                return $this->indeterminate('payment_level_mismatch');
             }
             $expected = EVC_Membership_Calendar::next_period($previous_end, $p->confirmed_at_utc);
             if ($expected['start'] != EVC_Clock::to_utc($p->period_start_utc) || $expected['end'] != EVC_Clock::to_utc($p->period_end_utc)) {
@@ -243,6 +283,9 @@ final class EVC_Pmpro_Entitlement_Mapper {
             if ($period['payment']->status === EVC_Pmpro_Payment_Fact::STATUS_REVERSED) {
                 return $this->indeterminate('payment_reversed');
             }
+            if ($period['payment']->level_id !== $row->level_id) {
+                return $this->indeterminate('level_change_within_paid_run');
+            }
         }
         foreach ($current_run as $period) {
             if ($period['payment']->status === EVC_Pmpro_Payment_Fact::STATUS_REFUNDED) {
@@ -258,10 +301,16 @@ final class EVC_Pmpro_Entitlement_Mapper {
             $flags[] = 'renewal_pending';
         }
         $run_start = $current_run[0]['start'];
+        if ($row_start < $run_start) {
+            return $this->indeterminate('membership_start_before_paid_run');
+        }
 
         if ($at >= $last['end']) {
             $flags[] = 'paid_period_ended';
             return new EVC_Entitlement(EVC_Entitlement::STATUS_EXPIRED, false, $last['end'], $level_ref, self::SOURCE, $run_start, null, $flags);
+        }
+        if ($at < $row_start) {
+            return $this->indeterminate('membership_not_started');
         }
         foreach ($current_run as $period) {
             if ($period['start'] <= $at && $at < $period['end']) {
@@ -276,21 +325,22 @@ final class EVC_Pmpro_Entitlement_Mapper {
     /**
      * PMPro stores site-local wall-clock strings. Returns the instant, or a
      * diagnostic flag when the value is missing, a placeholder or invalid.
+     * Ends resolve EARLIEST and starts LATEST (see EVC_Membership_Calendar).
      *
      * @return DateTimeImmutable|string
      */
-    private function local_instant(?string $value) {
+    private function local_instant(?string $value, string $missing_flag, string $mode) {
         if ($value === null || $value === '' || $value === '0000-00-00 00:00:00') {
-            return 'expiry_missing';
+            return $missing_flag;
         }
         if (!preg_match(self::LOCAL_DATETIME_PATTERN, $value, $m)) {
             return 'invalid_membership_dates';
         }
         if ((int) $m[1] < self::MIN_REAL_YEAR) {
-            return 'expiry_missing';
+            return $missing_flag;
         }
         try {
-            $resolved = EVC_Membership_Calendar::resolve_local_time((int) $m[1], (int) $m[2], (int) $m[3], (int) $m[4], (int) $m[5], (int) $m[6]);
+            $resolved = EVC_Membership_Calendar::resolve_local_time((int) $m[1], (int) $m[2], (int) $m[3], (int) $m[4], (int) $m[5], (int) $m[6], 0, $mode);
         } catch (Throwable $e) {
             return 'invalid_membership_dates';
         }

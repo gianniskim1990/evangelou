@@ -84,7 +84,10 @@ final class PmproEntitlementMapperTest extends TestCase {
 
         // Same, when the old payment belongs to an older PMPro row and the active row has none.
         $s = EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row0', 'changed', '2026-09-01 10:00:00'), EVC_Pmpro_Fixture::row('row1', 'active', '2026-09-01 10:00:00')),
+            array(
+                EVC_Pmpro_Fixture::row('row0', 'changed', '2026-09-01 10:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2026-08-01 10:00:00'),
+                EVC_Pmpro_Fixture::row('row1', 'active', '2026-09-01 10:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2026-08-01 10:00:00'),
+            ),
             array(EVC_Pmpro_Fixture::paid('aug', '2026-08-01 10:00', '2026-08-01 10:00', '2026-09-01 10:00', 'row0'))
         );
         $this->assertIneligible(self::map($s, self::when('2026-08-20 10:00')), 'indeterminate', 'pmpro_period_mismatch', self::when('2026-08-20 10:00'));
@@ -178,7 +181,7 @@ final class PmproEntitlementMapperTest extends TestCase {
 
     private static function late_renewal(string $start_local, string $end_local, string $row_end): EVC_Pmpro_Snapshot {
         return EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row1', 'expired', '2026-11-15 12:00:00'), EVC_Pmpro_Fixture::row('row2', 'active', $row_end)),
+            array(EVC_Pmpro_Fixture::row('row1', 'expired', '2026-11-15 12:00:00'), EVC_Pmpro_Fixture::row('row2', 'active', $row_end, EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2026-11-20 10:00:00')),
             array(
                 EVC_Pmpro_Fixture::paid('oct', '2026-10-15 12:00', '2026-10-15 12:00', '2026-11-15 12:00', 'row1'),
                 EVC_Pmpro_Fixture::paid('nov', '2026-11-20 10:00', $start_local, $end_local, 'row2'),
@@ -413,7 +416,7 @@ final class PmproEntitlementMapperTest extends TestCase {
     public function test_S_month_end_clamp_is_required_from_the_source(): void {
         $at = self::when('2027-02-10 09:00');
         $ok = EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-02-28 12:00:00')),
+            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-02-28 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2027-01-31 12:00:00')),
             array(EVC_Pmpro_Fixture::paid('jan', '2027-01-31 12:00', '2027-01-31 12:00', '2027-02-28 12:00'))
         );
         $e = self::map($ok, $at);
@@ -422,14 +425,14 @@ final class PmproEntitlementMapperTest extends TestCase {
 
         // PHP "+1 month" overflow (3 March) recorded by a source is rejected.
         $overflow = EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-03-03 12:00:00')),
+            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-03-03 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2027-01-31 12:00:00')),
             array(EVC_Pmpro_Fixture::paid('jan', '2027-01-31 12:00', '2027-01-31 12:00', '2027-03-03 12:00'))
         );
         $this->assertIneligible(self::map($overflow, $at), 'indeterminate', 'payment_period_mismatch', $at);
 
         // A fixed 30-day period is rejected as well.
         $thirty = EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-03-02 12:00:00')),
+            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-03-02 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2027-01-31 12:00:00')),
             array(EVC_Pmpro_Fixture::paid('jan', '2027-01-31 12:00', '2027-01-31 12:00', '2027-03-02 12:00'))
         );
         $this->assertIneligible(self::map($thirty, $at), 'indeterminate', 'payment_period_mismatch', $at);
@@ -437,7 +440,7 @@ final class PmproEntitlementMapperTest extends TestCase {
 
     public function test_leap_year_clamp_through_the_mapper(): void {
         $s = EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row1', 'active', '2028-02-29 12:00:00')),
+            array(EVC_Pmpro_Fixture::row('row1', 'active', '2028-02-29 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2028-01-31 12:00:00')),
             array(EVC_Pmpro_Fixture::paid('jan', '2028-01-31 12:00', '2028-01-31 12:00', '2028-02-29 12:00'))
         );
         $this->assertSame('active', self::map($s, self::when('2028-02-29 11:59'))->status());
@@ -447,9 +450,9 @@ final class PmproEntitlementMapperTest extends TestCase {
     public function test_T_consecutive_early_renewals_chain_from_each_paid_end(): void {
         $s = EVC_Pmpro_Fixture::snapshot(
             array(
-                EVC_Pmpro_Fixture::row('r1', 'changed', '2027-02-28 12:00:00'),
-                EVC_Pmpro_Fixture::row('r2', 'changed', '2027-03-28 12:00:00'),
-                EVC_Pmpro_Fixture::row('r3', 'active', '2027-04-28 12:00:00'),
+                EVC_Pmpro_Fixture::row('r1', 'changed', '2027-02-28 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2027-01-31 12:00:00'),
+                EVC_Pmpro_Fixture::row('r2', 'changed', '2027-03-28 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2027-01-31 12:00:00'),
+                EVC_Pmpro_Fixture::row('r3', 'active', '2027-04-28 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2027-01-31 12:00:00'),
             ),
             array(
                 EVC_Pmpro_Fixture::paid('m1', '2027-01-31 12:00', '2027-01-31 12:00', '2027-02-28 12:00', 'r1'),
@@ -463,14 +466,14 @@ final class PmproEntitlementMapperTest extends TestCase {
         $this->assertSame('2027-01-31 12:00:00', self::local($e->started_at_utc()));
         $this->assertSame(EVC_Pmpro_Fixture::ref('payment-record:m3'), $e->payment_evidence()->reference());
         // Restoring the "31st" anniversary would be a different (unapproved) policy.
-        $s->memberships[2] = EVC_Pmpro_Fixture::row('r3', 'active', '2027-04-30 12:00:00');
+        $s->memberships[2] = EVC_Pmpro_Fixture::row('r3', 'active', '2027-04-30 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2027-01-31 12:00:00');
         $s->payments[2] = EVC_Pmpro_Fixture::paid('m3', '2027-03-20 10:00', '2027-03-31 12:00', '2027-04-30 12:00', 'r3');
         $this->assertSame('indeterminate', self::map($s, self::when('2027-04-01 09:00'))->status());
     }
 
     public function test_U_year_rollover(): void {
         $s = EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-01-31 23:30:00')),
+            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-01-31 23:30:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2026-12-31 23:30:00')),
             array(EVC_Pmpro_Fixture::paid('dec', '2026-12-31 23:30', '2026-12-31 23:30', '2027-01-31 23:30'))
         );
         $this->assertSame('active', self::map($s, self::when('2027-01-31 23:29'))->status());
@@ -489,7 +492,7 @@ final class PmproEntitlementMapperTest extends TestCase {
         // 28 Feb 03:30 + 1 month = 28 Mar 03:30, which does not exist (jump at 01:00Z).
         $transition = EVC_Pmpro_Fixture::utc('2027-03-28T01:00:00Z');
         $s = EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-03-28 03:30:00')),
+            array(EVC_Pmpro_Fixture::row('row1', 'active', '2027-03-28 03:30:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2027-02-28 03:30:00')),
             array(EVC_Pmpro_Fixture::payment('feb', 'confirmed', EVC_Pmpro_Fixture::athens('2027-02-28 03:30'), EVC_Pmpro_Fixture::athens('2027-02-28 03:30'), $transition))
         );
         $this->assertSame('active', self::map($s, $transition->modify('-1 second'))->status());
@@ -503,7 +506,7 @@ final class PmproEntitlementMapperTest extends TestCase {
     public function test_W_end_in_the_autumn_repeat_uses_the_first_occurrence(): void {
         $first = EVC_Pmpro_Fixture::utc('2026-10-25T00:30:00Z');
         $s = EVC_Pmpro_Fixture::snapshot(
-            array(EVC_Pmpro_Fixture::row('row1', 'active', '2026-10-25 03:30:00')),
+            array(EVC_Pmpro_Fixture::row('row1', 'active', '2026-10-25 03:30:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2026-09-25 03:30:00')),
             array(EVC_Pmpro_Fixture::payment('sep', 'confirmed', EVC_Pmpro_Fixture::athens('2026-09-25 03:30'), EVC_Pmpro_Fixture::athens('2026-09-25 03:30'), $first))
         );
         $this->assertSame('active', self::map($s, $first->modify('-1 second'))->status());

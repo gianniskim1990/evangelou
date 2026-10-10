@@ -49,6 +49,8 @@ final class EVC_Pmpro_Fixture {
         return (new DateTimeImmutable($instant))->setTimezone(new DateTimeZone('UTC'));
     }
 
+    const SECOND_CLUB_LEVEL = 8;
+
     public static function config(): EVC_Pmpro_Mapper_Config {
         return new EVC_Pmpro_Mapper_Config(array(self::CLUB_LEVEL), '3.0', '4.0');
     }
@@ -57,8 +59,14 @@ final class EVC_Pmpro_Fixture {
         return new EVC_Pmpro_Entitlement_Mapper(self::config());
     }
 
-    public static function row(string $label = 'row1', string $status = 'active', ?string $end_local = '2026-11-15 12:00:00', int $level = self::CLUB_LEVEL, bool $cancellation_pending = false): EVC_Pmpro_Membership_Row {
-        return new EVC_Pmpro_Membership_Row(self::ref($label), $level, $status, '2026-10-15 12:00:00', $end_local, $cancellation_pending);
+    /** Explicitly configured with TWO approved Club levels (7 and 8). */
+    public static function two_level_mapper(): EVC_Pmpro_Entitlement_Mapper {
+        return new EVC_Pmpro_Entitlement_Mapper(new EVC_Pmpro_Mapper_Config(array(self::CLUB_LEVEL, self::SECOND_CLUB_LEVEL), '3.0', '4.0'));
+    }
+
+    /** Raw PMPro row; dates are site-local wall-clock strings exactly as PMPro stores them. */
+    public static function row(string $label = 'row1', string $status = 'active', ?string $end_local = '2026-11-15 12:00:00', int $level = self::CLUB_LEVEL, bool $cancellation_pending = false, ?string $start_local = '2026-10-15 12:00:00'): EVC_Pmpro_Membership_Row {
+        return new EVC_Pmpro_Membership_Row(self::ref($label), $level, $status, $start_local, $end_local, $cancellation_pending);
     }
 
     /**

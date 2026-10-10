@@ -113,6 +113,33 @@ evaluation instant at/after the paid end (PMPro "active" status and its
 A reader exception propagates as `EVC_Membership_Source_Exception` → the engine
 returns `server_error` and grants nothing.
 
+**Task 1D-B.R1 hardening (identity, level, start):**
+
+- *Identity.* Every PMPro row reference must identify exactly one row, and
+  every underlying payment reference must always carry the same
+  de-duplication key and identical facts. One payment can therefore never be
+  replayed as two money movements (e.g. under a second de-duplication key),
+  checked before any period is replayed. Identical repeats still count once;
+  different payments are never merged because amounts or times match.
+- *Level binding.* A payment may only fund a row of its own level
+  (`payment.level_id === row.level_id`), and one continuous paid run may not
+  mix levels, so money paid for one approved Club level never funds another.
+  Several approved levels remain supported when configured explicitly;
+  historical rows of another level in a lapsed earlier run are fine.
+- *Membership start.* The active row's PMPro start must be a real date
+  (missing / zero / "magic" / malformed / impossible → `indeterminate`), must
+  be before its end, must have been reached (start is inclusive), and must lie
+  inside the current continuous paid run (`run start <= row start`). PMPro
+  and the WooCommerce add-on may keep an ORIGINAL start across early renewals
+  or restart it at a renewal, so the row start is not required to equal the
+  latest funded period; but a row start before the paid run (e.g. spanning an
+  unpaid lapse) is a contradiction and fails closed. Starts are resolved with
+  the LATEST DST reading (ends with the earliest), so both directions only
+  shrink a period. Limitation: there is no tolerance — if the real source
+  stamps a row start seconds before the payment-confirmation instant, it will
+  be rejected until staging shows the actual behaviour and an explicit,
+  reviewed rule is approved.
+
 **What the pure mapper CANNOT verify** (needs the installed plugins and
 staging): that a future reader maps PMPro/WooCommerce/gateway states correctly
 (confirmed vs pending/processing/on-hold, refunds, chargebacks); that a

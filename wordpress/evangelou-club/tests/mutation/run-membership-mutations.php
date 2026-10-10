@@ -1,7 +1,9 @@
 <?php
 /**
  * Targeted mutation tests for the Task 1D-B membership entitlement rules
- * (calendar/DST, renewal, payment-to-period binding, fail-closed mapper).
+ * (calendar/DST, renewal, payment-to-period binding, fail-closed mapper) and
+ * the Task 1D-B.R1 hardening (R1-R9: membership start, payment identity,
+ * payment-to-row level binding).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -98,7 +100,7 @@ $mutants = array(
     array(
         'id' => 'B14-unlinked-payment-accepted',
         'file' => $mapper,
-        'search' => "                || !in_array(\$p->membership_row_ref, \$club_row_refs, true)) {",
+        'search' => "                || !isset(\$club_rows_by_ref[\$p->membership_row_ref])) {",
         'replace' => "                && false) {",
     ),
     array(
@@ -208,6 +210,61 @@ $mutants = array(
         'file' => 'includes/class-evc-entitlement.php',
         'search' => "        if (\$this->status !== self::STATUS_ACTIVE) {\n            return \$this->status;\n        }",
         'replace' => "        if (\$this->status !== self::STATUS_ACTIVE && \$this->status !== self::STATUS_INDETERMINATE) {\n            return \$this->status;\n        }",
+    ),
+    // ---- Task 1D-B.R1 -------------------------------------------------------
+    array(
+        'id' => 'R1-future-membership-start-accepted',
+        'file' => $mapper,
+        'search' => 'if ($at < $row_start) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'R2-start-before-paid-run-accepted',
+        'file' => $mapper,
+        'search' => 'if ($row_start < $run_start) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'R3-start-after-end-accepted',
+        'file' => $mapper,
+        'search' => 'if ($row_start >= $row_end) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'R4-start-resolved-to-earliest-dst-reading',
+        'file' => $mapper,
+        'search' => "\$this->local_instant(\$row->startdate_local, 'start_missing', EVC_Membership_Calendar::LATEST);",
+        'replace' => "\$this->local_instant(\$row->startdate_local, 'start_missing', EVC_Membership_Calendar::EARLIEST);",
+    ),
+    array(
+        'id' => 'R5-missing-start-tolerated',
+        'file' => $mapper,
+        'search' => "        if (is_string(\$row_start)) {\n            return \$this->indeterminate(\$row_start);\n        }",
+        'replace' => "        if (is_string(\$row_start)) {\n            \$row_start = \$row_end->modify('-1 day');\n        }",
+    ),
+    array(
+        'id' => 'R6-payment-reference-reuse-accepted',
+        'file' => $mapper,
+        'search' => 'if ($first->dedupe_key !== $p->dedupe_key || !$this->same_payment($first, $p)) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'R7-payment-level-not-bound-to-row',
+        'file' => $mapper,
+        'search' => 'if ($club_rows_by_ref[$p->membership_row_ref]->level_id !== $p->level_id) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'R8-paid-run-may-mix-levels',
+        'file' => $mapper,
+        'search' => "if (\$period['payment']->level_id !== \$row->level_id) {",
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'R9-duplicate-row-identity-accepted',
+        'file' => $mapper,
+        'search' => 'if (isset($rows_by_ref[$row->row_ref])) {',
+        'replace' => 'if (false) {',
     ),
 );
 
