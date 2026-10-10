@@ -3,7 +3,8 @@
  * Targeted mutation tests for the Task 1D-B membership entitlement rules
  * (calendar/DST, renewal, payment-to-period binding, fail-closed mapper) and
  * the Task 1D-B.R1 hardening (R1-R9: membership start, payment identity,
- * payment-to-row level binding).
+ * payment-to-row level binding) and Task 1D-E (P1-P22: provenance recorder,
+ * incl. the in-memory store's atomicity / compare-and-set contract).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -265,6 +266,139 @@ $mutants = array(
         'file' => $mapper,
         'search' => 'if (isset($rows_by_ref[$row->row_ref])) {',
         'replace' => 'if (false) {',
+    ),
+    // ---- Task 1D-E: payment-provenance recorder core ----------------------
+    array(
+        'id' => 'P1-duplicate-movement-creates-second-period',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$existing !== null) {\n            return \$this->repeat_of(\$existing, \$m);\n        }\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'P2-cross-source-alias-credits-twice',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            if (\$this->store->movement_for_alias(\$alias->key()) !== null) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P3-conflicting-alias-on-repeat-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            if (\$owner !== null && \$owner !== \$m->movement_id()) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P4-pending-payment-grants-period',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$m->state() !== EVC_Verified_Movement::STATE_CONFIRMED) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P5-member-mismatch-ignored',
+        'file' => 'includes/class-evc-verified-movement.php',
+        'search' => "            && \$this->wp_user_id === \$other->wp_user_id\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'P6-unapproved-level-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (!\$this->levels->is_club_level(\$m->level_id())) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P7-early-renewal-loses-remaining-time',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "EVC_Membership_Calendar::next_period(\$latest === null ? null : \$latest->end_utc(), \$m->verified_at_utc());",
+        'replace' => "EVC_Membership_Calendar::next_period(null, \$m->verified_at_utc());",
+    ),
+    array(
+        'id' => 'P8-late-renewal-stacks-on-old-end',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "EVC_Membership_Calendar::next_period(\$latest === null ? null : \$latest->end_utc(), \$m->verified_at_utc());",
+        'replace' => "EVC_Membership_Calendar::next_period(\$latest === null ? null : \$latest->end_utc(), \$latest === null ? \$m->verified_at_utc() : \$latest->end_utc()->modify('-1 second'));",
+    ),
+    array(
+        'id' => 'P9-refund-ignored',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        \$this->store->commit(EVC_Provenance_Write::correction(\$c));\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'P10-failed-write-leaves-partial-period',
+        'file' => 'tests/support/class-evc-in-memory-provenance-store.php',
+        'search' => "        if (\$this->fail_next_commit_after_apply) {",
+        'replace' => "        \$this->state = \$next;\n        if (\$this->fail_next_commit_after_apply) {",
+    ),
+    array(
+        'id' => 'P11-error-reported-as-success',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            return \$this->record_or_throw(\$movement);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::unavailable();",
+        'replace' => "            return \$this->record_or_throw(\$movement);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::recorded(null);",
+    ),
+    array(
+        'id' => 'P12-payment-timestamp-silently-changed',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            \$next['start'],\n",
+        'replace' => "            \$next['start']->modify('-1 hour'),\n",
+    ),
+    array(
+        'id' => 'P13-fractional-instant-silently-accepted',
+        'file' => 'includes/class-evc-verified-movement.php',
+        'search' => "        if (\$verified_at_utc->format('u') !== '000000') {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P14-same-instant-payments-silently-ordered',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            if (\$other->verified_at_utc() == \$m->verified_at_utc()) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P15-out-of-order-payment-appended',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            if (\$other->verified_at_utc() > \$m->verified_at_utc()) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P16-unanchored-gateway-signal-credited',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (count(\$anchors) === 0) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P17-wrong-amount-funds-a-month',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$m->amount_minor() !== \$this->amount_minor || \$m->currency() !== \$this->currency) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P18-sandbox-environment-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$m->environment() !== \$this->environment) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P19-correction-state-regression-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (!EVC_Movement_Correction::allowed_after(\$current, \$c->kind())) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P20-repeat-with-other-order-anchor-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$m->order_anchors()[0]->key() !== \$known_anchor->key()) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P21-store-compare-and-set-removed',
+        'file' => 'tests/support/class-evc-in-memory-provenance-store.php',
+        'search' => "            if (\$current_latest !== \$w->expected_predecessor || \$p->predecessor_movement_id() !== \$current_latest) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P22-changed-facts-on-repeat-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (!\$existing->same_facts_as(\$m)) {",
+        'replace' => "        if (false) {",
     ),
 );
 

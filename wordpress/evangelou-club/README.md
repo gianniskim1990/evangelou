@@ -140,6 +140,49 @@ returns `server_error` and grants nothing.
   be rejected until staging shows the actual behaviour and an explicit,
   reviewed rule is approved.
 
+**Payment-provenance recorder core (Task 1D-E — pure PHP, NOT wired):**
+
+Launch context (owner, 2026-10-10): the Club starts from **zero** paying
+members. Newsletter contacts are not Club members and are never imported or
+enrolled; there is no legacy migration, carry-over or historical backfill.
+WooCommerce is not installed yet and payment methods are unconfirmed.
+
+- `EVC_Verified_Movement` is an immutable fact that a FUTURE trusted adapter
+  must already have verified (gateway API re-check, verified order state or
+  an authorised manual confirmation). Nothing in this code base verifies a
+  payment or builds this object from a webhook or a browser request.
+- Identity: one canonical, source-independent `movement_id` per real money
+  movement, plus verified aliases (`wc_order`, `pmpro_order`,
+  `manual_receipt`, `viva_transaction`, `paypal_transaction`, all opaque
+  64-hex). Each alias belongs to at most one movement, and each movement has
+  exactly ONE order anchor (the order it settles), so a Viva callback and a
+  WooCommerce completion for the same order fund ONE period; a signal that
+  cannot be tied to an order is not recorded. Amounts, names and times never
+  merge or split payments. HMAC references are not reversible: resolving
+  them back to provider records for reconciliation needs a separate,
+  authorised resolver (future work).
+- Time: the verification instant is an explicit input (no clock is read). It
+  must be a whole-second `UTC` instant; anything else is rejected, never
+  rounded. Which instant counts (gateway settlement vs later server
+  verification) is owner decision **O1, still open**.
+- `EVC_Provenance_Recorder::record()` appends exactly one period per new
+  movement using `EVC_Membership_Calendar::next_period()` (D1/D2/D5) and
+  returns `newly_recorded | already_recorded | conflict | indeterminate |
+  unavailable`. Pending/failed/unknown, wrong amount (EUR 20.00), wrong
+  environment, unapproved level, missing order anchor, same-instant or
+  out-of-order payments are refused without writing. A recorded movement is
+  NOT eligibility: the mapper still decides.
+- Corrections (refund, partial refund, reversal, void) are append-only,
+  idempotent and forward-only; history is never erased. The mapper treats
+  them as refunded / indeterminate. No coffee clawback, no debt.
+- `EVC_Provenance_Store` defines invariants I1–I6 (unique movement, unique
+  alias, one period per movement, single chain with compare-and-set,
+  append-only corrections, atomic commit). Only a TEST in-memory store exists;
+  it proves nothing about database concurrency. A real store needs a
+  migration, transactions, a per-member row lock and unique constraints.
+- Still open: O1, O3 (PMPro date alignment), O4 (Viva capture-only), D3, D4,
+  D6–D10, month-end drift.
+
 **What the pure mapper CANNOT verify** (needs the installed plugins and
 staging): that a future reader maps PMPro/WooCommerce/gateway states correctly
 (confirmed vs pending/processing/on-hold, refunds, chargebacks); that a
