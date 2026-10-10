@@ -24,7 +24,7 @@ const FORBIDDEN_BUNDLE_STRINGS = [
   "Μαρία Παπαδοπούλου", "Γιώργος Νικολάου", "DEMO-QR", "6900000001", "evaggelou-club-redemptions",
   "mockClubService", "createMockClubService", "TEST Espresso", "x-admin-password", "/api/orders", "/api/overrides",
 ];
-const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire"];
+const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture"];
 const SILENCE = "<?php\n// Silence is golden.\n";
 
 function fail(message) {

@@ -13,6 +13,14 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  * An unknown/missing expiry is NOT eligible: Phase 1 memberships are manual
  * one-month purchases that must always carry an end date. FluentCRM tags are
  * never an input here.
+ *
+ * v2 (Task 1D-B, additive): optional started_at_utc, payment evidence
+ * (EVC_Payment_Evidence: opaque, period-bound proof of a confirmed live
+ * payment) and internal diagnostic flags, plus an explicit "indeterminate"
+ * status for facts that cannot be trusted. Indeterminate is never eligible and
+ * maps to the public "inactive" bucket. Flags are for logs/review only and are
+ * never part of a public API response. Absent v2 data is left null/empty,
+ * never manufactured; existing five-argument constructor calls are unchanged.
  */
 final class EVC_Entitlement {
     const STATUS_ACTIVE = 'active';
@@ -22,6 +30,9 @@ final class EVC_Entitlement {
     const STATUS_PAYMENT_FAILED = 'payment_failed';
     const STATUS_REFUNDED = 'refunded';
     const STATUS_NONE = 'none';
+    const STATUS_INDETERMINATE = 'indeterminate';
+
+    const FLAG_PATTERN = '/^[a-z][a-z0-9_]{0,47}$/D';
 
     const DENIAL_PAYMENT_UNVERIFIED = 'payment_unverified';
     const DENIAL_EXPIRY_UNKNOWN = 'expiry_unknown';
@@ -37,8 +48,26 @@ final class EVC_Entitlement {
     private $level_ref;
     /** @var string */
     private $source;
+    /** @var DateTimeImmutable|null */
+    private $started_at_utc;
+    /** @var EVC_Payment_Evidence|null */
+    private $payment_evidence;
+    /** @var string[] */
+    private $diagnostic_flags;
 
-    public function __construct(string $status, bool $payment_verified, ?DateTimeImmutable $expires_at_utc, ?string $level_ref, string $source) {
+    /**
+     * @param string[] $diagnostic_flags internal codes (FLAG_PATTERN), never shown publicly
+     */
+    public function __construct(
+        string $status,
+        bool $payment_verified,
+        ?DateTimeImmutable $expires_at_utc,
+        ?string $level_ref,
+        string $source,
+        ?DateTimeImmutable $started_at_utc = null,
+        ?EVC_Payment_Evidence $payment_evidence = null,
+        array $diagnostic_flags = array()
+    ) {
         if (!in_array($status, self::statuses(), true)) {
             throw new InvalidArgumentException('Unknown membership status.');
         }
@@ -48,15 +77,36 @@ final class EVC_Entitlement {
         if ($level_ref !== null && !preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $level_ref)) {
             throw new InvalidArgumentException('Invalid membership level reference.');
         }
+        $started_at_utc =$started_at_utc === null ? null : EVC_Clock::to_utc($started_at_utc);
+        $expires_at_utc = $expires_at_utc === null ? null : EVC_Clock::to_utc($expires_at_utc);
+        if ($started_at_utc !== null && $expires_at_utc !== null && $started_at_utc >= $expires_at_utc) {
+            throw new InvalidArgumentException('Membership must start before it expires.');
+        }
+        if ($payment_evidence !== null && !$payment_verified) {
+            throw new InvalidArgumentException('Payment evidence requires a verified payment.');
+        }
+        foreach ($diagnostic_flags as $flag) {
+            if (!is_string($flag) || !preg_match(self::FLAG_PATTERN, $flag)) {
+                throw new InvalidArgumentException('Invalid diagnostic flag.');
+            }
+        }
         $this->status = $status;
         $this->payment_verified = $payment_verified;
-        $this->expires_at_utc = $expires_at_utc === null ? null : EVC_Clock::to_utc($expires_at_utc);
+        $this->expires_at_utc = $expires_at_utc;
         $this->level_ref = $level_ref;
         $this->source = $source;
+        $this->started_at_utc = $started_at_utc;
+        $this->payment_evidence = $payment_evidence;
+        $this->diagnostic_flags = array_values(array_unique($diagnostic_flags));
     }
 
-    public static function none(string $source): self {
-        return new self(self::STATUS_NONE, false, null, null, $source);
+    public static function none(string $source, array $diagnostic_flags = array()): self {
+        return new self(self::STATUS_NONE, false, null, null, $source, null, null, $diagnostic_flags);
+    }
+
+    /** Facts could not be trusted: never eligible, never "paid". */
+    public static function indeterminate(string $source, array $diagnostic_flags): self {
+        return new self(self::STATUS_INDETERMINATE, false, null, null, $source, null, null, $diagnostic_flags);
     }
 
     /** @return string[] */
@@ -69,6 +119,7 @@ final class EVC_Entitlement {
             self::STATUS_PAYMENT_FAILED,
             self::STATUS_REFUNDED,
             self::STATUS_NONE,
+            self::STATUS_INDETERMINATE,
         );
     }
 
@@ -126,5 +177,18 @@ final class EVC_Entitlement {
 
     public function source(): string {
         return $this->source;
+    }
+
+    public function started_at_utc(): ?DateTimeImmutable {
+        return $this->started_at_utc;
+    }
+
+    public function payment_evidence(): ?EVC_Payment_Evidence {
+        return $this->payment_evidence;
+    }
+
+    /** @return string[] internal diagnostics only */
+    public function diagnostic_flags(): array {
+        return $this->diagnostic_flags;
     }
 }

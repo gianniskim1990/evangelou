@@ -11,6 +11,7 @@ require_once dirname(__DIR__) . '/includes/bootstrap.php';
 
 require_once __DIR__ . '/support/class-evc-fixed-clock.php';
 require_once __DIR__ . '/support/class-evc-mock-membership-adapter.php';
+require_once __DIR__ . '/support/class-evc-fake-pmpro-reader.php';
 require_once __DIR__ . '/support/class-evc-faulty-pdo.php';
 require_once __DIR__ . '/support/class-evc-failing-audit-log.php';
 require_once __DIR__ . '/support/class-evc-test-database.php';
