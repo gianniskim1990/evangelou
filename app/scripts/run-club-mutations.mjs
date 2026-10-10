@@ -202,8 +202,8 @@ const mutants = [
   {
     id: "S16-protected-op-runs-when-not-ready",
     file: "staff/staffController.ts",
-    search: '    if (!this.isReady) return { status: "stale" };\n    return this.track(fn, () => this.isReady);',
-    replace: "    return this.track(fn, () => true);",
+    search: '    if (!this.isReady) return { status: "stale" };\n    const result = await this.track(fn, () => this.isReady);',
+    replace: "    const result = await this.track(fn, () => true);",
   },
   {
     id: "S17-late-private-response-restored",
@@ -222,6 +222,73 @@ const mutants = [
     file: "staff/staffApi.ts",
     search: '      if (timedOut) throw new StaffApiError("timeout");\n',
     replace: "",
+  },
+  // ---- Task 1D-C: protected 401/403 gate + latest-request-wins status checks
+  {
+    id: "S20-protected-auth-loss-ignored",
+    file: "staff/staffController.ts",
+    search: "    if (loss !== null) {",
+    replace: "    if (false) {",
+  },
+  {
+    id: "S21-protected-club-401-ignored",
+    file: "staff/staffController.ts",
+    search: "    if (error.code === \"unauthorized\" && error.httpStatus === 401) return \"unauthorized\";\n",
+    replace: "",
+  },
+  {
+    id: "S22-protected-club-403-ignored",
+    file: "staff/staffController.ts",
+    search: "    if (error.code === \"forbidden\" && error.httpStatus === 403) return \"forbidden\";\n",
+    replace: "",
+  },
+  {
+    id: "S23-409-treated-as-auth-failure",
+    file: "staff/staffController.ts",
+    search: "    if (error.code === \"forbidden\" && error.httpStatus === 403) return \"forbidden\";\n",
+    replace: "    if (error.code === \"forbidden\" && error.httpStatus === 403) return \"forbidden\";\n    if (error.httpStatus === 409) return \"unauthorized\";\n",
+  },
+  {
+    id: "S24-auth-loss-keeps-sensitive-data",
+    file: "staff/staffController.ts",
+    search: "    this.sensitive = null;\n",
+    replace: "",
+  },
+  {
+    id: "S25-older-status-success-overwrites-newer",
+    file: "staff/staffController.ts",
+    search: "      if (!superseded) this.setState({ phase: \"ready\", session: result.value });",
+    replace: "      this.setState({ phase: \"ready\", session: result.value });",
+  },
+  {
+    id: "S26-older-status-failure-overwrites-newer",
+    file: "staff/staffController.ts",
+    search: "      if (!superseded || authLossOf(result.error) !== null) this.handleError(result.error);",
+    replace: "      this.handleError(result.error);",
+  },
+  {
+    id: "S27-superseded-401-ignored",
+    file: "staff/staffController.ts",
+    search: "      if (!superseded || authLossOf(result.error) !== null) this.handleError(result.error);",
+    replace: "      if (!superseded) this.handleError(result.error);",
+  },
+  {
+    id: "S28-superseded-check-not-aborted",
+    file: "staff/staffController.ts",
+    search: "        this.statusRequest?.abort();\n",
+    replace: "",
+  },
+  {
+    id: "S29-untrusted-staff-error-without-status",
+    file: "staff/staffController.ts",
+    search: "    if (error.kind === \"unauthorized\" && error.status === 401) return \"unauthorized\";",
+    replace: "    if (error.kind === \"unauthorized\") return \"unauthorized\";",
+  },
+  {
+    id: "S30-client-made-club-error-trusted",
+    file: "staff/staffController.ts",
+    search: "    if (error.code === \"unauthorized\" && error.httpStatus === 401) return \"unauthorized\";",
+    replace: "    if (error.code === \"unauthorized\") return \"unauthorized\";",
   },
 ];
 
