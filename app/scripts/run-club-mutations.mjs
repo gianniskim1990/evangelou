@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
-const src = (f) => join(appDir, "src", "club", f);
+const src = (f) => join(appDir, "src", f.includes("/") ? f : `club/${f}`);
 
 const mutants = [
   {
@@ -108,12 +108,129 @@ const mutants = [
     search: "return !(err instanceof ClubApiError) || RETRY_SAME_INTENT.has(err.code);",
     replace: "return err instanceof ClubApiError && RETRY_SAME_INTENT.has(err.code);",
   },
+  // Task 1C-D: real staff app (/club-admin/).
+  {
+    id: "S1-idle-lock-boundary-off-by-one",
+    file: "staff/idleLock.ts",
+    search: "if (!this.locked && this.clock.now() - this.last >= this.timeoutMs) {",
+    replace: "if (!this.locked && this.clock.now() - this.last > this.timeoutMs) {",
+  },
+  {
+    id: "S2-idle-lock-bypassed",
+    file: "staff/idleLock.ts",
+    search: "    if (!this.locked && this.clock.now() - this.last >= this.timeoutMs) {\n      this.lock();\n    }\n",
+    replace: "",
+  },
+  {
+    id: "S3-late-touch-revives-expired-session",
+    file: "staff/idleLock.ts",
+    search: "    if (this.check()) return; // interaction after the deadline cannot revive the session\n",
+    replace: "",
+  },
+  {
+    id: "S4-mousemove-counts-as-activity",
+    file: "staff/idleLock.ts",
+    search: '["pointerdown", "keydown", "touchstart", "wheel"] as const;',
+    replace: '["pointerdown", "keydown", "touchstart", "wheel", "mousemove", "scroll", "focus", "visibilitychange", "pageshow"] as const;',
+  },
+  {
+    id: "S5-stale-responses-not-discarded",
+    file: "staff/staffController.ts",
+    search: "    this.epoch++;\n",
+    replace: "",
+  },
+  {
+    id: "S6-reload-bypasses-lock",
+    file: "staff/staffController.ts",
+    search: 'if (ref !== "" && marker === ref) {',
+    replace: "if (false) {",
+  },
+  {
+    id: "S7-lock-keeps-server-session",
+    file: "staff/staffController.ts",
+    search: "        await this.deps.api.endSession();\n",
+    replace: "",
+  },
+  {
+    id: "S8-unlock-in-place-without-login",
+    file: "staff/staffController.ts",
+    search: "    this.deps.navigate(this.deps.config.loginUrl);\n",
+    replace: "    this.setState({ phase: \"loading\" });\n",
+  },
+  {
+    id: "S9-refreshed-nonce-ignored",
+    file: "staff/staffApi.ts",
+    search: '    nonce.update(res.headers.get("X-WP-Nonce"));\n',
+    replace: "",
+  },
+  {
+    id: "S10-cross-origin-config-accepted",
+    file: "staff/config.ts",
+    search: "    if (url.origin !== origin) return null;\n",
+    replace: "",
+  },
+  {
+    id: "S11-staff-bundle-imports-mock",
+    file: "staff/staffApi.ts",
+    search: 'import { isValidNonce, type StaffConfig } from "./config";',
+    replace: 'import { isValidNonce, type StaffConfig } from "./config";\nimport { mockClubService as __demo } from "../club/clubService";\nexport const __leak = __demo;',
+  },
+  {
+    id: "S12-401-not-treated-as-expired",
+    file: "staff/staffController.ts",
+    search: 'if (error.kind === "unauthorized") {',
+    replace: 'if (error.kind === "never") {',
+  },
+  {
+    id: "S13-nonce-sent-cross-origin",
+    file: "staff/staffApi.ts",
+    search: '    if (url.origin !== origin) throw new StaffApiError("invalid_response");\n',
+    replace: "",
+  },
+  {
+    id: "S14-session-request-timeout-removed",
+    file: "staff/staffApi.ts",
+    search: "    const timer = timers.setTimeout(() => {\n      timedOut = true;\n      controller.abort();\n    }, timeoutMs);\n",
+    replace: "    const timer = undefined;\n",
+  },
+  {
+    id: "S15-sensitive-data-in-forbidden-offline",
+    file: "staff/staffController.ts",
+    search: "    if (!this.isReady) return false;\n",
+    replace: "",
+  },
+  {
+    id: "S16-protected-op-runs-when-not-ready",
+    file: "staff/staffController.ts",
+    search: '    if (!this.isReady) return { status: "stale" };\n    return this.track(fn, () => this.isReady);',
+    replace: "    return this.track(fn, () => true);",
+  },
+  {
+    id: "S17-late-private-response-restored",
+    file: "staff/staffController.ts",
+    search: '      if (epoch !== this.epoch || !stillValid()) return { status: "stale" };\n      return { status: "ok", value };',
+    replace: '      return { status: "ok", value };',
+  },
+  {
+    id: "S18-unknown-logout-reported-as-success",
+    file: "staff/staffController.ts",
+    search: "      } catch {\n        // Outcome unknown (or session possibly still alive): never claim it.\n",
+    replace: "      } catch {\n        confirmed = true;\n",
+  },
+  {
+    id: "S19-timeout-reported-as-network",
+    file: "staff/staffApi.ts",
+    search: '      if (timedOut) throw new StaffApiError("timeout");\n',
+    replace: "",
+  },
 ];
 
 const runSuite = () =>
   spawnSync(process.execPath, [join(appDir, "scripts", "run-club-tests.mjs")], {
     env: { ...process.env, EVC_QUIET_TESTS: "1" },
     stdio: "ignore",
+    // A mutant that hangs the suite (e.g. a removed timeout) counts as killed.
+    timeout: 180_000,
   }).status;
 
 const sha = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");

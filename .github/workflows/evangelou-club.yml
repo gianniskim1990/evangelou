@@ -4,10 +4,26 @@ on:
     paths:
       - 'wordpress/evangelou-club/**'
       - '.github/workflows/evangelou-club.yml'
+      - 'app/src/staff/**'
+      - 'app/src/club/**'
+      - 'app/src/index.css'
+      - 'app/staff.html'
+      - 'app/vite.staff.config.ts'
+      - 'app/scripts/package-club-plugin.mjs'
+      - 'app/package.json'
+      - 'app/package-lock.json'
   pull_request:
     paths:
       - 'wordpress/evangelou-club/**'
       - '.github/workflows/evangelou-club.yml'
+      - 'app/src/staff/**'
+      - 'app/src/club/**'
+      - 'app/src/index.css'
+      - 'app/staff.html'
+      - 'app/vite.staff.config.ts'
+      - 'app/scripts/package-club-plugin.mjs'
+      - 'app/package.json'
+      - 'app/package-lock.json'
 
 permissions:
   contents: read
@@ -156,3 +172,95 @@ jobs:
       - name: Confirm sources unchanged by test runs
         working-directory: .
         run: git diff --exit-code -- wordpress/evangelou-club
+
+  wordpress-http:
+    name: wordpress real HTTP (packaged plugin, php 8.2 / mysql:8.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EVC_WP_TEST_DB_NAME: evc_wp_tests_http
+      EVC_HTTP_BASE: http://127.0.0.1:8089
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start isolated mysql:8.0 container
+        run: |
+          docker run -d --name evc-test-db -p 127.0.0.1:13306:3306 \
+            -e MYSQL_ROOT_PASSWORD="$EVC_TEST_DB_PASSWORD" mysql:8.0 \
+            --default-authentication-plugin=mysql_native_password
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo, pdo_mysql, mysqli, curl
+          coverage: none
+          tools: composer:v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build staff app and package the plugin (no deployment)
+        working-directory: app
+        run: |
+          npm ci
+          npm run package:club-plugin
+          cd dist-plugin && zip -qr evangelou-club.zip evangelou-club
+
+      - name: Locked WordPress core (dev tooling only)
+        working-directory: wordpress/evangelou-club
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Assemble disposable WordPress with the PACKAGED plugin
+        run: |
+          WP="$RUNNER_TEMP/wp"
+          cp -r wordpress/evangelou-club/vendor/johnpbloch/wordpress-core "$WP"
+          mkdir -p "$WP/wp-content/plugins"
+          cp -r app/dist-plugin/evangelou-club "$WP/wp-content/plugins/evangelou-club"
+          echo "EVC_WP=$WP" >> "$GITHUB_ENV"
+          PW="$(openssl rand -hex 24)"
+          echo "::add-mask::$PW"
+          echo "EVC_HTTP_PASSWORD=$PW" >> "$GITHUB_ENV"
+
+      - name: Install disposable site
+        working-directory: wordpress/evangelou-club
+        run: |
+          php tests/bin/wait-for-db.php
+          php tests/bin/create-wp-test-db.php
+          php tests/http/setup-site.php config "$EVC_WP"
+          php tests/http/setup-site.php install "$EVC_WP"
+          php tests/http/setup-site.php provision "$EVC_WP"
+
+      - name: Real HTTP checks - staff flag ON (isolated CI site only)
+        working-directory: wordpress/evangelou-club
+        run: |
+          EVC_HTTP_FLAG=on php -S 127.0.0.1:8089 -t "$EVC_WP" "$PWD/tests/http/router.php" > "$RUNNER_TEMP/server-on.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 30); do curl -s -o /dev/null "$EVC_HTTP_BASE/wp-login.php" && break; sleep 1; done
+          php tests/http/run-http-checks.php on
+          kill "$(cat "$RUNNER_TEMP/server.pid")"
+
+      - name: Real HTTP checks - staff flag OFF (default)
+        working-directory: wordpress/evangelou-club
+        run: |
+          EVC_HTTP_FLAG=off php -S 127.0.0.1:8089 -t "$EVC_WP" "$PWD/tests/http/router.php" > "$RUNNER_TEMP/server-off.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 30); do curl -s -o /dev/null "$EVC_HTTP_BASE/wp-login.php" && break; sleep 1; done
+          php tests/http/run-http-checks.php off
+          kill "$(cat "$RUNNER_TEMP/server.pid")"
+
+      - name: Server logs (diagnostics)
+        if: always()
+        run: tail -n 50 "$RUNNER_TEMP"/server-*.log || true
+
+      - name: Keep the verified plugin package as a CI artifact (not a deployment)
+        uses: actions/upload-artifact@v4
+        with:
+          name: evangelou-club-plugin-package
+          path: app/dist-plugin/evangelou-club.zip
+          retention-days: 7
+
+      - name: Confirm sources unchanged by test runs
+        run: git diff --exit-code -- wordpress/evangelou-club app/src

@@ -145,6 +145,113 @@ enable it on staging or production** until every prerequisite below is met.
 6. The shared account created manually (strong password, owner recovery
    mailbox) and verified to hold only the Club role.
 
+## Staff app at `/club-admin/` (Task 1C-D — flag-gated, NOT deployed)
+
+**What it is:** a separately built React app (`app/src/staff/`, entry
+`app/staff.html`, config `app/vite.staff.config.ts`) served by THIS plugin on
+the WordPress origin. It never uses `mockClubService`, demo members, demo QR
+tokens or demo storage (enforced by an import-graph test and a bundle scan),
+never imports the ordering app, and is never deployed to Vercel. The public
+Vercel `/club` demo is unchanged and still runs on the mock.
+
+**Build & package (repeatable, no deployment):**
+
+    cd app
+    npm ci
+    npm run package:club-plugin     # = vite build (staff config) + assemble + verify
+
+Output `app/dist-plugin/evangelou-club/` contains only runtime files
+(`evangelou-club.php`, `includes/`, `database/`, `README.md`) plus
+`staff-app/manifest.json`, `staff-app/assets/*` (hashed JS/CSS/logo) and
+`staff-app/build-info.json` (source commit). The script fails on any dev file
+(tests, vendor, Composer/PHPUnit files), source maps, test-only PHP classes,
+demo/mock strings or ordering-app code in the bundle, or a manifest entry whose
+file is missing. `staff-app/` is git-ignored in the plugin source tree.
+
+**Routing:** one rewrite rule `^club-admin/?$ → index.php?evc_club_admin=1`,
+present only while the flag is on and no page/post owns the `club-admin`
+slug (an existing page is never taken over). Rules are flushed only when that
+desired state changes (option `evc_club_admin_rewrite_state`), never per
+request; a fresh activation with the flag off never flushes.
+
+**Shell authorization (cookie session, no nonce on the navigation):**
+
+| Situation | Response |
+|---|---|
+| flag off | 404, no shell, no bootstrap |
+| not logged in | 302 → `wp-login.php?redirect_to=/club-admin/` |
+| wrong role, extra roles, direct caps, disabled account | 403, no bootstrap |
+| expired / idle / unmarked session | session destroyed, 302 → `wp-login.php?reauth=1` |
+| assets missing, corrupt manifest, stale or unsafe asset path | 503, no bootstrap |
+| restricted staff, valid session | 200 shell + bootstrap |
+
+The checks are `EVC_Staff_Auth::check_account()` — the same code the REST
+routes use (minus the nonce). Loading the page counts as staff activity.
+
+**Bootstrap:** an inert `<script type="application/json" id="evc-staff-config">`
+(JSON with `<`, `>`, `&`, `'`, `"` \u-escaped) carrying `restBase`, the
+`wp_rest` nonce, the `reauth=1` login URL, the shell URL, `idleLockSeconds`
+(300), the non-secret `sessionRef`, the app version and all-false feature
+flags. Only the 200 response contains it; the app removes the element after
+reading and keeps the nonce in memory only (never storage, never a URL).
+No auth cookie, session token, credential or customer data is exposed.
+
+**Session endpoints (flag-gated, nonce + restricted account + session policy):**
+`GET /evangelou-club/v1/session` (status; NEVER extends the 30-minute
+inactivity window) and `POST /evangelou-club/v1/session/end` (destroys this
+session server-side and clears the auth cookie). There is no unauthenticated
+nonce endpoint; WordPress refreshes the nonce via the `X-WP-Nonce` response
+header and the app adopts it. The app does not poll.
+
+**5-minute tablet lock (owner-approved):** only pointer/touch/key/wheel input
+counts as activity; timers, requests and visibility changes only *check*
+elapsed wall-clock time, so a tablet that slept locks on wake. On lock the app
+aborts in-flight requests (late responses are discarded by epoch), clears
+sensitive state, ends the server session, and records a per-session marker so
+a reload of the same session re-locks. Unlocking is only possible through a
+real WordPress login at `wp-login.php?reauth=1`, which shows the login form
+even if a cookie were still valid. No PIN, no second password store.
+
+**Bounded session requests and honest logout:** every `/session` and
+`/session/end` request (headers AND body) is aborted after 10 seconds
+(`SESSION_REQUEST_TIMEOUT_MS`); a caller's abort signal is honoured and no
+timer or listener outlives the request. The locked screen reports the server
+outcome truthfully: "pending", "confirmed" (only a verified `200 {"ended":
+true}`) or "unconfirmed" (timeout / network / 5xx — outcome unknown — and also
+401/403, since a missing or stale nonce returns them while the session may
+still be alive). Unconfirmed keeps the screen locked, says the session will
+expire on its own within 30 minutes, and offers an explicit "end session again"
+action. The "log in again" button is never disabled. A timeout never unlocks.
+
+**Fail-closed state:** session requests (bootstrap, status re-check, recovery)
+may run in loading/ready/offline/error; protected member-data operations and
+sensitive data are allowed ONLY in a verified `ready` state. Every transition
+out of `ready` (lock, expired, forbidden, offline, error) bumps the epoch,
+aborts in-flight requests and clears sensitive data, so a late response is
+discarded — also after offline → ready recovery. Offline/error return to ready
+only after a successful `GET /session`.
+
+**Shell headers:** `Cache-Control: no-store, private`, `Pragma: no-cache`,
+`nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+`X-Robots-Tag: noindex, nofollow`, and `EVC_Rest_Security::SHELL_CSP`
+(self-only scripts/styles/fonts/connect, no `unsafe-inline`/`unsafe-eval`, no
+framing). Set only on `/club-admin/` responses. Fonts are not self-hosted yet:
+the staff app falls back to system fonts instead of loading Google Fonts.
+
+**Member operations:** QR lookup, phone lookup, coffee redemption and history
+are shown as disabled ("Η λειτουργία θα ενεργοποιηθεί μετά τη σύνδεση του
+Club."). The redeem route still returns 503 with the production backend.
+
+**Tests:** frontend `npm run test:club` (staff config, transport/nonce,
+idle-lock boundaries, bounded session requests (never-settling fetch, stalled
+body, caller abort, timer/listener cleanup), controller ready-only/stale-response
+and lock/revocation/reauth rules, import-graph
+isolation); real WordPress suites (`StaffShellTest`, `RestSessionTest`,
+`StaffShellDisabledTest`); and a CI-only real HTTP run (`tests/http/`) that
+installs a disposable WordPress, serves it with `php -S`, installs the
+**packaged** plugin and checks redirects, real headers, real CORS, cookies,
+logout replay and the reauth form with the flag on and off.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in

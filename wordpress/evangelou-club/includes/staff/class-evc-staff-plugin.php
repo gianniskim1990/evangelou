@@ -2,21 +2,25 @@
 defined('ABSPATH') || exit;
 
 /**
- * Wiring for the staff authentication foundation (Task 1C-C).
+ * Wiring for the staff foundation (Tasks 1C-C / 1C-D).
  *
  * Always active while the plugin is active, but scoped to users holding
  * the evc_club_staff role (no effect on anyone else):
  *   12 h / 30 min session policy, admin-area guard, login throttling,
  *   administrator-only emergency revocation (admin-post).
+ * /club-admin/ shell hooks are registered always so the rewrite rule is
+ * removed again when the flag is switched off; the query var, the rule and
+ * the page itself exist only while the flag is on.
  * Only when EVC_CLUB_STAFF_ENABLED === true:
- *   Club REST hardening + the redeem route (with the always-unavailable
- *   production backend, i.e. fail-closed 503).
+ *   Club REST hardening, the session status/end routes and the redeem route
+ *   (with the always-unavailable production backend, i.e. fail-closed 503).
  */
 final class EVC_Staff_Plugin {
     public static function boot(): void {
         EVC_Staff_Session::register_hooks();
         EVC_Staff_Admin_Guard::register_hooks();
         EVC_Login_Throttle::register_hooks();
+        EVC_Staff_Shell::register_hooks();
         if (!EVC_Staff_Feature::enabled()) {
             return;
         }
@@ -29,6 +33,7 @@ final class EVC_Staff_Plugin {
             return;
         }
         (new EVC_Rest_Redeem_Controller(new EVC_Unavailable_Redemption_Backend()))->register_routes();
+        (new EVC_Rest_Session_Controller())->register_routes();
     }
 
     public static function activate(): void {
@@ -37,5 +42,6 @@ final class EVC_Staff_Plugin {
 
     public static function deactivate(): void {
         EVC_Staff_Role::unregister();
+        EVC_Staff_Shell::deactivate();
     }
 }

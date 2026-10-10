@@ -20,13 +20,32 @@ defined('ABSPATH') || exit;
 final class EVC_Staff_Auth {
     const DISABLED_META = 'evc_staff_disabled';
 
-    /** @return true|WP_Error */
+    /**
+     * Protected Club REST route requiring $capability. Counts as staff
+     * activity (refreshes the 30 min inactivity window).
+     * @return true|WP_Error
+     */
     public static function authorize(WP_REST_Request $request, string $capability) {
-        if (!EVC_Staff_Feature::enabled()) {
-            return new WP_Error('evc_feature_disabled', 'Not available.', array('status' => 404));
-        }
         if (!in_array($capability, EVC_Staff_Role::staff_capabilities(), true)) {
-            return self::forbidden();
+            return EVC_Staff_Feature::enabled() ? self::forbidden() : self::feature_disabled();
+        }
+        return self::authorize_rest($request, $capability, true);
+    }
+
+    /**
+     * Staff session endpoints (status / end): same account, nonce and session
+     * checks but NO capability beyond being the restricted account, and NO
+     * activity refresh, so status checks can never keep an idle tablet alive.
+     * @return true|WP_Error
+     */
+    public static function authorize_session_request(WP_REST_Request $request) {
+        return self::authorize_rest($request, null, false);
+    }
+
+    /** @return true|WP_Error */
+    private static function authorize_rest(WP_REST_Request $request, ?string $capability, bool $touch) {
+        if (!EVC_Staff_Feature::enabled()) {
+            return self::feature_disabled();
         }
         $user = wp_get_current_user();
         if (!$user || !$user->exists()) {
@@ -39,16 +58,33 @@ final class EVC_Staff_Auth {
         if (!is_string($nonce) || $nonce === '' || !wp_verify_nonce($nonce, 'wp_rest')) {
             return self::unauthorized();
         }
-        if (!EVC_Staff_Role::is_restricted_staff_account($user) || !user_can($user, $capability)) {
+        $error = self::check_account($user, $capability, $touch);
+        return $error === null ? true : $error;
+    }
+
+    /**
+     * Account + session policy shared by the REST routes and the /club-admin/
+     * HTML shell (a top-level navigation carries no X-WP-Nonce, so the shell
+     * relies on the cookie session plus exactly these checks).
+     *
+     * @return WP_Error|null null when the user is the restricted, enabled
+     *   Club account with a valid 12 h / 30 min session.
+     */
+    public static function check_account(WP_User $user, ?string $capability, bool $touch) {
+        if (!EVC_Staff_Role::is_restricted_staff_account($user) || ($capability !== null && !user_can($user, $capability))) {
             return self::forbidden();
         }
         if (self::is_disabled((int) $user->ID)) {
             return self::forbidden();
         }
-        if (EVC_Staff_Session::verify_current((int) $user->ID) !== EVC_Staff_Session::OK) {
+        if (EVC_Staff_Session::verify_current((int) $user->ID, null, $touch) !== EVC_Staff_Session::OK) {
             return self::unauthorized();
         }
-        return true;
+        return null;
+    }
+
+    private static function feature_disabled(): WP_Error {
+        return new WP_Error('evc_feature_disabled', 'Not available.', array('status' => 404));
     }
 
     public static function is_disabled(int $user_id): bool {

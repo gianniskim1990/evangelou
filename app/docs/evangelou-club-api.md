@@ -102,6 +102,8 @@ taken from the session, never from the body; path ids only from the URL.
 | `POST` | `/members/lookup` | Resolve a member by phone or QR token |
 | `POST` | `/members/{member_id}/benefits/{benefit_type}/redeem` | Redeem today's benefit with a selected coffee |
 | `GET`  | `/coffee-options` | Coffees staff may record (proposed, §7.1) |
+| `GET`  | `/session` | Staff session status (implemented, flag-gated, §4.3) |
+| `POST` | `/session/end` | End this staff session server-side (implemented, flag-gated, §4.3) |
 
 ### 4.1 `POST /members/lookup`
 
@@ -240,6 +242,43 @@ coffee in its result details, so `coffee_code` is optional.)
 
 **The backend re-checks eligibility at redemption time**, regardless of
 what lookup said earlier.
+
+### 4.3 Staff session endpoints (Task 1C-D)
+
+Same authorization as every Club route (cookie session + `X-WP-Nonce` +
+restricted shared account + 12 h / 30 min policy), but **status checks never
+extend the inactivity window**. No personal or customer data is returned.
+
+`GET /session` → `200`:
+
+```json
+{
+  "authenticated": true,
+  "session": {
+    "expires_at": "2026-10-10T22:00:00+03:00",
+    "absolute_lifetime_seconds": 43200,
+    "idle_timeout_seconds": 1800,
+    "idle_lock_seconds": 300
+  },
+  "features": { "qr_lookup": false, "phone_lookup": false, "coffee_redemption": false, "history": false }
+}
+```
+
+`POST /session/end` → `200 {"ended": true}`: destroys the current WordPress
+session token and clears the auth cookie (logout, 5-minute lock). Other
+tablets' sessions are unaffected. Without a valid nonce → `401`, nothing ends.
+
+Client behaviour (staff app): both session requests are bounded to 10 s
+(headers and body). The staff app treats only `200 {"ended": true}` as
+revocation confirmed; a timeout, network error, `5xx` and also `401`/`403`
+(a missing/stale nonce returns these while the session may still be alive) are
+**unconfirmed** — it stays locked, does not claim the session ended and
+offers an explicit retry. No server change: the server-side 30-minute
+inactivity limit bounds an unconfirmed session.
+
+There is **no** endpoint that hands out a nonce: the `wp_rest` nonce reaches
+the staff app only inside the protected `/club-admin/` HTML shell, and
+WordPress refreshes it through the `X-WP-Nonce` response header.
 
 ## 5. Idempotency, retries and concurrency
 
@@ -440,6 +479,14 @@ caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
   `server_error`.
 - WordPress-native auth/param errors inside the namespace are returned in
   the v1 envelope (`unauthorized`, `forbidden`, `invalid_request`).
+
+**Task 1C-D (2026-10-10):**
+
+- Added `GET /session` and `POST /session/end` (§4.3), flag-gated; additive.
+- The real staff app is served by the plugin at `/club-admin/` with its URL
+  and nonce supplied by the protected shell; it uses `credentials:
+  "same-origin"` and adopts refreshed `X-WP-Nonce` headers. No changes to
+  existing request/response shapes.
 
 ## 16. Demo-only shortcuts (deliberate)
 
