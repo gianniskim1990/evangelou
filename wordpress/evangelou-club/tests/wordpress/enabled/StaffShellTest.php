@@ -279,30 +279,10 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         // Simulate a fresh request: the plugin's own init earlier in this PHPUnit
         // process already registered the rule in memory.
         global $wp_rewrite;
-        unset($wp_rewrite->extra_rules_top['^club-admin/?
-    }
-
-    public function test_ordinary_requests_are_untouched_by_the_shell_hook(): void {
-        $this->go_to(home_url('/'));
-        EVC_Staff_Shell::serve(); // must return (no output, no exit) when not the staff route
-        $this->assertSame('', (string) get_query_var(EVC_Staff_Shell::QUERY_VAR));
-        $this->assertSame(0, has_action('template_redirect', array('EVC_Staff_Shell', 'serve')));
-    }
-}
-]);
+        unset($wp_rewrite->extra_rules_top['^club-admin/?$']);
         update_option(EVC_Staff_Shell::REWRITE_STATE_OPTION, EVC_Staff_Shell::REWRITE_STATE_ON);
         EVC_Staff_Shell::sync_rewrite();
-        $this->assertArrayNotHasKey('^club-admin/?
-    }
-
-    public function test_ordinary_requests_are_untouched_by_the_shell_hook(): void {
-        $this->go_to(home_url('/'));
-        EVC_Staff_Shell::serve(); // must return (no output, no exit) when not the staff route
-        $this->assertSame('', (string) get_query_var(EVC_Staff_Shell::QUERY_VAR));
-        $this->assertSame(0, has_action('template_redirect', array('EVC_Staff_Shell', 'serve')));
-    }
-}
-, (array) get_option('rewrite_rules'));
+        $this->assertArrayNotHasKey('^club-admin/?$', (array) get_option('rewrite_rules'));
         $this->assertSame(EVC_Staff_Shell::REWRITE_STATE_OFF, get_option(EVC_Staff_Shell::REWRITE_STATE_OPTION));
     }
 
