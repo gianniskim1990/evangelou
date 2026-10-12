@@ -29,6 +29,12 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  * recorded (indeterminate) because the mapper replays payments in
  * confirmation order; the instant is never shifted to make it fit.
  *
+ * Corrections (Task 1D-E.R1): forward-only and compare-and-set at commit
+ * time. A verified correction for a movement that is not recorded (refund
+ * seen before its payment) is kept as an UNRESOLVED obligation; the payment
+ * is then refused by record() and can only enter through reconcile(), which
+ * a trusted adapter calls after re-verifying the current source state.
+ *
  * Every refusal leaves the store untouched. Recording is not eligibility.
  */
 final class EVC_Provenance_Recorder {
@@ -79,7 +85,23 @@ final class EVC_Provenance_Recorder {
         }
     }
 
-    private function record_or_throw(EVC_Verified_Movement $m): EVC_Record_Outcome {
+    /**
+     * Trusted resolution of corrections that arrived before their payment
+     * (Task 1D-E.R1): records the movement, its period and the acknowledged
+     * corrections in ONE commit, so the payment never exists without them.
+     */
+    public function reconcile(EVC_Movement_Reconciliation $reconciliation): EVC_Record_Outcome {
+        try {
+            return $this->reconcile_or_throw($reconciliation);
+        } catch (EVC_Provenance_Conflict_Exception $e) {
+            return EVC_Record_Outcome::conflict('concurrent_update');
+        } catch (Throwable $e) {
+            return EVC_Record_Outcome::unavailable();
+        }
+    }
+
+    /** Checks that do not depend on the store; null when the movement may be recorded. */
+    private function refusal(EVC_Verified_Movement $m): ?EVC_Record_Outcome {
         if ($m->state() !== EVC_Verified_Movement::STATE_CONFIRMED) {
             return EVC_Record_Outcome::indeterminate('movement_not_confirmed');
         }
@@ -99,12 +121,51 @@ final class EVC_Provenance_Recorder {
         if (count($anchors) > 1) {
             return EVC_Record_Outcome::conflict('multiple_order_anchors');
         }
+        return null;
+    }
 
+    private function record_or_throw(EVC_Verified_Movement $m): EVC_Record_Outcome {
+        $refusal = $this->refusal($m);
+        if ($refusal !== null) {
+            return $refusal;
+        }
         $existing = $this->store->movement($m->movement_id());
         if ($existing !== null) {
             return $this->repeat_of($existing, $m);
         }
+        if ($this->store->corrections_for($m->movement_id()) !== array()) {
+            // A verified refund/reversal arrived first: these facts may be stale.
+            return EVC_Record_Outcome::indeterminate('unresolved_correction');
+        }
+        return $this->append($m, array());
+    }
 
+    private function reconcile_or_throw(EVC_Movement_Reconciliation $r): EVC_Record_Outcome {
+        $m = $r->movement();
+        $refusal = $this->refusal($m);
+        if ($refusal !== null) {
+            return $refusal;
+        }
+        $held = array_map(function (EVC_Movement_Correction $c) {
+            return $c->correction_id();
+        }, $this->store->corrections_for($m->movement_id()));
+        $acknowledged = $r->acknowledged_correction_ids();
+        $existing = $this->store->movement($m->movement_id());
+        if ($existing !== null) {
+            // Replay: the acknowledged list must still be the start of the history.
+            if (array_slice($held, 0, count($acknowledged)) !== $acknowledged) {
+                return EVC_Record_Outcome::conflict('reconciliation_mismatch');
+            }
+            return $this->repeat_of($existing, $m);
+        }
+        if ($held !== $acknowledged) {
+            return EVC_Record_Outcome::conflict('reconciliation_mismatch');
+        }
+        return $this->append($m, $held);
+    }
+
+    /** @param string[] $expected_unresolved */
+    private function append(EVC_Verified_Movement $m, array $expected_unresolved): EVC_Record_Outcome {
         foreach ($m->aliases() as $alias) {
             if ($this->store->movement_for_alias($alias->key()) !== null) {
                 return EVC_Record_Outcome::conflict('alias_conflict');
@@ -132,7 +193,7 @@ final class EVC_Provenance_Recorder {
             $latest === null ? EVC_Funded_Period::KIND_INITIAL : $next['renewal'],
             $latest === null ? null : $latest->movement_id()
         );
-        $this->store->commit(EVC_Provenance_Write::new_movement($m, $period));
+        $this->store->commit(EVC_Provenance_Write::new_movement($m, $period, $expected_unresolved));
         return EVC_Record_Outcome::recorded($period);
     }
 
@@ -161,21 +222,26 @@ final class EVC_Provenance_Recorder {
         return EVC_Record_Outcome::already($this->store->period_for_movement($m->movement_id()));
     }
 
+    /**
+     * The write carries what was read (latest correction id, whether the
+     * movement is recorded); the store re-checks both and the transition at
+     * commit time, so a concurrent writer makes this a conflict, never a
+     * silently reordered or regressed history.
+     */
     private function correct_or_throw(EVC_Movement_Correction $c): EVC_Record_Outcome {
-        if ($this->store->movement($c->movement_id()) === null) {
-            // E.g. a refund seen before its payment: nothing to attach it to.
-            return EVC_Record_Outcome::indeterminate('unknown_movement');
-        }
         $existing = $this->store->correction($c->correction_id());
         if ($existing !== null) {
             return $existing->same_as($c) ? EVC_Record_Outcome::already(null) : EVC_Record_Outcome::conflict('correction_conflict');
         }
+        $recorded = $this->store->movement($c->movement_id()) !== null;
         $history = $this->store->corrections_for($c->movement_id());
-        $current = $history === array() ? null : $history[count($history) - 1]->kind();
-        if (!EVC_Movement_Correction::allowed_after($current, $c->kind())) {
+        $prior = $history === array() ? null : $history[count($history) - 1];
+        if (!EVC_Movement_Correction::allowed_after($prior === null ? null : $prior->kind(), $c->kind())) {
             return EVC_Record_Outcome::conflict('correction_state_regression');
         }
-        $this->store->commit(EVC_Provenance_Write::correction($c));
-        return EVC_Record_Outcome::recorded(null);
+        $this->store->commit(EVC_Provenance_Write::correction($c, $prior === null ? null : $prior->correction_id(), $recorded));
+        // Refund seen before its payment: kept as an unresolved obligation that
+        // blocks the movement until a trusted reconciliation (never dropped).
+        return $recorded ? EVC_Record_Outcome::recorded(null) : EVC_Record_Outcome::quarantined('unknown_movement');
     }
 }

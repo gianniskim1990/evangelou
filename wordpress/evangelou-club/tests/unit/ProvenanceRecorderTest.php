@@ -410,11 +410,7 @@ final class ProvenanceRecorderTest extends TestCase {
         }, $store->corrections_for(self::ref('mv:oct'))));
     }
 
-    public function test_Q_refund_before_its_payment_is_not_attached_to_anything(): void {
-        $store = new EVC_In_Memory_Provenance_Store();
-        $this->assertOutcome(self::recorder($store)->correct(self::correction('r1', 'unknown', 'refunded')), EVC_Record_Outcome::INDETERMINATE, 'unknown_movement');
-        $this->assertNothingRecorded($store);
-    }
+    // Refund seen before its payment: see ProvenanceCorrectionSafetyTest (Task 1D-E.R1).
 
     // ---- S / T: failures, retries, atomicity ------------------------------------
 

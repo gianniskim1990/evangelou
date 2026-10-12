@@ -125,6 +125,24 @@ final class ProvenanceMapperIntegrationTest extends TestCase {
         $this->assertSame('expired', self::map($store, array(self::row('row1', 'active', '2026-10-15 12:00:00', '2026-11-15 12:00:00')), '2026-11-20 09:00')->status());
     }
 
+    public function test_M_refund_first_stays_fail_closed_through_the_mapper(): void {
+        $rows = array(self::row('row1', 'active', '2026-10-15 12:00:00', '2026-11-15 12:00:00'));
+        $store = new EVC_In_Memory_Provenance_Store();
+        $r = self::recorder($store);
+        $refund = new EVC_Movement_Correction(self::ref('c:r1'), self::ref('mv:oct'), 'refunded', EVC_Verified_Movement::AUTHORITY_GATEWAY_API, EVC_Pmpro_Fixture::athens('2026-10-16 10:00'));
+        $this->assertSame(EVC_Record_Outcome::QUARANTINED, $r->correct($refund)->outcome());
+        // The stale "confirmed" payment is refused, so PMPro's active row has no paid evidence.
+        $this->assertSame(EVC_Record_Outcome::INDETERMINATE, $r->record(self::movement('oct', '2026-10-15 12:00:00'))->outcome());
+        $e = self::map($store, $rows, '2026-10-20 09:00');
+        $this->assertSame('indeterminate', $e->status());
+        $this->assertContains('no_payment_evidence', $e->diagnostic_flags());
+        // After trusted reconciliation the payment exists only together with its refund.
+        $this->assertSame(EVC_Record_Outcome::NEWLY_RECORDED, $r->reconcile(new EVC_Movement_Reconciliation(self::movement('oct', '2026-10-15 12:00:00'), array(self::ref('c:r1'))))->outcome());
+        $e = self::map($store, $rows, '2026-10-20 09:00');
+        $this->assertSame('refunded', $e->status());
+        $this->assertFalse($e->is_eligible_at(EVC_Pmpro_Fixture::athens('2026-10-20 09:00')));
+    }
+
     public function test_no_recorded_payment_means_no_paid_evidence(): void {
         $e = self::map(new EVC_In_Memory_Provenance_Store(), array(self::row('row1', 'active', '2026-10-15 12:00:00', '2026-11-15 12:00:00')), '2026-10-20 09:00');
         $this->assertSame('indeterminate', $e->status());

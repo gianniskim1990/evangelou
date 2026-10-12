@@ -175,11 +175,25 @@ WooCommerce is not installed yet and payment methods are unconfirmed.
 - Corrections (refund, partial refund, reversal, void) are append-only,
   idempotent and forward-only; history is never erased. The mapper treats
   them as refunded / indeterminate. No coffee clawback, no debt.
-- `EVC_Provenance_Store` defines invariants I1–I6 (unique movement, unique
+- Task 1D-E.R1: each correction write carries the latest correction id and
+  movement-recorded state the recorder read; the store re-checks both and
+  the forward-only transition at commit, so a concurrent writer causes a
+  `conflict`, never a reordered or regressed history.
+- Refund before payment (R1): a verified correction for a movement that is
+  not recorded is stored as an UNRESOLVED obligation (`quarantined`). The
+  payment is then refused by `record()` (`unresolved_correction`) and can
+  only be recorded through `reconcile()` with an `EVC_Movement_Reconciliation`
+  that acknowledges exactly the held corrections. A future trusted adapter
+  builds it after re-verifying the current source state. Movement, period and
+  corrections are committed together, so the mapper never sees the payment
+  without its refund. Nothing deletes an obligation.
+- `EVC_Provenance_Store` defines invariants I1–I8 (unique movement, unique
   alias, one period per movement, single chain with compare-and-set,
-  append-only corrections, atomic commit). Only a TEST in-memory store exists;
-  it proves nothing about database concurrency. A real store needs a
-  migration, transactions, a per-member row lock and unique constraints.
+  append-only corrections, atomic commit, refund-first acknowledgement,
+  correction compare-and-set/forward-only at commit). Only a TEST in-memory
+  store exists; it proves nothing about database concurrency. The interface
+  documents the SQL requirements (transaction, member and per-movement
+  correction-head row locks in a fixed order, unique constraints).
 - Still open: O1, O3 (PMPro date alignment), O4 (Viva capture-only), D3, D4,
   D6–D10, month-end drift.
 

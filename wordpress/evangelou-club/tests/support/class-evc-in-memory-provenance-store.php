@@ -1,7 +1,7 @@
 <?php
 /**
  * TEST-ONLY in-memory EVC_Provenance_Store (Task 1D-E). Never shipped (the
- * packager rejects this class). It enforces invariants I1-I6 of the store
+ * packager rejects this class). It enforces invariants I1-I8 of the store
  * contract inside commit() by applying the write to a COPY of the state and
  * swapping it in only at the very end, so a failure at any point leaves the
  * store unchanged. Single-process PHP: this says nothing about database
@@ -72,6 +72,17 @@ final class EVC_In_Memory_Provenance_Store implements EVC_Provenance_Store {
         return $out;
     }
 
+    public function unresolved_corrections(): array {
+        $this->guard();
+        $out = array();
+        foreach ($this->state['history'] as $movement_id => $ids) {
+            if (!isset($this->state['movements'][$movement_id])) {
+                $out[$movement_id] = $this->corrections_for((string) $movement_id);
+            }
+        }
+        return $out;
+    }
+
     public function commit(EVC_Provenance_Write $w): void {
         if ($this->before_next_commit !== null) {
             $hook = $this->before_next_commit;
@@ -97,6 +108,9 @@ final class EVC_In_Memory_Provenance_Store implements EVC_Provenance_Store {
             }
             if ($current_latest !== null && isset($next['successor'][$current_latest])) {
                 throw new EVC_Provenance_Conflict_Exception('I4 predecessor already has a successor');
+            }
+            if (($next['history'][$id] ?? array()) !== $w->expected_unresolved) {
+                throw new EVC_Provenance_Conflict_Exception('I7 unresolved corrections not acknowledged exactly');
             }
             $next['movements'][$id] = $m;
             $next['periods'][$id] = $p;
@@ -125,8 +139,16 @@ final class EVC_In_Memory_Provenance_Store implements EVC_Provenance_Store {
             if (isset($next['corrections'][$c->correction_id()])) {
                 throw new EVC_Provenance_Conflict_Exception('I5 correction already recorded');
             }
-            if (!isset($next['movements'][$c->movement_id()])) {
-                throw new EVC_Provenance_Conflict_Exception('I5 correction for an unknown movement');
+            if (isset($next['movements'][$c->movement_id()]) !== $w->expected_movement_recorded) {
+                throw new EVC_Provenance_Conflict_Exception('I8 movement recorded state changed');
+            }
+            $held = $next['history'][$c->movement_id()] ?? array();
+            $prior = $held === array() ? null : $held[count($held) - 1];
+            if ($prior !== $w->expected_prior_correction) {
+                throw new EVC_Provenance_Conflict_Exception('I8 correction history changed (compare-and-set failed)');
+            }
+            if (!EVC_Movement_Correction::allowed_after($prior === null ? null : $next['corrections'][$prior]->kind(), $c->kind())) {
+                throw new EVC_Provenance_Conflict_Exception('I8 forbidden correction transition');
             }
             $next['corrections'][$c->correction_id()] = $c;
             $next['history'][$c->movement_id()][] = $c->correction_id();

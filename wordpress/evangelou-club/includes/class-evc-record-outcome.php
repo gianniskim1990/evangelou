@@ -11,7 +11,12 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *                    verified aliases) written
  *  conflict          contradicts recorded facts; nothing written; needs review
  *  indeterminate     not recordable as given (pending, unanchored, out of
- *                    order, same instant, wrong amount/env/level); nothing written
+ *                    order, same instant, wrong amount/env/level, or the
+ *                    movement has unresolved corrections); nothing written
+ *  quarantined       a verified correction for a movement that is not
+ *                    recorded was stored as an UNRESOLVED obligation
+ *                    (Task 1D-E.R1). It grants nothing and blocks the
+ *                    movement until a trusted reconciliation
  *  unavailable       the store failed; nothing written; safe to retry
  */
 final class EVC_Record_Outcome {
@@ -19,6 +24,7 @@ final class EVC_Record_Outcome {
     const ALREADY_RECORDED = 'already_recorded';
     const CONFLICT = 'conflict';
     const INDETERMINATE = 'indeterminate';
+    const QUARANTINED = 'quarantined';
     const UNAVAILABLE = 'unavailable';
 
     /** @var string */
@@ -48,6 +54,10 @@ final class EVC_Record_Outcome {
 
     public static function indeterminate(string $reason): self {
         return new self(self::INDETERMINATE, $reason, null);
+    }
+
+    public static function quarantined(string $reason): self {
+        return new self(self::QUARANTINED, $reason, null);
     }
 
     public static function unavailable(): self {

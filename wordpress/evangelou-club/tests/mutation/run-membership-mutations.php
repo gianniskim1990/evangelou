@@ -4,7 +4,8 @@
  * (calendar/DST, renewal, payment-to-period binding, fail-closed mapper) and
  * the Task 1D-B.R1 hardening (R1-R9: membership start, payment identity,
  * payment-to-row level binding) and Task 1D-E (P1-P22: provenance recorder,
- * incl. the in-memory store's atomicity / compare-and-set contract).
+ * incl. the in-memory store's atomicity / compare-and-set contract) and
+ * Task 1D-E.R1 (P23-P29: commit-time correction guards, refund-first safety).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -319,7 +320,7 @@ $mutants = array(
     array(
         'id' => 'P9-refund-ignored',
         'file' => 'includes/class-evc-provenance-recorder.php',
-        'search' => "        \$this->store->commit(EVC_Provenance_Write::correction(\$c));\n",
+        'search' => "        \$this->store->commit(EVC_Provenance_Write::correction(\$c, \$prior === null ? null : \$prior->correction_id(), \$recorded));\n",
         'replace' => "",
     ),
     array(
@@ -379,7 +380,7 @@ $mutants = array(
     array(
         'id' => 'P19-correction-state-regression-accepted',
         'file' => 'includes/class-evc-provenance-recorder.php',
-        'search' => "        if (!EVC_Movement_Correction::allowed_after(\$current, \$c->kind())) {",
+        'search' => "        if (!EVC_Movement_Correction::allowed_after(\$prior === null ? null : \$prior->kind(), \$c->kind())) {",
         'replace' => "        if (false) {",
     ),
     array(
@@ -398,6 +399,49 @@ $mutants = array(
         'id' => 'P22-changed-facts-on-repeat-accepted',
         'file' => 'includes/class-evc-provenance-recorder.php',
         'search' => "        if (!\$existing->same_facts_as(\$m)) {",
+        'replace' => "        if (false) {",
+    ),
+    // ---- Task 1D-E.R1: correction atomicity and refund-first safety --------
+    array(
+        'id' => 'P23-store-correction-compare-and-set-removed',
+        'file' => 'tests/support/class-evc-in-memory-provenance-store.php',
+        'search' => "            if (\$prior !== \$w->expected_prior_correction) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P24-store-commit-time-transition-guard-removed',
+        'file' => 'tests/support/class-evc-in-memory-provenance-store.php',
+        'search' => "            if (!EVC_Movement_Correction::allowed_after(\$prior === null ? null : \$next['corrections'][\$prior]->kind(), \$c->kind())) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P25-store-refund-first-guard-removed',
+        'file' => 'tests/support/class-evc-in-memory-provenance-store.php',
+        'search' => "            if ((\$next['history'][\$id] ?? array()) !== \$w->expected_unresolved) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P26-recorder-refund-first-guard-removed',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$this->store->corrections_for(\$m->movement_id()) !== array()) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'P27-refund-before-payment-dropped',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        \$recorded = \$this->store->movement(\$c->movement_id()) !== null;\n",
+        'replace' => "        \$recorded = \$this->store->movement(\$c->movement_id()) !== null;\n        if (!\$recorded) {\n            return EVC_Record_Outcome::indeterminate('unknown_movement');\n        }\n",
+    ),
+    array(
+        'id' => 'P28-store-recorded-state-check-removed',
+        'file' => 'tests/support/class-evc-in-memory-provenance-store.php',
+        'search' => "            if (isset(\$next['movements'][\$c->movement_id()]) !== \$w->expected_movement_recorded) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'P29-reconciliation-acknowledgement-unchecked',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$held !== \$acknowledged) {",
         'replace' => "        if (false) {",
     ),
 );

@@ -34,6 +34,7 @@ require_once $evc_includes . 'class-evc-movement-alias.php';
 require_once $evc_includes . 'class-evc-verified-movement.php';
 require_once $evc_includes . 'class-evc-funded-period.php';
 require_once $evc_includes . 'class-evc-movement-correction.php';
+require_once $evc_includes . 'class-evc-movement-reconciliation.php';
 require_once $evc_includes . 'class-evc-provenance-write.php';
 require_once $evc_includes . 'interface-evc-provenance-store.php';
 require_once $evc_includes . 'class-evc-record-outcome.php';
