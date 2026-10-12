@@ -101,6 +101,37 @@ final class SqlProvenanceConcurrencyTest extends EVC_Db_Test_Case {
         ), 'every member with periods has a head');
     }
 
+    /**
+     * A correction worker reports success only after a committed write. If EVERY
+     * correction worker of a round got a conflict (its read became stale, e.g. the
+     * movement was recorded meanwhile), nothing was acknowledged and nothing may be
+     * stored; the caller's retry must then store it exactly once.
+     *
+     * @return bool whether a retry was needed
+     */
+    private function settle_correction(array $jobs, array $results, string $label, string $movement, string $kind): bool {
+        $acknowledged = false;
+        foreach ($results as $i => $r) {
+            if ($jobs[$i]['op'] === 'correct' && in_array($r['outcome'], array('newly_recorded', 'quarantined', 'already_recorded'), true)) {
+                $acknowledged = true;
+            }
+        }
+        $stored = $this->count_rows('evc_pay_corrections', 'correction_id = ?', array(self::ref('corr:' . $label)));
+        if ($acknowledged) {
+            $this->assertSame(1, $stored, 'an acknowledged correction is stored exactly once');
+            return false;
+        }
+        foreach ($results as $i => $r) {
+            if ($jobs[$i]['op'] === 'correct') {
+                $this->assertSame('conflict', $r['outcome'], 'an unacknowledged correction attempt must be a conflict');
+            }
+        }
+        $this->assertSame(0, $stored, 'nothing stored without acknowledgement');
+        $retry = EVC_Provenance_Test_Fixture::recorder($this->store())->correct(EVC_Provenance_Test_Fixture::correction($label, $movement, $kind));
+        $this->assertContains($retry->outcome(), array('newly_recorded', 'quarantined'), 'retry after conflict stores the correction');
+        return true;
+    }
+
     public function test_competing_renewals_extend_the_chain_exactly_once(): void {
         $totals = array();
         for ($round = 0; $round < self::rounds(); $round++) {
@@ -190,6 +221,7 @@ final class SqlProvenanceConcurrencyTest extends EVC_Db_Test_Case {
     public function test_refund_and_payment_race_never_leaves_a_clean_paid_period(): void {
         $totals = array();
         $branches = array();
+        $retried = 0;
         for ($round = 0; $round < self::rounds(); $round++) {
             $jobs = array();
             for ($w = 0; $w < self::workers(); $w++) {
@@ -204,19 +236,23 @@ final class SqlProvenanceConcurrencyTest extends EVC_Db_Test_Case {
             $quarantined = in_array('quarantined', $outcomes, true);
             $this->assertFalse($paid && $quarantined, "round $round: payment recorded although its refund was quarantined first");
             $recorded = $this->count_rows('evc_pay_movements', 'movement_id = ?', array(self::ref("mv:race-$round"))) === 1;
-            $this->assertSame(1, $this->count_rows('evc_pay_corrections', 'movement_id = ?', array(self::ref("mv:race-$round"))), 'the refund is never lost');
             $this->assertSame($quarantined, !$recorded, "round $round: quarantined <=> payment blocked");
+            if ($this->settle_correction($jobs, $results, "refund-$round", "race-$round", 'refunded')) {
+                $retried++;
+            }
+            $this->assertSame(1, $this->count_rows('evc_pay_corrections', 'movement_id = ?', array(self::ref("mv:race-$round"))), 'the refund is never lost');
             $branches[$recorded ? 'payment_first' : 'refund_first'] = ($branches[$recorded ? 'payment_first' : 'refund_first'] ?? 0) + 1;
             $this->assertSame(0, self::count_of($results, 'unavailable'));
         }
         $this->assertChainsAreLinear();
         $this->assertCount(2, $branches, 'both orderings exercised: ' . json_encode($branches));
-        $this->evidence('refund-payment', $totals, 'branches=' . json_encode($branches) . ' movements=' . $this->count_rows('evc_pay_movements') . ' unresolved=' . count($this->store()->unresolved_corrections()));
+        $this->evidence('refund-payment', $totals, 'branches=' . json_encode($branches) . ' retried_after_conflict=' . $retried . ' movements=' . $this->count_rows('evc_pay_movements') . ' unresolved=' . count($this->store()->unresolved_corrections()));
     }
 
     public function test_reconciliation_racing_a_new_correction_loses_nothing(): void {
         $totals = array();
         $branches = array();
+        $retried = 0;
         for ($round = 0; $round < self::rounds(); $round++) {
             EVC_Provenance_Test_Fixture::recorder($this->store())->correct(EVC_Provenance_Test_Fixture::correction("p-$round", "rec-$round", 'partially_refunded'));
             $jobs = array();
@@ -238,6 +274,11 @@ final class SqlProvenanceConcurrencyTest extends EVC_Db_Test_Case {
                 }
             }
             $this->assertFalse($reconciled && $final_quarantined, "round $round: reconciliation ignored a correction held before it");
+            $recorded_now = $this->count_rows('evc_pay_movements', 'movement_id = ?', array(self::ref("mv:rec-$round"))) === 1;
+            $this->assertSame($reconciled, $recorded_now);
+            if ($this->settle_correction($jobs, $results, "f-$round", "rec-$round", 'refunded')) {
+                $retried++;
+            }
             $ids = array_map(function ($c) { return $c->correction_id(); }, $this->store()->corrections_for(self::ref("mv:rec-$round")));
             $this->assertSame(array(self::ref("corr:p-$round"), self::ref("corr:f-$round")), $ids, 'the concurrent refund is never lost or reordered');
             $recorded = $this->count_rows('evc_pay_movements', 'movement_id = ?', array(self::ref("mv:rec-$round"))) === 1;
@@ -246,6 +287,6 @@ final class SqlProvenanceConcurrencyTest extends EVC_Db_Test_Case {
             $this->assertSame(0, self::count_of($results, 'unavailable'));
         }
         $this->assertCount(2, $branches, 'both orderings exercised: ' . json_encode($branches));
-        $this->evidence('reconciliation', $totals, 'branches=' . json_encode($branches) . ' movements=' . $this->count_rows('evc_pay_movements') . ' unresolved=' . count($this->store()->unresolved_corrections()));
+        $this->evidence('reconciliation', $totals, 'branches=' . json_encode($branches) . ' retried_after_conflict=' . $retried . ' movements=' . $this->count_rows('evc_pay_movements') . ' unresolved=' . count($this->store()->unresolved_corrections()));
     }
 }
