@@ -8,7 +8,8 @@
  * Task 1D-E.R1 (P23-P29: commit-time correction guards, refund-first safety)
  * and Task 1D-I (I1-I17: canonical payment identity, key ring, trust gate)
  * and Task 1D-I.R1 (J1-J7: gate approval provenance, cross-version refund-first,
- * pinned-fingerprint minting, row-ref stability).
+ * pinned-fingerprint minting, row-ref stability) and Task 1D-I.R2 (K1-K4:
+ * historical key integrity before minting).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -486,9 +487,9 @@ $mutants = array(
     ),
     array(
         'id' => 'I7-second-id-minted-with-incomplete-history',
-        'file' => 'includes/class-evc-payment-identity-resolver.php',
-        'search' => "        if (!\$this->identity->ring()->identity_history_complete()) {\n            return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_history_incomplete');\n        }\n        if (!\$this->identity->ring()->identity_key_pinned()) {",
-        'replace' => "        if (!\$this->identity->ring()->identity_key_pinned()) {",
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        foreach (\$this->issued_identity_versions as \$v) {\n            if (\$this->key_status(\$v) === self::KEY_MISSING) {\n                return 'identity_history_incomplete';\n            }\n        }\n",
+        'replace' => '',
     ),
     array(
         'id' => 'I8-authenticated-notification-funds-membership',
@@ -583,15 +584,40 @@ $mutants = array(
     ),
     array(
         'id' => 'J6-minting-without-pinned-fingerprint',
-        'file' => 'includes/class-evc-payment-identity-resolver.php',
-        'search' => "        if (!\$this->identity->ring()->identity_key_pinned()) {",
-        'replace' => '        if (false) {',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        if (\$this->key_status(\$this->identity_version) !== self::KEY_VERIFIED) {\n            return 'identity_key_unpinned';",
+        'replace' => "        if (false) {\n            return 'identity_key_unpinned';",
     ),
     array(
         'id' => 'J7-row-ref-follows-alias-version',
         'file' => 'includes/class-evc-payment-identity.php',
         'search' => "        return \$this->row_ref_for_version(\$site_scope, \$raw_row_id, \$this->ring->identity_version());",
         'replace' => "        return \$this->row_ref_for_version(\$site_scope, \$raw_row_id, \$this->ring->alias_version());",
+    ),
+    // ---- Task 1D-I.R2: historical key integrity --------------------------------
+    array(
+        'id' => 'K1-only-current-identity-fingerprint-checked',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        foreach (array_unique(array_merge(\$this->retained_versions(), \$this->issued_identity_versions)) as \$v) {",
+        'replace' => "        foreach (array(\$this->identity_version) as \$v) {",
+    ),
+    array(
+        'id' => 'K2-historical-fingerprint-absence-ignored',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "            if (\$this->key_status(\$v) !== self::KEY_VERIFIED) {\n                return 'historical_key_unverified';",
+        'replace' => "            if (\$this->key_status(\$v) === self::KEY_MISSING) {\n                return 'historical_key_unverified';",
+    ),
+    array(
+        'id' => 'K3-historical-alias-integrity-bypassed',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        foreach (array_unique(array_merge(\$this->retained_versions(), \$this->issued_identity_versions)) as \$v) {",
+        'replace' => "        foreach (\$this->issued_identity_versions as \$v) {",
+    ),
+    array(
+        'id' => 'K4-key-presence-treated-as-verified',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        return isset(\$this->pinned[\$version]) ? self::KEY_VERIFIED : self::KEY_UNVERIFIED;",
+        'replace' => "        return self::KEY_VERIFIED;",
     ),
 );
 

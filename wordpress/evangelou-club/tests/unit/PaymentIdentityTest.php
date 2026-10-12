@@ -593,6 +593,44 @@ final class PaymentIdentityTest extends TestCase {
         $this->assertTrue(F::ring()->identity_key_pinned());
     }
 
+    public function test_r2_key_status_distinguishes_missing_unverified_verified_and_mismatch(): void {
+        $fp1 = F::ring('live', array(1))->fingerprint(1);
+        $ring = new EVC_Payment_Key_Ring('live', array(1 => F::secret(1), 2 => F::secret(2)), 2, 2, array(1, 2), array(1 => $fp1));
+        $this->assertSame(array('verified', 'unverified', 'missing'), array($ring->key_status(1), $ring->key_status(2), $ring->key_status(3)));
+        $this->assertSame('identity_key_unpinned', $ring->minting_refusal());
+        // Mismatch never produces a ring (explicitly wrong expected fingerprint).
+        try {
+            new EVC_Payment_Key_Ring('live', array(1 => F::secret(1)), 1, 1, array(1), array(1 => str_repeat('0', 64)));
+            $this->fail('wrong expected fingerprint accepted');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('fingerprint', $e->getMessage());
+        }
+        // A fingerprint for an absent version is refused too (no fingerprint without its key).
+        $this->expectException(InvalidArgumentException::class);
+        new EVC_Payment_Key_Ring('live', array(1 => F::secret(1)), 1, 1, array(1), array(2 => $fp1));
+    }
+
+    public function test_r2_missing_historical_fingerprint_blocks_minting_but_not_lookups(): void {
+        $p = $this->verified($this->captured('CAP-1', '1001'));
+        $this->record($p); // recorded with a fully verified v1 ring
+        // v1 key is even CORRECT here, but its fingerprint was not supplied: unverified.
+        $fp2 = F::ring('live', array(2), 2, 2, array(2))->fingerprint(2);
+        $unverified_history = new EVC_Payment_Key_Ring('live', array(1 => F::secret(1), 2 => F::secret(2)), 2, 2, array(1, 2), array(2 => $fp2));
+        $this->assertSame('historical_key_unverified', $unverified_history->minting_refusal());
+        $new = $this->resolver($unverified_history)->resolve_payment($this->verified($this->captured('CAP-NEW', '1002')));
+        $this->assertSame(array(EVC_Payment_Identity_Resolution::UNRESOLVED, 'historical_key_unverified'), array($new->status(), $new->reason()));
+        // The already-recorded payment is still found (read-only lookup, nothing minted).
+        $existing = $this->resolver($unverified_history)->resolve_payment($p);
+        $this->assertSame(array(EVC_Payment_Identity_Resolution::RESOLVED, true), array($existing->status(), $existing->existing()));
+        // Alias-only historical version (never an identity version) must be verified too.
+        $alias_only = new EVC_Payment_Key_Ring('live', array(1 => F::secret(1), 2 => F::secret(2)), 2, 2, array(2), array(2 => $fp2));
+        $this->assertSame('historical_key_unverified', $alias_only->minting_refusal());
+        // Missing issued key -> incomplete history; fully verified ring -> may mint.
+        $missing = new EVC_Payment_Key_Ring('live', array(2 => F::secret(2)), 2, 2, array(1, 2), array(2 => $fp2));
+        $this->assertSame(array('missing', 'identity_history_incomplete'), array($missing->key_status(1), $missing->minting_refusal()));
+        $this->assertNull(F::ring('live', array(1, 2), 2, 2, array(1, 2))->minting_refusal());
+    }
+
     public function test_r1_row_refs_do_not_drift_when_alias_keys_rotate(): void {
         $before = F::identity(F::ring('live', array(1)))->row_ref(F::SITE, 'pmpro-row-17');
         $alias_rotated = F::identity(F::ring('live', array(1, 2), 1, 2, array(1)));

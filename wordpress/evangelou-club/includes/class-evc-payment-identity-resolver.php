@@ -225,13 +225,11 @@ final class EVC_Payment_Identity_Resolver {
      * otherwise silently mint different ids).
      */
     private function mint_refusal(): ?EVC_Payment_Identity_Resolution {
-        if (!$this->identity->ring()->identity_history_complete()) {
-            return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_history_incomplete');
-        }
-        if (!$this->identity->ring()->identity_key_pinned()) {
-            return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_key_unpinned');
-        }
-        return null;
+        // Task 1D-I.R2: EVERY key used for the absence checks (identity
+        // candidates, correction candidates, historical alias owners) must be
+        // present and fingerprint-verified, not only the current identity key.
+        $reason = $this->identity->ring()->minting_refusal();
+        return $reason === null ? null : EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, $reason);
     }
 
     /** @return array<int,string> alias version => owning movement id (only versions with an owner) */

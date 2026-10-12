@@ -35,6 +35,10 @@ final class EVC_Payment_Key_Ring {
     const PURPOSE_ROW = 'row';
     const PURPOSE_CHECK = 'check';
 
+    const KEY_MISSING = 'missing';
+    const KEY_UNVERIFIED = 'unverified';
+    const KEY_VERIFIED = 'verified';
+
     const MIN_SECRET_BYTES = 32;
     /** Rejects obviously non-random material (e.g. repeated characters). */
     const MIN_DISTINCT_BYTES = 12;
@@ -112,7 +116,50 @@ final class EVC_Payment_Key_Ring {
      * migration 003 work.
      */
     public function identity_key_pinned(): bool {
-        return isset($this->pinned[$this->identity_version]);
+        return $this->key_status($this->identity_version) === self::KEY_VERIFIED;
+    }
+
+    /**
+     * Integrity of one key version (Task 1D-I.R2):
+     *   missing     no key material configured for this version;
+     *   unverified  key present but NO expected fingerprint was supplied, so a
+     *               wrong secret under this version cannot be detected;
+     *   verified    key present AND matched the fingerprint supplied by the
+     *               configuration boundary.
+     * A fingerprint MISMATCH never yields a ring: the constructor throws.
+     * Presence of a version number or of key bytes is never proof.
+     */
+    public function key_status(int $version): string {
+        if (!isset($this->secrets[$version])) {
+            return self::KEY_MISSING;
+        }
+        return isset($this->pinned[$version]) ? self::KEY_VERIFIED : self::KEY_UNVERIFIED;
+    }
+
+    /**
+     * Why NEW movement/correction ids must not be minted, or null when they may
+     * (Task 1D-I.R2). Minting a new id asserts that no older identity, correction
+     * or alias obligation exists; that absence is only established when EVERY key
+     * used for those lookups is correct. So every issued identity version must be
+     * present, and every retained version (identity candidates AND historical
+     * alias lookups) plus every issued identity version must be VERIFIED.
+     * Lookups of already-recorded facts do not need this.
+     */
+    public function minting_refusal(): ?string {
+        foreach ($this->issued_identity_versions as $v) {
+            if ($this->key_status($v) === self::KEY_MISSING) {
+                return 'identity_history_incomplete';
+            }
+        }
+        if ($this->key_status($this->identity_version) !== self::KEY_VERIFIED) {
+            return 'identity_key_unpinned';
+        }
+        foreach (array_unique(array_merge($this->retained_versions(), $this->issued_identity_versions)) as $v) {
+            if ($this->key_status($v) !== self::KEY_VERIFIED) {
+                return 'historical_key_unverified';
+            }
+        }
+        return null;
     }
 
     /** Non-secret check value of a key version (HMAC of a constant under its own purpose key). */

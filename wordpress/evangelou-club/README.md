@@ -327,6 +327,20 @@ gateway configured. Nothing here verifies a real payment.
     configured fingerprint (`identity_key_pinned()`); lookups still work.
   - PMPro row refs are tied to the pinned identity version, not the alias
     version, so alias-key rotation does not change them.
+- Task 1D-I.R2 historical key integrity: `EVC_Payment_Key_Ring::key_status()`
+  distinguishes `missing` (no key), `unverified` (key present, no expected
+  fingerprint supplied) and `verified` (key matched a supplied fingerprint);
+  a fingerprint MISMATCH never builds a ring. New movement/correction ids are
+  minted only when `minting_refusal()` is null: every issued identity version
+  present, the pinned identity key verified, AND every retained version
+  (identity candidates, correction candidates, historical alias owners)
+  verified. A wrong or unverified historical key could otherwise hide an
+  older refund-first quarantine or order-alias owner and let a clean new id
+  through (reproduced before the fix). Read-only lookups of already-recorded
+  facts still work. This proves the configured keys MATCH the configured
+  fingerprints; it does not make the fingerprints themselves trustworthy:
+  they must come from a trusted configuration/storage boundary independent
+  of the key (designing that store is migration 003).
 - Key-version limitations (honest status): ACTIVE IDENTITY-KEY TRANSITION IS
   NOT APPROVED until database-level coordination and migration 003 are
   designed. A fingerprint is only as trustworthy as where it is stored
