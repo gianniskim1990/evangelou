@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         php: ['7.4', '8.2', '8.4']
-        db: ['mysql:8.0', 'mariadb:10.11']
+        db: ['mysql:8.0', 'mysql:8.4', 'mariadb:10.11']
     defaults:
       run:
         working-directory: wordpress/evangelou-club
@@ -61,7 +61,9 @@ jobs:
         run: |
           extra=""
           case "${{ matrix.db }}" in
-            mysql:*) extra="--default-authentication-plugin=mysql_native_password" ;;
+            mysql:8.0) extra="--default-authentication-plugin=mysql_native_password" ;;
+            # MySQL 8.4 removed --default-authentication-plugin; PHP 7.4 mysqlnd needs native auth without TLS.
+            mysql:8.4) extra="--mysql-native-password=ON --authentication-policy=mysql_native_password" ;;
           esac
           docker run -d --name evc-test-db -p 127.0.0.1:13306:3306 \
             -e MYSQL_ROOT_PASSWORD="$EVC_TEST_DB_PASSWORD" \
@@ -104,6 +106,10 @@ jobs:
       - name: Membership entitlement mutation tests (Task 1D-B, DB-free, every PHP version)
         if: matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-membership-mutations.php
+
+      - name: SQL provenance store mutation tests (Task 1D-G, real MySQL 8.4 and MariaDB 10.11)
+        if: matrix.php == '8.2' && (matrix.db == 'mysql:8.4' || matrix.db == 'mariadb:10.11')
+        run: php tests/mutation/run-provenance-sql-mutations.php
 
       - name: Confirm sources unchanged by test runs
         working-directory: .

@@ -71,7 +71,7 @@ final class EVC_Provenance_Recorder {
         } catch (EVC_Provenance_Conflict_Exception $e) {
             return EVC_Record_Outcome::conflict('concurrent_update');
         } catch (Throwable $e) {
-            return EVC_Record_Outcome::unavailable();
+            return EVC_Record_Outcome::unavailable($e instanceof EVC_Provenance_Commit_Unknown_Exception ? 'commit_outcome_unknown' : 'store_unavailable');
         }
     }
 
@@ -81,7 +81,7 @@ final class EVC_Provenance_Recorder {
         } catch (EVC_Provenance_Conflict_Exception $e) {
             return EVC_Record_Outcome::conflict('concurrent_update');
         } catch (Throwable $e) {
-            return EVC_Record_Outcome::unavailable();
+            return EVC_Record_Outcome::unavailable($e instanceof EVC_Provenance_Commit_Unknown_Exception ? 'commit_outcome_unknown' : 'store_unavailable');
         }
     }
 
@@ -96,7 +96,7 @@ final class EVC_Provenance_Recorder {
         } catch (EVC_Provenance_Conflict_Exception $e) {
             return EVC_Record_Outcome::conflict('concurrent_update');
         } catch (Throwable $e) {
-            return EVC_Record_Outcome::unavailable();
+            return EVC_Record_Outcome::unavailable($e instanceof EVC_Provenance_Commit_Unknown_Exception ? 'commit_outcome_unknown' : 'store_unavailable');
         }
     }
 

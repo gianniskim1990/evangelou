@@ -332,7 +332,7 @@ $mutants = array(
     array(
         'id' => 'P11-error-reported-as-success',
         'file' => 'includes/class-evc-provenance-recorder.php',
-        'search' => "            return \$this->record_or_throw(\$movement);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::unavailable();",
+        'search' => "            return \$this->record_or_throw(\$movement);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::unavailable(\$e instanceof EVC_Provenance_Commit_Unknown_Exception ? 'commit_outcome_unknown' : 'store_unavailable');",
         'replace' => "            return \$this->record_or_throw(\$movement);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::recorded(null);",
     ),
     array(

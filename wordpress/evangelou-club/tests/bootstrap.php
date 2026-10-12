@@ -13,6 +13,8 @@ require_once __DIR__ . '/support/class-evc-fixed-clock.php';
 require_once __DIR__ . '/support/class-evc-mock-membership-adapter.php';
 require_once __DIR__ . '/support/class-evc-fake-pmpro-reader.php';
 require_once __DIR__ . '/support/class-evc-in-memory-provenance-store.php';
+require_once __DIR__ . '/support/class-evc-provenance-test-fixture.php';
+require_once __DIR__ . '/support/trait-evc-provenance-store-contract.php';
 require_once __DIR__ . '/support/class-evc-faulty-pdo.php';
 require_once __DIR__ . '/support/class-evc-failing-audit-log.php';
 require_once __DIR__ . '/support/class-evc-test-database.php';

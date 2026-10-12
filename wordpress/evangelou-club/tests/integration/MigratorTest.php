@@ -36,24 +36,36 @@ final class MigratorTest extends EVC_Db_Test_Case {
         foreach ($rows as $row) {
             $out[$row['t']] = $row['e'];
         }
+        ksort($out, SORT_STRING); // information_schema ordering differs between MySQL and MariaDB collations
         return $out;
     }
 
     public function test_fresh_database_migrates_and_records_version_and_checksum(): void {
         $migrator = new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir());
-        $this->assertSame(array(1), $migrator->migrate());
+        $this->assertSame(array(1, 2), $migrator->migrate());
 
         $this->assertSame(array(
             'evc_audit_events' => 'InnoDB',
             'evc_members' => 'InnoDB',
+            'evc_pay_aliases' => 'InnoDB',
+            'evc_pay_correction_heads' => 'InnoDB',
+            'evc_pay_corrections' => 'InnoDB',
+            'evc_pay_member_heads' => 'InnoDB',
+            'evc_pay_movements' => 'InnoDB',
+            'evc_pay_periods' => 'InnoDB',
             'evc_qr_tokens' => 'InnoDB',
             'evc_redemptions' => 'InnoDB',
             'evc_schema_migrations' => 'InnoDB',
         ), $this->tables());
 
         $applied = $migrator->applied();
-        $this->assertSame(array(1), array_keys($applied));
+        $this->assertSame(array(1, 2), array_keys($applied));
         $this->assertSame('initial', $applied[1]['name']);
+        $this->assertSame('payment_provenance', $applied[2]['name']);
+        $this->assertSame(
+            EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/002_payment_provenance.sql'),
+            $applied[2]['checksum']
+        );
         $this->assertSame(
             EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/001_initial.sql'),
             $applied[1]['checksum']
@@ -67,7 +79,7 @@ final class MigratorTest extends EVC_Db_Test_Case {
         $this->assertSame(array(), $migrator->migrate());
         $this->assertSame(array(), (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate());
         $this->assertSame($before, $this->tables());
-        $this->assertSame(1, $this->count_rows('evc_schema_migrations'));
+        $this->assertSame(2, $this->count_rows('evc_schema_migrations'));
     }
 
     public function test_required_unique_keys_and_foreign_keys_exist(): void {
@@ -89,9 +101,12 @@ final class MigratorTest extends EVC_Db_Test_Case {
             "SELECT CONSTRAINT_NAME AS c FROM information_schema.REFERENTIAL_CONSTRAINTS
               WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY CONSTRAINT_NAME"
         );
+        $names = array_column($fks, 'c');
+        sort($names, SORT_STRING);
         $this->assertSame(
-            array('fk_audit_member', 'fk_audit_redemption', 'fk_qr_tokens_member', 'fk_redemptions_member'),
-            array_column($fks, 'c')
+            array('fk_audit_member', 'fk_audit_redemption', 'fk_pay_alias_movement', 'fk_pay_corr_head', 'fk_pay_corr_prior', 'fk_pay_head_latest',
+                'fk_pay_period_movement', 'fk_pay_period_predecessor', 'fk_qr_tokens_member', 'fk_redemptions_member'),
+            $names
         );
     }
 

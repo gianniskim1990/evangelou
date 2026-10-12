@@ -94,8 +94,9 @@ class EVC_Club_Db {
     /**
      * Runs $work inside one transaction and commits. On ANY failure (including
      * a failed COMMIT) the transaction is rolled back before the exception is
-     * rethrown. A COMMIT failure means the outcome is unknown to the caller;
-     * idempotent callers recover by retrying with the same request key.
+     * rethrown. A COMMIT failure means the outcome is unknown to the caller and
+     * is thrown as EVC_Db_Commit_Unknown_Exception (never as retryable or
+     * duplicate); idempotent callers recover by retrying with the same key.
      *
      * @param callable $work function (EVC_Club_Db $db): mixed
      * @return mixed Whatever $work returns.
@@ -111,7 +112,7 @@ class EVC_Club_Db {
         }
         try {
             $result = $work($this);
-            $this->pdo->commit();
+            $this->commit_or_unknown();
             return $result;
         } catch (Throwable $e) {
             $this->rollback_quietly();
@@ -119,6 +120,15 @@ class EVC_Club_Db {
                 throw self::map_exception($e);
             }
             throw $e;
+        }
+    }
+
+    private function commit_or_unknown(): void {
+        try {
+            $this->pdo->commit();
+        } catch (PDOException $e) {
+            $mapped = self::map_exception($e);
+            throw new EVC_Db_Commit_Unknown_Exception('Club database commit outcome unknown.', $mapped->sql_state(), $mapped->driver_code());
         }
     }
 

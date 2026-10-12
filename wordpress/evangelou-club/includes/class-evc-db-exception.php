@@ -49,6 +49,16 @@ final class EVC_Db_Duplicate_Key_Exception extends EVC_Db_Exception {
 final class EVC_Db_Retryable_Exception extends EVC_Db_Exception {
 }
 
+/**
+ * COMMIT itself failed (e.g. connection lost while committing). The server
+ * may or may not have committed: this is NOT a proof of rollback. Callers
+ * must recover by reading back their canonical identity on a fresh
+ * connection, or treat the outcome as unknown. Extends EVC_Db_Exception so
+ * existing catch blocks (redemption engine) keep their behaviour.
+ */
+final class EVC_Db_Commit_Unknown_Exception extends EVC_Db_Exception {
+}
+
 /** Migration bookkeeping/drift/apply failure. */
 final class EVC_Migration_Exception extends RuntimeException {
 }

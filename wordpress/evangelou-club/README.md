@@ -197,6 +197,64 @@ WooCommerce is not installed yet and payment methods are unconfirmed.
 - Still open: O1, O3 (PMPro date alignment), O4 (Viva capture-only), D3, D4,
   D6–D10, month-end drift.
 
+**SQL provenance store (Task 1D-G — disposable test databases only, NOT wired):**
+
+- `database/002_payment_provenance.sql` (additive; 001 and the redemption
+  ledger untouched) adds six tables: `evc_pay_movements`, `evc_pay_aliases`,
+  `evc_pay_periods`, `evc_pay_member_heads` (per-member chain lock row),
+  `evc_pay_correction_heads` (per-movement lock row; no FK to movements, so
+  a refund verified before its payment can be held) and the append-only
+  `evc_pay_corrections`. Opaque ids are `VARCHAR(64)` + length CHECK:
+  MariaDB 10.11 rejects STORED generated columns that read a `CHAR` column.
+- Backstops: PKs; one order anchor per movement (generated unique column);
+  composite FK binding each period to its movement's member, level AND
+  `pmpro_row_ref`; one initial period per member; no period with two
+  successors; predecessor and head of the same member; correction sequence
+  unique, prior correction of the same movement; CHECKs (whole-second UTC,
+  `confirmed` only, kinds, authorities, head consistency).
+- `EVC_Sql_Provenance_Store` re-validates I1–I8 INSIDE one transaction
+  under row locks. It also refuses malformed/mixed `EVC_Provenance_Write`
+  shapes and recomputes the period with `EVC_Membership_Calendar::
+  next_period()` (exact start, exclusive end, early/late kind, strictly
+  later payment, member/level/PMPro row) instead of trusting the caller.
+- Lock order: member head (new movement only) → movement correction head →
+  inserts (aliases sorted by key) → compare-and-set head update → COMMIT.
+  Sessions run READ COMMITTED, where `SELECT … FOR UPDATE` on a missing row
+  locks nothing, so lock rows are created with a no-op
+  `INSERT … ON DUPLICATE KEY UPDATE` first.
+- Errors: CAS/precondition/duplicate key/FK → conflict; deadlock and
+  lock-wait timeout → whole write retried (max 3), then unavailable; CHECK
+  violation (3819 MySQL / 4025 MariaDB) and other failures → unavailable.
+  A failed COMMIT is `EVC_Db_Commit_Unknown_Exception` (a subclass of
+  `EVC_Db_Exception`, so the redemption engine behaves as before) and is
+  never treated as a rollback: the store opens a fresh connection, takes
+  the same lock rows (waiting for a possibly still-open original
+  transaction) and compares the stored row with the exact write. Committed
+  → success; definitely absent → unavailable (safe retry); differs →
+  conflict; inconclusive → `unavailable/commit_outcome_unknown`.
+- Runtime DB user: `EVC_Sql_Provenance_Store::RUNTIME_GRANTS` (no
+  UPDATE/DELETE on history tables); migrations use a separate DDL user.
+- Identity limits (NOT solved here): a quarantined refund blocks only the
+  same canonical `movement_id`. Future adapters must derive one stable
+  canonical id per real payment from a verified order anchor, resolve
+  payments and corrections to the same movement, and fail closed on any
+  unresolved source identity. HMAC references are not reversible; there is
+  no key-version column because no rotation exists yet. A key change would
+  produce different references for the same order, so rotation needs its
+  own reviewed migration and resolver.
+- Tests (`EVC_TEST_DB_*`, disposable loopback databases only):
+  `SqlProvenanceStoreContractTest` (same behaviour as the in-memory store),
+  `SqlProvenanceStoreTest` (schema, shapes, calendar, rollback, deadlock,
+  lock wait, lost/unknown COMMIT, drift, missing migration, grants, HMAC
+  ids), `SqlProvenanceConcurrencyTest` (multi-process races) and
+  `tests/mutation/run-provenance-sql-mutations.php`. CI: MySQL 8.0, MySQL
+  8.4 LTS and MariaDB 10.11 on PHP 7.4/8.2/8.4.
+- Production blockers: technician-confirmed DB version/host, separate Club
+  DB and runtime/migration users, backups and restore drill, staging,
+  trusted source adapters and canonical identity, HMAC key lifecycle, O1/
+  O3/O4, D3/D4/D6–D10. Nothing constructs this store in the plugin (the
+  packager rejects shipped code containing `new EVC_Sql_Provenance_Store`).
+
 **What the pure mapper CANNOT verify** (needs the installed plugins and
 staging): that a future reader maps PMPro/WooCommerce/gateway states correctly
 (confirmed vs pending/processing/on-hold, refunds, chargebacks); that a
