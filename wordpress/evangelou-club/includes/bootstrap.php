@@ -39,6 +39,8 @@ require_once $evc_includes . 'class-evc-provenance-write.php';
 require_once $evc_includes . 'interface-evc-provenance-store.php';
 require_once $evc_includes . 'class-evc-record-outcome.php';
 require_once $evc_includes . 'class-evc-provenance-recorder.php';
+// Task 1D-G: SQL store definition only; nothing constructs it outside tests.
+require_once $evc_includes . 'class-evc-sql-provenance-store.php';
 require_once $evc_includes . 'class-evc-coffee-catalog.php';
 require_once $evc_includes . 'class-evc-request-fingerprint.php';
 require_once $evc_includes . 'class-evc-redemption-request.php';

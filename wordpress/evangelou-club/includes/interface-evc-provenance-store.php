@@ -91,3 +91,13 @@ class EVC_Provenance_Store_Exception extends RuntimeException {
 /** A store invariant / precondition was violated (e.g. a concurrent writer); nothing was written. */
 final class EVC_Provenance_Conflict_Exception extends EVC_Provenance_Store_Exception {
 }
+
+/**
+ * Task 1D-G: COMMIT failed and read-back recovery could not prove either
+ * outcome (e.g. the original transaction may still hold its locks, or the
+ * database is unreachable). The write MAY have committed. Never treated as
+ * a rollback; the caller reports unavailable and retries later with the
+ * same canonical ids, which the store resolves idempotently.
+ */
+final class EVC_Provenance_Commit_Unknown_Exception extends EVC_Provenance_Store_Exception {
+}

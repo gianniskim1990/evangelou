@@ -17,7 +17,9 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *                    recorded was stored as an UNRESOLVED obligation
  *                    (Task 1D-E.R1). It grants nothing and blocks the
  *                    movement until a trusted reconciliation
- *  unavailable       the store failed; nothing written; safe to retry
+ *  unavailable       the store failed; nothing written; safe to retry. With
+ *                    reason commit_outcome_unknown the write MAY have been
+ *                    committed: retry with the same ids (idempotent)
  */
 final class EVC_Record_Outcome {
     const NEWLY_RECORDED = 'newly_recorded';
@@ -60,8 +62,9 @@ final class EVC_Record_Outcome {
         return new self(self::QUARANTINED, $reason, null);
     }
 
-    public static function unavailable(): self {
-        return new self(self::UNAVAILABLE, 'store_unavailable', null);
+    /** @param string $reason store_unavailable, or commit_outcome_unknown (Task 1D-G: the write MAY have committed) */
+    public static function unavailable(string $reason = 'store_unavailable'): self {
+        return new self(self::UNAVAILABLE, $reason, null);
     }
 
     public function outcome(): string {
