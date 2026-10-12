@@ -206,7 +206,7 @@ final class PaymentIdentityTest extends TestCase {
             $id->alias_ref($capture, 1),
             $id->correction_id($refund, 1),
             $id->alias_ref($refund, 1),
-            $id->row_ref(F::SITE, 'CAP-1', 1),
+            $id->row_ref(F::SITE, 'CAP-1'),
             $id->ring()->fingerprint(1),
         );
         $this->assertCount(count($outputs), array_unique($outputs), 'no purpose output equals another');
@@ -488,6 +488,119 @@ final class PaymentIdentityTest extends TestCase {
         $other = $this->verified($this->captured('CAP-2', '1002'));
         $this->expectException(InvalidArgumentException::class);
         $resolver->build_movement($other, $resolver->resolve_payment($p), self::USER, 7, EVC_Provenance_Test_Fixture::ref('row1'), EVC_Pmpro_Fixture::athens('2026-11-01 09:00:00'));
+    }
+
+    // ---- Task 1D-I.R1-B: evidence provenance ------------------------------------------------
+
+    public function test_r1b_forged_record_naming_the_same_verifier_cannot_become_l3_or_r(): void {
+        $capture = $this->captured('CAP-1', '1001');
+        // Fabricated in-process, naming the gate's OWN verifier, never fetched by the gate.
+        $forged = new EVC_Provider_Record($this->verifier, $capture, 'captured', null, 2000, 'EUR', array(F::wc_order('1001')), array());
+        try {
+            new EVC_Verified_Payment($this->gate, $forged);
+            $this->fail('same-verifier forged record became L3');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('verified by this gate', $e->getMessage());
+        }
+        $this->assertFalse($this->gate->redeem_approval($forged, EVC_Payment_Evidence_Gate::APPROVED_PAYMENT));
+        $refund = new EVC_Provider_Record($this->verifier, F::paypal_refund('RF-1'), 'completed', 'refunded', 2000, 'EUR', array(), array($capture));
+        try {
+            new EVC_Verified_Refund($this->gate, $refund, $forged);
+            $this->fail('same-verifier forged records became R');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('verified parent', $e->getMessage());
+        }
+    }
+
+    public function test_r1b_refused_or_already_used_records_cannot_be_elevated_later(): void {
+        // Captured, but refused by the gate (two order references): the very record object it fetched.
+        $this->verifier->put(F::paypal_capture('CAP-2'), 'captured', 2000, array(F::wc_order('1'), F::wc_order('2')));
+        $this->assertSame('multiple_order_references', $this->gate->verify_payment(F::paypal_capture('CAP-2'))->reason());
+        $refused = $this->verifier->last_record;
+        $this->assertSame('captured', $refused->state());
+        try {
+            new EVC_Verified_Payment($this->gate, $refused);
+            $this->fail('refused record elevated to L3');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('verified by this gate', $e->getMessage());
+        }
+        // A genuinely verified record: its approval is one-shot and was consumed by the gate itself.
+        $genuine = $this->verified($this->captured('CAP-3', '1003'));
+        $this->assertSame(EVC_Payment_Evidence_Level::L3_CAPTURED, $genuine->level());
+        $this->assertFalse($this->gate->redeem_approval($this->verifier->last_record, EVC_Payment_Evidence_Gate::APPROVED_PAYMENT), 'approval already consumed');
+        $this->expectException(InvalidArgumentException::class);
+        new EVC_Verified_Payment($this->gate, $this->verifier->last_record);
+    }
+
+    public function test_r1b_genuine_refund_with_verified_parent_is_accepted_and_one_shot(): void {
+        $this->verifier->put(F::paypal_capture('CAP-1'), 'captured');
+        $o = $this->gate->verify_refund($this->refund('RF-1', 'CAP-1'));
+        $this->assertSame(EVC_Payment_Evidence_Outcome::VERIFIED, $o->status());
+        $this->assertSame(EVC_Payment_Evidence_Level::R_CORRECTION, $o->refund()->level());
+        // Records fetched by ANOTHER gate (same verifier) are not evidence for this gate.
+        $other_gate = F::gate($this->verifier);
+        $other_gate->verify_payment(F::paypal_capture('CAP-1'));
+        $this->expectException(InvalidArgumentException::class);
+        new EVC_Verified_Payment($this->gate, $this->verifier->last_record);
+    }
+
+    public function test_r1b_replayed_and_untrusted_notifications_never_become_evidence(): void {
+        $capture = F::paypal_capture('CAP-1');
+        $this->verifier->put($capture, 'pending');
+        $n = new EVC_Payment_Notification(array($capture), true, 'PAYMENT.CAPTURE.COMPLETED');
+        for ($i = 0; $i < 3; $i++) {
+            $o = $this->gate->verify_notification($n);
+            $this->assertSame(array(EVC_Payment_Evidence_Outcome::NOT_ACCEPTED, null), array($o->status(), $o->payment()));
+        }
+        // Once the provider record really is captured, a replay is verified again (and
+        // the resolver/recorder keep it idempotent); the notification itself proved nothing.
+        $this->verifier->put($capture, 'captured', 2000, array(F::wc_order('1001')));
+        $this->assertSame(EVC_Payment_Evidence_Outcome::VERIFIED, $this->gate->verify_notification($n)->status());
+        $this->assertSame(EVC_Payment_Evidence_Outcome::VERIFIED, $this->gate->verify_notification($n)->status());
+        $this->assertSame(4 + 1, $this->verifier->calls, 'every verification fetches from the source again');
+    }
+
+    public function test_r1b_no_source_record_substitution(): void {
+        $capture = $this->captured('CAP-1', '1001');
+        // The configured verifier hands back a record produced by ANOTHER verifier.
+        $other = new EVC_Fake_Payment_Source_Verifier();
+        $other->put($capture, 'captured', 2000, array(F::wc_order('1001')));
+        $this->verifier->delegate = $other;
+        $this->assertSame(array(EVC_Payment_Evidence_Outcome::CONFLICT, 'record_identity_mismatch'), array($this->gate->verify_payment($capture)->status(), $this->gate->verify_payment($capture)->reason()));
+        $this->verifier->delegate = null;
+        // ...or a record for a different identifier.
+        $this->verifier->answer_with = F::paypal_capture('CAP-OTHER');
+        $this->verifier->put(F::paypal_capture('CAP-OTHER'), 'captured');
+        $this->assertSame('record_identity_mismatch', $this->gate->verify_payment($capture)->reason());
+    }
+
+    // ---- Task 1D-I.R1: key-version limitations addressed in pure PHP -----------------------------
+
+    public function test_r1_minting_requires_a_pinned_identity_key_fingerprint(): void {
+        $p = $this->verified($this->captured('CAP-1', '1001'));
+        $unpinned = F::ring('live', array(1), 1, 1, null, false);
+        $this->assertFalse($unpinned->identity_key_pinned());
+        $r = $this->resolver($unpinned)->resolve_payment($p);
+        $this->assertSame(array(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_key_unpinned'), array($r->status(), $r->reason()));
+        // Lookups of already-recorded payments still work without minting.
+        $this->record($p);
+        $found = $this->resolver($unpinned)->resolve_payment($p);
+        $this->assertSame(array(EVC_Payment_Identity_Resolution::RESOLVED, true), array($found->status(), $found->existing()));
+        // Refund ids are not minted either.
+        $this->verifier->put(F::paypal_capture('CAP-1'), 'captured');
+        $rr = $this->resolver($unpinned)->resolve_refund($this->gate->verify_refund($this->refund('RF-1', 'CAP-1'))->refund());
+        $this->assertSame('identity_key_unpinned', $rr->reason());
+        $this->assertTrue(F::ring()->identity_key_pinned());
+    }
+
+    public function test_r1_row_refs_do_not_drift_when_alias_keys_rotate(): void {
+        $before = F::identity(F::ring('live', array(1)))->row_ref(F::SITE, 'pmpro-row-17');
+        $alias_rotated = F::identity(F::ring('live', array(1, 2), 1, 2, array(1)));
+        $this->assertSame($before, $alias_rotated->row_ref(F::SITE, 'pmpro-row-17'));
+        // Identity recovery (pinned v2) keeps the old row ref findable via candidates.
+        $recovery = F::identity(F::ring('live', array(1, 2), 2, 2, array(1, 2)));
+        $this->assertContains($before, $recovery->row_ref_candidates(F::SITE, 'pmpro-row-17'));
+        $this->assertNotSame($before, $recovery->row_ref(F::SITE, 'pmpro-row-17'));
     }
 
     public function test_no_shipped_code_implements_a_verifier_or_constructs_the_gate(): void {

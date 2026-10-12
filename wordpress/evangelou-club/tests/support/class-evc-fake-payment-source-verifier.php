@@ -14,6 +14,8 @@ final class EVC_Fake_Payment_Source_Verifier implements EVC_Payment_Source_Verif
     public $answer_with;
     /** @var int */
     public $calls = 0;
+    /** @var EVC_Provider_Record|null last record object returned (to try elevating it outside the gate) */
+    public $last_record;
 
     /**
      * @param EVC_Payment_Source_Ref[] $related
@@ -23,8 +25,14 @@ final class EVC_Fake_Payment_Source_Verifier implements EVC_Payment_Source_Verif
         $this->records[self::key($ref)] = array($ref, $state, $correction_kind, $amount_minor, $currency, $related, $parents);
     }
 
+    /** @var EVC_Payment_Source_Verifier|null misbehaving verifier: hands out ANOTHER verifier's records */
+    public $delegate;
+
     public function fetch(EVC_Payment_Source_Ref $ref): EVC_Provider_Record {
         $this->calls++;
+        if ($this->delegate !== null) {
+            return $this->delegate->fetch($ref);
+        }
         if ($this->unavailable) {
             throw new EVC_Payment_Source_Unavailable_Exception('synthetic outage');
         }
@@ -33,7 +41,8 @@ final class EVC_Fake_Payment_Source_Verifier implements EVC_Payment_Source_Verif
             throw new EVC_Payment_Source_Unavailable_Exception('synthetic record not found');
         }
         list($r, $state, $kind, $amount, $currency, $related, $parents) = $this->records[$key];
-        return new EVC_Provider_Record($this, $r, $state, $kind, $amount, $currency, $related, $parents);
+        $this->last_record = new EVC_Provider_Record($this, $r, $state, $kind, $amount, $currency, $related, $parents);
+        return $this->last_record;
     }
 
     private static function key(EVC_Payment_Source_Ref $ref): string {
@@ -53,13 +62,26 @@ final class EVC_Payment_Identity_Fixture {
         return hash('sha256', 'evc-fake-test-secret/' . $env . '/v' . $version, true);
     }
 
-    /** @param int[] $versions @param int[]|null $issued */
-    public static function ring(string $env = 'live', array $versions = array(1), int $identity = 1, int $alias = 1, ?array $issued = null): EVC_Payment_Key_Ring {
+    /**
+     * Key ring with every version's fingerprint pinned (the configuration a
+     * minting deployment needs). $pinned = false leaves fingerprints out.
+     *
+     * @param int[] $versions @param int[]|null $issued
+     */
+    public static function ring(string $env = 'live', array $versions = array(1), int $identity = 1, int $alias = 1, ?array $issued = null, bool $pinned = true): EVC_Payment_Key_Ring {
         $secrets = array();
         foreach ($versions as $v) {
             $secrets[$v] = self::secret($v, $env);
         }
-        return new EVC_Payment_Key_Ring($env, $secrets, $identity, $alias, $issued ?? array($identity));
+        $unpinned = new EVC_Payment_Key_Ring($env, $secrets, $identity, $alias, $issued ?? array($identity));
+        if (!$pinned) {
+            return $unpinned;
+        }
+        $fingerprints = array();
+        foreach ($versions as $v) {
+            $fingerprints[$v] = $unpinned->fingerprint($v);
+        }
+        return new EVC_Payment_Key_Ring($env, $secrets, $identity, $alias, $issued ?? array($identity), $fingerprints);
     }
 
     public static function identity(?EVC_Payment_Key_Ring $ring = null): EVC_Payment_Identity {

@@ -152,6 +152,97 @@ trait EVC_Provenance_Store_Contract {
         $this->assertSame('alias_owned_by_other_movement', $resolver->resolve_payment($gate->verify_payment(EVC_Payment_Identity_Fixture::paypal_capture('CONTRACT-CAP-2'))->payment())->reason());
     }
 
+    /** Task 1D-I.R1-A helper: gate + verifier with one captured PayPal capture linked to an order. */
+    private function c_identity_world(string $capture_id, string $order): array {
+        $verifier = new EVC_Fake_Payment_Source_Verifier();
+        $verifier->put(EVC_Payment_Identity_Fixture::paypal_capture($capture_id), 'captured', 2000, array(EVC_Payment_Identity_Fixture::wc_order($order)));
+        return array($verifier, EVC_Payment_Identity_Fixture::gate($verifier));
+    }
+
+    private function c_resolver(EVC_Payment_Key_Ring $ring): EVC_Payment_Identity_Resolver {
+        return new EVC_Payment_Identity_Resolver(new EVC_Payment_Identity($ring), $this->contract_store());
+    }
+
+    /** Refund-first quarantined under identity v1 must never be bypassed after v2 is pinned. */
+    public function test_contract_r1a_cross_version_refund_first_is_never_bypassed(): void {
+        list($verifier, $gate) = $this->c_identity_world('XV-CAP-1', '6001');
+        $capture = EVC_Payment_Identity_Fixture::paypal_capture('XV-CAP-1');
+        $v1 = EVC_Payment_Identity_Fixture::ring('live', array(1));
+        $v2 = EVC_Payment_Identity_Fixture::ring('live', array(1, 2), 2, 2, array(1, 2));
+        $v1_id = (new EVC_Payment_Identity($v1))->movement_id($capture, 1);
+        // 1-3. Identity v1: verified refund before payment -> quarantined under the v1 id.
+        $verifier->put(EVC_Payment_Identity_Fixture::paypal_refund('XV-RF-1'), 'completed', 2000, array(), array($capture), 'refunded');
+        $refund = $gate->verify_refund(EVC_Payment_Identity_Fixture::paypal_refund('XV-RF-1'))->refund();
+        $rv1 = $this->c_resolver($v1)->resolve_refund($refund);
+        $this->assertSame($v1_id, $rv1->movement_id());
+        $this->c_outcome($this->c_rec()->correct($this->c_resolver($v1)->build_correction($refund, $rv1, EVC_Pmpro_Fixture::athens('2026-10-16 10:00'))), EVC_Record_Outcome::QUARANTINED);
+        // 4-6. v2 pinned, v1 retained; a stale "captured" read resolves to the HELD v1 id, not a clean v2 id.
+        $payment = $gate->verify_payment($capture)->payment();
+        $res = $this->c_resolver($v2)->resolve_payment($payment);
+        $this->assertSame(array(EVC_Payment_Identity_Resolution::RESOLVED, $v1_id, false), array($res->status(), $res->movement_id(), $res->existing()));
+        $m = $this->c_resolver($v2)->build_movement($payment, $res, EVC_Provenance_Test_Fixture::USER, 7, self::c_ref('row1'), EVC_Pmpro_Fixture::athens('2026-10-15 12:00:00'));
+        $this->c_outcome($this->c_rec()->record($m), EVC_Record_Outcome::INDETERMINATE, 'unresolved_correction');
+        $this->assertCount(0, $this->contract_store()->member_movements(EVC_Provenance_Test_Fixture::USER), 'no paid period');
+        $rows = array(EVC_Pmpro_Fixture::row('row1', 'active', '2026-11-15 12:00:00', 7, false, '2026-10-15 12:00:00'));
+        $e = EVC_Pmpro_Fixture::mapper()->map(EVC_Provenance_Fact_Builder::snapshot($this->contract_store(), EVC_Provenance_Test_Fixture::USER, $rows), EVC_Pmpro_Fixture::athens('2026-10-20 09:00'));
+        $this->assertFalse($e->is_eligible_at(EVC_Pmpro_Fixture::athens('2026-10-20 09:00')), 'no clean entitlement after quarantine');
+        // Repeated refund under the v2 ring: same (v1) correction, idempotent.
+        $again = $this->c_resolver($v2)->resolve_refund($refund);
+        $this->assertSame(array($v1_id, $rv1->correction_id(), true), array($again->movement_id(), $again->correction_id(), $again->correction_existing()));
+        $this->c_outcome($this->c_rec()->correct($this->c_resolver($v2)->build_correction($refund, $again, EVC_Pmpro_Fixture::athens('2026-10-16 10:00'))), EVC_Record_Outcome::ALREADY_RECORDED);
+        // Reconciliation still works on the held id; afterwards the payment is found as existing.
+        $this->c_outcome($this->c_rec()->reconcile(new EVC_Movement_Reconciliation($m, array($rv1->correction_id()))), EVC_Record_Outcome::NEWLY_RECORDED);
+        $after = $this->c_resolver($v2)->resolve_payment($payment);
+        $this->assertSame(array($v1_id, true), array($after->movement_id(), $after->existing()));
+        $this->assertCount(1, $this->contract_store()->member_movements(EVC_Provenance_Test_Fixture::USER), 'exactly one period');
+        $e2 = EVC_Pmpro_Fixture::mapper()->map(EVC_Provenance_Fact_Builder::snapshot($this->contract_store(), EVC_Provenance_Test_Fixture::USER, $rows), EVC_Pmpro_Fixture::athens('2026-10-20 09:00'));
+        $this->assertSame('refunded', $e2->status());
+    }
+
+    /** Payment-first under v1, refund after v2 is pinned: attaches to the v1 movement. */
+    public function test_contract_r1a_cross_version_payment_first_then_refund(): void {
+        list($verifier, $gate) = $this->c_identity_world('XV-CAP-2', '6002');
+        $capture = EVC_Payment_Identity_Fixture::paypal_capture('XV-CAP-2');
+        $v1 = EVC_Payment_Identity_Fixture::ring('live', array(1));
+        $v2 = EVC_Payment_Identity_Fixture::ring('live', array(1, 2), 2, 2, array(1, 2));
+        $payment = $gate->verify_payment($capture)->payment();
+        $res = $this->c_resolver($v1)->resolve_payment($payment);
+        $this->c_rec()->record($this->c_resolver($v1)->build_movement($payment, $res, EVC_Provenance_Test_Fixture::USER, 7, self::c_ref('row1'), EVC_Pmpro_Fixture::athens('2026-10-15 12:00:00')));
+        $verifier->put(EVC_Payment_Identity_Fixture::paypal_refund('XV-RF-2'), 'completed', 2000, array(), array($capture), 'refunded');
+        $refund = $gate->verify_refund(EVC_Payment_Identity_Fixture::paypal_refund('XV-RF-2'))->refund();
+        $rr = $this->c_resolver($v2)->resolve_refund($refund);
+        $this->assertSame(array($res->movement_id(), true), array($rr->movement_id(), $rr->existing()));
+        $this->c_outcome($this->c_rec()->correct($this->c_resolver($v2)->build_correction($refund, $rr, EVC_Pmpro_Fixture::athens('2026-10-16 10:00'))), EVC_Record_Outcome::NEWLY_RECORDED);
+        $this->assertSame(array('refunded'), $this->c_kinds_of($res->movement_id()));
+        $this->assertSame(array(), $this->contract_store()->unresolved_corrections());
+    }
+
+    /** Obligations under two identity versions of one payment: fail closed. */
+    public function test_contract_r1a_competing_candidate_identities_fail_closed(): void {
+        list($verifier, $gate) = $this->c_identity_world('XV-CAP-3', '6003');
+        $capture = EVC_Payment_Identity_Fixture::paypal_capture('XV-CAP-3');
+        $both = EVC_Payment_Identity_Fixture::ring('live', array(1, 2), 2, 2, array(1, 2));
+        $identity = new EVC_Payment_Identity($both);
+        // Corrections held under BOTH the v1 and the v2 candidate ids (no movement anywhere).
+        foreach (array(1, 2) as $v) {
+            $this->c_rec()->correct(new EVC_Movement_Correction(self::c_ref('xv-corr-' . $v), $identity->movement_id($capture, $v), 'refunded', 'gateway_api', EVC_Pmpro_Fixture::athens('2026-10-16 10:00')));
+        }
+        $payment = $gate->verify_payment($capture)->payment();
+        $res = $this->c_resolver($both)->resolve_payment($payment);
+        $this->assertSame(array(EVC_Payment_Identity_Resolution::CONFLICT, 'identity_versions_disagree'), array($res->status(), $res->reason()));
+        $verifier->put(EVC_Payment_Identity_Fixture::paypal_refund('XV-RF-3'), 'completed', 2000, array(), array($capture), 'refunded');
+        $rr = $this->c_resolver($both)->resolve_refund($gate->verify_refund(EVC_Payment_Identity_Fixture::paypal_refund('XV-RF-3'))->refund());
+        $this->assertSame('identity_versions_disagree', $rr->reason());
+        $this->assertCount(0, $this->contract_store()->member_movements(EVC_Provenance_Test_Fixture::USER));
+    }
+
+    /** @return string[] */
+    private function c_kinds_of(string $movement_id): array {
+        return array_map(function (EVC_Movement_Correction $c) {
+            return $c->kind();
+        }, $this->contract_store()->corrections_for($movement_id));
+    }
+
     public function test_contract_mapper_compatibility(): void {
         $r = $this->c_rec();
         $r->record(self::c_mv('oct', '2026-10-15 12:00:00'));

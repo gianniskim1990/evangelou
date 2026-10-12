@@ -74,8 +74,9 @@ final class EVC_Payment_Identity_Resolver {
                 }
                 return EVC_Payment_Identity_Resolution::resolved($movement->movement_id(), $movement->alias_version(), $movement->existing(), $existing->correction_id(), true);
             }
-            if (!$this->identity->ring()->identity_history_complete()) {
-                return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_history_incomplete');
+            $mint = $this->mint_refusal();
+            if ($mint !== null) {
+                return $mint;
             }
             $id = $this->identity->correction_id($refund->refund_ref(), $this->identity->ring()->identity_version());
             return EVC_Payment_Identity_Resolution::resolved($movement->movement_id(), $movement->alias_version(), $movement->existing(), $id, false);
@@ -174,16 +175,25 @@ final class EVC_Payment_Identity_Resolver {
      * @param EVC_Payment_Source_Ref[] $refs aliases to check: orders first, settlement last
      */
     private function resolve_movement(EVC_Payment_Source_Ref $settlement, array $refs): EVC_Payment_Identity_Resolution {
-        $existing = array();
+        // Task 1D-I.R1-A: a candidate id is OCCUPIED when it has a recorded
+        // movement OR any correction history -- including a refund-first
+        // correction quarantined before its payment (no movement row yet).
+        // A held refund must never be bypassed by minting under another
+        // identity version. Advisory read only: it is NOT atomic against a
+        // concurrent identity-key transition (not approved; see README).
+        $occupied = array();
+        $recorded = false;
         foreach ($this->identity->movement_candidates($settlement) as $v => $id) {
-            if ($this->store->movement($id) !== null) {
-                $existing[$v] = $id;
+            $has_movement = $this->store->movement($id) !== null;
+            if ($has_movement || $this->store->corrections_for($id) !== array()) {
+                $occupied[$v] = $id;
+                $recorded = $has_movement;
             }
         }
-        if (count($existing) > 1) {
+        if (count($occupied) > 1) {
             return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::CONFLICT, 'identity_versions_disagree');
         }
-        $known = $existing === array() ? null : reset($existing);
+        $known = $occupied === array() ? null : reset($occupied);
         $alias_version = null;
         foreach ($refs as $ref) {
             foreach ($this->owners($ref) as $v => $owner) {
@@ -196,13 +206,32 @@ final class EVC_Payment_Identity_Resolver {
             }
         }
         if ($known !== null) {
-            return EVC_Payment_Identity_Resolution::resolved($known, $alias_version ?? $this->identity->ring()->alias_version(), true, null, false);
+            // Reuse the occupied id: a held refund then blocks a clean record()
+            // in the recorder/store (refund-first quarantine) on THIS id.
+            return EVC_Payment_Identity_Resolution::resolved($known, $alias_version ?? $this->identity->ring()->alias_version(), $recorded, null, false);
         }
-        if (!$this->identity->ring()->identity_history_complete()) {
-            return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_history_incomplete');
+        $mint = $this->mint_refusal();
+        if ($mint !== null) {
+            return $mint;
         }
         $minted = $this->identity->movement_id($settlement, $this->identity->ring()->identity_version());
         return EVC_Payment_Identity_Resolution::resolved($minted, $this->identity->ring()->alias_version(), false, null, false);
+    }
+
+    /**
+     * New ids are only minted when (a) every issued identity version is still
+     * available (an old payment could otherwise get a second id) and (b) the
+     * pinned identity key matched a configured fingerprint (a wrong secret would
+     * otherwise silently mint different ids).
+     */
+    private function mint_refusal(): ?EVC_Payment_Identity_Resolution {
+        if (!$this->identity->ring()->identity_history_complete()) {
+            return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_history_incomplete');
+        }
+        if (!$this->identity->ring()->identity_key_pinned()) {
+            return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_key_unpinned');
+        }
+        return null;
     }
 
     /** @return array<int,string> alias version => owning movement id (only versions with an owner) */

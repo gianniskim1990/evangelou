@@ -50,6 +50,8 @@ final class EVC_Payment_Key_Ring {
     private $alias_version;
     /** @var int[] */
     private $issued_identity_versions;
+    /** @var array<int,bool> versions whose fingerprint was supplied AND matched */
+    private $pinned = array();
 
     /**
      * @param array<int,string> $secrets                 version => raw secret bytes (decode base64/hex BEFORE)
@@ -97,7 +99,20 @@ final class EVC_Payment_Key_Ring {
             if (!is_int($version) || !isset($secrets[$version]) || !is_string($expected) || !hash_equals($expected, $this->fingerprint($version))) {
                 throw new InvalidArgumentException('Payment identity key does not match its recorded fingerprint.');
             }
+            $this->pinned[$version] = true;
         }
+    }
+
+    /**
+     * True only when the PINNED identity key was checked against a fingerprint
+     * supplied by the configuration boundary (Task 1D-I.R1). Without it a wrong
+     * secret under a known version cannot be detected, so the resolver refuses
+     * to MINT new ids (lookups still work). The fingerprint is only as trustworthy
+     * as where it is kept: storing it independently of the key (e.g. Club DB) is
+     * migration 003 work.
+     */
+    public function identity_key_pinned(): bool {
+        return isset($this->pinned[$this->identity_version]);
     }
 
     /** Non-secret check value of a key version (HMAC of a constant under its own purpose key). */

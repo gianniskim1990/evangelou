@@ -6,7 +6,9 @@
  * payment-to-row level binding) and Task 1D-E (P1-P22: provenance recorder,
  * incl. the in-memory store's atomicity / compare-and-set contract) and
  * Task 1D-E.R1 (P23-P29: commit-time correction guards, refund-first safety)
- * and Task 1D-I (I1-I17: canonical payment identity, key ring, trust gate).
+ * and Task 1D-I (I1-I17: canonical payment identity, key ring, trust gate)
+ * and Task 1D-I.R1 (J1-J7: gate approval provenance, cross-version refund-first,
+ * pinned-fingerprint minting, row-ref stability).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -485,8 +487,8 @@ $mutants = array(
     array(
         'id' => 'I7-second-id-minted-with-incomplete-history',
         'file' => 'includes/class-evc-payment-identity-resolver.php',
-        'search' => "        if (!\$this->identity->ring()->identity_history_complete()) {\n            return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_history_incomplete');\n        }\n        \$minted",
-        'replace' => "        \$minted",
+        'search' => "        if (!\$this->identity->ring()->identity_history_complete()) {\n            return EVC_Payment_Identity_Resolution::refused(EVC_Payment_Identity_Resolution::UNRESOLVED, 'identity_history_incomplete');\n        }\n        if (!\$this->identity->ring()->identity_key_pinned()) {",
+        'replace' => "        if (!\$this->identity->ring()->identity_key_pinned()) {",
     ),
     array(
         'id' => 'I8-authenticated-notification-funds-membership',
@@ -497,8 +499,8 @@ $mutants = array(
     array(
         'id' => 'I9-record-from-any-verifier-trusted',
         'file' => 'includes/class-evc-payment-evidence-gate.php',
-        'search' => "        return \$record->fetched_by() === \$this->verifier;",
-        'replace' => "        return true;",
+        'search' => "\$record->fetched_by() !== \$this->verifier || ",
+        'replace' => '',
     ),
     array(
         'id' => 'I10-order-only-evidence-treated-as-payment',
@@ -547,6 +549,49 @@ $mutants = array(
         'file' => 'includes/class-evc-payment-evidence-gate.php',
         'search' => "            case EVC_Provider_Record::STATE_CAPTURED:\n                break;\n            case EVC_Provider_Record::STATE_AUTHORIZED:\n                return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::NOT_ACCEPTED, 'authorization_not_capture');",
         'replace' => "            case EVC_Provider_Record::STATE_CAPTURED:\n            case EVC_Provider_Record::STATE_AUTHORIZED:\n                break;",
+    ),
+    // ---- Task 1D-I.R1 ----------------------------------------------------------
+    array(
+        'id' => 'J1-approval-not-required-same-verifier-forgery',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        if (!\$this->approvals->contains(\$record) || \$this->approvals[\$record] !== \$purpose) {\n            return false;\n        }\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'J2-approval-not-consumed-replay',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        \$this->approvals->detach(\$record);\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'J3-approval-granted-on-every-fetch',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "            return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::CONFLICT, 'record_identity_mismatch');\n        }\n        return \$record;",
+        'replace' => "            return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::CONFLICT, 'record_identity_mismatch');\n        }\n        \$this->approve(\$record, self::APPROVED_PAYMENT);\n        return \$record;",
+    ),
+    array(
+        'id' => 'J4-quarantined-candidate-ignored-cross-version',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "            if (\$has_movement || \$this->store->corrections_for(\$id) !== array()) {",
+        'replace' => "            if (\$has_movement) {",
+    ),
+    array(
+        'id' => 'J5-competing-candidates-not-a-conflict',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "        if (count(\$occupied) > 1) {",
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'J6-minting-without-pinned-fingerprint',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "        if (!\$this->identity->ring()->identity_key_pinned()) {",
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'J7-row-ref-follows-alias-version',
+        'file' => 'includes/class-evc-payment-identity.php',
+        'search' => "        return \$this->row_ref_for_version(\$site_scope, \$raw_row_id, \$this->ring->identity_version());",
+        'replace' => "        return \$this->row_ref_for_version(\$site_scope, \$raw_row_id, \$this->ring->alias_version());",
     ),
 );
 

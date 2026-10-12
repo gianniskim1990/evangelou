@@ -311,6 +311,28 @@ gateway configured. Nothing here verifies a real payment.
 - Still open: provider field mapping (Viva ParentId exposure, PayPal intent,
   disputes), technician versions/scopes/secrets, O1/O3/O4, D3/D4/D6–D10,
   hold scope, key retention.
+- Task 1D-I.R1 hardening:
+  - Cross-version refund-first: before minting, every available identity
+    candidate is checked for a recorded movement OR any correction history
+    (incl. a refund quarantined with no movement). A single occupied
+    candidate is REUSED (so the recorder's quarantine blocks a clean record
+    on that id); two occupied candidates → conflict. This check is an
+    advisory read, NOT atomic against a concurrent identity-key transition.
+  - Evidence provenance: L3/R objects require a one-shot approval the gate
+    grants only after fetching the record through its own verifier and
+    passing every check. Records built elsewhere (even naming the same
+    verifier), records the gate refused, records from another gate and
+    already-used records cannot become evidence.
+  - New ids are minted only when the pinned identity key matched a
+    configured fingerprint (`identity_key_pinned()`); lookups still work.
+  - PMPro row refs are tied to the pinned identity version, not the alias
+    version, so alias-key rotation does not change them.
+- Key-version limitations (honest status): ACTIVE IDENTITY-KEY TRANSITION IS
+  NOT APPROVED until database-level coordination and migration 003 are
+  designed. A fingerprint is only as trustworthy as where it is stored
+  (independent storage is 003). Migration 002 cannot enforce alias
+  uniqueness across key versions under concurrent rotation (different
+  versions give different refs). Key rotation is NOT production-safe.
 
 **What the pure mapper CANNOT verify** (needs the installed plugins and
 staging): that a future reader maps PMPro/WooCommerce/gateway states correctly

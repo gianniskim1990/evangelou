@@ -130,8 +130,25 @@ final class EVC_Payment_Identity {
         return $ns === null ? null : new EVC_Movement_Alias($ns, $this->alias_ref($ref, $version));
     }
 
-    /** Opaque PMPro membership-row reference (site scoped) under one alias-lifecycle version. */
-    public function row_ref(string $site_scope, string $raw_row_id, int $version): string {
+    /**
+     * Opaque PMPro membership-row reference (site scoped) under the PINNED
+     * identity version (Task 1D-I.R1): row refs are stored in periods and must
+     * not drift when ALIAS keys rotate. Lookups use row_ref_candidates().
+     */
+    public function row_ref(string $site_scope, string $raw_row_id): string {
+        return $this->row_ref_for_version($site_scope, $raw_row_id, $this->ring->identity_version());
+    }
+
+    /** @return array<int,string> identity version => candidate row ref */
+    public function row_ref_candidates(string $site_scope, string $raw_row_id): array {
+        $out = array();
+        foreach ($this->ring->available_identity_versions() as $v) {
+            $out[$v] = $this->row_ref_for_version($site_scope, $raw_row_id, $v);
+        }
+        return $out;
+    }
+
+    private function row_ref_for_version(string $site_scope, string $raw_row_id, int $version): string {
         if (!preg_match(EVC_Payment_Source_Ref::TOKEN_PATTERN, $site_scope) || !preg_match(EVC_Payment_Source_Ref::TOKEN_PATTERN, $raw_row_id)) {
             throw new InvalidArgumentException('Row scope and id must be printable ASCII without spaces.');
         }

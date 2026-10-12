@@ -196,14 +196,20 @@ final class EVC_Payment_Notification {
     }
 }
 
-/** L3: a captured money movement vouched for by the gate's own verifier. */
+/**
+ * L3: a captured money movement. Only constructible while the gate holds a
+ * one-shot approval for THIS record object (Task 1D-I.R1-B): the gate grants
+ * it after fetching the record through its own verifier and passing every
+ * check, and the constructor consumes it. A record built elsewhere -- even
+ * naming the same verifier -- has no approval and is refused.
+ */
 final class EVC_Verified_Payment {
     /** @var EVC_Provider_Record */
     private $record;
 
     /** @internal issued by EVC_Payment_Evidence_Gate only */
     public function __construct(EVC_Payment_Evidence_Gate $issuer, EVC_Provider_Record $record) {
-        if (!$issuer->vouches_for($record) || !$record->ref()->is_settlement_anchor()
+        if (!$issuer->redeem_approval($record, EVC_Payment_Evidence_Gate::APPROVED_PAYMENT) || !$record->ref()->is_settlement_anchor()
             || $record->state() !== EVC_Provider_Record::STATE_CAPTURED || $record->amount_minor() < 1) {
             throw new InvalidArgumentException('Not a captured money movement verified by this gate.');
         }
@@ -232,7 +238,7 @@ final class EVC_Verified_Payment {
     }
 }
 
-/** R: a completed refund/void/reversal whose single parent is a verified capture. */
+/** R: a completed refund/void/reversal whose single parent is a verified capture (gate-approved, one-shot, see L3). */
 final class EVC_Verified_Refund {
     /** @var EVC_Provider_Record */
     private $refund;
@@ -241,7 +247,7 @@ final class EVC_Verified_Refund {
 
     /** @internal issued by EVC_Payment_Evidence_Gate only */
     public function __construct(EVC_Payment_Evidence_Gate $issuer, EVC_Provider_Record $refund, EVC_Provider_Record $parent) {
-        if (!$issuer->vouches_for($refund) || !$issuer->vouches_for($parent)
+        if (!$issuer->redeem_approval($refund, EVC_Payment_Evidence_Gate::APPROVED_REFUND) || !$issuer->redeem_approval($parent, EVC_Payment_Evidence_Gate::APPROVED_PARENT)
             || $refund->ref()->kind() !== EVC_Payment_Source_Ref::KIND_REFUND || $refund->state() !== EVC_Provider_Record::STATE_COMPLETED
             || count($refund->parents()) !== 1 || !$refund->parents()[0]->same_as($parent->ref()) || !$parent->ref()->is_settlement_anchor()) {
             throw new InvalidArgumentException('Not a completed refund with a verified parent capture.');
@@ -328,8 +334,14 @@ final class EVC_Payment_Evidence_Outcome {
 }
 
 final class EVC_Payment_Evidence_Gate {
+    const APPROVED_PAYMENT = 'payment';
+    const APPROVED_REFUND = 'refund';
+    const APPROVED_PARENT = 'parent';
+
     /** @var EVC_Payment_Source_Verifier */
     private $verifier;
+    /** @var SplObjectStorage records this gate fetched AND approved, not yet turned into evidence (record => purpose) */
+    private $approvals;
     /** @var string */
     private $environment;
     /** @var array<string,string[]> provider => merchant/site scopes this deployment is configured for */
@@ -348,11 +360,24 @@ final class EVC_Payment_Evidence_Gate {
         $this->verifier = $verifier;
         $this->environment = $environment;
         $this->scopes = $scopes;
+        $this->approvals = new SplObjectStorage();
     }
 
-    /** True only for records fetched by THIS gate's configured verifier. */
-    public function vouches_for(EVC_Provider_Record $record): bool {
-        return $record->fetched_by() === $this->verifier;
+    /**
+     * Consumes the one-shot approval this gate granted for exactly this record
+     * object and purpose. False for anything the gate did not itself fetch and
+     * approve (fabricated, refused, substituted or already-used records).
+     */
+    public function redeem_approval(EVC_Provider_Record $record, string $purpose): bool {
+        if (!$this->approvals->contains($record) || $this->approvals[$record] !== $purpose) {
+            return false;
+        }
+        $this->approvals->detach($record);
+        return true;
+    }
+
+    private function approve(EVC_Provider_Record $record, string $purpose): void {
+        $this->approvals[$record] = $purpose;
     }
 
     /** L0/L1 -> lookup of the single claimed settlement anchor; the claimed status is ignored. */
@@ -423,6 +448,7 @@ final class EVC_Payment_Evidence_Gate {
         if ($orders > 1) {
             return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::CONFLICT, 'multiple_order_references');
         }
+        $this->approve($record, self::APPROVED_PAYMENT);
         return EVC_Payment_Evidence_Outcome::verified(new EVC_Verified_Payment($this, $record));
     }
 
@@ -462,6 +488,8 @@ final class EVC_Payment_Evidence_Gate {
             EVC_Provider_Record::STATE_REVERSED, EVC_Provider_Record::STATE_DISPUTED), true)) {
             return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::CONFLICT, 'parent_not_a_capture');
         }
+        $this->approve($record, self::APPROVED_REFUND);
+        $this->approve($parent, self::APPROVED_PARENT);
         return EVC_Payment_Evidence_Outcome::verified(new EVC_Verified_Refund($this, $record, $parent));
     }
 
@@ -472,7 +500,7 @@ final class EVC_Payment_Evidence_Gate {
         } catch (Throwable $e) {
             return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::UNAVAILABLE, 'source_unavailable');
         }
-        if (!$this->vouches_for($record) || !$record->ref()->same_as($ref)) {
+        if (!$record instanceof EVC_Provider_Record || $record->fetched_by() !== $this->verifier || !$record->ref()->same_as($ref)) {
             return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::CONFLICT, 'record_identity_mismatch');
         }
         return $record;
