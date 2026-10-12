@@ -41,6 +41,13 @@ require_once $evc_includes . 'class-evc-record-outcome.php';
 require_once $evc_includes . 'class-evc-provenance-recorder.php';
 // Task 1D-G: SQL store definition only; nothing constructs it outside tests.
 require_once $evc_includes . 'class-evc-sql-provenance-store.php';
+// Task 1D-I: canonical payment identity core. Definitions only: no verifier
+// implementation, key material or payment flow exists in the plugin.
+require_once $evc_includes . 'class-evc-payment-source-ref.php';
+require_once $evc_includes . 'class-evc-payment-key-ring.php';
+require_once $evc_includes . 'class-evc-payment-identity.php';
+require_once $evc_includes . 'class-evc-payment-evidence-gate.php';
+require_once $evc_includes . 'class-evc-payment-identity-resolver.php';
 require_once $evc_includes . 'class-evc-coffee-catalog.php';
 require_once $evc_includes . 'class-evc-request-fingerprint.php';
 require_once $evc_includes . 'class-evc-redemption-request.php';

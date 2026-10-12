@@ -123,6 +123,35 @@ trait EVC_Provenance_Store_Contract {
         $this->c_outcome($r->correct(self::c_corr('q2', 'dec', 'partially_refunded')), EVC_Record_Outcome::CONFLICT, 'correction_state_regression');
     }
 
+    /** Task 1D-I identity core (synthetic verifier) on top of this store. */
+    public function test_contract_identity_core_round_trip(): void {
+        $verifier = new EVC_Fake_Payment_Source_Verifier();
+        $gate = EVC_Payment_Identity_Fixture::gate($verifier);
+        $capture = EVC_Payment_Identity_Fixture::paypal_capture('CONTRACT-CAP-1');
+        $verifier->put($capture, 'captured', 2000, array(EVC_Payment_Identity_Fixture::wc_order('5001')));
+        $v1 = EVC_Payment_Identity_Fixture::ring('live', array(1));
+        $resolver = new EVC_Payment_Identity_Resolver(new EVC_Payment_Identity($v1), $this->contract_store());
+        // Refund verified first: quarantined under the id the payment will have.
+        $verifier->put(EVC_Payment_Identity_Fixture::paypal_refund('CONTRACT-RF-1'), 'completed', 2000, array(), array($capture), 'partially_refunded');
+        $refund = $gate->verify_refund(EVC_Payment_Identity_Fixture::paypal_refund('CONTRACT-RF-1'))->refund();
+        $rr = $resolver->resolve_refund($refund);
+        $this->c_outcome($this->c_rec()->correct($resolver->build_correction($refund, $rr, EVC_Pmpro_Fixture::athens('2026-10-16 10:00'))), EVC_Record_Outcome::QUARANTINED);
+        $payment = $gate->verify_payment($capture)->payment();
+        $pr = $resolver->resolve_payment($payment);
+        $this->assertSame($rr->movement_id(), $pr->movement_id());
+        $m = $resolver->build_movement($payment, $pr, EVC_Provenance_Test_Fixture::USER, 7, self::c_ref('row1'), EVC_Pmpro_Fixture::athens('2026-10-15 12:00:00'));
+        $this->c_outcome($this->c_rec()->record($m), EVC_Record_Outcome::INDETERMINATE, 'unresolved_correction');
+        $this->c_outcome($this->c_rec()->reconcile(new EVC_Movement_Reconciliation($m, array($rr->correction_id()))), EVC_Record_Outcome::NEWLY_RECORDED);
+        // After an alias-key rotation the same payment is found, not duplicated.
+        $v2 = EVC_Payment_Identity_Fixture::ring('live', array(1, 2), 1, 2, array(1));
+        $again = (new EVC_Payment_Identity_Resolver(new EVC_Payment_Identity($v2), $this->contract_store()))->resolve_payment($payment);
+        $this->assertSame(array(true, $pr->movement_id(), 1), array($again->existing(), $again->movement_id(), $again->alias_version()));
+        $this->assertSame($pr->movement_id(), $this->contract_store()->movement_for_alias('wc_order:' . (new EVC_Payment_Identity($v1))->alias_ref(EVC_Payment_Identity_Fixture::wc_order('5001'), 1)));
+        // A second capture on the same order is refused.
+        $verifier->put(EVC_Payment_Identity_Fixture::paypal_capture('CONTRACT-CAP-2'), 'captured', 2000, array(EVC_Payment_Identity_Fixture::wc_order('5001')));
+        $this->assertSame('alias_owned_by_other_movement', $resolver->resolve_payment($gate->verify_payment(EVC_Payment_Identity_Fixture::paypal_capture('CONTRACT-CAP-2'))->payment())->reason());
+    }
+
     public function test_contract_mapper_compatibility(): void {
         $r = $this->c_rec();
         $r->record(self::c_mv('oct', '2026-10-15 12:00:00'));

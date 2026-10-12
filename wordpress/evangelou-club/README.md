@@ -255,6 +255,63 @@ WooCommerce is not installed yet and payment methods are unconfirmed.
   O3/O4, D3/D4/D6–D10. Nothing constructs this store in the plugin (the
   packager rejects shipped code containing `new EVC_Sql_Provenance_Store`).
 
+**Canonical payment identity core (Task 1D-I — pure PHP, synthetic facts only, NOT wired):**
+
+Context unchanged: zero paid Club members, WooCommerce not installed, no
+gateway configured. Nothing here verifies a real payment.
+
+- Identity = one VERIFIED money movement: a provider capture (PayPal
+  completed capture, Viva successful charge/capture) or a Club-issued manual
+  receipt. Orders (WooCommerce, PMPro, PayPal order, Viva orderCode) are
+  related aliases only, never proof of payment or identity.
+- `EVC_Payment_Identity`: `movement_id = HMAC-SHA256(HKDF(secret[v],
+  "evc/movement/v{v}/{env}"), LP(tag) LP(provider) LP(merchant scope)
+  LP(environment) LP(kind) LP(raw id))`, `LP` = 4-byte length prefix.
+  Raw ids are used exactly as issued (no trim/case folding; anything else is
+  refused). Alias refs, correction ids (from the refund's OWN id) and PMPro
+  row refs use their own tag and their own HKDF purpose key. Amounts, times,
+  names, e-mails, phones and client order numbers are never inputs. HMACs
+  are not reversible.
+- `EVC_Payment_Key_Ring`: injected secrets only (>= 32 random bytes per
+  version; nothing generated, stored, logged or serialized). Explicit
+  versions: a PINNED identity version for new movement/correction ids, the
+  list of every identity version ever issued, and a current alias version
+  (older ones retained for lookup). Optional per-version fingerprints make a
+  wrong key fail closed. If an issued identity version is missing, the
+  history is incomplete and NO new id is minted.
+- `EVC_Payment_Evidence_Gate` (trust boundary): L0 raw / L1 authenticated
+  notifications only name ids to look up (claimed status ignored); L2 = a
+  record fetched by the gate's OWN `EVC_Payment_Source_Verifier`; L3 =
+  captured money; R = completed refund whose single parent capture was also
+  fetched; Q = everything else. Authorizations, pending captures, order-only
+  evidence, other merchants/environments, foreign records and provider
+  outages never yield L3. A capture that is already refunded/disputed is
+  `requires_reconciliation`, never a clean payment. No verifier is shipped;
+  the packager rejects shipped verifiers, gate construction and test fixtures.
+- `EVC_Payment_Identity_Resolver` (read-only on `EVC_Provenance_Store`):
+  checks every retained identity and alias version before attributing
+  anything new; reuses an existing id after a key change; two recorded
+  identity versions or an alias owned by another movement → conflict (this
+  also keeps a second capture on an already-anchored order FAIL CLOSED);
+  unknown refund parent → unresolved; same refund id → same correction id;
+  same refund id with changed facts → conflict. It maps evidence onto the
+  unchanged `EVC_Verified_Movement` / `EVC_Movement_Correction` contract, so
+  migration 002, the recorder, quarantine and the mapper apply unchanged.
+  The verification instant stays an explicit input (O1 open).
+- Migration 003 prerequisites (NOT implemented): alias key-version column
+  and lazy re-keying; namespaces for provider orders, authorizations and
+  refunds (002's CHECK allows five); persisted key fingerprints; an
+  unattributed-refund intake whose hold scope is an owner decision (no
+  global or provider-wide freeze exists); multi-capture-per-order support
+  only after an owner-approved contract change.
+- Key compromise: attacker with key + raw ids can link references (privacy),
+  not create payments. Key loss: identity history incomplete → minting stops
+  until recovery re-derives aliases from source systems (forward lookup,
+  never reversal). Real rotation/backup procedures are future work.
+- Still open: provider field mapping (Viva ParentId exposure, PayPal intent,
+  disputes), technician versions/scopes/secrets, O1/O3/O4, D3/D4/D6–D10,
+  hold scope, key retention.
+
 **What the pure mapper CANNOT verify** (needs the installed plugins and
 staging): that a future reader maps PMPro/WooCommerce/gateway states correctly
 (confirmed vs pending/processing/on-hold, refunds, chargebacks); that a
