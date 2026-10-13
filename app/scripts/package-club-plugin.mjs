@@ -26,7 +26,7 @@ const FORBIDDEN_BUNDLE_STRINGS = [
   // UI-01 design preview must never reach the real staff bundle.
   "evc-club-design-preview", "ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ", "ΠΡΟΕΠΙΣΚΟΠΗΣΗ ΣΧΕΔΙΑΣΜΟΥ", "example.invalid",
 ];
-const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Sql_Provenance_Store", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup"];
+const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Sql_Provenance_Store", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup", "class EVC_In_Memory_Prepared_Redemption_Store", "class EVC_Fake_Prep_Catalogue_Authority", "new EVC_Prepared_Redemption_Service", "implements EVC_Prep_Redemption_Store", "implements EVC_Prep_Catalogue_Authority"];
 const SILENCE = "<?php\n// Silence is golden.\n";
 
 function fail(message) {

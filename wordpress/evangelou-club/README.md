@@ -587,6 +587,20 @@ installs a disposable WordPress, serves it with `php -S`, installs the
 **packaged** plugin and checks redirects, real headers, real CORS, cookies,
 logout replay and the reauth form with the flag on and off.
 
+## Prepared redemption transaction model (UI-03D.A — pure PHP, NOT wired)
+
+`EVC_Prepared_Redemption_Service` models how one verified, eligible redemption
+atomically records its structured preparation: exactly one ledger row, one
+immutable `EVC_Prep_Snapshot` and one audit event, all or none. It replays an
+exact retry before any catalogue, membership or clock decision; refuses reuse of
+a request id with another payload; returns `outcome_unknown` (retry with the SAME
+request id, never a new one) for an unknown COMMIT; and fails closed on missing,
+corrupt or conflicting snapshots. A catalogue that merely says `approved` is
+not enough: a server-side owner approval digest must match the document. Only
+in-memory test fakes implement the store and catalogue authority; no SQL, no
+migration, no REST wiring. See `docs/prepared-redemption-transaction.md` for the
+state/failure model and how the future SQL transaction must satisfy it.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in
