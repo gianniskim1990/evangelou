@@ -619,6 +619,91 @@ $mutants = array(
         'search' => "        return isset(\$this->pinned[\$version]) ? self::KEY_VERIFIED : self::KEY_UNVERIFIED;",
         'replace' => "        return self::KEY_VERIFIED;",
     ),
+    // UI-03C preparation contract core (M1-M14).
+    array(
+        'id' => 'M1-free-text-note-accepted',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "if (array_key_exists('note', \$preparation) && \$preparation['note'] !== null) {",
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'M2-modifiers-not-sorted',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "        ksort(\$modifiers, SORT_STRING);\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'M3-catalogue-checked-before-replay',
+        'file' => 'includes/class-evc-prep-redeem-precheck.php',
+        'search' => "\$stored = \$this->lookup->fingerprint_for_request(\$body['request_id']);",
+        'replace' => "\$stored = \$body['catalogue_version'] !== \$this->catalogue->version() ? null : \$this->lookup->fingerprint_for_request(\$body['request_id']);",
+    ),
+    array(
+        'id' => 'M4-different-preparation-replays',
+        'file' => 'includes/class-evc-prep-redeem-precheck.php',
+        'search' => 'return hash_equals($stored, $fingerprint) ? EVC_Prep_Decision::replay($fingerprint) : EVC_Prep_Decision::conflict();',
+        'replace' => 'return EVC_Prep_Decision::replay($fingerprint);',
+    ),
+    array(
+        'id' => 'M5-fingerprint-ignores-preparation',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "            \$prep_hash,\n",
+        'replace' => "            '',\n",
+    ),
+    array(
+        'id' => 'M6-fingerprint-v2-domain-tag-reused',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "const FINGERPRINT_VERSION = 'evc-redeem-v2';",
+        'replace' => "const FINGERPRINT_VERSION = 'evc-redeem-v1';",
+    ),
+    array(
+        'id' => 'M7-hidden-group-accepted',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "                throw EVC_Prep_Rejection::preparation('hidden_group_present');\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'M8-temperature-notes-not-exclusive',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "                    throw EVC_Prep_Rejection::preparation('exclusive_conflict');\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'M9-illustrative-catalogue-activatable',
+        'file' => 'includes/class-evc-prep-redeem-precheck.php',
+        'search' => 'if (!$active_catalogue->is_approved() && $illustrative_opt_in !== self::ALLOW_ILLUSTRATIVE_CATALOGUE_FOR_TESTS) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'M10-catalogue-accepts-pricing',
+        'file' => 'includes/class-evc-prep-catalogue.php',
+        'search' => "if (\$d['pricing_policy'] !== self::PRICING_UNDECIDED) {",
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'M11-catalogue-allows-free-text',
+        'file' => 'includes/class-evc-prep-catalogue.php',
+        'search' => "if (\$d['free_text_note'] !== false) {",
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'M12-label-length-in-bytes',
+        'file' => 'includes/class-evc-prep-catalogue.php',
+        'search' => "return preg_match_all('/./su', \$v) <= self::MAX_LABEL_CODE_POINTS;",
+        'replace' => 'return strlen($v) <= self::MAX_LABEL_CODE_POINTS;',
+    ),
+    array(
+        'id' => 'M13-hot-note-allowed-on-cold-coffee',
+        'file' => 'includes/class-evc-prep-catalogue.php',
+        'search' => "|| (\$applies === self::APPLIES_HOT && \$c['temperature'] === self::TEMPERATURE_HOT)",
+        'replace' => "|| (\$applies === self::APPLIES_HOT)",
+    ),
+    array(
+        'id' => 'M14-required-group-not-enforced',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "if (\$groups[\$group]['required'] && !isset(\$modifiers[\$group])) {",
+        'replace' => 'if (false) {',
+    ),
 );
 
 function evc_run_suite(array $command): int {

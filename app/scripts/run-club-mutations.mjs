@@ -459,6 +459,73 @@ const mutants = [
     search: '{ id: "lukewarm", label: "χλιαρός", when: "hot", exclusive: "temperature" }',
     replace: '{ id: "lukewarm", label: "χλιαρός", when: "hot" }',
   },
+  // UI-03C preparation contract (client mirror; shared vectors with PHP).
+  {
+    id: "V1-free-text-note-accepted",
+    file: "preparationContract.ts",
+    search: 'if ("note" in preparation && preparation.note !== null) return reject("invalid_preparation", "free_text_not_supported");',
+    replace: "",
+  },
+  {
+    id: "V2-modifiers-not-sorted",
+    file: "preparationContract.ts",
+    search: "modifiers: [...modifiers.entries()].sort((a, b) => byteOrder(a[0], b[0]))",
+    replace: "modifiers: [...modifiers.entries()]",
+  },
+  {
+    id: "V3-hidden-group-accepted",
+    file: "preparationContract.ts",
+    search: 'for (const [group] of parsed.modifiers) if (!visible.includes(group)) return reject("invalid_preparation", "hidden_group_present");',
+    replace: "",
+  },
+  {
+    id: "V4-temperature-notes-not-exclusive",
+    file: "preparationContract.ts",
+    search: 'if (sets.has(set)) return reject("invalid_preparation", "exclusive_conflict");',
+    replace: "",
+  },
+  {
+    id: "V5-quick-note-applicability-ignored",
+    file: "preparationContract.ts",
+    search: 'if (!coffee.quickNotes.includes(id)) return reject("invalid_preparation", "quick_note_not_applicable");',
+    replace: "",
+  },
+  {
+    id: "V6-catalogue-allows-free-text",
+    file: "preparationContract.ts",
+    search: 'if (c.free_text_note !== false) fail("free_text_note");',
+    replace: "",
+  },
+  {
+    id: "V7-hyphenated-ids-accepted",
+    file: "preparationContract.ts",
+    search: "export const ID_PATTERN = /^[a-z][a-z0-9_]{1,31}$/;",
+    replace: "export const ID_PATTERN = /^[a-z][a-z0-9_-]{1,31}$/;",
+  },
+  {
+    id: "V8-required-group-not-enforced",
+    file: "preparationContract.ts",
+    search: 'for (const id of visible) if (groups.get(id)!.required && !selections.has(id)) return reject("invalid_preparation", "required_missing");',
+    replace: "",
+  },
+  {
+    id: "V9-hot-note-allowed-on-cold-coffee",
+    file: "preparationContract.ts",
+    search: '(applies === "hot" && cr.temperature === "hot")',
+    replace: '(applies === "hot")',
+  },
+  {
+    id: "V10-catalogue-accepts-pricing",
+    file: "preparationContract.ts",
+    search: 'if (c.pricing_policy !== "undecided") fail("pricing_policy");',
+    replace: "",
+  },
+  {
+    id: "V11-label-counts-utf16-units",
+    file: "preparationContract.ts",
+    search: "return [...v].length <= MAX_LABEL_CODE_POINTS;",
+    replace: "return v.length <= MAX_LABEL_CODE_POINTS;",
+  },
   {
     id: "U20-summary-drops-extras",
     file: "preview/coffeeConfig.ts",
