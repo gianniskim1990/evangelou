@@ -138,6 +138,15 @@ npm run images:stock -- --force   # ξαναφέρνει τα πάντα
 
 **Πλήρες API contract:** το ακριβές REST συμβόλαιο (`evangelou-club/v1`) που θα πρέπει να υλοποιήσει το μελλοντικό WordPress plugin — endpoints, request/response schemas, HTTP statuses, error model, privacy κανόνες, idempotent redemption, source-of-truth mapping σε PMPro/FluentCRM/WooCommerce — είναι τεκμηριωμένο στο [`docs/evangelou-club-api.md`](docs/evangelou-club-api.md). Το `src/club/restClubService.ts` δείχνει ένα (ανενεργό, όχι wired) skeleton υλοποίησης — DTO types + mappers + τα endpoints ως comments — ώστε ο μελλοντικός developer να μην μαντεύει τι περιμένει το React app.
 
+## Ευαγγέλου Club — προεπισκόπηση σχεδιασμού (`/club-preview`, UI-01)
+
+Οπτικό πρωτότυπο της Phase 1 για έγκριση από τον ιδιοκτήτη: **DEMO με φανταστικά δεδομένα**. Δεν είναι λειτουργική εφαρμογή.
+
+- **Περιοχές:** Πελάτης (10 οθόνες: καλωσόρισμα, εγγραφή, newsletter & ξεχωριστές συναινέσεις, συνδρομή 20 €, αρχική, κάρτα με δείγμα QR, καταστάσεις, σημερινός καφές, ιστορικό, λογαριασμός), Προσωπικό (8: πίνακας ταμείου, σάρωση, αναζήτηση τηλεφώνου, μέλος & δικαίωμα, επιλογή καφέ, επιβεβαίωση, ήδη εξαργυρώθηκε / έληξε, ιστορικό μέλους), Διαχείριση Club (8: επισκόπηση, μέλη, καρτέλα μέλους, καταστάσεις, δραστηριότητα, προτιμήσεις, στατιστικά, ρυθμίσεις). Διαδρομές: `/club-preview/<περιοχή>/<οθόνη>`.
+- **Ασφάλεια:** καμία κλήση δικτύου, κανένα API, WordPress, πληρωμή ή QR. Το δείγμα QR δεν είναι κωδικοποιημένο QR και γράφει «ΔΕΙΓΜΑ — ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ». Η «Επιβεβαίωση» ταμείου δείχνει μόνο ότι **δεν** καταχωρήθηκε τίποτα. Η πραγματική εφαρμογή προσωπικού (`/club-admin/`) μένει ξεχωριστή και ανενεργή.
+- **Δρομολόγηση:** το `/club-preview` ταιριάζει ακριβώς (`src/entryRoute.ts`) και ελέγχεται πριν από το υπάρχον `/club`, που δεν αλλάζει.
+- **Build gate:** το preview μπαίνει στο build μόνο τοπικά και στα Vercel *Preview* deployments. Σε Vercel production (`VERCEL_ENV=production`) ή με `EVC_CLUB_PREVIEW=off` αφαιρείται εντελώς (δεν δημιουργείται καν chunk). Τα tests ελέγχουν ότι δεν φτάνει στο bundle προσωπικού ούτε στο production bundle.
+
 ## Σχεδιαστικές αποφάσεις
 
 - **Καμία υπάρχουσα σκαλωσιά στο repo** — φτιάχτηκε από την αρχή Vite + React + TypeScript + Tailwind v4 στο `app/`, όπως ζητήθηκε στο brief ("React με Tailwind, mobile-first").

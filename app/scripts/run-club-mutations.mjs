@@ -290,6 +290,43 @@ const mutants = [
     search: "    if (error.code === \"unauthorized\" && error.httpStatus === 401) return \"unauthorized\";",
     replace: "    if (error.code === \"unauthorized\") return \"unauthorized\";",
   },
+  // ---- UI-01 design preview: routing, build gate, isolation -----------------
+  {
+    id: "U1-preview-prefix-match-captures-lookalikes",
+    file: "./entryRoute.ts",
+    search: "const CLUB_PREVIEW_PATH = /^\\/club-preview(?:\\/|$)/;",
+    replace: "const CLUB_PREVIEW_PATH = /^\\/club-preview/;",
+  },
+  {
+    id: "U2-club-prefix-checked-before-preview",
+    file: "./entryRoute.ts",
+    search: "  if (previewEnabled && isClubPreviewPath(pathname)) return \"club-preview\";\n  if (pathname.startsWith(\"/club\")) return \"club\";",
+    replace: "  if (pathname.startsWith(\"/club\")) return \"club\";\n  if (previewEnabled && isClubPreviewPath(pathname)) return \"club-preview\";",
+  },
+  {
+    id: "U3-preview-route-ignores-build-gate",
+    file: "./entryRoute.ts",
+    search: "  if (previewEnabled && isClubPreviewPath(pathname)) return \"club-preview\";",
+    replace: "  if (isClubPreviewPath(pathname)) return \"club-preview\";",
+  },
+  {
+    id: "U4-preview-built-into-vercel-production",
+    file: "preview/buildFlag.ts",
+    search: "  if (env.VERCEL_ENV === \"production\") return false;\n",
+    replace: "",
+  },
+  {
+    id: "U5-preview-code-not-gated-out-of-public-bundle",
+    file: "./main.tsx",
+    search: "const ClubPreviewApp = __EVC_CLUB_PREVIEW__\n  ? lazy(",
+    replace: "const ClubPreviewApp = true\n  ? lazy(",
+  },
+  {
+    id: "U6-preview-makes-network-call",
+    file: "preview/ClubPreviewApp.tsx",
+    search: "  const today = useMemo(() => athensToday(), []);",
+    replace: "  const today = useMemo(() => athensToday(), []);\n  useEffect(() => { void fetch(\"/api/orders\"); }, []);",
+  },
 ];
 
 const runSuite = () =>
