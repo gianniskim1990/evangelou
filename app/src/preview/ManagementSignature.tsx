@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { CLUB_RULES, COFFEES, MEMBERS, addDays, coffeeName, greekDate, redemptionHistory, shortGreekDate, todaysRedemptions, type PreviewMember, type PreviewMembershipState } from "./previewData";
 import { cx, type ManagementScreen } from "./screens";
 import { Glyph, Logo, PreviewNote, StateMark } from "./ds";
+import { daysWord, fmt } from "./format";
 
 /*
  * UI-01.R1 signature screens, Club management: overview and members.
@@ -12,12 +13,16 @@ import { Glyph, Logo, PreviewNote, StateMark } from "./ds";
 const NAV: { id: ManagementScreen; label: string }[] = [
   { id: "overview", label: "Επισκόπηση" },
   { id: "members", label: "Μέλη" },
+  { id: "statuses", label: "Συνδρομές" },
   { id: "activity", label: "Δραστηριότητα" },
+  { id: "preferences", label: "Προτιμήσεις" },
   { id: "analytics", label: "Στατιστικά" },
   { id: "settings", label: "Ρυθμίσεις" },
 ];
 
 export function ManagementFrame({ screen, go, children }: { screen: ManagementScreen; go: (s: ManagementScreen) => void; children: ReactNode }) {
+  // A member's page lives under "Μέλη".
+  const section = screen === "member" ? "members" : screen;
   return (
     <div className="min-h-[calc(100svh-52px)] bg-[var(--milk)]">
       <header className="border-b border-[var(--rule)] bg-[var(--paper)]">
@@ -32,8 +37,8 @@ export function ManagementFrame({ screen, go, children }: { screen: ManagementSc
                 key={n.id}
                 type="button"
                 onClick={() => go(n.id)}
-                aria-current={screen === n.id ? "page" : undefined}
-                className={cx("t-label border-b-2 pt-1 pb-3.5 whitespace-nowrap", screen === n.id ? "border-[var(--roast)] text-[var(--ink)]" : "border-transparent text-[var(--ink-3)] hover:text-[var(--ink)]")}
+                aria-current={section === n.id ? "page" : undefined}
+                className={cx("t-label min-h-11 border-b-2 pt-2 pb-3.5 whitespace-nowrap", section === n.id ? "border-[var(--roast)] text-[var(--ink)]" : "border-transparent text-[var(--ink-3)] hover:text-[var(--ink)]")}
               >
                 {n.label}
               </button>
@@ -45,14 +50,6 @@ export function ManagementFrame({ screen, go, children }: { screen: ManagementSc
       <main className="mx-auto max-w-[1280px] px-5 py-8 md:px-10 md:py-12">{children}</main>
     </div>
   );
-}
-
-const fmt = (n: number, digits = 0) => n.toLocaleString("el-GR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-
-function daysWord(n: number): string {
-  if (n === 0) return "σήμερα";
-  if (n === 1) return "αύριο";
-  return `σε ${n} ημέρες`;
 }
 
 // ---- Overview ---------------------------------------------------------------------
@@ -105,7 +102,7 @@ export function ManagementOverview({ today, go, openMember }: { today: string; g
         </section>
 
         <section aria-labelledby="evc-expiring">
-          <SectionHead id="evc-expiring" title="Λήγουν σύντομα" note="Χειροκίνητη ανανέωση" action={<button type="button" onClick={() => go("members")} className="t-label text-[var(--bronze-deep)] underline-offset-4 hover:underline">Όλα τα μέλη</button>} />
+          <SectionHead id="evc-expiring" title="Λήγουν σύντομα" note="Χειροκίνητη ανανέωση" action={<button type="button" onClick={() => go("members")} className="t-label -my-3 py-3 text-[var(--bronze-deep)] underline-offset-4 hover:underline">Όλα τα μέλη</button>} />
           <ul className="m-0 list-none p-0">
             {data.expiring.map((m) => (
               <li key={m.id} className="border-b border-[var(--rule)]">
@@ -145,7 +142,7 @@ export function ManagementOverview({ today, go, openMember }: { today: string; g
   );
 }
 
-function Metric({ label, value, note }: { label: string; value: string; note: string }) {
+export function Metric({ label, value, note }: { label: string; value: string; note: string }) {
   return (
     <div className="border-[var(--rule)] px-0 py-6 odd:pr-5 even:border-l even:pl-5 lg:border-l lg:px-6 lg:first:border-l-0 lg:first:pl-0">
       <dt className="t-small text-[var(--ink-2)]">{label}</dt>
@@ -157,7 +154,7 @@ function Metric({ label, value, note }: { label: string; value: string; note: st
   );
 }
 
-function SectionHead({ id, title, note, action }: { id: string; title: string; note?: string; action?: ReactNode }) {
+export function SectionHead({ id, title, note, action }: { id: string; title: string; note?: string; action?: ReactNode }) {
   return (
     <div className="mb-4 flex items-baseline justify-between gap-4 border-b border-[var(--rule-strong)] pb-3">
       <h2 id={id} className="t-title text-[var(--ink)]">
@@ -225,19 +222,21 @@ function DailyChart({ data, avg }: { data: { date: string; value: number }[]; av
         </div>
         <span />
       </div>
-      <table className="sr-only">
+      <div className="sr-only">
+        <table>
         <caption>{label}</caption>
         <tbody>
           {data.map((d) => (
             <tr key={d.date}><th scope="row">{greekDate(d.date)}</th><td>{d.value}</td></tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
     </figure>
   );
 }
 
-function HourChart({ data }: { data: { hour: number; value: number }[] }) {
+export function HourChart({ data }: { data: { hour: number; value: number }[] }) {
   const max = Math.max(1, ...data.map((d) => d.value));
   const peak = data.reduce((a, b) => (b.value > a.value ? b : a));
   return (
@@ -391,7 +390,7 @@ export function MembersDirectory({ today, openMember }: { today: string; openMem
         <div className="border-b border-[var(--rule)] py-12 text-center">
           <p className="t-title text-[var(--ink)]">Κανένα μέλος δεν ταιριάζει</p>
           <p className="t-small mt-2 text-[var(--ink-2)]">Δοκιμάστε άλλο όνομα ή τα 2 τελευταία ψηφία του τηλεφώνου.</p>
-          <button type="button" onClick={() => { setQ(""); setFilter("all"); }} className="t-label mt-4 text-[var(--bronze-deep)] underline underline-offset-4">Καθαρισμός φίλτρων</button>
+          <button type="button" onClick={() => { setQ(""); setFilter("all"); }} className="t-label mt-1 py-3 text-[var(--bronze-deep)] underline underline-offset-4">Καθαρισμός φίλτρων</button>
         </div>
       )}
 

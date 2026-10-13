@@ -345,6 +345,30 @@ const mutants = [
     search: 'title: "ενδεικτικές επιλογές", body: `Για παράδειγμα: ${COFFEES.map((c) => c.label).join(", ")}. Ο τελικός κατάλογος δεν έχει οριστικοποιηθεί.`',
     replace: 'title: "επιλογές", body: `${COFFEES.map((c) => c.label).join(", ")}.`',
   },
+  {
+    id: "U10-offer-payment-button-enabled",
+    file: "preview/CustomerPreview.tsx",
+    search: '<Btn tone="brass" disabled title="Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"',
+    replace: '<Btn tone="brass" title="Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"',
+  },
+  {
+    id: "U11-offer-says-30-days",
+    file: "preview/CustomerPreview.tsx",
+    search: '<span className="t-body text-[var(--milk)]/70">για έναν ημερολογιακό μήνα</span>',
+    replace: '<span className="t-body text-[var(--milk)]/70">για 30 ημέρες</span>',
+  },
+  {
+    id: "U12-today-coffee-list-not-illustrative",
+    file: "preview/CustomerPreview.tsx",
+    search: '<h2 className="t-title mt-10 text-[var(--ink)]">Ενδεικτικές επιλογές</h2>',
+    replace: '<h2 className="t-title mt-10 text-[var(--ink)]">Επιλογές</h2>',
+  },
+  {
+    id: "U13-staff-confirm-drops-not-recorded-notice",
+    file: "preview/StaffPreview.tsx",
+    search: "Δεν καλείται κανένα API και δεν καταχωρείται εξαργύρωση.",
+    replace: "Ο καφές καταχωρήθηκε.",
+  },
 ];
 
 const runSuite = () =>
