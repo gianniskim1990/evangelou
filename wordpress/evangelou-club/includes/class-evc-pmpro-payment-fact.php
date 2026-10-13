@@ -6,10 +6,21 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  * WooCommerce order or a recorded manual (cash/bank) confirmation.
  *
  * status (normalised by the reader; anything else is rejected):
- *   confirmed           money verified received (PMPro "success", Woo "completed",
- *                       manual payment explicitly marked paid)
+ *   confirmed           money INDEPENDENTLY verified as captured/settled: a
+ *                       provider capture fetched server-side by a trusted
+ *                       adapter (EVC_Payment_Evidence_Gate, level L3), or a
+ *                       manual payment confirmed by a separate authorised
+ *                       actor with auditable evidence (never the shared Club
+ *                       staff account)
  *   pending             not (yet) verified: pending, on-hold, processing, review,
  *                       unconfirmed cash / bank transfer
+ *
+ * Commerce workflow states are NOT evidence of settlement (Task 1D-I):
+ * WooCommerce "processing"/"completed" can be set by hand or by plugins and
+ * never prove money was captured; a gateway AUTHORIZATION is not captured
+ * money; and PMPro "success" must not grant Club entitlement without
+ * verified provenance of the current paid period. A reader must map such
+ * states to "pending" unless the trusted gate confirmed the capture.
  *   failed              never paid
  *   refunded            was confirmed, then fully refunded
  *   partially_refunded  was confirmed, then partly refunded (owner policy D3 open)

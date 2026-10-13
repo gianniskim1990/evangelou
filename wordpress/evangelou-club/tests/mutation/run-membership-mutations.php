@@ -5,7 +5,11 @@
  * the Task 1D-B.R1 hardening (R1-R9: membership start, payment identity,
  * payment-to-row level binding) and Task 1D-E (P1-P22: provenance recorder,
  * incl. the in-memory store's atomicity / compare-and-set contract) and
- * Task 1D-E.R1 (P23-P29: commit-time correction guards, refund-first safety).
+ * Task 1D-E.R1 (P23-P29: commit-time correction guards, refund-first safety)
+ * and Task 1D-I (I1-I17: canonical payment identity, key ring, trust gate)
+ * and Task 1D-I.R1 (J1-J7: gate approval provenance, cross-version refund-first,
+ * pinned-fingerprint minting, row-ref stability) and Task 1D-I.R2 (K1-K4:
+ * historical key integrity before minting).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -443,6 +447,177 @@ $mutants = array(
         'file' => 'includes/class-evc-provenance-recorder.php',
         'search' => "        if (\$held !== \$acknowledged) {",
         'replace' => "        if (false) {",
+    ),
+    // ---- Task 1D-I: canonical payment identity core --------------------------
+    array(
+        'id' => 'I1-merchant-scope-removed-from-identity',
+        'file' => 'includes/class-evc-payment-identity.php',
+        'search' => "            \$settlement->merchant_scope(),\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'I2-environment-removed-from-identity',
+        'file' => 'includes/class-evc-payment-identity.php',
+        'search' => "            \$settlement->environment(),\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'I3-environment-removed-from-hkdf-purpose',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "'evc/' . \$purpose . '/v' . \$version . '/' . \$this->environment",
+        'replace' => "'evc/' . \$purpose . '/v' . \$version",
+    ),
+    array(
+        'id' => 'I4-hmac-domain-separation-removed',
+        'file' => 'includes/class-evc-payment-identity.php',
+        'search' => "EVC_Payment_Key_Ring::PURPOSE_ALIAS, \$version, self::encode(array(\n            self::TAG_ALIAS,",
+        'replace' => "EVC_Payment_Key_Ring::PURPOSE_MOVEMENT, \$version, self::encode(array(\n            self::TAG_MOVEMENT,",
+    ),
+    array(
+        'id' => 'I5-only-current-alias-version-looked-up',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "        foreach (\$this->identity->ring()->retained_versions() as \$v) {",
+        'replace' => "        foreach (array(\$this->identity->ring()->alias_version()) as \$v) {",
+    ),
+    array(
+        'id' => 'I6-only-pinned-identity-version-checked',
+        'file' => 'includes/class-evc-payment-identity.php',
+        'search' => "        foreach (\$this->ring->available_identity_versions() as \$v) {\n            \$out[\$v] = \$this->movement_id(\$settlement, \$v);",
+        'replace' => "        foreach (array(\$this->ring->identity_version()) as \$v) {\n            \$out[\$v] = \$this->movement_id(\$settlement, \$v);",
+    ),
+    array(
+        'id' => 'I7-second-id-minted-with-incomplete-history',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        foreach (\$this->issued_identity_versions as \$v) {\n            if (\$this->key_status(\$v) === self::KEY_MISSING) {\n                return 'identity_history_incomplete';\n            }\n        }\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'I8-authenticated-notification-funds-membership',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        return \$level === self::L3_CAPTURED;",
+        'replace' => "        return \$level !== self::Q_UNRESOLVED;",
+    ),
+    array(
+        'id' => 'I9-record-from-any-verifier-trusted',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "\$record->fetched_by() !== \$this->verifier || ",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'I10-order-only-evidence-treated-as-payment',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        if (!\$settlement->is_settlement_anchor()) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'I11-refund-parent-not-verified',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        \$parent = \$this->fetch(\$parent_ref);\n",
+        'replace' => "        \$parent = new EVC_Provider_Record(\$this->verifier, \$parent_ref, EVC_Provider_Record::STATE_CAPTURED, null, 1, 'EUR', array(), array());\n",
+    ),
+    array(
+        'id' => 'I12-duplicate-refund-gets-new-correction',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "            if (\$found !== array()) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'I13-unknown-refund-parent-accepted',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        if (\$parents === array()) {\n            return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::UNRESOLVED, 'parent_unknown');\n        }\n",
+        'replace' => "        if (\$parents === array()) {\n            \$parents = array(\$refund);\n        }\n",
+    ),
+    array(
+        'id' => 'I14-alias-ownership-conflict-ignored',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "                if (\$owner !== \$known) {",
+        'replace' => "                if (false) {",
+    ),
+    array(
+        'id' => 'I15-merchant-scope-not-enforced-by-gate',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        if (!in_array(\$ref->merchant_scope(), \$this->scopes[\$ref->provider()] ?? array(), true)) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'I16-changed-refund-facts-accepted',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "                if (\$existing->movement_id() !== \$movement->movement_id() || \$existing->kind() !== \$refund->kind()) {",
+        'replace' => "                if (false) {",
+    ),
+    array(
+        'id' => 'I17-authorization-treated-as-capture',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "            case EVC_Provider_Record::STATE_CAPTURED:\n                break;\n            case EVC_Provider_Record::STATE_AUTHORIZED:\n                return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::NOT_ACCEPTED, 'authorization_not_capture');",
+        'replace' => "            case EVC_Provider_Record::STATE_CAPTURED:\n            case EVC_Provider_Record::STATE_AUTHORIZED:\n                break;",
+    ),
+    // ---- Task 1D-I.R1 ----------------------------------------------------------
+    array(
+        'id' => 'J1-approval-not-required-same-verifier-forgery',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        if (!\$this->approvals->contains(\$record) || \$this->approvals[\$record] !== \$purpose) {\n            return false;\n        }\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'J2-approval-not-consumed-replay',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "        \$this->approvals->detach(\$record);\n",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'J3-approval-granted-on-every-fetch',
+        'file' => 'includes/class-evc-payment-evidence-gate.php',
+        'search' => "            return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::CONFLICT, 'record_identity_mismatch');\n        }\n        return \$record;",
+        'replace' => "            return EVC_Payment_Evidence_Outcome::refused(EVC_Payment_Evidence_Outcome::CONFLICT, 'record_identity_mismatch');\n        }\n        \$this->approve(\$record, self::APPROVED_PAYMENT);\n        return \$record;",
+    ),
+    array(
+        'id' => 'J4-quarantined-candidate-ignored-cross-version',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "            if (\$has_movement || \$this->store->corrections_for(\$id) !== array()) {",
+        'replace' => "            if (\$has_movement) {",
+    ),
+    array(
+        'id' => 'J5-competing-candidates-not-a-conflict',
+        'file' => 'includes/class-evc-payment-identity-resolver.php',
+        'search' => "        if (count(\$occupied) > 1) {",
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'J6-minting-without-pinned-fingerprint',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        if (\$this->key_status(\$this->identity_version) !== self::KEY_VERIFIED) {\n            return 'identity_key_unpinned';",
+        'replace' => "        if (false) {\n            return 'identity_key_unpinned';",
+    ),
+    array(
+        'id' => 'J7-row-ref-follows-alias-version',
+        'file' => 'includes/class-evc-payment-identity.php',
+        'search' => "        return \$this->row_ref_for_version(\$site_scope, \$raw_row_id, \$this->ring->identity_version());",
+        'replace' => "        return \$this->row_ref_for_version(\$site_scope, \$raw_row_id, \$this->ring->alias_version());",
+    ),
+    // ---- Task 1D-I.R2: historical key integrity --------------------------------
+    array(
+        'id' => 'K1-only-current-identity-fingerprint-checked',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        foreach (array_unique(array_merge(\$this->retained_versions(), \$this->issued_identity_versions)) as \$v) {",
+        'replace' => "        foreach (array(\$this->identity_version) as \$v) {",
+    ),
+    array(
+        'id' => 'K2-historical-fingerprint-absence-ignored',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "            if (\$this->key_status(\$v) !== self::KEY_VERIFIED) {\n                return 'historical_key_unverified';",
+        'replace' => "            if (\$this->key_status(\$v) === self::KEY_MISSING) {\n                return 'historical_key_unverified';",
+    ),
+    array(
+        'id' => 'K3-historical-alias-integrity-bypassed',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        foreach (array_unique(array_merge(\$this->retained_versions(), \$this->issued_identity_versions)) as \$v) {",
+        'replace' => "        foreach (\$this->issued_identity_versions as \$v) {",
+    ),
+    array(
+        'id' => 'K4-key-presence-treated-as-verified',
+        'file' => 'includes/class-evc-payment-key-ring.php',
+        'search' => "        return isset(\$this->pinned[\$version]) ? self::KEY_VERIFIED : self::KEY_UNVERIFIED;",
+        'replace' => "        return self::KEY_VERIFIED;",
     ),
 );
 
