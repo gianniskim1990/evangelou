@@ -35,6 +35,10 @@ try {
     target: "node20",
     outdir: outDir,
     outExtension: { ".js": ".mjs" },
+    // Preview copy tests server-render .tsx components (React 17+ automatic runtime).
+    jsx: "automatic",
+    // react-dom/server is CommonJS and requires Node built-ins (util, stream).
+    banner: { js: "import { createRequire as __evcCreateRequire } from 'node:module'; const require = __evcCreateRequire(import.meta.url);" },
     sourcemap: "inline",
     logLevel: "warning",
     // The staff UI imports a PNG; esbuild is used only by the graph test at runtime.
