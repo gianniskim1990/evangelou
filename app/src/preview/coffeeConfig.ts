@@ -150,17 +150,15 @@ export type CoffeeOrder = {
   coffee: CoffeeCode | null;
   choices: Partial<Record<GroupId, string>>;
   extras: ExtraId[];
-  /** Tapped quick notes: typed, pruned like any other option when the coffee changes. */
+  /**
+   * Tapped quick notes: typed ids from the catalogue, pruned like any other
+   * option when the coffee changes. The order is STRUCTURED ONLY (owner decision
+   * 2026-10-13): there is no free-text field of any kind.
+   */
   quickNotes: QuickNoteId[];
-  /** Optional free text. Kept on a coffee change, but then flagged for review. */
-  note: string;
-  /** True when the coffee changed after free text was written: staff must re-read it. */
-  noteReview: boolean;
 };
 
-export const EMPTY_ORDER: CoffeeOrder = { coffee: null, choices: {}, extras: [], quickNotes: [], note: "", noteReview: false };
-
-export const NOTE_MAX = 80;
+export const EMPTY_ORDER: CoffeeOrder = { coffee: null, choices: {}, extras: [], quickNotes: [] };
 
 const ORDER: GroupId[] = ["shots", "sweetness", "sweetener", "milk", "ice", "foam"];
 
@@ -182,7 +180,7 @@ export function extrasFor(coffee: CoffeeCode | null): ExtraId[] {
 
 /** Drop every choice or extra the current coffee (or sweetness) no longer supports. */
 function normalize(order: CoffeeOrder): CoffeeOrder {
-  if (!order.coffee) return { ...order, choices: {}, extras: [], quickNotes: [] };
+  if (!order.coffee) return { ...EMPTY_ORDER };
   const visible = visibleGroups(order);
   const coffee = order.coffee;
   const choices: Partial<Record<GroupId, string>> = {};
@@ -191,17 +189,16 @@ function normalize(order: CoffeeOrder): CoffeeOrder {
     if (v !== undefined && optionsFor(coffee, g).some((o) => o.id === v)) choices[g] = v;
   }
   // Removing an unsupported sweetness can hide the sweetener: settle once more.
-  const settled = { ...order, choices };
+  const settled: CoffeeOrder = { coffee: order.coffee, choices, extras: order.extras, quickNotes: order.quickNotes };
   const again = visibleGroups(settled);
   for (const g of Object.keys(choices) as GroupId[]) if (!again.includes(g)) delete choices[g];
   const allowedNotes = quickNotesFor(coffee).map((q) => q.id);
-  return { ...settled, choices, extras: order.extras.filter((e) => PROFILES[coffee].extras.includes(e)), quickNotes: resolveExclusive(order.quickNotes.filter((q) => allowedNotes.includes(q))) };
+  // Rebuilt from the known fields only: nothing else an input object carries survives.
+  return { coffee, choices, extras: order.extras.filter((e) => PROFILES[coffee].extras.includes(e)), quickNotes: resolveExclusive(order.quickNotes.filter((q) => allowedNotes.includes(q))) };
 }
 
 export function selectCoffee(order: CoffeeOrder, coffee: CoffeeCode): CoffeeOrder {
-  // Free text cannot be checked against the new coffee, so it is kept but flagged for review.
-  const changed = order.coffee !== null && order.coffee !== coffee;
-  return normalize({ ...order, coffee, noteReview: order.noteReview || (changed && order.note.trim() !== "") });
+  return normalize({ ...order, coffee });
 }
 
 /** Set (or clear with null) one choice; options the coffee does not support are ignored. */
@@ -235,50 +232,21 @@ export function toggleQuickNote(order: CoffeeOrder, id: QuickNoteId): CoffeeOrde
   return { ...order, quickNotes };
 }
 
-/** Single line, collapsed whitespace, at most NOTE_MAX characters. */
-export function cleanNote(raw: string): string {
-  return raw.replace(/\s+/g, " ").replace(/^\s+/, "").slice(0, NOTE_MAX);
-}
-
-/** Editing the free text counts as reviewing it. */
-export function setNote(order: CoffeeOrder, raw: string): CoffeeOrder {
-  const note = cleanNote(raw);
-  return { ...order, note, noteReview: order.noteReview && note.trim() !== "" && note === order.note };
-}
-
-/** Staff confirm the free text still fits the current coffee. */
-export function confirmNote(order: CoffeeOrder): CoffeeOrder {
-  return { ...order, noteReview: false };
-}
-
-/**
- * The free text is for preparation only. This is a basic heuristic that refuses
- * obvious phone/card numbers and e-mail addresses; it does NOT validate the
- * text's meaning or catch every kind of personal data.
- */
-export function noteProblem(note: string): string | null {
-  const digits = note.replace(/[\s.\-/]/g, "").match(/\d{6,}/);
-  if (digits || note.includes("@")) return "Οι οδηγίες είναι μόνο για την παρασκευή. Μην γράφετε τηλέφωνα, e-mail ή στοιχεία πληρωμής.";
-  return null;
-}
-
 /** Labels of the required choices still missing (coffee first). */
 export function missing(order: CoffeeOrder): string[] {
   if (!order.coffee) return ["Καφές"];
-  const gaps = visibleGroups(order)
+  return visibleGroups(order)
     .filter((g) => GROUPS[g].required && order.choices[g] === undefined)
     .map((g) => groupLabel(order.coffee, g));
-  return order.noteReview ? [...gaps, "Έλεγχος οδηγιών"] : gaps;
 }
 
 export function isComplete(order: CoffeeOrder): boolean {
-  return missing(order).length === 0 && noteProblem(order.note) === null;
+  return missing(order).length === 0;
 }
 
-/** Quick notes (catalogue labels) followed by the free text. */
-export function noteParts(order: CoffeeOrder): string[] {
-  const quick = QUICK_NOTES.filter((q) => order.quickNotes.includes(q.id)).map((q) => q.label);
-  return order.note.trim() ? [...quick, order.note.trim()] : quick;
+/** Labels of the selected quick notes (catalogue order). */
+export function quickNoteLabels(order: CoffeeOrder): string[] {
+  return QUICK_NOTES.filter((q) => order.quickNotes.includes(q.id)).map((q) => q.label);
 }
 
 function optionLabel(group: GroupId, id: string, field: "label" | "summary"): string {
@@ -294,7 +262,7 @@ export function preparationRows(order: CoffeeOrder): [string, string][] {
     if (v !== undefined) rows.push([groupLabel(order.coffee, g), optionLabel(g, v, "label")]);
   }
   if (order.extras.length) rows.push(["Επιπλέον", order.extras.map((e) => EXTRAS[e].label).join(", ")]);
-  if (noteParts(order).length) rows.push(["Οδηγίες", noteParts(order).join(", ")]);
+  if (quickNoteLabels(order).length) rows.push(["Οδηγίες", quickNoteLabels(order).join(", ")]);
   return rows;
 }
 
@@ -307,7 +275,7 @@ export function preparationLine(order: CoffeeOrder): string {
     if (v !== undefined) parts.push(optionLabel(g, v, "summary"));
   }
   for (const e of order.extras) parts.push(EXTRAS[e].summary);
-  for (const n of noteParts(order)) parts.push(`«${n}»`);
+  for (const n of quickNoteLabels(order)) parts.push(`«${n}»`);
   return parts.join(", ");
 }
 
@@ -365,8 +333,6 @@ export type OrderAction =
   | { type: "choice"; group: GroupId; value: string | null }
   | { type: "extra"; extra: ExtraId }
   | { type: "quick-note"; id: QuickNoteId }
-  | { type: "note"; note: string }
-  | { type: "note-ok" }
   | { type: "prefill"; order: CoffeeOrder }
   | { type: "reset" };
 
@@ -386,15 +352,14 @@ export function orderReducer(state: OrderState, action: OrderAction): OrderState
       return { ...state, order: toggleExtra(state.order, action.extra) };
     case "quick-note":
       return { ...state, order: toggleQuickNote(state.order, action.id) };
-    case "note":
-      return { ...state, order: setNote(state.order, action.note) };
-    case "note-ok":
-      return { ...state, order: confirmNote(state.order) };
     case "prefill":
       // A copy: today's order may change without touching the member's usual preference.
-      return action.order.coffee ? { ...state, order: normalize({ ...action.order, choices: { ...action.order.choices }, extras: [...action.order.extras], quickNotes: [...action.order.quickNotes], noteReview: false }) } : state;
+      return action.order.coffee ? { ...state, order: normalize({ coffee: action.order.coffee, choices: { ...action.order.choices }, extras: [...action.order.extras], quickNotes: [...action.order.quickNotes] }) } : state;
     case "reset":
       return { ...state, order: EMPTY_ORDER };
+    default:
+      // Unknown actions (including any attempt to add text) change nothing.
+      return state;
   }
 }
 
@@ -411,9 +376,9 @@ export function orderReducer(state: OrderState, action: OrderAction): OrderState
  * - The drink is a SNAPSHOT of that transaction (codes plus the labels shown
  *   at the counter and the catalogue version), so later catalogue edits do not
  *   rewrite history and the member's usual preference is a separate thing.
- * - Quick notes are typed ids from the catalogue (only those valid for the
- *   coffee); the free-text note is optional, short (≤ 80) and preparation-only.
- *   Its personal-data check is a heuristic, not full validation.
+ * - STRUCTURED ONLY (owner decision 2026-10-13): modifiers and quick notes are
+ *   typed ids from the catalogue (quick notes only if valid for the coffee).
+ *   There is no free-text note field, no text persistence and no text hash.
  * - Final catalogue, modifier availability and any surcharge need separate
  *   owner approval.
  */
@@ -428,7 +393,6 @@ export type RedemptionPreparationSnapshot = {
   coffee: { code: CoffeeCode; label: string };
   modifiers: { group: GroupId | ExtraId; option: string; label: string }[];
   quickNotes: { id: QuickNoteId; label: string }[];
-  note: string | null;
 };
 
 /** Entitlement key: preparation is deliberately NOT part of it. */
@@ -445,5 +409,5 @@ export function toSnapshot(order: CoffeeOrder, meta: { redemptionId: string; mem
     if (v !== undefined) modifiers.push({ group: g, option: v, label: optionLabel(g, v, "label") });
   }
   for (const e of order.extras) modifiers.push({ group: e, option: "yes", label: EXTRAS[e].label });
-  return { ...meta, catalogueVersion: "preview-illustrative", coffee: { code: order.coffee, label: coffeeName(order.coffee) }, modifiers, quickNotes: QUICK_NOTES.filter((q) => order.quickNotes.includes(q.id)).map((q) => ({ id: q.id, label: q.label })), note: order.note.trim() || null };
+  return { ...meta, catalogueVersion: "preview-illustrative", coffee: { code: order.coffee, label: coffeeName(order.coffee) }, modifiers, quickNotes: QUICK_NOTES.filter((q) => order.quickNotes.includes(q.id)).map((q) => ({ id: q.id, label: q.label })) };
 }
