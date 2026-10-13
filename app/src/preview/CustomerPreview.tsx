@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { CLUB_RULES, CUSTOMER, addDays, coffeeName, greekDate, memberHistory, shortGreekDate, type PreviewMembershipState } from "./previewData";
+import { CLUB_RULES, CUSTOMER, addDays, coffeeName, greekDate, memberHistory, type PreviewMembershipState } from "./previewData";
 import { cx, type CustomerScreen } from "./screens";
-import { Card, Eyebrow, GhostButton, Icon, PreviewOnly, PrimaryButton, SampleQr, ScreenTitle, StatusBadge } from "./ui";
+import { ClubWelcome, MemberPass } from "./CustomerSignature";
+import { Card, Eyebrow, GhostButton, Icon, PreviewOnly, PrimaryButton, ScreenTitle, StatusBadge } from "./ui";
 
 /* UI-01 design preview — Customer Club (visual only, synthetic data). */
 
@@ -15,6 +16,9 @@ type Props = {
 
 export function CustomerPreview(props: Props) {
   const { screen, go } = props;
+  // UI-01.R1 signature screens (new design system, full-bleed).
+  if (screen === "welcome") return <ClubWelcome go={go} />;
+  if (screen === "card") return <MemberPass {...props} />;
   const inApp = !["welcome", "register", "newsletter", "offer"].includes(screen);
   return (
     <div className="mx-auto w-full max-w-[440px] md:my-6 md:overflow-hidden md:rounded-[34px] md:border md:border-espresso/15 md:shadow-[0_24px_60px_-30px_rgba(30,24,18,0.45)]">
@@ -24,12 +28,10 @@ export function CustomerPreview(props: Props) {
           <span className="rounded-full bg-[#efe6d2] px-2.5 py-1 text-[11px] font-semibold text-bronze-dark">Club</span>
         </div>
         <div className="flex-1 px-5 pt-3 pb-6">
-          {screen === "welcome" && <Welcome go={go} />}
           {screen === "register" && <Register go={go} />}
           {screen === "newsletter" && <Newsletter go={go} />}
           {screen === "offer" && <Offer go={go} />}
           {screen === "dashboard" && <Dashboard {...props} />}
-          {screen === "card" && <MemberCard {...props} />}
           {screen === "states" && <States today={props.today} />}
           {screen === "today" && <Today {...props} />}
           {screen === "history" && <History today={props.today} />}
@@ -58,37 +60,6 @@ function TabBar({ screen, go }: { screen: CustomerScreen; go: (s: CustomerScreen
         </button>
       ))}
     </nav>
-  );
-}
-
-function Welcome({ go }: { go: (s: CustomerScreen) => void }) {
-  return (
-    <div>
-      <div className="relative mb-6 overflow-hidden rounded-3xl bg-espresso px-6 pt-8 pb-7 text-cream">
-        <div className="absolute -top-16 -right-16 h-48 w-48 rounded-full bg-bronze/30" aria-hidden="true" />
-        <div className="absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-bronze/20" aria-hidden="true" />
-        <p className="relative text-[11px] font-semibold tracking-[0.16em] text-[#d9c9a0] uppercase">Evangelou Club</p>
-        <h1 className="font-literata relative mt-2 text-[30px] leading-[1.15] font-semibold">Ο καφές σας,<br />κάθε μέρα.</h1>
-        <p className="relative mt-3 text-[15px] leading-relaxed text-cream/80">Γίνετε μέλος και απολαύστε έναν δωρεάν καφέ κάθε μέρα στο κατάστημα.</p>
-      </div>
-      <ul className="mb-7 space-y-3.5">
-        {[
-          { icon: "coffee" as const, t: "1 δωρεάν καφές την ημέρα", d: "Κάθε ημερολογιακή ημέρα (ώρα Ελλάδας)." },
-          { icon: "card" as const, t: "Ψηφιακή κάρτα μέλους", d: "Δείχνετε τον κωδικό σας στο ταμείο." },
-          { icon: "calendar" as const, t: `${CLUB_RULES.monthlyPriceEur} € τον μήνα`, d: "Χωρίς δέσμευση — ανανέωση με δική σας επιλογή." },
-        ].map((b) => (
-          <li key={b.t} className="flex gap-3.5">
-            <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[#efe6d2] text-bronze-dark"><Icon name={b.icon} /></span>
-            <span>
-              <span className="block text-[15px] font-semibold">{b.t}</span>
-              <span className="block text-[13.5px] text-espresso/60">{b.d}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
-      <PrimaryButton className="w-full" onClick={() => go("register")}>Ξεκινήστε <Icon name="arrow" size={16} /></PrimaryButton>
-      <button type="button" onClick={() => go("dashboard")} className="mt-3 w-full py-2 text-[14px] font-semibold text-bronze-dark">Είμαι ήδη μέλος</button>
-    </div>
   );
 }
 
@@ -250,30 +221,6 @@ function Dashboard({ state, coffeeUsedToday, today, go }: Props) {
           <span className="block text-[12px] text-espresso/50">{CUSTOMER.visitsThisMonth} καφέδες τον μήνα</span>
         </button>
       </div>
-    </div>
-  );
-}
-
-function MemberCard({ state, today }: Props) {
-  const until = paidUntil(state, today);
-  return (
-    <div>
-      <ScreenTitle eyebrow="Κάρτα μέλους" title="Δείξτε τον κωδικό στο ταμείο" />
-      <div className="overflow-hidden rounded-3xl bg-espresso text-cream shadow-[0_20px_40px_-24px_rgba(30,24,18,0.7)]">
-        <div className="flex items-center justify-between px-6 pt-5">
-          <span className="font-literata text-[18px] font-semibold">Evangelou Club</span>
-          <StatusBadge state={state} />
-        </div>
-        <div className="px-6 pt-1 pb-5 text-[13px] text-cream/70">{CUSTOMER.name}</div>
-        <div className="flex justify-center bg-cream/95 px-6 py-6">
-          <SampleQr seed={11} size={210} />
-        </div>
-        <div className="flex justify-between px-6 py-4 text-[12.5px] text-cream/70">
-          <span>Μέλος από {shortGreekDate(CUSTOMER.memberSince)}</span>
-          <span>{until ? `Έως ${shortGreekDate(until)}` : "Αναμονή πληρωμής"}</span>
-        </div>
-      </div>
-      <PreviewOnly>Το QR είναι ΔΕΙΓΜΑ: δεν αντιστοιχεί σε μέλος, δεν σαρώνεται και δεν εξαργυρώνεται.</PreviewOnly>
     </div>
   );
 }

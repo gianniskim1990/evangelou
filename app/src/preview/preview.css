@@ -1,0 +1,183 @@
+/* UI-01.R1 design preview: scoped design tokens (loaded only with the preview chunk).
+ *
+ * Type: Commissioner by Kostas Bartsokas, a Greek-designed variable family.
+ * Its FLAR (flair) axis gives the flared display voice; plain for UI text.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Commissioner:wght,FLAR,VOLM@100..900,0..100,0..100&display=swap");
+
+.evc-ds {
+  --roast: #1e1713;
+  --roast-2: #2a211b;
+  --roast-3: #3a2e25;
+  --stone: #e6dfd3;
+  --milk: #f8f6f1;
+  --paper: #fffdf9;
+  --ink: #221b16;
+  --ink-2: #5e544b;
+  --ink-3: #8c8278;
+  --rule: #ddd5c8;
+  --rule-strong: #c9bfae;
+  --bronze: #8b7650;
+  --bronze-deep: #6a5a3c;
+  --brass: #c8b27c;
+  --brass-soft: rgba(200, 178, 124, 0.32);
+  --ok: #1f6a47;
+  --ok-tint: #e2efe6;
+  --stop: #9a2f2b;
+  --stop-tint: #f6e3e1;
+  --wait: #8a6212;
+  --wait-tint: #f5ead2;
+
+  font-family: "Commissioner", var(--font-commissioner), system-ui, sans-serif;
+  font-variation-settings: "FLAR" 0, "VOLM" 0;
+  color: var(--ink);
+  font-feature-settings: "kern", "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Type scale (perfect fourth, 16px base) ---------------------------------- */
+.evc-ds .t-display {
+  font-variation-settings: "FLAR" 100, "VOLM" 40;
+  font-weight: 640;
+  font-size: clamp(2.6rem, 6.4vw, 4.75rem);
+  line-height: 0.98;
+  letter-spacing: -0.028em;
+}
+.evc-ds .t-headline {
+  font-variation-settings: "FLAR" 100, "VOLM" 20;
+  font-weight: 620;
+  font-size: clamp(1.75rem, 3.2vw, 2.4rem);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+.evc-ds .t-title {
+  font-variation-settings: "FLAR" 60, "VOLM" 0;
+  font-weight: 600;
+  font-size: 1.3125rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.evc-ds .t-lede {
+  font-size: 1.125rem;
+  line-height: 1.55;
+  font-weight: 420;
+}
+.evc-ds .t-body {
+  font-size: 1rem;
+  line-height: 1.55;
+  font-weight: 420;
+}
+.evc-ds .t-small {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  font-weight: 460;
+}
+.evc-ds .t-label {
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  font-weight: 560;
+  letter-spacing: 0.01em;
+}
+.evc-ds .t-num {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum", "lnum";
+}
+.evc-ds .t-figure {
+  font-variation-settings: "FLAR" 100, "VOLM" 60;
+  font-weight: 560;
+  font-size: clamp(2.25rem, 4vw, 3rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* ---- Interaction ---------------------------------------------------------------- */
+.evc-ds .press {
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.evc-ds .press:active {
+  transform: translateY(1px) scale(0.99);
+}
+.evc-ds :focus-visible {
+  outline: 2px solid var(--bronze);
+  outline-offset: 3px;
+}
+.evc-ds .on-dark :focus-visible,
+.evc-ds .on-dark:focus-visible {
+  outline-color: var(--brass);
+}
+
+/* ---- The one orchestrated moment per screen ------------------------------------- */
+@keyframes evc-pass-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(18px) rotateX(10deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes evc-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes evc-sheen {
+  from {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(260%) skewX(-18deg);
+  }
+}
+.evc-ds .pass-arrive {
+  animation: evc-pass-arrive 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: 50% 100%;
+}
+.evc-ds .pass-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 244, 214, 0.1), transparent);
+  animation: evc-sheen 1600ms 700ms cubic-bezier(0.4, 0, 0.2, 1) 1 both;
+  pointer-events: none;
+}
+.evc-ds .fade-in {
+  animation: evc-fade 700ms ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .evc-ds .pass-arrive,
+  .evc-ds .fade-in,
+  .evc-ds .pass-sheen::after {
+    animation: none;
+  }
+  .evc-ds .press {
+    transition: none;
+  }
+}
+
+/* ---- Tables ------------------------------------------------------------------------ */
+.evc-ds .ledger th {
+  font-size: 0.75rem;
+  font-weight: 560;
+  color: var(--ink-3);
+  text-align: left;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.evc-ds .ledger td {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+}
+.evc-ds .ledger tbody tr {
+  transition: background-color 120ms ease;
+}
+.evc-ds .ledger tbody tr:hover {
+  background: rgba(139, 118, 80, 0.06);
+}

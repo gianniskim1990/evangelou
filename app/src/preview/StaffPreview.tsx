@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { COFFEES, MEMBERS, addDays, coffeeName, greekDate, memberById, memberHistory, todaysRedemptions, type CoffeeCode, type PreviewMember } from "./previewData";
 import { cx, type StaffScreen } from "./screens";
+import { StaffCounter } from "./StaffSignature";
 import { Avatar, Card, Eyebrow, GhostButton, Icon, PreviewOnly, PrimaryButton, ScreenTitle, StatusBadge } from "./ui";
 
 /* UI-01 design preview — Staff Club counter flow (visual only). The REAL
@@ -23,6 +24,8 @@ export function StaffPreview({ screen, go, today }: { screen: StaffScreen; go: (
     setCoffee(null);
     go("member");
   };
+  // UI-01.R1 signature screen (new design system, full-bleed).
+  if (screen === "dashboard") return <StaffCounter go={go} today={today} openMember={openMember} />;
   return (
     <div className="mx-auto w-full max-w-[1024px] md:my-6 md:overflow-hidden md:rounded-[28px] md:border md:border-espresso/15 md:shadow-[0_24px_60px_-30px_rgba(30,24,18,0.45)]">
       <header className="flex items-center justify-between gap-3 border-b border-espresso/12 bg-surface px-5 py-3.5 md:px-7">
@@ -36,7 +39,6 @@ export function StaffPreview({ screen, go, today }: { screen: StaffScreen; go: (
         </div>
       </header>
       <div className="min-h-[640px] bg-cream px-5 py-6 md:px-8 md:py-8">
-        {screen === "dashboard" && <Dashboard go={go} today={today} openMember={openMember} />}
         {screen === "scan" && <Scan openMember={openMember} />}
         {screen === "search" && <Search openMember={openMember} />}
         {screen === "member" && <MemberSummary member={member} today={today} go={go} openMember={openMember} />}
@@ -45,49 +47,6 @@ export function StaffPreview({ screen, go, today }: { screen: StaffScreen; go: (
         {screen === "blocked" && <Blocked today={today} openMember={openMember} />}
         {screen === "history" && <MemberHistory member={member} today={today} />}
       </div>
-    </div>
-  );
-}
-
-function Dashboard({ go, today, openMember }: { go: (s: StaffScreen) => void; today: string; openMember: (id: string) => void }) {
-  const served = todaysRedemptions(today);
-  return (
-    <div>
-      <ScreenTitle eyebrow="Ταμείο" title="Καλή βάρδια" lead="Σαρώστε την κάρτα μέλους ή αναζητήστε με τηλέφωνο." />
-      <div className="grid gap-4 md:grid-cols-2">
-        <button type="button" onClick={() => go("scan")} className="flex items-center gap-4 rounded-2xl bg-espresso p-6 text-left text-cream">
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-bronze/45"><Icon name="qr" size={28} /></span>
-          <span>
-            <span className="font-literata block text-[21px] font-semibold">Σάρωση κάρτας</span>
-            <span className="block text-[13.5px] text-cream/70">Κάμερα tablet</span>
-          </span>
-        </button>
-        <button type="button" onClick={() => go("search")} className="flex items-center gap-4 rounded-2xl border border-espresso/15 bg-surface p-6 text-left">
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#efe6d2] text-bronze-dark"><Icon name="search" size={28} /></span>
-          <span>
-            <span className="font-literata block text-[21px] font-semibold">Αναζήτηση τηλεφώνου</span>
-            <span className="block text-[13.5px] text-espresso/55">Όταν δεν υπάρχει κάρτα</span>
-          </span>
-        </button>
-      </div>
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <Card><p className="text-[12px] text-espresso/55">Καφέδες Club σήμερα</p><p className="font-literata mt-1 text-[30px] font-semibold">{served.length}</p></Card>
-        <Card><p className="text-[12px] text-espresso/55">Ενεργά μέλη</p><p className="font-literata mt-1 text-[30px] font-semibold">{MEMBERS.filter((m) => m.state === "active").length}</p></Card>
-        <Card><p className="text-[12px] text-espresso/55">Τελευταία εξαργύρωση</p><p className="font-literata mt-1 text-[30px] font-semibold">{served[served.length - 1]?.time ?? "—"}</p></Card>
-      </div>
-      <Card className="mt-4 p-0">
-        <p className="border-b border-espresso/8 px-5 py-3 text-[13px] font-semibold text-espresso/70">Σήμερα (δείγμα)</p>
-        {served.map((r) => {
-          const m = memberById(r.memberId);
-          return (
-            <button key={r.memberId} type="button" onClick={() => openMember(m.id)} className="flex w-full items-center gap-3 border-b border-espresso/8 px-5 py-3 text-left last:border-0">
-              <Avatar initials={m.initials} size={36} />
-              <span className="flex-1 text-[14px] font-medium">{m.name}</span>
-              <span className="text-[13px] text-espresso/55">{coffeeName(r.coffee)} · {r.time}</span>
-            </button>
-          );
-        })}
-      </Card>
     </div>
   );
 }

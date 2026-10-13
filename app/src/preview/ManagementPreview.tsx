@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { CLUB_RULES, COFFEES, MEMBERS, addDays, coffeeName, greekDate, memberById, memberHistory, redemptionHistory, shortGreekDate, todaysRedemptions, type PreviewMembershipState } from "./previewData";
-import { cx, type ManagementScreen } from "./screens";
-import { Avatar, BarChart, Card, Eyebrow, Icon, PreviewOnly, ScreenTitle, Stat, StatusBadge } from "./ui";
+import type { ManagementScreen } from "./screens";
+import { ManagementFrame, ManagementOverview, MembersDirectory } from "./ManagementSignature";
+import { Avatar, BarChart, Card, Eyebrow, PreviewOnly, ScreenTitle, Stat, StatusBadge } from "./ui";
 
 /* UI-01 design preview — Club management (read-only, synthetic). This is NOT
  * the ordering AdminApp and has no create/edit/activate/cancel/payment action. */
@@ -12,106 +13,22 @@ export function ManagementPreview({ screen, go, today }: { screen: ManagementScr
     setMemberId(id);
     go("member");
   };
+  // UI-01.R1 signature screens (new design system, full-bleed).
+  if (screen === "overview" || screen === "members") {
+    return (
+      <ManagementFrame screen={screen} go={go}>
+        {screen === "overview" ? <ManagementOverview today={today} go={go} openMember={openMember} /> : <MembersDirectory today={today} openMember={openMember} />}
+      </ManagementFrame>
+    );
+  }
   return (
     <div className="mx-auto w-full max-w-[1180px] px-4 py-6 md:px-8 md:py-8">
-      {screen === "overview" && <Overview today={today} go={go} openMember={openMember} />}
-      {screen === "members" && <Members today={today} openMember={openMember} />}
       {screen === "member" && <MemberDetails id={memberId} today={today} />}
       {screen === "statuses" && <Statuses today={today} openMember={openMember} />}
       {screen === "activity" && <Activity today={today} />}
       {screen === "preferences" && <Preferences today={today} />}
       {screen === "analytics" && <Analytics today={today} />}
       {screen === "settings" && <Settings />}
-    </div>
-  );
-}
-
-function dailySeries(today: string, days: number) {
-  const hist = redemptionHistory(today, days);
-  return Array.from({ length: days }, (_, i) => {
-    const date = addDays(today, -(days - i));
-    return { label: shortGreekDate(date), value: hist.filter((r) => r.date === date).length };
-  });
-}
-
-function Overview({ today, go, openMember }: { today: string; go: (s: ManagementScreen) => void; openMember: (id: string) => void }) {
-  const active = MEMBERS.filter((m) => m.state === "active");
-  const series = dailySeries(today, 14);
-  const month = redemptionHistory(today, 30).length;
-  const expiringSoon = active.filter((m) => m.paidUntilOffsetDays <= 5);
-  return (
-    <div>
-      <ScreenTitle eyebrow="Διαχείριση Club" title="Επισκόπηση" lead="Δείγμα δεδομένων για τον σχεδιασμό — όχι πραγματικά μέλη." />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Ενεργά μέλη" value={String(active.length)} hint={`από ${MEMBERS.length} εγγεγραμμένα`} />
-        <Stat label="Καφέδες σήμερα" value={String(todaysRedemptions(today).length)} hint="1 ανά μέλος / ημέρα" />
-        <Stat label="Καφέδες 30 ημερών" value={String(month)} />
-        <Stat label="Λήγουν σε ≤ 5 ημέρες" value={String(expiringSoon.length)} hint="Χειροκίνητη ανανέωση" />
-      </div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-        <Card>
-          <div className="mb-4 flex items-baseline justify-between">
-            <p className="text-[15px] font-semibold">Δωρεάν καφέδες ανά ημέρα</p>
-            <span className="text-[12px] text-espresso/50">Τελευταίες 14 ημέρες</span>
-          </div>
-          <BarChart data={series} label="Δωρεάν καφέδες ανά ημέρα, τελευταίες 14 ημέρες" />
-        </Card>
-        <Card className="p-0">
-          <div className="flex items-center justify-between border-b border-espresso/8 px-5 py-3.5">
-            <p className="text-[15px] font-semibold">Χρειάζονται ανανέωση</p>
-            <button type="button" onClick={() => go("statuses")} className="text-[13px] font-semibold text-bronze-dark">Όλα</button>
-          </div>
-          {[...expiringSoon, ...MEMBERS.filter((m) => m.state !== "active")].slice(0, 5).map((m) => (
-            <button key={m.id} type="button" onClick={() => openMember(m.id)} className="flex w-full items-center gap-3 border-b border-espresso/8 px-5 py-3 text-left last:border-0 hover:bg-cream">
-              <Avatar initials={m.initials} size={34} />
-              <span className="flex-1 text-[14px] font-medium">{m.name}</span>
-              <StatusBadge state={m.state} />
-            </button>
-          ))}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function Members({ today, openMember }: { today: string; openMember: (id: string) => void }) {
-  const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<PreviewMembershipState | "all">("all");
-  const rows = MEMBERS.filter((m) => (filter === "all" || m.state === filter) && m.name.toLowerCase().includes(q.toLowerCase()));
-  return (
-    <div>
-      <ScreenTitle eyebrow="Μέλη" title="Κατάλογος μελών" />
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <label className="flex flex-1 items-center gap-2 rounded-xl border border-espresso/15 bg-surface px-3.5 py-2.5 md:max-w-[340px]">
-          <Icon name="search" size={18} className="text-espresso/45" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Αναζήτηση ονόματος" className="w-full bg-transparent text-[14px] outline-none" />
-        </label>
-        <div className="flex gap-1.5 rounded-xl bg-hairline/60 p-1">
-          {([["all", "Όλα"], ["active", "Ενεργά"], ["pending", "Αναμονή"], ["expired", "Έληξαν"]] as const).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setFilter(k)} className={cx("rounded-lg px-3 py-1.5 text-[13px] font-semibold", filter === k ? "bg-surface shadow-sm" : "text-espresso/55")}>{l}</button>
-          ))}
-        </div>
-      </div>
-      <Card className="overflow-x-auto p-0">
-        <table className="w-full min-w-[640px] text-left text-[14px]">
-          <thead className="border-b border-espresso/10 text-[12px] text-espresso/55">
-            <tr><th className="px-5 py-3 font-semibold">Μέλος</th><th className="px-3 py-3 font-semibold">Τηλέφωνο</th><th className="px-3 py-3 font-semibold">Κατάσταση</th><th className="px-3 py-3 font-semibold">Ισχύει έως</th><th className="px-5 py-3 text-right font-semibold">Καφέδες μήνα</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((m) => (
-              <tr key={m.id} onClick={() => openMember(m.id)} className="cursor-pointer border-b border-espresso/8 last:border-0 hover:bg-cream">
-                <td className="px-5 py-3"><span className="flex items-center gap-3"><Avatar initials={m.initials} size={34} /><span className="font-medium">{m.name}</span></span></td>
-                <td className="px-3 py-3 text-espresso/60 tabular-nums">{m.phoneMasked}</td>
-                <td className="px-3 py-3"><StatusBadge state={m.state} /></td>
-                <td className="px-3 py-3 text-espresso/70">{m.state === "pending" ? "—" : shortGreekDate(addDays(today, m.paidUntilOffsetDays))}</td>
-                <td className="px-5 py-3 text-right tabular-nums">{m.visitsThisMonth}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={5} className="px-5 py-6 text-center text-espresso/50">Κανένα μέλος δεν ταιριάζει.</td></tr>}
-          </tbody>
-        </table>
-      </Card>
-      <PreviewOnly>Ο κατάλογος είναι μόνο για προβολή· δημιουργία, επεξεργασία, ενεργοποίηση ή ακύρωση μελών δεν υπάρχει στην προεπισκόπηση.</PreviewOnly>
     </div>
   );
 }
