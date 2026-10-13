@@ -55,7 +55,7 @@ export function ClubPreviewApp() {
     setMembership(v === "used" ? "active" : (v as PreviewMembershipState));
     setCoffeeUsed(v === "used");
   };
-  const control = "t-label min-h-9 rounded-full border border-[var(--brass-soft)] bg-[var(--roast-2)] px-3 text-[var(--milk)] hover:border-[var(--brass)]";
+  const control = "t-label min-h-10 rounded-full border border-[var(--brass-soft)] bg-[var(--roast-2)] px-3 text-[var(--milk)] hover:border-[var(--brass)]";
 
   return (
     <div className="evc-ds min-h-screen bg-[#ece7df]" data-evc-preview={PREVIEW_MARKER}>

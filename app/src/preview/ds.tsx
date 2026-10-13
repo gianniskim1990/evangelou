@@ -3,10 +3,9 @@ import type { PreviewMembershipState } from "./previewData";
 import { cx, sampleQrModules } from "./screens";
 
 /*
- * UI-01.R1 design preview: primitives of the "contemporary coffee club"
- * system (scoped by .evc-ds in preview.css). Presentational only, no data
- * access. Used by the five signature screens; the remaining preview screens
- * still use ui.tsx until the direction is approved.
+ * Design preview: primitives of the approved "contemporary coffee club"
+ * system (scoped by .evc-ds in preview.css), shared by all 26 preview
+ * screens. Presentational only, no data access.
  */
 
 export function Logo({ className }: { className?: string }) {
@@ -127,5 +126,60 @@ export function Glyph({ name, size = 20, className }: { name: "scan" | "phone" |
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
       {d[name]}
     </svg>
+  );
+}
+
+/** Read-only sample text field (the preview never submits or stores anything). */
+export function Field({ label, value, type = "text", hint }: { label: string; value: string; type?: string; hint?: string }) {
+  return (
+    <label className="block">
+      <span className="t-label block text-[var(--ink)]">{label}</span>
+      <input type={type} defaultValue={value} readOnly className="t-body mt-2 min-h-13 w-full rounded-[12px] border border-[var(--rule-strong)] bg-[var(--paper)] px-4 text-[var(--ink)] outline-none focus:border-[var(--ink)]" />
+      {hint && <span className="t-small mt-1.5 block text-[var(--ink-3)]">{hint}</span>}
+    </label>
+  );
+}
+
+/** A real sequence (onboarding steps), so numbering carries meaning here. */
+export function Steps({ steps, active }: { steps: string[]; active: number }) {
+  return (
+    <ol className="m-0 grid list-none gap-3 p-0" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }} aria-label="Βήματα εγγραφής">
+      {steps.map((s, i) => (
+        <li key={s} aria-current={i === active ? "step" : undefined} className={cx("border-t-2 pt-2.5", i <= active ? "border-[var(--roast)]" : "border-[var(--rule-strong)]")}>
+          <span className={cx("t-small t-num block", i === active ? "font-semibold text-[var(--ink)]" : "text-[var(--ink-3)]")}>
+            {i + 1}. {s}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** A consent choice as a ruled row with a large checkbox; each consent is independent. */
+export function ConsentRow({ checked, onChange, title, body, required }: { checked: boolean; onChange: (v: boolean) => void; title: string; body: string; required?: boolean }) {
+  return (
+    <label className="grid cursor-pointer grid-cols-[1.75rem_minmax(0,1fr)] gap-4 border-b border-[var(--rule-strong)] py-5">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 h-6 w-6 accent-[#1e1713]" />
+      <span>
+        <span className="t-title block text-[var(--ink)]">
+          {title} <span className="t-small font-normal text-[var(--ink-3)]">{required ? "απαιτείται" : "προαιρετικό"}</span>
+        </span>
+        <span className="t-body mt-1.5 block max-w-[52ch] text-[var(--ink-2)]">{body}</span>
+      </span>
+    </label>
+  );
+}
+
+/** Two-column definition rows used by profile, member and settings screens. */
+export function DefRows({ rows, dark = false, className }: { rows: [string, ReactNode][]; dark?: boolean; className?: string }) {
+  return (
+    <dl className={cx("m-0", className)}>
+      {rows.map(([k, v]) => (
+        <div key={k} className={cx("grid gap-x-6 gap-y-1 border-b py-3.5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-baseline", dark ? "border-[var(--brass-soft)]" : "border-[var(--rule)]")}>
+          <dt className={cx("t-small", dark ? "text-[var(--milk)]/60" : "text-[var(--ink-2)]")}>{k}</dt>
+          <dd className={cx("t-body m-0", dark ? "text-[var(--milk)]" : "text-[var(--ink)]")}>{v}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

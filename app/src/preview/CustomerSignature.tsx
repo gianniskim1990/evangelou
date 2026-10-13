@@ -22,7 +22,7 @@ export function ClubWelcome({ go }: { go: (screen: CustomerScreen) => void }) {
     <div className="min-h-[calc(100svh-52px)] bg-[var(--stone)]">
       <header className="mx-auto flex max-w-[1280px] items-center justify-between px-5 py-5 md:px-10 md:py-7">
         <Logo className="h-8 md:h-10" />
-        <button type="button" onClick={() => go("card")} className="press t-label rounded-full px-1 py-2 text-[var(--ink-2)] underline decoration-[var(--rule-strong)] underline-offset-[6px] hover:text-[var(--ink)] hover:decoration-[var(--ink)]">
+        <button type="button" onClick={() => go("card")} className="press t-label -my-1 rounded-full px-1 py-3 text-[var(--ink-2)] underline decoration-[var(--rule-strong)] underline-offset-[6px] hover:text-[var(--ink)] hover:decoration-[var(--ink)]">
           Έχω ήδη κάρτα
         </button>
       </header>
@@ -55,7 +55,7 @@ export function ClubWelcome({ go }: { go: (screen: CustomerScreen) => void }) {
 
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
             <Btn onClick={() => go("register")} className="px-8">Γίνετε μέλος</Btn>
-            <button type="button" onClick={() => go("offer")} className="press t-label py-2 text-[var(--ink-2)] underline decoration-[var(--rule-strong)] underline-offset-[6px] hover:text-[var(--ink)] hover:decoration-[var(--ink)]">
+            <button type="button" onClick={() => go("offer")} className="press t-label -my-1 py-3 text-[var(--ink-2)] underline decoration-[var(--rule-strong)] underline-offset-[6px] hover:text-[var(--ink)] hover:decoration-[var(--ink)]">
               Δείτε τους όρους
             </button>
           </div>
@@ -99,7 +99,7 @@ export function MemberPass({ go, state, coffeeUsedToday, today }: Props) {
   return (
     <div className="on-dark min-h-[calc(100svh-52px)] bg-[var(--roast)] text-[var(--milk)]">
       <header className="mx-auto flex max-w-[1080px] items-center justify-between px-5 py-4 md:px-10 md:py-6">
-        <button type="button" onClick={() => go("dashboard")} className="press t-label -ml-2 flex items-center gap-1 rounded-full py-2 pr-3 pl-1 text-[var(--milk)]/75 hover:text-[var(--milk)]">
+        <button type="button" onClick={() => go("dashboard")} className="press t-label -my-1 -ml-2 flex items-center gap-1 rounded-full py-3 pr-3 pl-1 text-[var(--milk)]/75 hover:text-[var(--milk)]">
           <Glyph name="back" size={20} />
           Αρχική
         </button>
