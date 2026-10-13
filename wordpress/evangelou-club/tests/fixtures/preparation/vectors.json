@@ -1,0 +1,1158 @@
+{
+  "description": "UI-03C shared preparation-contract vectors. Generated once from the TypeScript implementation; BOTH the PHP and TypeScript test suites must reproduce every expectation. Illustrative catalogue only (not an approved menu).",
+  "catalogue": "catalogue-illustrative.json",
+  "cases": [
+    {
+      "name": "ok_espresso_sweet_stevia",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "sweetener",
+            "option": "stevia"
+          },
+          {
+            "group": "shots",
+            "option": "double"
+          },
+          {
+            "group": "sweetness",
+            "option": "medium"
+          }
+        ],
+        "quick_notes": [
+          "very_hot",
+          "takeaway"
+        ]
+      },
+      "expect": {
+        "kind": "ok",
+        "canonical": "evc-prep-v1\ncatalogue_version=1\ncoffee=espresso\nmodifier=shots:double\nmodifier=sweetener:stevia\nmodifier=sweetness:medium\nquick_note=takeaway\nquick_note=very_hot",
+        "prep_hash": "6df6fd44fc3a197eaab08ab0284b787d0e2733ae8983648bfd9ae24a5c22ef58"
+      }
+    },
+    {
+      "name": "ok_espresso_plain",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "ok",
+        "canonical": "evc-prep-v1\ncatalogue_version=1\ncoffee=espresso\nmodifier=shots:single\nmodifier=sweetness:none",
+        "prep_hash": "8dfffe62fc1e83c0c93ef87de55c9a7e2bbd9a8eb08f26e52d42d0967eb76b5f"
+      }
+    },
+    {
+      "name": "ok_freddo_cappuccino_full_a",
+      "coffee_code": "freddo_cappuccino",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "double"
+          },
+          {
+            "group": "sweetness",
+            "option": "medium"
+          },
+          {
+            "group": "sweetener",
+            "option": "brown"
+          },
+          {
+            "group": "milk",
+            "option": "lactose_free"
+          },
+          {
+            "group": "ice",
+            "option": "little"
+          },
+          {
+            "group": "foam",
+            "option": "extra"
+          },
+          {
+            "group": "caffeine",
+            "option": "decaf"
+          }
+        ],
+        "quick_notes": [
+          "no_straw",
+          "cinnamon"
+        ]
+      },
+      "expect": {
+        "kind": "ok",
+        "canonical": "evc-prep-v1\ncatalogue_version=1\ncoffee=freddo_cappuccino\nmodifier=caffeine:decaf\nmodifier=foam:extra\nmodifier=ice:little\nmodifier=milk:lactose_free\nmodifier=shots:double\nmodifier=sweetener:brown\nmodifier=sweetness:medium\nquick_note=cinnamon\nquick_note=no_straw",
+        "prep_hash": "b8730b4a8c63164e25a3f122b0719f2c17c05b3a0bc5513305baa57c073af3bf"
+      }
+    },
+    {
+      "name": "ok_freddo_cappuccino_full_b",
+      "coffee_code": "freddo_cappuccino",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "caffeine",
+            "option": "decaf"
+          },
+          {
+            "group": "foam",
+            "option": "extra"
+          },
+          {
+            "group": "milk",
+            "option": "lactose_free"
+          },
+          {
+            "group": "sweetener",
+            "option": "brown"
+          },
+          {
+            "group": "ice",
+            "option": "little"
+          },
+          {
+            "group": "sweetness",
+            "option": "medium"
+          },
+          {
+            "group": "shots",
+            "option": "double"
+          }
+        ],
+        "quick_notes": [
+          "cinnamon",
+          "no_straw"
+        ]
+      },
+      "expect": {
+        "kind": "ok",
+        "canonical": "evc-prep-v1\ncatalogue_version=1\ncoffee=freddo_cappuccino\nmodifier=caffeine:decaf\nmodifier=foam:extra\nmodifier=ice:little\nmodifier=milk:lactose_free\nmodifier=shots:double\nmodifier=sweetener:brown\nmodifier=sweetness:medium\nquick_note=cinnamon\nquick_note=no_straw",
+        "prep_hash": "b8730b4a8c63164e25a3f122b0719f2c17c05b3a0bc5513305baa57c073af3bf"
+      }
+    },
+    {
+      "name": "ok_filter_plain_milk",
+      "coffee_code": "filter_coffee",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "milk",
+            "option": "regular"
+          }
+        ],
+        "quick_notes": [
+          "takeaway"
+        ]
+      },
+      "expect": {
+        "kind": "ok",
+        "canonical": "evc-prep-v1\ncatalogue_version=1\ncoffee=filter_coffee\nmodifier=milk:regular\nmodifier=sweetness:none\nquick_note=takeaway",
+        "prep_hash": "061af1f5236cb8b316c0ebfb459f121495722b49e8fd7e92fa209cfb324ae09c"
+      }
+    },
+    {
+      "name": "ok_greek_sweet_brown",
+      "coffee_code": "greek_coffee",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "double"
+          },
+          {
+            "group": "sweetness",
+            "option": "sweet"
+          },
+          {
+            "group": "sweetener",
+            "option": "brown"
+          }
+        ],
+        "quick_notes": [
+          "lukewarm"
+        ]
+      },
+      "expect": {
+        "kind": "ok",
+        "canonical": "evc-prep-v1\ncatalogue_version=1\ncoffee=greek_coffee\nmodifier=shots:double\nmodifier=sweetener:brown\nmodifier=sweetness:sweet\nquick_note=lukewarm",
+        "prep_hash": "96d4003afb0b93575882ac6ab067ed3c90781dfb9dfd406b8fcdfe44218ac3b0"
+      }
+    },
+    {
+      "name": "ok_note_null_tolerated",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [],
+        "note": null
+      },
+      "expect": {
+        "kind": "ok",
+        "canonical": "evc-prep-v1\ncatalogue_version=1\ncoffee=espresso\nmodifier=shots:single\nmodifier=sweetness:none",
+        "prep_hash": "8dfffe62fc1e83c0c93ef87de55c9a7e2bbd9a8eb08f26e52d42d0967eb76b5f"
+      }
+    },
+    {
+      "name": "ok_freddo_espresso_no_milk",
+      "coffee_code": "freddo_espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "double"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "milk",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [
+          "ice_side"
+        ]
+      },
+      "expect": {
+        "kind": "ok",
+        "canonical": "evc-prep-v1\ncatalogue_version=1\ncoffee=freddo_espresso\nmodifier=milk:none\nmodifier=shots:double\nmodifier=sweetness:none\nquick_note=ice_side",
+        "prep_hash": "5a7ba203bd66a587a641377aecb7c6b93d376367953db4b170957d198d033f81"
+      }
+    },
+    {
+      "name": "note_empty_string_rejected",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [],
+        "note": ""
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "free_text_not_supported"
+      }
+    },
+    {
+      "name": "note_text_rejected",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [],
+        "note": "λίγο πάγο"
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "free_text_not_supported"
+      }
+    },
+    {
+      "name": "note_object_rejected",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [],
+        "quick_notes": [],
+        "note": {
+          "text": "x"
+        }
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "free_text_not_supported"
+      }
+    },
+    {
+      "name": "duplicate_group",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "shots",
+            "option": "double"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "duplicate_group"
+      }
+    },
+    {
+      "name": "duplicate_quick_note",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [
+          "takeaway",
+          "takeaway"
+        ]
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "duplicate_quick_note"
+      }
+    },
+    {
+      "name": "hyphenated_coffee_code",
+      "coffee_code": "freddo-espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "milk",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_coffee",
+        "reason": null
+      }
+    },
+    {
+      "name": "unknown_coffee",
+      "coffee_code": "mocha",
+      "preparation": {
+        "modifiers": [],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_coffee",
+        "reason": null
+      }
+    },
+    {
+      "name": "unknown_group",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "milk",
+            "option": "regular"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "unknown_group"
+      }
+    },
+    {
+      "name": "unknown_option",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "triple"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "unknown_option"
+      }
+    },
+    {
+      "name": "cappuccino_without_milk_option",
+      "coffee_code": "cappuccino",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "milk",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "unknown_option"
+      }
+    },
+    {
+      "name": "hidden_sweetener_with_plain",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "sweetener",
+            "option": "white"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "hidden_group_present"
+      }
+    },
+    {
+      "name": "required_shots_missing",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "required_missing"
+      }
+    },
+    {
+      "name": "required_sweetener_missing",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "medium"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "required_missing"
+      }
+    },
+    {
+      "name": "required_milk_missing_cold",
+      "coffee_code": "freddo_espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "required_missing"
+      }
+    },
+    {
+      "name": "too_many_quick_notes",
+      "coffee_code": "cappuccino",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "milk",
+            "option": "regular"
+          }
+        ],
+        "quick_notes": [
+          "takeaway",
+          "very_hot",
+          "cinnamon",
+          "cocoa",
+          "lukewarm"
+        ]
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "too_many_quick_notes"
+      }
+    },
+    {
+      "name": "unknown_quick_note",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [
+          "extra_hot"
+        ]
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "unknown_quick_note"
+      }
+    },
+    {
+      "name": "hot_note_on_cold_coffee",
+      "coffee_code": "freddo_espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "milk",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [
+          "very_hot"
+        ]
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "quick_note_not_applicable"
+      }
+    },
+    {
+      "name": "ice_note_on_hot_coffee",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [
+          "ice_side"
+        ]
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "quick_note_not_applicable"
+      }
+    },
+    {
+      "name": "foam_note_without_foam",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [
+          "cinnamon"
+        ]
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "quick_note_not_applicable"
+      }
+    },
+    {
+      "name": "temperature_exclusive_conflict",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [
+          "very_hot",
+          "lukewarm"
+        ]
+      },
+      "expect": {
+        "kind": "invalid_preparation",
+        "reason": "exclusive_conflict"
+      }
+    },
+    {
+      "name": "modifier_uppercase_option",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "Double"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_request",
+        "reason": "modifier_shape"
+      }
+    },
+    {
+      "name": "modifier_hyphenated_option",
+      "coffee_code": "cappuccino",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          },
+          {
+            "group": "milk",
+            "option": "lactose-free"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_request",
+        "reason": "modifier_shape"
+      }
+    },
+    {
+      "name": "modifier_extra_key",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single",
+            "price": 0
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_request",
+        "reason": "modifier_shape"
+      }
+    },
+    {
+      "name": "preparation_missing_quick_notes",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ]
+      },
+      "expect": {
+        "kind": "invalid_request",
+        "reason": "preparation_shape"
+      }
+    },
+    {
+      "name": "preparation_extra_key",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [],
+        "surcharge": 0.5
+      },
+      "expect": {
+        "kind": "invalid_request",
+        "reason": "preparation_shape"
+      }
+    },
+    {
+      "name": "preparation_not_object",
+      "coffee_code": "espresso",
+      "preparation": [
+        "shots",
+        "single"
+      ],
+      "expect": {
+        "kind": "invalid_request",
+        "reason": "preparation_shape"
+      }
+    },
+    {
+      "name": "too_many_modifiers",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "group_a",
+            "option": "single"
+          },
+          {
+            "group": "group_b",
+            "option": "single"
+          },
+          {
+            "group": "group_c",
+            "option": "single"
+          },
+          {
+            "group": "group_d",
+            "option": "single"
+          },
+          {
+            "group": "group_e",
+            "option": "single"
+          },
+          {
+            "group": "group_f",
+            "option": "single"
+          },
+          {
+            "group": "group_g",
+            "option": "single"
+          },
+          {
+            "group": "group_h",
+            "option": "single"
+          },
+          {
+            "group": "group_i",
+            "option": "single"
+          },
+          {
+            "group": "group_j",
+            "option": "single"
+          },
+          {
+            "group": "group_k",
+            "option": "single"
+          },
+          {
+            "group": "group_l",
+            "option": "single"
+          },
+          {
+            "group": "group_m",
+            "option": "single"
+          }
+        ],
+        "quick_notes": []
+      },
+      "expect": {
+        "kind": "invalid_request",
+        "reason": "preparation_shape"
+      }
+    },
+    {
+      "name": "quick_note_not_string",
+      "coffee_code": "espresso",
+      "preparation": {
+        "modifiers": [
+          {
+            "group": "shots",
+            "option": "single"
+          },
+          {
+            "group": "sweetness",
+            "option": "none"
+          }
+        ],
+        "quick_notes": [
+          7
+        ]
+      },
+      "expect": {
+        "kind": "invalid_request",
+        "reason": "quick_note_shape"
+      }
+    }
+  ],
+  "equivalent": [
+    [
+      "ok_freddo_cappuccino_full_a",
+      "ok_freddo_cappuccino_full_b"
+    ],
+    [
+      "ok_espresso_plain",
+      "ok_note_null_tolerated"
+    ]
+  ],
+  "fingerprints": [
+    {
+      "case": "ok_espresso_sweet_stevia",
+      "member_public_id": "mem_0123456789abcdef0123456789abcdef",
+      "benefit_type": "free_coffee",
+      "staff_wp_user_id": 7,
+      "prep_hash": "6df6fd44fc3a197eaab08ab0284b787d0e2733ae8983648bfd9ae24a5c22ef58",
+      "fingerprint_v2": "a9e47ad501a295f48a9eeb518d2763ebb578735cac2ec572331c21b9c040c3cb"
+    },
+    {
+      "case": "ok_freddo_cappuccino_full_a",
+      "member_public_id": "mem_0123456789abcdef0123456789abcdef",
+      "benefit_type": "free_coffee",
+      "staff_wp_user_id": 7,
+      "prep_hash": "b8730b4a8c63164e25a3f122b0719f2c17c05b3a0bc5513305baa57c073af3bf",
+      "fingerprint_v2": "7c93b02801bee98d4b3836617f98ecabd41145a560a84456cf44dcc43247aaa0"
+    }
+  ],
+  "fingerprint_v1_reference": {
+    "member_public_id": "mem_0123456789abcdef0123456789abcdef",
+    "benefit_type": "free_coffee",
+    "coffee_code": "espresso",
+    "staff_wp_user_id": 7,
+    "fingerprint_v1": "266c55bbc9437cab83613e5dc440ac4d5fb03a5d9832fd052155e89e33054448"
+  },
+  "catalogue_rejections": [
+    {
+      "name": "status_not_allowed",
+      "path": [
+        "status"
+      ],
+      "value": "approved_by_staff",
+      "reason": "status"
+    },
+    {
+      "name": "pricing_policy_decided",
+      "path": [
+        "pricing_policy"
+      ],
+      "value": "surcharge",
+      "reason": "pricing_policy"
+    },
+    {
+      "name": "free_text_enabled",
+      "path": [
+        "free_text_note"
+      ],
+      "value": true,
+      "reason": "free_text_note"
+    },
+    {
+      "name": "version_zero",
+      "path": [
+        "catalogue_version"
+      ],
+      "value": 0,
+      "reason": "catalogue_version"
+    },
+    {
+      "name": "max_quick_notes_too_high",
+      "path": [
+        "max_quick_notes"
+      ],
+      "value": 9,
+      "reason": "max_quick_notes"
+    },
+    {
+      "name": "unknown_top_level_key",
+      "path": [
+        "surcharges"
+      ],
+      "value": {},
+      "reason": "shape"
+    },
+    {
+      "name": "hyphenated_coffee_code",
+      "path": [
+        "coffees",
+        1,
+        "code"
+      ],
+      "value": "freddo-espresso",
+      "reason": "coffee"
+    },
+    {
+      "name": "hot_note_marked_cold",
+      "path": [
+        "quick_notes",
+        1,
+        "applies_to"
+      ],
+      "value": "cold",
+      "reason": "quick_note_not_applicable_to_coffee"
+    },
+    {
+      "name": "hot_note_on_cold_coffee",
+      "path": [
+        "coffees",
+        1,
+        "quick_notes"
+      ],
+      "value": [
+        "very_hot"
+      ],
+      "reason": "quick_note_not_applicable_to_coffee"
+    },
+    {
+      "name": "cold_note_on_hot_coffee",
+      "path": [
+        "coffees",
+        0,
+        "quick_notes"
+      ],
+      "value": [
+        "ice_side"
+      ],
+      "reason": "quick_note_not_applicable_to_coffee"
+    },
+    {
+      "name": "foam_note_on_espresso",
+      "path": [
+        "coffees",
+        0,
+        "quick_notes"
+      ],
+      "value": [
+        "cinnamon"
+      ],
+      "reason": "quick_note_not_applicable_to_coffee"
+    },
+    {
+      "name": "exclusive_single_member",
+      "path": [
+        "exclusive_quick_notes"
+      ],
+      "value": [
+        [
+          "very_hot"
+        ]
+      ],
+      "reason": "exclusive_set"
+    },
+    {
+      "name": "visible_when_unknown_group",
+      "path": [
+        "coffees",
+        0,
+        "groups",
+        2,
+        "visible_when"
+      ],
+      "value": {
+        "group": "milk",
+        "not_in": [
+          "none"
+        ]
+      },
+      "reason": "visible_when"
+    },
+    {
+      "name": "visible_when_unknown_option",
+      "path": [
+        "coffees",
+        0,
+        "groups",
+        2,
+        "visible_when"
+      ],
+      "value": {
+        "group": "sweetness",
+        "not_in": [
+          "zero"
+        ]
+      },
+      "reason": "visible_when"
+    },
+    {
+      "name": "visible_when_both_modes",
+      "path": [
+        "coffees",
+        0,
+        "groups",
+        2,
+        "visible_when"
+      ],
+      "value": {
+        "group": "sweetness",
+        "in": [
+          "medium"
+        ],
+        "not_in": [
+          "none"
+        ]
+      },
+      "reason": "visible_when"
+    },
+    {
+      "name": "group_label_control_char",
+      "path": [
+        "coffees",
+        0,
+        "groups",
+        0,
+        "label"
+      ],
+      "value": "Δόση\u0007",
+      "reason": "group"
+    },
+    {
+      "name": "duplicate_option_id",
+      "path": [
+        "coffees",
+        0,
+        "groups",
+        0,
+        "options",
+        1,
+        "id"
+      ],
+      "value": "single",
+      "reason": "option"
+    },
+    {
+      "name": "option_has_price",
+      "path": [
+        "coffees",
+        0,
+        "groups",
+        0,
+        "options",
+        1,
+        "price"
+      ],
+      "value": 0.5,
+      "reason": "option"
+    }
+  ]
+}

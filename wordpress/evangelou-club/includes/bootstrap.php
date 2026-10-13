@@ -56,4 +56,10 @@ require_once $evc_includes . 'interface-evc-audit-log.php';
 require_once $evc_includes . 'class-evc-db-audit-log.php';
 require_once $evc_includes . 'class-evc-redemption-store.php';
 require_once $evc_includes . 'class-evc-redemption-service.php';
+// UI-03C preparation contract core: definitions only, NOT wired to REST or the
+// engine. Structured options only (no free text); the only catalogue is a
+// test-only illustrative fixture, which the precheck refuses outside tests.
+require_once $evc_includes . 'class-evc-prep-catalogue.php';
+require_once $evc_includes . 'class-evc-prep-contract.php';
+require_once $evc_includes . 'class-evc-prep-redeem-precheck.php';
 unset($evc_includes);
