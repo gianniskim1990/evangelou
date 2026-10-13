@@ -4,6 +4,7 @@ import { cx, type ManagementScreen } from "./screens";
 import { HourChart, ManagementFrame, ManagementOverview, MembersDirectory, Metric, SectionHead } from "./ManagementSignature";
 import { DefRows, Glyph, PreviewNote, StateMark } from "./ds";
 import { addCalendarMonths, daysWord, fmt } from "./format";
+import { GROUPS, historyPreparation, preparationLine, type CoffeeOrder, type GroupId } from "./coffeeConfig";
 
 /*
  * UI-02 design preview, Club management (read-only, synthetic). This is NOT
@@ -155,7 +156,10 @@ function MemberDetails({ member: m, today, go }: { member: PreviewMember; today:
             {[...(served ? [served] : []), ...hist].slice(0, 8).map((r) => (
               <tr key={r.date}>
                 <td className="t-body pr-4 text-[var(--ink)]">{r.date === today ? "Σήμερα" : greekDate(r.date, true)}</td>
-                <td className="t-body pr-4 text-[var(--ink)]">{coffeeName(r.coffee)}</td>
+                <td className="pr-4">
+                  <span className="t-body block text-[var(--ink)]">{coffeeName(r.coffee)}</span>
+                  <span className="t-small block text-[var(--ink-2)]">{preparationLine(historyPreparation(m, r.coffee, r.date))}</span>
+                </td>
                 <td className="t-small t-num text-right text-[var(--ink-2)]">{r.time}</td>
               </tr>
             ))}
@@ -273,10 +277,13 @@ function Activity({ today, openMember }: { today: string; openMember: (id: strin
             <ul className="m-0 list-none p-0">
               {g.rows.map((r) => (
                 <li key={`${r.date}-${r.memberId}`} className="border-b border-[var(--rule)]">
-                  <button type="button" onClick={() => openMember(r.memberId)} className="grid min-h-12 w-full grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-4 py-2 text-left hover:bg-[rgba(139,118,80,0.06)] sm:grid-cols-[4rem_minmax(0,1fr)_12rem]">
+                  <button type="button" onClick={() => openMember(r.memberId)} className="grid min-h-12 w-full grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-x-4 gap-y-0.5 py-2.5 text-left hover:bg-[rgba(139,118,80,0.06)] sm:grid-cols-[4rem_minmax(0,0.8fr)_minmax(0,1.2fr)]">
                     <span className="t-small t-num text-[var(--ink-3)]">{r.time}</span>
                     <span className="t-body truncate text-[var(--ink)]">{memberById(r.memberId).name}</span>
-                    <span className="t-small truncate text-right text-[var(--ink-2)] sm:text-left">{coffeeName(r.coffee)}</span>
+                    <span className="col-start-2 min-w-0 sm:col-start-auto">
+                      <span className="t-small block truncate text-[var(--ink)]">{coffeeName(r.coffee)}</span>
+                      <span className="t-small block truncate text-[var(--ink-3)]">{preparationLine(historyPreparation(memberById(r.memberId), r.coffee, r.date))}</span>
+                    </span>
                   </button>
                 </li>
               ))}
@@ -293,7 +300,10 @@ function Activity({ today, openMember }: { today: string; openMember: (id: strin
 // ---- Preferences ----------------------------------------------------------------------------
 
 function Preferences({ today }: { today: string }) {
-  const hist = useMemo(() => redemptionHistory(today, 30), [today]);
+  const { hist, preps } = useMemo(() => {
+    const h = redemptionHistory(today, 30);
+    return { hist: h, preps: h.map((r) => historyPreparation(memberById(r.memberId), r.coffee, r.date)) };
+  }, [today]);
   const served = COFFEES.map((c) => ({ code: c.code, label: c.label, note: c.note, value: hist.filter((r) => r.coffee === c.code).length })).sort((a, b) => b.value - a.value);
   const members = MEMBERS.filter((m) => m.state !== "pending");
   const favourites = COFFEES.map((c) => ({ label: c.label, value: members.filter((m) => m.favourite === c.code).length })).sort((a, b) => b.value - a.value);
@@ -334,7 +344,39 @@ function Preferences({ today }: { today: string }) {
           </ol>
         </section>
       </div>
-      <PreviewNote className="mt-12">Φανταστικά δεδομένα. Ο τελικός κατάλογος καφέδων Club αναμένει έγκριση από τον ιδιοκτήτη.</PreviewNote>
+      <section aria-labelledby="evc-pref-prep" className="mt-14">
+        <SectionHead id="evc-pref-prep" title="Πώς τον πίνουν" note="από την παρασκευή κάθε καφέ, 30 ημέρες" />
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-x-12 gap-y-8 md:grid-cols-3">
+          {(["sweetness", "sweetener", "milk"] as GroupId[]).map((g) => (
+            <PrepDistribution key={g} group={g} preps={preps} />
+          ))}
+        </div>
+      </section>
+      <PreviewNote className="mt-12">Φανταστικά δεδομένα. Ο τελικός κατάλογος καφέδων Club και οι επιλογές παρασκευής αναμένουν έγκριση από τον ιδιοκτήτη.</PreviewNote>
+    </div>
+  );
+}
+
+/** Share of each option among the coffees where the group applied (single series, bronze). */
+function PrepDistribution({ group, preps }: { group: GroupId; preps: CoffeeOrder[] }) {
+  const chosen = preps.map((p) => p.choices[group]).filter((v): v is string => v !== undefined);
+  const rows = GROUPS[group].options.map((o) => ({ label: o.label, value: chosen.filter((v) => v === o.id).length })).sort((a, b) => b.value - a.value);
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  return (
+    <div>
+      <h3 className="t-label flex items-baseline justify-between text-[var(--ink)]">
+        {GROUPS[group].label}
+        <span className="t-small t-num font-normal text-[var(--ink-3)]">{chosen.length} καφέδες</span>
+      </h3>
+      <ol className="m-0 mt-2 list-none p-0">
+        {rows.map((r) => (
+          <li key={r.label} className="grid grid-cols-[8rem_minmax(0,1fr)_2.75rem] items-center gap-3 border-b border-[var(--rule)] py-2.5">
+            <span className="t-small truncate text-[var(--ink)]">{r.label}</span>
+            <span className="h-2 rounded-r-[4px] bg-[var(--bronze)]" style={{ width: `${Math.max(2, (r.value / max) * 100)}%` }} aria-hidden="true" />
+            <span className="t-small t-num text-right text-[var(--ink-2)]">{Math.round((r.value / Math.max(1, chosen.length)) * 100)}%</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

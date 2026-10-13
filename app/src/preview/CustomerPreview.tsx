@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, CUSTOMER, addDays, coffeeName, greekDate, memberHistory, type PreviewMembershipState, type PreviewRedemption } from "./previewData";
 import { cx, type CustomerScreen } from "./screens";
 import { ClubWelcome, MemberPass } from "./CustomerSignature";
+import { historyPreparation, preparationLine } from "./coffeeConfig";
 import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote, StateMark, Steps } from "./ds";
 
 /*
@@ -375,7 +376,8 @@ function History({ today, state }: { today: string; state: PreviewMembershipStat
                   </span>
                   <span className="min-w-0">
                     <span className="t-body block font-medium text-[var(--ink)]">{coffeeName(r.coffee)}</span>
-                    <span className="t-small block text-[var(--ink-2)] first-letter:uppercase">{day}</span>
+                    <span className="t-small block text-[var(--ink-2)]">{preparationLine(historyPreparation(CUSTOMER, r.coffee, r.date))}</span>
+                    <span className="t-small block text-[var(--ink-3)] first-letter:uppercase">{day}</span>
                   </span>
                   <span className="t-small t-num text-[var(--ink-3)]">{r.time}</span>
                 </li>

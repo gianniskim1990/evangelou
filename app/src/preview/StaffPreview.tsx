@@ -1,5 +1,7 @@
-import { useState, type ReactNode } from "react";
-import { COFFEES, MEMBERS, addDays, coffeeName, greekDate, memberById, memberHistory, todaysRedemptions, type CoffeeCode, type PreviewMember } from "./previewData";
+import { useReducer, useState, type Dispatch, type ReactNode } from "react";
+import { MEMBERS, addDays, coffeeName, greekDate, memberById, memberHistory, todaysRedemptions, type PreviewMember } from "./previewData";
+import { EMPTY_ORDER, historyPreparation, isComplete, missing, orderReducer, preparationLine, usualOrder, type CoffeeOrder, type OrderAction } from "./coffeeConfig";
+import { CoffeeConfigurator, OrderSummary } from "./StaffOrder";
 import { cx, type StaffScreen } from "./screens";
 import { StaffCounter, StaffFrame } from "./StaffSignature";
 import { Btn, DefRows, Glyph, PreviewNote, StateMark } from "./ds";
@@ -32,12 +34,11 @@ const TONE_FG: Record<Tone, string> = { ok: "text-[var(--ok)]", stop: "text-[var
 const TONE_SOLID: Record<Tone, string> = { ok: "bg-[var(--ok)]", stop: "bg-[var(--stop)]", wait: "bg-[var(--wait)]" };
 
 export function StaffPreview({ screen, go, today }: { screen: StaffScreen; go: (s: StaffScreen) => void; today: string }) {
-  const [memberId, setMemberId] = useState("m01");
-  const [coffee, setCoffee] = useState<CoffeeCode | null>(null);
+  // One order per member visit: survives coffee <-> confirm navigation, cleared for a different member.
+  const [{ memberId, order }, dispatch] = useReducer(orderReducer, { memberId: "m01", order: EMPTY_ORDER });
   const member = memberById(memberId);
   const openMember = (id: string) => {
-    setMemberId(id);
-    setCoffee(null);
+    dispatch({ type: "open-member", memberId: id });
     go("member");
   };
   if (screen === "dashboard") return <StaffCounter go={go} today={today} openMember={openMember} />;
@@ -46,8 +47,8 @@ export function StaffPreview({ screen, go, today }: { screen: StaffScreen; go: (
       {screen === "scan" && <Scan go={go} openMember={openMember} />}
       {screen === "search" && <Search go={go} openMember={openMember} />}
       {screen === "member" && <MemberCheck member={member} today={today} go={go} openMember={openMember} />}
-      {screen === "coffee" && <CoffeeSelect member={member} coffee={coffee} setCoffee={setCoffee} go={go} />}
-      {screen === "confirm" && <Confirm member={member} coffee={coffee ?? member.favourite} today={today} go={go} />}
+      {screen === "coffee" && <CoffeeSelect member={member} order={order} dispatch={dispatch} go={go} />}
+      {screen === "confirm" && <Confirm member={member} order={order} dispatch={dispatch} today={today} go={go} />}
       {screen === "blocked" && <Blocked today={today} go={go} openMember={openMember} />}
       {screen === "history" && <MemberHistory member={member} today={today} go={go} />}
     </StaffFrame>
@@ -241,7 +242,7 @@ function MemberCheck({ member, today, go, openMember }: { member: PreviewMember;
               rows={[
                 ["Συνδρομή", <StateMark key="s" state={member.state} />],
                 ["Ισχύει έως", member.state === "pending" ? "Δεν έχει ενεργοποιηθεί" : greekDate(addDays(today, member.paidUntilOffsetDays))],
-                ["Συνήθως πίνει", coffeeName(member.favourite)],
+                ["Συνήθως", `${coffeeName(member.favourite)}, ${preparationLine(usualOrder(member))}`],
                 ["Μέλος από", greekDate(member.memberSince)],
               ]}
             />
@@ -260,85 +261,69 @@ function MemberCheck({ member, today, go, openMember }: { member: PreviewMember;
   );
 }
 
-function CoffeeSelect({ member, coffee, setCoffee, go }: { member: PreviewMember; coffee: CoffeeCode | null; setCoffee: (c: CoffeeCode) => void; go: (s: StaffScreen) => void }) {
-  const chosen = coffee ?? member.favourite;
+function CoffeeSelect({ member, order, dispatch, go }: { member: PreviewMember; order: CoffeeOrder; dispatch: Dispatch<OrderAction>; go: (s: StaffScreen) => void }) {
   return (
     <>
-      <FlowBar back="Μέλος" onBack={() => go("member")} title={member.name} />
-      <Page className="pb-32">
-        <h1 className="t-headline text-[var(--ink)]">Ποιος καφές σερβίρεται;</h1>
-        <p className="t-body mt-2 text-[var(--ink-2)]">Ο καφές που πίνει συνήθως το μέλος είναι ήδη επιλεγμένος. Ενδεικτικός κατάλογος, δεν έχει εγκριθεί ακόμη.</p>
-        <div role="radiogroup" aria-label="Καφές" className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3">
-          {COFFEES.map((c) => {
-            const on = chosen === c.code;
-            return (
-              <button key={c.code} type="button" role="radio" aria-checked={on} onClick={() => setCoffee(c.code)} className={cx("press flex min-h-28 flex-col justify-between rounded-[14px] border p-4 text-left md:p-5", on ? "on-dark border-[var(--roast)] bg-[var(--roast)] text-[var(--milk)]" : "border-[var(--rule-strong)] bg-[var(--paper)] text-[var(--ink)] hover:border-[var(--ink)]")}>
-                <span className="flex items-start justify-between gap-2">
-                  <span className="t-title">{c.label}</span>
-                  {on && <Glyph name="check" size={22} className="flex-none text-[var(--brass)]" />}
-                </span>
-                <span className={cx("t-small", on ? "text-[var(--milk)]/65" : "text-[var(--ink-2)]")}>
-                  {c.note}
-                  {c.code === member.favourite ? ", συνήθως αυτόν" : ""}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </Page>
-      <div className="sticky bottom-0 z-10 border-t border-[var(--rule)] bg-[var(--paper)]">
-        <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-4 px-5 py-3 md:px-8">
-          <p className="t-body min-w-0 truncate text-[var(--ink)]">
-            <span className="text-[var(--ink-2)]">Επιλογή: </span>
-            <strong className="font-semibold">{coffeeName(chosen)}</strong>
-          </p>
-          <button type="button" onClick={() => go("confirm")} className="press min-h-14 flex-none rounded-[12px] bg-[var(--roast)] px-8 text-[17px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Συνέχεια</button>
-        </div>
-      </div>
+      <FlowBar back="Μέλος" onBack={() => go("member")} title={`Καφές για: ${member.name}`} />
+      <CoffeeConfigurator member={member} order={order} dispatch={dispatch} onContinue={() => go("confirm")} />
     </>
   );
 }
 
-function Confirm({ member, coffee, today, go }: { member: PreviewMember; coffee: CoffeeCode; today: string; go: (s: StaffScreen) => void }) {
+/** The single notice used by every confirmation state (checked by tests and mutants). */
+const NOT_RECORDED = "Η «Επιβεβαίωση» δείχνει μόνο την επόμενη οθόνη. Δεν καλείται κανένα API και δεν καταχωρείται εξαργύρωση.";
+
+function Confirm({ member, order, dispatch, today, go }: { member: PreviewMember; order: CoffeeOrder; dispatch: Dispatch<OrderAction>; today: string; go: (s: StaffScreen) => void }) {
   const [done, setDone] = useState(false);
   if (done) {
     return (
-      <Page className="max-w-[640px] py-12 text-center md:py-16">
+      <Page className="max-w-[720px] py-10 md:py-14">
         <div data-evc-preview="not-recorded">
-          <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[var(--ok)] text-white">
-            <Glyph name="check" size={38} />
-          </span>
-          <h1 className="t-headline mt-6 text-[var(--ink)]">Ο καφές δόθηκε (προσομοίωση)</h1>
-          <p className="t-lede mt-2 text-[var(--ink-2)]">
-            {coffeeName(coffee)} για {member.name.split(" ")[0]}.
-          </p>
-          <p role="note" className="t-body mx-auto mt-6 max-w-[44ch] rounded-[12px] border-2 border-[var(--stop)] bg-[var(--stop-tint)] px-5 py-4 font-semibold text-[var(--stop)]">
-            ΔΕΙΓΜΑ: καμία εξαργύρωση δεν καταχωρήθηκε. Αυτή η οθόνη δείχνει μόνο πώς θα φαίνεται.
-          </p>
-          <button type="button" onClick={() => go("dashboard")} className="press mt-8 min-h-16 rounded-[14px] bg-[var(--roast)] px-10 text-[18px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επόμενος πελάτης</button>
+          <div className="text-center">
+            <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[var(--ok)] text-white">
+              <Glyph name="check" size={38} />
+            </span>
+            <h1 className="t-headline mt-6 text-[var(--ink)]">Ο καφές δόθηκε (προσομοίωση)</h1>
+            <p role="note" className="t-body mx-auto mt-6 max-w-[44ch] rounded-[12px] border-2 border-[var(--stop)] bg-[var(--stop-tint)] px-5 py-4 font-semibold text-[var(--stop)]">
+              ΔΕΙΓΜΑ: καμία εξαργύρωση δεν καταχωρήθηκε. Αυτή η οθόνη δείχνει μόνο πώς θα φαίνεται.
+            </p>
+          </div>
+          <div className="mt-8 rounded-[18px] border border-[var(--rule-strong)] bg-[var(--paper)] px-6 py-2">
+            <OrderSummary member={member} order={order} today={today} />
+          </div>
+          <div className="mt-8 text-center">
+            <button type="button" onClick={() => { dispatch({ type: "reset" }); go("dashboard"); }} className="press min-h-16 rounded-[14px] bg-[var(--roast)] px-10 text-[18px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επόμενος πελάτης</button>
+          </div>
         </div>
       </Page>
     );
   }
+  const complete = isComplete(order);
   return (
     <>
       <FlowBar back="Καφές" onBack={() => go("coffee")} title="Επιβεβαίωση δωρεάν καφέ" />
-      <Page className="max-w-[720px]">
-        <h1 className="t-headline text-[var(--ink)]">Επιβεβαιώστε τον καφέ</h1>
-        <div className="mt-6 rounded-[18px] border border-[var(--rule-strong)] bg-[var(--paper)] px-6 py-2">
-          <DefRows
-            rows={[
-              ["Μέλος", member.name],
-              ["Καφές", <span key="c" className="t-title">{coffeeName(coffee)}</span>],
-              ["Ημέρα", `${greekDate(today, true)}, ο 1 καφές της ημέρας`],
-            ]}
-          />
-        </div>
-        <div className="mt-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3">
-          <button type="button" onClick={() => go("coffee")} className="press min-h-16 rounded-[14px] border border-[var(--rule-strong)] text-[17px] font-semibold text-[var(--ink)] hover:border-[var(--ink)]">Αλλαγή</button>
-          <button type="button" onClick={() => setDone(true)} className="press min-h-16 rounded-[14px] bg-[var(--roast)] text-[18px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επιβεβαίωση</button>
-        </div>
-        <PreviewNote className="mt-6">Η «Επιβεβαίωση» δείχνει μόνο την επόμενη οθόνη. Δεν καλείται κανένα API και δεν καταχωρείται εξαργύρωση.</PreviewNote>
+      <Page className="max-w-[760px]">
+        <h1 className="t-headline text-[var(--ink)]">{complete ? "Επιβεβαιώστε τον καφέ" : "Η παραγγελία δεν είναι πλήρης"}</h1>
+        {complete ? (
+          <>
+            <div className="mt-6 rounded-[18px] border border-[var(--rule-strong)] bg-[var(--paper)] px-6 py-2">
+              <OrderSummary member={member} order={order} today={today} />
+            </div>
+            <div className="mt-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3">
+              <button type="button" onClick={() => go("coffee")} className="press min-h-16 rounded-[14px] border border-[var(--rule-strong)] text-[17px] font-semibold text-[var(--ink)] hover:border-[var(--ink)]">Αλλαγή</button>
+              <button type="button" onClick={() => setDone(true)} className="press min-h-16 rounded-[14px] bg-[var(--roast)] text-[18px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επιβεβαίωση</button>
+            </div>
+          </>
+        ) : (
+          <div className="mt-6">
+            <p className="t-body text-[var(--ink-2)]">Λείπει: {missing(order).join(", ") || "διόρθωση των οδηγιών"}. Τίποτα δεν συμπληρώνεται αυτόματα.</p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button type="button" onClick={() => go("coffee")} className="press min-h-16 rounded-[14px] bg-[var(--roast)] px-8 text-[18px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επιστροφή στον καφέ</button>
+              <Btn tone="line" onClick={() => dispatch({ type: "prefill", order: usualOrder(member) })} className="min-h-16 px-7">Δείγμα: η συνήθης επιλογή</Btn>
+            </div>
+          </div>
+        )}
+        <PreviewNote className="mt-6">{NOT_RECORDED}</PreviewNote>
       </Page>
     </>
   );
@@ -407,7 +392,10 @@ function MemberHistory({ member, today, go }: { member: PreviewMember; today: st
             {rows.map((r) => (
               <tr key={r.date}>
                 <td className="t-body pr-4 text-[var(--ink)]">{greekDate(r.date, true)}</td>
-                <td className="t-body pr-4 font-medium text-[var(--ink)]">{coffeeName(r.coffee)}</td>
+                <td className="pr-4">
+                  <span className="t-body block font-medium text-[var(--ink)]">{coffeeName(r.coffee)}</span>
+                  <span className="t-small block text-[var(--ink-2)]">{preparationLine(historyPreparation(member, r.coffee, r.date))}</span>
+                </td>
                 <td className="t-small t-num text-right text-[var(--ink-2)]">{r.time}</td>
               </tr>
             ))}

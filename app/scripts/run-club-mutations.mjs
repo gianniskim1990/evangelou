@@ -369,6 +369,48 @@ const mutants = [
     search: "Δεν καλείται κανένα API και δεν καταχωρείται εξαργύρωση.",
     replace: "Ο καφές καταχωρήθηκε.",
   },
+  {
+    id: "U14-sweetener-shown-without-sweetness",
+    file: "preview/coffeeConfig.ts",
+    search: '(g !== "sweetener" || (order.choices.sweetness !== undefined && order.choices.sweetness !== "none"))',
+    replace: "true",
+  },
+  {
+    id: "U15-coffee-change-keeps-incompatible-options",
+    file: "preview/coffeeConfig.ts",
+    search: "  return normalize({ ...order, coffee });",
+    replace: "  return { ...order, coffee };",
+  },
+  {
+    id: "U16-new-member-keeps-previous-order",
+    file: "preview/coffeeConfig.ts",
+    search: "      return action.memberId === state.memberId ? state : { memberId: action.memberId, order: EMPTY_ORDER };",
+    replace: "      return { ...state, memberId: action.memberId };",
+  },
+  {
+    id: "U17-required-choices-assumed",
+    file: "preview/coffeeConfig.ts",
+    search: ".filter((g) => GROUPS[g].required && order.choices[g] === undefined)",
+    replace: ".filter((g) => false && GROUPS[g].required && order.choices[g] === undefined)",
+  },
+  {
+    id: "U18-note-accepts-personal-data",
+    file: "preview/coffeeConfig.ts",
+    search: '  if (digits || note.includes("@")) return',
+    replace: '  if (false && (digits || note.includes("@"))) return',
+  },
+  {
+    id: "U19-continue-enabled-for-incomplete-order",
+    file: "preview/StaffOrder.tsx",
+    search: "disabled={!ready} onClick={onContinue}",
+    replace: "disabled={false} onClick={onContinue}",
+  },
+  {
+    id: "U20-summary-drops-extras",
+    file: "preview/coffeeConfig.ts",
+    search: '  if (order.extras.length) rows.push(["Επιπλέον", order.extras.map((e) => EXTRAS[e].label).join(", ")]);',
+    replace: "",
+  },
 ];
 
 const runSuite = () =>

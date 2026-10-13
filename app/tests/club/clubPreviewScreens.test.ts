@@ -87,6 +87,14 @@ describe("UI-02 approved business rules in rendered copy", () => {
     assert.ok(found >= 10, `payment/renewal buttons found: ${found}`);
   });
 
+  it("history and management show the exact preparation of each coffee", () => {
+    assert.match(text(staff.find((s) => s.id === "history")!.html), /(μονός|διπλός), [^,]+, /);
+    assert.match(text(management.find((s) => s.id === "activity")!.html), /(μονός|διπλός), /);
+    assert.match(text(management.find((s) => s.id === "member")!.html), /(μονός|διπλός), /);
+    assert.match(text(management.find((s) => s.id === "preferences")!.html), /Πώς τον πίνουν.*Ζάχαρη.*Γλυκαντικό.*Γάλα/);
+    assert.match(text(customer.find((s) => s.id === "history")!.html), /(μονός|διπλός), /);
+  });
+
   it("staff confirmation states that nothing is recorded", () => {
     assert.match(text(staff.find((s) => s.id === "confirm")!.html), /δεν καταχωρείται εξαργύρωση/);
   });
