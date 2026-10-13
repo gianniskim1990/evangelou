@@ -13,9 +13,10 @@ type Props = {
 
 export function ClubWelcome({ go }: { go: (screen: CustomerScreen) => void }) {
   const terms: { figure: string; title: string; body: string }[] = [
-    { figure: `${CLUB_RULES.monthlyPriceEur} €`, title: "τον μήνα", body: "Πληρώνετε μία φορά για 30 ημέρες. Δεν υπάρχει αυτόματη χρέωση· ανανεώνετε μόνο αν θέλετε." },
+    { figure: `${CLUB_RULES.monthlyPriceEur} €`, title: "τον μήνα", body: "Η συνδρομή ισχύει έναν ημερολογιακό μήνα και λήγει με ώρα Ελλάδας. Δεν υπάρχει αυτόματη χρέωση· ανανεώνετε μόνο αν θέλετε." },
     { figure: String(CLUB_RULES.coffeesPerAthensDay), title: "καφές κάθε μέρα", body: "Ο καφές της ημέρας ανανεώνεται στις 12 τα μεσάνυχτα, ώρα Ελλάδας." },
-    { figure: String(COFFEES.length), title: "επιλογές", body: COFFEES.map((c) => c.label).join(", ") + "." },
+    // The eligible coffee list is not owner-approved yet: shown as an example only.
+    { figure: String(COFFEES.length), title: "ενδεικτικές επιλογές", body: `Για παράδειγμα: ${COFFEES.map((c) => c.label).join(", ")}. Ο τελικός κατάλογος δεν έχει οριστικοποιηθεί.` },
   ];
   return (
     <div className="min-h-[calc(100svh-52px)] bg-[var(--stone)]">
@@ -148,9 +149,9 @@ export function MemberPass({ go, state, coffeeUsedToday, today }: Props) {
               </li>
             ))}
           </ol>
-          <dl className="t-small mt-10 grid max-w-[44ch] grid-cols-[minmax(0,1fr)_auto] gap-y-3 text-[var(--milk)]/60">
+          <dl className="t-small mt-10 grid max-w-[44ch] grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-3 [&>dt]:whitespace-nowrap text-[var(--milk)]/60">
             <dt>Ανανέωση</dt>
-            <dd className="m-0 text-right text-[var(--milk)]">Χειροκίνητη, {CLUB_RULES.monthlyPriceEur} € / 30 ημέρες</dd>
+            <dd className="m-0 text-right text-[var(--milk)]">Χειροκίνητη, {CLUB_RULES.monthlyPriceEur} € / ημερολογιακό μήνα</dd>
             <dt>Καφέδες αυτόν τον μήνα</dt>
             <dd className="t-num m-0 text-right text-[var(--milk)]">{CUSTOMER.visitsThisMonth}</dd>
           </dl>

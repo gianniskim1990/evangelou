@@ -327,6 +327,24 @@ const mutants = [
     search: "  const today = useMemo(() => athensToday(), []);",
     replace: "  const today = useMemo(() => athensToday(), []);\n  useEffect(() => { void fetch(\"/api/orders\"); }, []);",
   },
+  {
+    id: "U7-welcome-says-membership-lasts-30-days",
+    file: "preview/CustomerSignature.tsx",
+    search: "Η συνδρομή ισχύει έναν ημερολογιακό μήνα και λήγει με ώρα Ελλάδας.",
+    replace: "Πληρώνετε μία φορά για 30 ημέρες.",
+  },
+  {
+    id: "U8-pass-renewal-says-30-days",
+    file: "preview/CustomerSignature.tsx",
+    search: "€ / ημερολογιακό μήνα",
+    replace: "€ / 30 ημέρες",
+  },
+  {
+    id: "U9-coffee-list-advertised-as-final",
+    file: "preview/CustomerSignature.tsx",
+    search: 'title: "ενδεικτικές επιλογές", body: `Για παράδειγμα: ${COFFEES.map((c) => c.label).join(", ")}. Ο τελικός κατάλογος δεν έχει οριστικοποιηθεί.`',
+    replace: 'title: "επιλογές", body: `${COFFEES.map((c) => c.label).join(", ")}.`',
+  },
 ];
 
 const runSuite = () =>

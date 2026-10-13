@@ -8,6 +8,9 @@ import { isClubPreviewPath, resolveEntry } from "../../src/entryRoute";
 import { clubPreviewEnabled } from "../../src/preview/buildFlag";
 import { MEMBERS, PREVIEW_MARKER, addDays, athensToday, redemptionHistory, todaysRedemptions } from "../../src/preview/previewData";
 import { parsePreviewPath, sampleQrModules } from "../../src/preview/screens";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ClubWelcome, MemberPass } from "../../src/preview/CustomerSignature";
 
 /**
  * UI-01 design preview: route isolation, build gating and bundle isolation.
@@ -147,5 +150,35 @@ describe("club preview synthetic data", () => {
     assert.deepEqual(sampleQrModules(11), sampleQrModules(11));
     assert.notDeepEqual(sampleQrModules(11), sampleQrModules(12));
     assert.ok(sampleQrModules(11).length > 100);
+  });
+});
+
+describe("UI-01.R1a membership copy accuracy (rendered customer screens)", () => {
+  // Approved rule: EUR 20 buys ONE CALENDAR MONTH, expiring on Europe/Athens
+  // time, renewed manually. It is never "30 days".
+  const today = "2026-10-13";
+  const go = () => {};
+  const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+  const welcome = text(renderToStaticMarkup(createElement(ClubWelcome, { go })));
+  const passes = (["active", "pending", "expired"] as const).flatMap((state) =>
+    [false, true].map((coffeeUsedToday) => text(renderToStaticMarkup(createElement(MemberPass, { go, state, coffeeUsedToday, today })))),
+  );
+  const THIRTY_DAYS = /30\s*(ημέρ|ημερ|μέρ|days?)/i;
+
+  it("never describes the membership period as 30 days", () => {
+    for (const screen of [welcome, ...passes]) assert.doesNotMatch(screen, THIRTY_DAYS);
+  });
+
+  it("states one calendar month, Athens expiry and manual renewal", () => {
+    assert.match(welcome, /ημερολογιακό μήνα/);
+    assert.match(welcome, /ώρα Ελλάδας/);
+    assert.match(welcome, /Δεν υπάρχει αυτόματη χρέωση/);
+    assert.match(passes[0], /Χειροκίνητη, 20 € \/ ημερολογιακό μήνα/);
+  });
+
+  it("presents the coffee list as illustrative, not a finalized catalogue", () => {
+    assert.match(welcome, /ενδεικτικές επιλογές/);
+    assert.match(welcome, /Για παράδειγμα: Espresso/);
+    assert.match(welcome, /Ο τελικός κατάλογος δεν έχει οριστικοποιηθεί/);
   });
 });
