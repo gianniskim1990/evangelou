@@ -62,4 +62,9 @@ require_once $evc_includes . 'class-evc-redemption-service.php';
 require_once $evc_includes . 'class-evc-prep-catalogue.php';
 require_once $evc_includes . 'class-evc-prep-contract.php';
 require_once $evc_includes . 'class-evc-prep-redeem-precheck.php';
+// UI-03D.A atomic redemption + preparation transaction model: definitions only,
+// NOT wired. No store or catalogue authority implementation ships (the packager
+// rejects one); only test fakes exist.
+require_once $evc_includes . 'class-evc-prep-snapshot.php';
+require_once $evc_includes . 'class-evc-prepared-redemption.php';
 unset($evc_includes);

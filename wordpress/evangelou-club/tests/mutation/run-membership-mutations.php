@@ -9,7 +9,9 @@
  * and Task 1D-I (I1-I17: canonical payment identity, key ring, trust gate)
  * and Task 1D-I.R1 (J1-J7: gate approval provenance, cross-version refund-first,
  * pinned-fingerprint minting, row-ref stability) and Task 1D-I.R2 (K1-K4:
- * historical key integrity before minting).
+ * historical key integrity before minting) and UI-03C (M1-M14: preparation
+ * contract core) and UI-03D.A (N1-N28: atomic redemption + preparation
+ * transaction model, incl. the in-memory store's atomicity).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -703,6 +705,175 @@ $mutants = array(
         'file' => 'includes/class-evc-prep-contract.php',
         'search' => "if (\$groups[\$group]['required'] && !isset(\$modifiers[\$group])) {",
         'replace' => 'if (false) {',
+    ),
+    // UI-03D.A atomic redemption + preparation transaction model (N1-N28).
+    array(
+        'id' => 'N1-replay-lookup-skipped',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '        if ($stored !== null) {' . "\n" . '            return $this->replay_or_reject($stored, $fingerprint, $canonical, null);' . "\n" . '        }' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'N2-different-payload-replays',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if (!is_string($ledger[\'request_fingerprint\']) || !hash_equals($ledger[\'request_fingerprint\'], $fingerprint)) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'N3-missing-snapshot-tolerated',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            return \'snapshot_missing\';' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'N4-extra-snapshots-tolerated',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if (count($snapshots) !== 1) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'N5-stored-snapshot-not-verified',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '$stored_canonical = EVC_Prep_Snapshot::verify($snapshot);',
+        'replace' => '$stored_canonical = $canonical;',
+    ),
+    array(
+        'id' => 'N6-ledger-snapshot-hash-not-compared',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            || !is_string($ledger[\'snapshot_hash\']) || !hash_equals($ledger[\'snapshot_hash\'], $snapshot[\'snapshot_hash\'])' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'N7-fingerprint-version-not-checked',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if ($ledger[\'fingerprint_version\'] !== EVC_Prep_Canonical::FINGERPRINT_VERSION) {' . "\n" . '            return',
+        'replace' => 'if (false) {' . "\n" . '            return',
+    ),
+    array(
+        'id' => 'N8-commit-unknown-reported-as-redeemed',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'return EVC_Prepared_Redemption_Outcome::unresolved(EVC_Prepared_Redemption_Outcome::OUTCOME_UNKNOWN, $request_id);',
+        'replace' => 'return EVC_Prepared_Redemption_Outcome::success(EVC_Prepared_Redemption_Outcome::REDEEMED, self::view(0, $member_public_id, $ledger, $snapshot));',
+    ),
+    array(
+        'id' => 'N9-commit-unknown-retried-blindly',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '                $this->report(\'commit_unknown\', $e);' . "\n" . '                return',
+        'replace' => '                $this->report(\'commit_unknown\', $e);' . "\n" . '                continue;' . "\n" . '                return',
+    ),
+    array(
+        'id' => 'N10-unknown-outcome-without-original-request-id',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'unresolved(EVC_Prepared_Redemption_Outcome::OUTCOME_UNKNOWN, $request_id)',
+        'replace' => 'unresolved(EVC_Prepared_Redemption_Outcome::OUTCOME_UNKNOWN, null)',
+    ),
+    array(
+        'id' => 'N11-unresolved-outcome-may-serve',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'return $this->redemption !== null && ($this->kind === self::REDEEMED || $this->kind === self::REPLAYED);',
+        'replace' => 'return $this->kind !== self::SERVER_ERROR;',
+    ),
+    array(
+        'id' => 'N12-retryable-failure-not-retried',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if ($attempt >= self::MAX_TRANSACTION_ATTEMPTS) {',
+        'replace' => 'if ($attempt >= 1) {',
+    ),
+    array(
+        'id' => 'N13-member-day-duplicate-served',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'return EVC_Prepared_Redemption_Outcome::failure(EVC_Prepared_Redemption_Outcome::ALREADY_REDEEMED, array(',
+        'replace' => 'return EVC_Prepared_Redemption_Outcome::success(EVC_Prepared_Redemption_Outcome::REPLAYED, array(',
+    ),
+    array(
+        'id' => 'N14-body-may-carry-extra-keys',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '|| !EVC_Prep_Catalogue::is_object_with($body, self::BODY_KEYS)',
+        'replace' => '|| !is_array($body) || !isset($body[\'request_id\'], $body[\'catalogue_version\'], $body[\'coffee_code\'], $body[\'preparation\'])',
+    ),
+    array(
+        'id' => 'N15-clock-read-twice',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '$business_date = EVC_Clock::business_date($this->now);',
+        'replace' => '$business_date = EVC_Clock::business_date($this->clock->now());',
+    ),
+    array(
+        'id' => 'N16-catalogue-status-trusted-without-approval',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if ($approved === null || !hash_equals($approved, EVC_Prep_Catalogue_Digest::of($data))) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'N17-approval-not-bound-to-document',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => ' || !hash_equals($approved, EVC_Prep_Catalogue_Digest::of($data))',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'N18-illustrative-catalogue-without-opt-in',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'return $this->illustrative_opt_in === self::ALLOW_ILLUSTRATIVE_CATALOGUE_FOR_TESTS ? $catalogue : null;',
+        'replace' => 'return $catalogue;',
+    ),
+    array(
+        'id' => 'N19-stale-catalogue-version-accepted',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if ($body[\'catalogue_version\'] !== $catalogue->version()) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'N20-write-set-prep-hash-unchecked',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            || $ledger[\'prep_hash\'] !== $snapshot[\'prep_hash\']' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'N21-write-set-snapshot-hash-unchecked',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            || $ledger[\'snapshot_hash\'] !== $snapshot[\'snapshot_hash\']' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'N22-write-set-audit-request-unchecked',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            || $audit[\'request_id\'] !== $ledger[\'request_id\']' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'N23-disabled-member-served',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if ($member === null || $member[\'status\'] !== \'enabled\') {',
+        'replace' => 'if ($member === null) {',
+    ),
+    array(
+        'id' => 'N24-eligibility-ignored',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if ($denial !== null) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'N25-snapshot-labels-unprotected',
+        'file' => 'includes/class-evc-prep-snapshot.php',
+        'search' => 'if (!hash_equals($raw[\'snapshot_hash\'], self::snapshot_hash($raw))) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'N26-snapshot-codes-unprotected',
+        'file' => 'includes/class-evc-prep-snapshot.php',
+        'search' => 'if (!hash_equals($raw[\'prep_hash\'], EVC_Prep_Canonical::prep_hash($canonical))) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'N27-snapshot-accepts-a-note',
+        'file' => 'includes/class-evc-prep-snapshot.php',
+        'search' => '\'prep_hash\', \'snapshot_hash\'))) {',
+        'replace' => '\'prep_hash\', \'snapshot_hash\'), array(\'note\'))) {',
+    ),
+    array(
+        'id' => 'N28-fake-store-not-atomic',
+        'file' => 'tests/support/class-evc-in-memory-prepared-redemption-store.php',
+        'search' => '        $staged = $this->state;' . "\n" . '',
+        'replace' => '        $staged = &$this->state;' . "\n" . '',
     ),
 );
 
