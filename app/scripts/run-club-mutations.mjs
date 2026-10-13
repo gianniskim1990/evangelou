@@ -378,8 +378,8 @@ const mutants = [
   {
     id: "U15-coffee-change-keeps-incompatible-options",
     file: "preview/coffeeConfig.ts",
-    search: "  return normalize({ ...order, coffee });",
-    replace: "  return { ...order, coffee };",
+    search: "  return normalize({ ...order, coffee, noteReview:",
+    replace: "  return ({ ...order, coffee, noteReview:",
   },
   {
     id: "U16-new-member-keeps-previous-order",
@@ -404,6 +404,42 @@ const mutants = [
     file: "preview/StaffOrder.tsx",
     search: "disabled={!ready} onClick={onContinue}",
     replace: "disabled={false} onClick={onContinue}",
+  },
+  {
+    id: "U21-cold-drinks-offered-hot-notes",
+    file: "preview/coffeeConfig.ts",
+    search: '(q.when === "hot" && !cold)',
+    replace: '(q.when === "hot")',
+  },
+  {
+    id: "U22-foam-notes-offered-everywhere",
+    file: "preview/coffeeConfig.ts",
+    search: '(q.when === "foam" && foam)',
+    replace: '(q.when === "foam")',
+  },
+  {
+    id: "U23-coffee-change-keeps-incompatible-quick-notes",
+    file: "preview/coffeeConfig.ts",
+    search: "quickNotes: order.quickNotes.filter((q) => allowedNotes.includes(q))",
+    replace: "quickNotes: order.quickNotes",
+  },
+  {
+    id: "U24-free-text-silently-carried-to-new-coffee",
+    file: "preview/coffeeConfig.ts",
+    search: 'noteReview: order.noteReview || (changed && order.note.trim() !== "")',
+    replace: "noteReview: order.noteReview",
+  },
+  {
+    id: "U25-unreviewed-note-does-not-block",
+    file: "preview/coffeeConfig.ts",
+    search: 'return order.noteReview ? [...gaps, "Έλεγχος οδηγιών"] : gaps;',
+    replace: "return gaps;",
+  },
+  {
+    id: "U26-inapplicable-quick-note-accepted",
+    file: "preview/coffeeConfig.ts",
+    search: "  if (!quickNotesFor(order.coffee).some((q) => q.id === id)) return order;\n",
+    replace: "",
   },
   {
     id: "U20-summary-drops-extras",

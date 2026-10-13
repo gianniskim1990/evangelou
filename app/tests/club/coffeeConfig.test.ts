@@ -18,6 +18,11 @@ import {
   selectCoffee,
   setChoice,
   setNote,
+  confirmNote,
+  isColdCoffee,
+  quickNotesFor,
+  toggleQuickNote,
+  QUICK_NOTES,
   toSnapshot,
   toggleExtra,
   usualOrder,
@@ -195,11 +200,16 @@ describe("synthetic preferences and history snapshots", () => {
     }
   });
 
-  it("synthetic notes fit the drink: cold coffees are never noted as very hot", () => {
+  it("synthetic notes fit the drink: every history quick note is valid for its coffee", () => {
+    let withNotes = 0;
     for (const r of redemptionHistory(TODAY, 30)) {
       const p = historyPreparation(memberById(r.memberId), r.coffee, r.date);
-      if (visibleGroups(p).includes("ice")) assert.notEqual(p.note, "πολύ ζεστός", `${r.memberId} ${r.date}`);
+      const allowed = quickNotesFor(r.coffee).map((q) => q.id);
+      for (const q of p.quickNotes) assert.ok(allowed.includes(q), `${r.memberId} ${r.date}: ${q} on ${r.coffee}`);
+      if (isColdCoffee(r.coffee)) assert.ok(!p.quickNotes.includes("very_hot"), `${r.memberId} ${r.date}`);
+      withNotes += p.quickNotes.length;
     }
+    assert.ok(withNotes > 0, "the synthetic history includes some quick notes");
   });
 
   it("history can differ from the usual preference (they are separate things)", () => {
@@ -264,5 +274,116 @@ describe("configurator and summary rendering", () => {
 
   it("covers the whole illustrative catalogue", () => {
     for (const c of COFFEES) assert.ok(visibleGroups(order(c.code)).includes("sweetness"), c.code);
+  });
+});
+
+describe("UI-02.R1a coffee-specific quick notes", () => {
+  const ids = (c: Parameters<typeof quickNotesFor>[0]) => quickNotesFor(c).map((q) => q.id);
+  const cold = COFFEES.map((c) => c.code).filter((c) => isColdCoffee(c));
+  const hot = COFFEES.map((c) => c.code).filter((c) => !isColdCoffee(c));
+
+  it("classifies the illustrative catalogue by temperature from its ice options", () => {
+    assert.deepEqual(cold, ["freddo-espresso", "freddo-cappuccino"]);
+    assert.deepEqual(hot, ["espresso", "cappuccino", "greek-coffee", "filter"]);
+  });
+
+  it("cold drinks never suggest «πολύ ζεστός» or «χλιαρός»", () => {
+    for (const c of cold) {
+      assert.ok(!ids(c).includes("very_hot"), c);
+      assert.ok(!ids(c).includes("lukewarm"), c);
+    }
+  });
+
+  it("hot drinks never suggest ice notes (the catalogue gives them no ice options)", () => {
+    for (const c of hot) {
+      assert.ok(!ids(c).includes("ice_side"), c);
+      assert.ok(!ids(c).includes("no_straw"), c);
+      assert.ok(!visibleGroups(order(c)).includes("ice"), c);
+    }
+  });
+
+  it("foam notes appear only on drinks with foam", () => {
+    for (const c of COFFEES.map((x) => x.code)) {
+      const hasFoam = visibleGroups(order(c)).includes("foam");
+      assert.equal(ids(c).includes("cinnamon"), hasFoam, c);
+      assert.equal(ids(c).includes("cocoa"), hasFoam, c);
+    }
+  });
+
+  it("the generic takeaway note is available for every coffee, and nothing before a coffee is chosen", () => {
+    for (const c of COFFEES.map((x) => x.code)) assert.ok(ids(c).includes("takeaway"), c);
+    assert.deepEqual(quickNotesFor(null), []);
+  });
+
+  it("a quick note that does not fit the coffee cannot be added", () => {
+    assert.deepEqual(toggleQuickNote(order("freddo-espresso"), "very_hot").quickNotes, []);
+    assert.deepEqual(toggleQuickNote(order("espresso"), "cinnamon").quickNotes, []);
+    assert.deepEqual(toggleQuickNote(order("espresso"), "very_hot").quickNotes, ["very_hot"]);
+    assert.deepEqual(toggleQuickNote(toggleQuickNote(order("espresso"), "very_hot"), "very_hot").quickNotes, []);
+  });
+
+  it("changing the coffee drops incompatible quick notes and keeps compatible ones", () => {
+    let o = order("cappuccino");
+    for (const q of ["very_hot", "cinnamon", "takeaway"] as const) o = toggleQuickNote(o, q);
+    assert.deepEqual(o.quickNotes, ["very_hot", "cinnamon", "takeaway"]);
+    assert.deepEqual(selectCoffee(o, "freddo-espresso").quickNotes, ["takeaway"]);
+    assert.deepEqual(selectCoffee(o, "freddo-cappuccino").quickNotes, ["cinnamon", "takeaway"]);
+    assert.deepEqual(selectCoffee(o, "espresso").quickNotes, ["very_hot", "takeaway"]);
+  });
+
+  it("free text is never silently carried to another coffee: it is kept but must be reviewed", () => {
+    const complete = order("cappuccino", { shots: "single", sweetness: "none", milk: "regular" });
+    const withText = setNote(complete, "πολύ αφρό από πάνω");
+    assert.equal(withText.noteReview, false);
+    const switched = selectCoffee(withText, "cappuccino");
+    assert.equal(switched.noteReview, false, "re-selecting the same coffee is not a change");
+    const other = selectCoffee(withText, "freddo-cappuccino");
+    assert.equal(other.note, "πολύ αφρό από πάνω");
+    assert.equal(other.noteReview, true);
+    const ready = setChoice(other, "shots", "single");
+    assert.ok(missing(ready).includes("Έλεγχος οδηγιών"));
+    assert.equal(isComplete(ready), false);
+    assert.equal(isComplete(confirmNote(ready)), true, "staff confirm the text still applies");
+    assert.equal(setNote(ready, "χωρίς αφρό").noteReview, false, "editing the text counts as reviewing it");
+    assert.equal(setNote(ready, "").noteReview, false, "clearing the text needs no review");
+    assert.equal(selectCoffee(complete, "espresso").noteReview, false, "no free text, nothing to review");
+  });
+
+  it("the reducer exposes quick notes and review confirmation", () => {
+    let s = orderReducer({ memberId: "m01", order: EMPTY_ORDER }, { type: "coffee", coffee: "espresso" });
+    s = orderReducer(s, { type: "quick-note", id: "very_hot" });
+    s = orderReducer(s, { type: "note", note: "σε μικρό φλιτζάνι" });
+    s = orderReducer(s, { type: "coffee", coffee: "freddo-espresso" });
+    assert.deepEqual(s.order.quickNotes, []);
+    assert.equal(s.order.noteReview, true);
+    s = orderReducer(s, { type: "note-ok" });
+    assert.equal(s.order.noteReview, false);
+  });
+
+  it("summaries and the design-only snapshot list quick notes by label, then the free text", () => {
+    let o = order("freddo-espresso", { shots: "double", sweetness: "none", milk: "none" });
+    o = setNote(toggleQuickNote(o, "no_straw"), "σε ψηλό ποτήρι");
+    assert.match(preparationLine(o), /«χωρίς καλαμάκι», «σε ψηλό ποτήρι»$/);
+    assert.deepEqual(preparationRows(o).at(-1), ["Οδηγίες", "χωρίς καλαμάκι, σε ψηλό ποτήρι"]);
+    const snap = toSnapshot(o, { redemptionId: "preview-q", memberId: "m01", athensDate: TODAY, athensTime: "10:00" });
+    assert.deepEqual(snap.quickNotes, [{ id: "no_straw", label: "χωρίς καλαμάκι" }]);
+    assert.equal(snap.note, "σε ψηλό ποτήρι");
+  });
+
+  it("the configurator renders only the quick notes of the selected coffee and the review prompt", () => {
+    const member = memberById("m01");
+    const noop = () => {};
+    const render = (o: CoffeeOrder) => text(renderToStaticMarkup(createElement(CoffeeConfigurator, { member, order: o, dispatch: noop, onContinue: noop })));
+    const cold = render(order("freddo-espresso"));
+    assert.ok(cold.includes("πάγος στο πλάι") && cold.includes("σε ποτήρι για έξω"));
+    assert.ok(!cold.includes("πολύ ζεστός") && !cold.includes("κανέλα στον αφρό"));
+    const hotPlain = render(order("espresso"));
+    assert.ok(hotPlain.includes("πολύ ζεστός"));
+    assert.ok(!hotPlain.includes("πάγος στο πλάι") && !hotPlain.includes("κανέλα στον αφρό"));
+    assert.ok(render(order("cappuccino")).includes("κανέλα στον αφρό"));
+    const flagged = render(selectCoffee(setNote(order("espresso"), "σε μικρό φλιτζάνι"), "filter"));
+    assert.match(flagged, /Οι οδηγίες γράφτηκαν για άλλο καφέ/);
+    assert.match(flagged, /Έλεγχος οδηγιών/);
+    assert.equal(QUICK_NOTES.length, 7);
   });
 });

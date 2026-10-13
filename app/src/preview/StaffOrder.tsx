@@ -1,6 +1,6 @@
 import type { Dispatch, ReactNode } from "react";
 import { COFFEES, coffeeName, greekDate, type PreviewMember } from "./previewData";
-import { EXTRAS, NOTE_MAX, NOTE_SUGGESTIONS, extrasFor, groupLabel, GROUPS, missing, noteProblem, optionsFor, preparationLine, preparationRows, usualOrder, visibleGroups, isComplete, type CoffeeOrder, type OrderAction } from "./coffeeConfig";
+import { EXTRAS, NOTE_MAX, extrasFor, quickNotesFor, groupLabel, GROUPS, missing, noteProblem, optionsFor, preparationLine, preparationRows, usualOrder, visibleGroups, isComplete, type CoffeeOrder, type OrderAction } from "./coffeeConfig";
 import { cx } from "./screens";
 import { DefRows, Glyph } from "./ds";
 
@@ -112,6 +112,21 @@ export function CoffeeConfigurator({ member, order, dispatch, onContinue }: { me
             {order.coffee && (
               <Row label="Οδηγίες" hint="Προαιρετικό">
                 <div>
+                  <div className="mb-3 flex flex-wrap gap-2" aria-label="Γρήγορες οδηγίες για αυτόν τον καφέ">
+                    {quickNotesFor(order.coffee).map((q) => (
+                      <Chip key={q.id} role="checkbox" selected={order.quickNotes.includes(q.id)} onClick={() => dispatch({ type: "quick-note", id: q.id })}>
+                        {q.label}
+                      </Chip>
+                    ))}
+                  </div>
+                  {order.noteReview && (
+                    <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-[12px] bg-[var(--wait-tint)] px-4 py-3">
+                      <p className="t-small font-semibold text-[var(--wait)]">Οι οδηγίες γράφτηκαν για άλλο καφέ. Ελέγξτε ότι ισχύουν ή διορθώστε τες.</p>
+                      <button type="button" onClick={() => dispatch({ type: "note-ok" })} className="press min-h-11 rounded-full border border-[var(--wait)] px-4 text-[15px] font-semibold text-[var(--ink)]">
+                        Ισχύουν
+                      </button>
+                    </div>
+                  )}
                   <input
                     aria-label="Οδηγίες παρασκευής"
                     aria-invalid={problem ? true : undefined}
@@ -120,22 +135,15 @@ export function CoffeeConfigurator({ member, order, dispatch, onContinue }: { me
                     maxLength={NOTE_MAX}
                     autoComplete="off"
                     onChange={(e) => dispatch({ type: "note", note: e.target.value })}
-                    placeholder="π.χ. λίγο πάγο"
+                    placeholder="Άλλη οδηγία (προαιρετικά)"
                     className={cx("t-body min-h-12 w-full rounded-[12px] border bg-[var(--paper)] px-4 text-[var(--ink)] outline-none", problem ? "border-[var(--stop)]" : "border-[var(--rule-strong)] focus:border-[var(--ink)]")}
                   />
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {NOTE_SUGGESTIONS.map((s) => (
-                        <button key={s} type="button" onClick={() => dispatch({ type: "note", note: order.note.trim() ? `${order.note.trim()}, ${s}` : s })} className="press t-small min-h-10 rounded-full px-3 text-[var(--ink-2)] hover:bg-[rgba(139,118,80,0.1)] hover:text-[var(--ink)]">
-                          + {s}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="t-small t-num text-[var(--ink-3)]">
+                  <div className="mt-1.5 flex items-start justify-between gap-4">
+                    <p id="evc-order-note-help" className={cx("t-small", problem ? "font-semibold text-[var(--stop)]" : "text-[var(--ink-3)]")}>{problem ?? "Μόνο για την παρασκευή. Μην γράφετε προσωπικά στοιχεία."}</p>
+                    <span className="t-small t-num flex-none text-[var(--ink-3)]">
                       {order.note.length}/{NOTE_MAX}
                     </span>
                   </div>
-                  <p id="evc-order-note-help" className={cx("t-small mt-1", problem ? "font-semibold text-[var(--stop)]" : "text-[var(--ink-3)]")}>{problem ?? "Μόνο για την παρασκευή του ροφήματος."}</p>
                 </div>
               </Row>
             )}
