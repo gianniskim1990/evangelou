@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { coffeeName, greekDate, memberById, todaysRedemptions } from "./previewData";
 import { cx, type StaffScreen } from "./screens";
 import { Glyph, Logo, PreviewNote } from "./ds";
@@ -20,13 +20,8 @@ function todaysChecks(today: string): Check[] {
   return checks.sort((a, b) => b.time.localeCompare(a.time));
 }
 
-export function StaffCounter({ today, go, openMember }: { today: string; go: (s: StaffScreen) => void; openMember: (id: string) => void }) {
-  const [phone, setPhone] = useState("");
-  const checks = todaysChecks(today);
-  const last = checks[0];
-  const lastMember = memberById(last.memberId);
-  const served = checks.filter((c) => c.ok).length;
-
+/** The counter's app chrome, shared by every staff screen. */
+export function StaffFrame({ today, children }: { today: string; children: ReactNode }) {
   return (
     <div className="min-h-[calc(100svh-52px)] bg-[var(--milk)]">
       <header className="border-b border-[var(--rule)] bg-[var(--paper)]">
@@ -41,6 +36,20 @@ export function StaffCounter({ today, go, openMember }: { today: string; go: (s:
           </div>
         </div>
       </header>
+      {children}
+    </div>
+  );
+}
+
+export function StaffCounter({ today, go, openMember }: { today: string; go: (s: StaffScreen) => void; openMember: (id: string) => void }) {
+  const [phone, setPhone] = useState("");
+  const checks = todaysChecks(today);
+  const last = checks[0];
+  const lastMember = memberById(last.memberId);
+  const served = checks.filter((c) => c.ok).length;
+
+  return (
+    <StaffFrame today={today}>
 
       <main className="mx-auto grid max-w-[1280px] grid-cols-[minmax(0,1fr)] gap-6 px-5 py-6 md:px-8 md:py-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] lg:gap-8">
         <div className="flex flex-col gap-6">
@@ -139,6 +148,6 @@ export function StaffCounter({ today, go, openMember }: { today: string; go: (s:
           <PreviewNote className="mt-6">Ένας καφές ανά μέλος ανά ημέρα, ώρα Ελλάδας. Στην προεπισκόπηση δεν καταγράφεται καμία εξαργύρωση.</PreviewNote>
         </section>
       </main>
-    </div>
+    </StaffFrame>
   );
 }
