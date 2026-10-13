@@ -40,7 +40,15 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *        commit unknown  -> outcome_unknown: NOT a coffee and NOT a failure;
  *                           the till must retry with the SAME request_id
  *
- * Only `redeemed` and `replayed` authorise serving (may_serve()). The future
+ * UI-03D.C: recording, fulfillment and instruction are separate facts. Only a
+ * FRESH commit instructs `prepare`. A replay reports `previously_recorded`
+ * plus the stored handoff status and instructs `verify_handoff` (no handoff
+ * recorded — NOT proof that nothing was handed over), `do_not_prepare` (a
+ * handoff confirmation is recorded) or `do_not_prepare_for_today` (an earlier
+ * Athens business date). Every other outcome instructs `do_not_prepare`.
+ * Handoff confirmation is a separate transaction (EVC_Handoff_Service).
+ *
+ * The future
  * SQL transaction that must satisfy the same contract is described in
  * docs/prepared-redemption-transaction.md.
  */
@@ -50,10 +58,11 @@ interface EVC_Prep_Redemption_Store {
 
     /**
      * The committed ledger row for this request id plus EVERY preparation
-     * snapshot linked to it (normally exactly one), or null when none exists.
+     * snapshot linked to it (normally exactly one) and EVERY handoff
+     * confirmation linked to it (none or one), or null when none exists.
      * Must be a fresh read that sees committed rows of other connections.
      *
-     * @return array{ledger:array,snapshots:array[]}|null
+     * @return array{ledger:array,snapshots:array[],handoffs:array[]}|null
      */
     public function find_by_request_id(string $request_id): ?array;
 
@@ -195,6 +204,21 @@ final class EVC_Prepared_Redemption_Outcome {
     const OUTCOME_UNKNOWN = 'outcome_unknown';
     const SERVER_ERROR = 'server_error';
 
+    // UI-03D.C — recording, fulfillment and instruction are SEPARATE facts.
+    const RECORDED_NOW = 'recorded_now';
+    const PREVIOUSLY_RECORDED = 'previously_recorded';
+    /** No handoff confirmation has been recorded. NOT proof that no coffee was handed over. */
+    const FULFILLMENT_UNCONFIRMED = 'unconfirmed';
+    /** Staff recorded a handoff confirmation. NOT proof that a coffee changed hands. */
+    const FULFILLMENT_CONFIRMED = 'confirmed';
+    /** Only a fresh commit, through its own fresh result. */
+    const PREPARE = 'prepare';
+    /** Replay of today's redemption without a recorded handoff: check before preparing anything. */
+    const VERIFY_HANDOFF = 'verify_handoff';
+    const DO_NOT_PREPARE = 'do_not_prepare';
+    /** Replay of a redemption of an EARLIER Athens business date: never today's coffee. */
+    const DO_NOT_PREPARE_FOR_TODAY = 'do_not_prepare_for_today';
+
     /** @var string */
     private $kind;
     /** @var array|null */
@@ -203,26 +227,53 @@ final class EVC_Prepared_Redemption_Outcome {
     private $details;
     /** @var string|null */
     private $retry_request_id;
+    /** @var string|null */
+    private $fulfillment;
+    /** @var string */
+    private $instruction;
+    /** @var array|null */
+    private $handoff;
 
-    private function __construct(string $kind, ?array $redemption, array $details, ?string $retry_request_id) {
+    private function __construct(string $kind, ?array $redemption, array $details, ?string $retry_request_id, ?string $fulfillment, string $instruction, ?array $handoff) {
         $this->kind = $kind;
         $this->redemption = $redemption;
         $this->details = $details;
         $this->retry_request_id = $retry_request_id;
+        $this->fulfillment = $fulfillment;
+        $this->instruction = $instruction;
+        $this->handoff = $handoff;
     }
 
-    public static function success(string $kind, array $redemption): self {
-        if ($kind !== self::REDEEMED && $kind !== self::REPLAYED) {
-            throw new InvalidArgumentException('Not a success outcome.');
+    /** A fresh commit: the ONLY outcome that instructs preparation. */
+    public static function redeemed(array $redemption): self {
+        return new self(self::REDEEMED, $redemption, array(), null, self::FULFILLMENT_UNCONFIRMED, self::PREPARE, null);
+    }
+
+    /**
+     * Replay of an already committed redemption. Never instructs preparation:
+     * an earlier business date is never today's coffee; a recorded handoff
+     * means do not prepare; no recorded handoff means verify first (it is
+     * NOT proof that nothing was handed over).
+     *
+     * @param array|null $handoff verified handoff view, or null when none is recorded
+     */
+    public static function replayed(array $redemption, bool $same_business_date, ?array $handoff): self {
+        if (!$same_business_date) {
+            $instruction = self::DO_NOT_PREPARE_FOR_TODAY;
+        } elseif ($handoff !== null) {
+            $instruction = self::DO_NOT_PREPARE;
+        } else {
+            $instruction = self::VERIFY_HANDOFF;
         }
-        return new self($kind, $redemption, array(), null);
+        $fulfillment = $handoff !== null ? self::FULFILLMENT_CONFIRMED : self::FULFILLMENT_UNCONFIRMED;
+        return new self(self::REPLAYED, $redemption, array(), null, $fulfillment, $instruction, $handoff);
     }
 
     public static function failure(string $kind, array $details = array()): self {
         if ($kind === self::REDEEMED || $kind === self::REPLAYED || $kind === self::OUTCOME_UNKNOWN || $kind === self::SERVER_ERROR) {
             throw new InvalidArgumentException('Not a definitive failure outcome.');
         }
-        return new self($kind, null, $details, null);
+        return new self($kind, null, $details, null, null, self::DO_NOT_PREPARE, null);
     }
 
     /**
@@ -235,16 +286,50 @@ final class EVC_Prepared_Redemption_Outcome {
         if ($kind !== self::OUTCOME_UNKNOWN && $kind !== self::SERVER_ERROR) {
             throw new InvalidArgumentException('Not an unresolved outcome.');
         }
-        return new self($kind, null, $details, $request_id);
+        return new self($kind, null, $details, $request_id, null, self::DO_NOT_PREPARE, null);
     }
 
     public function kind(): string {
         return $this->kind;
     }
 
-    /** True only for a committed (or exactly replayed) redemption with a verified snapshot. */
-    public function may_serve(): bool {
-        return $this->redemption !== null && ($this->kind === self::REDEEMED || $this->kind === self::REPLAYED);
+    /**
+     * Was today's (or the original day's) entitlement consumed by THIS
+     * request? true for a fresh or replayed commit, false for a definitive
+     * refusal of this request, null when unknown (unresolved outcome, or a
+     * stored record that failed its integrity check).
+     */
+    public function entitlement_consumed(): ?bool {
+        if ($this->kind === self::REDEEMED || $this->kind === self::REPLAYED) {
+            return true;
+        }
+        if ($this->kind === self::OUTCOME_UNKNOWN || $this->kind === self::SERVER_ERROR || $this->kind === self::RECORD_INTEGRITY_FAILURE) {
+            return null;
+        }
+        return false;
+    }
+
+    /** recorded_now | previously_recorded, or null when nothing is known to be recorded. */
+    public function recording(): ?string {
+        if ($this->kind === self::REDEEMED) {
+            return self::RECORDED_NOW;
+        }
+        return $this->kind === self::REPLAYED ? self::PREVIOUSLY_RECORDED : null;
+    }
+
+    /** unconfirmed | confirmed for a recorded redemption, null otherwise. */
+    public function fulfillment(): ?string {
+        return $this->fulfillment;
+    }
+
+    /** prepare | verify_handoff | do_not_prepare | do_not_prepare_for_today (never null). */
+    public function instruction(): string {
+        return $this->instruction;
+    }
+
+    /** The verified handoff confirmation of a replayed redemption, or null. */
+    public function handoff(): ?array {
+        return $this->handoff;
     }
 
     public function redemption(): ?array {
@@ -420,7 +505,7 @@ final class EVC_Prepared_Redemption_Service {
         for ($attempt = 1; ; $attempt++) {
             try {
                 $redemption_id = $this->store->commit_redemption($write);
-                return EVC_Prepared_Redemption_Outcome::success(EVC_Prepared_Redemption_Outcome::REDEEMED, self::view(
+                return EVC_Prepared_Redemption_Outcome::redeemed(self::view(
                     $redemption_id,
                     $member_public_id,
                     $ledger,
@@ -461,8 +546,9 @@ final class EVC_Prepared_Redemption_Service {
 
     /**
      * A committed record exists for this request id. Replays it only when the
-     * payload is identical AND its stored snapshot is intact; never exposes
-     * another payload's data.
+     * payload is identical AND its stored snapshot and handoff records are
+     * intact; never exposes another payload's data. A replay NEVER instructs
+     * preparation (see EVC_Prepared_Redemption_Outcome::replayed()).
      */
     private function replay_or_reject(array $stored, string $fingerprint, string $canonical, ?int $member_id): EVC_Prepared_Redemption_Outcome {
         $ledger = $stored['ledger'];
@@ -470,55 +556,24 @@ final class EVC_Prepared_Redemption_Service {
             $this->audit_rejection(EVC_Prepared_Redemption_Outcome::IDEMPOTENCY_CONFLICT, $member_id, array());
             return EVC_Prepared_Redemption_Outcome::failure(EVC_Prepared_Redemption_Outcome::IDEMPOTENCY_CONFLICT);
         }
-        $problem = self::snapshot_problem($ledger, $stored['snapshots'], $canonical);
+        $problem = EVC_Prepared_Redemption_Record::snapshot_problem($ledger, $stored['snapshots'], $canonical);
+        if ($problem === null) {
+            $problem = EVC_Prepared_Redemption_Record::handoff_problem($ledger, $stored['handoffs']);
+        }
         if ($problem !== null) {
             $this->audit_rejection(EVC_Prepared_Redemption_Outcome::RECORD_INTEGRITY_FAILURE, (int) $ledger['member_id'], array('reason' => $problem));
             return EVC_Prepared_Redemption_Outcome::failure(EVC_Prepared_Redemption_Outcome::RECORD_INTEGRITY_FAILURE, array('reason' => $problem));
         }
-        return EVC_Prepared_Redemption_Outcome::success(EVC_Prepared_Redemption_Outcome::REPLAYED, self::view(
-            (int) $ledger['id'],
-            (string) $ledger['member_public_id'],
-            $ledger,
-            $stored['snapshots'][0]
-        ));
-    }
-
-    /**
-     * Null when the ledger row has exactly one intact snapshot that matches
-     * both the row and the replayed request; otherwise the integrity problem.
-     *
-     * @param array[] $snapshots
-     */
-    private static function snapshot_problem(array $ledger, array $snapshots, string $canonical): ?string {
-        if ($ledger['fingerprint_version'] !== EVC_Prep_Canonical::FINGERPRINT_VERSION) {
-            return 'fingerprint_version';
+        // Today's Athens date only distinguishes "earlier day" from "today";
+        // it never re-decides eligibility, catalogue or membership.
+        if ($this->now === null) {
+            $this->now = EVC_Clock::to_utc($this->clock->now());
         }
-        if (count($snapshots) === 0) {
-            return 'snapshot_missing';
-        }
-        if (count($snapshots) !== 1) {
-            return 'snapshot_conflict';
-        }
-        $snapshot = $snapshots[0];
-        try {
-            $stored_canonical = EVC_Prep_Snapshot::verify($snapshot);
-        } catch (EVC_Prep_Snapshot_Invalid $e) {
-            return 'snapshot_corrupt';
-        }
-        if (!hash_equals($stored_canonical, $canonical)
-            || !is_string($ledger['prep_hash']) || !hash_equals($ledger['prep_hash'], $snapshot['prep_hash'])
-            || !is_string($ledger['snapshot_hash']) || !hash_equals($ledger['snapshot_hash'], $snapshot['snapshot_hash'])
-            || $ledger['coffee_code'] !== $snapshot['coffee_code']
-            || $ledger['catalogue_version'] !== $snapshot['catalogue_version']
-            || !hash_equals((string) $ledger['request_fingerprint'], EVC_Prep_Canonical::fingerprint_v2(
-                (string) $ledger['member_public_id'],
-                (string) $ledger['benefit_type'],
-                (int) $ledger['staff_wp_user_id'],
-                $snapshot['prep_hash']
-            ))) {
-            return 'snapshot_conflict';
-        }
-        return null;
+        return EVC_Prepared_Redemption_Outcome::replayed(
+            self::view((int) $ledger['id'], (string) $ledger['member_public_id'], $ledger, $stored['snapshots'][0]),
+            (string) $ledger['business_date'] === EVC_Clock::business_date($this->now),
+            count($stored['handoffs']) === 1 ? EVC_Handoff_Record::view($stored['handoffs'][0]) : null
+        );
     }
 
     /**
@@ -603,5 +658,62 @@ final class EVC_Prepared_Redemption_Service {
         } catch (Throwable $ignored) {
             // A broken reporter must not change the redemption outcome.
         }
+    }
+}
+
+/**
+ * Integrity of a stored redemption as read back (shared by the redemption
+ * service, the handoff service and the read model). Every check fails closed.
+ */
+final class EVC_Prepared_Redemption_Record {
+    /**
+     * Null when the ledger row has exactly one intact snapshot that matches
+     * the row (and, when given, the replayed request); otherwise the problem.
+     *
+     * @param array[] $snapshots
+     */
+    public static function snapshot_problem(array $ledger, array $snapshots, ?string $canonical): ?string {
+        if ($ledger['fingerprint_version'] !== EVC_Prep_Canonical::FINGERPRINT_VERSION) {
+            return 'fingerprint_version';
+        }
+        if (count($snapshots) === 0) {
+            return 'snapshot_missing';
+        }
+        if (count($snapshots) !== 1) {
+            return 'snapshot_conflict';
+        }
+        $snapshot = $snapshots[0];
+        try {
+            $stored_canonical = EVC_Prep_Snapshot::verify($snapshot);
+        } catch (EVC_Prep_Snapshot_Invalid $e) {
+            return 'snapshot_corrupt';
+        }
+        if (($canonical !== null && !hash_equals($stored_canonical, $canonical))
+            || !is_string($ledger['prep_hash']) || !hash_equals($ledger['prep_hash'], $snapshot['prep_hash'])
+            || !is_string($ledger['snapshot_hash']) || !hash_equals($ledger['snapshot_hash'], $snapshot['snapshot_hash'])
+            || $ledger['coffee_code'] !== $snapshot['coffee_code']
+            || $ledger['catalogue_version'] !== $snapshot['catalogue_version']
+            || !hash_equals((string) $ledger['request_fingerprint'], EVC_Prep_Canonical::fingerprint_v2(
+                (string) $ledger['member_public_id'],
+                (string) $ledger['benefit_type'],
+                (int) $ledger['staff_wp_user_id'],
+                $snapshot['prep_hash']
+            ))) {
+            return 'snapshot_conflict';
+        }
+        return null;
+    }
+
+    /**
+     * Null when the redemption has no handoff confirmation or exactly one that
+     * is intact and bound to THIS redemption; otherwise the problem.
+     *
+     * @param array[] $handoffs
+     */
+    public static function handoff_problem(array $ledger, array $handoffs): ?string {
+        if (count($handoffs) > 1) {
+            return 'handoff_conflict';
+        }
+        return count($handoffs) === 1 ? EVC_Handoff_Record::problem($handoffs[0], $ledger) : null;
     }
 }

@@ -130,7 +130,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         $outcome = $this->redeem(self::body());
 
         $this->assertSame(EVC_Prepared_Redemption_Outcome::REDEEMED, $outcome->kind());
-        $this->assertTrue($outcome->may_serve());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::PREPARE, $outcome->instruction());
         $this->assertNull($outcome->retry_request_id());
         $this->assertConsistent(1);
 
@@ -179,7 +179,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         $failed = $this->redeem(self::body());
 
         $this->assertSame(EVC_Prepared_Redemption_Outcome::SERVER_ERROR, $failed->kind());
-        $this->assertFalse($failed->may_serve());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::DO_NOT_PREPARE, $failed->instruction());
         $this->assertSame(self::R1, $failed->retry_request_id());
         $this->assertNothingWritten();
         $this->assertContains($point, $this->store->points_reached);
@@ -264,7 +264,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         $second = $this->redeem(self::cappuccino(self::R2));
 
         $this->assertSame(EVC_Prepared_Redemption_Outcome::ALREADY_REDEEMED, $second->kind());
-        $this->assertFalse($second->may_serve());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::DO_NOT_PREPARE, $second->instruction());
         $this->assertSame('2026-10-14', $second->details()['business_date']);
         $this->assertConsistent(1);
         $this->assertSame(EVC_Prepared_Redemption_Outcome::ALREADY_REDEEMED, $this->store->rejections[0]['outcome']);
@@ -310,10 +310,10 @@ final class PreparedRedemptionTransactionTest extends TestCase {
 
         $retry = $this->redeem(self::body());
         $this->assertSame(EVC_Prepared_Redemption_Outcome::REPLAYED, $retry->kind());
-        $this->assertTrue($retry->may_serve());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::VERIFY_HANDOFF, $retry->instruction());
         $this->assertSame($first->redemption(), $retry->redemption());
         $this->assertConsistent(1);
-        $this->assertSame($clock_reads, $this->clock->reads, 'no clock read on replay');
+        $this->assertSame($clock_reads + 1, $this->clock->reads, "one clock read on replay, only to classify the Athens business date");
         $this->assertSame($membership_calls, count($this->membership->calls), 'no membership decision on replay');
         $this->assertSame($catalogue_reads, $this->authority->reads, 'no catalogue decision on replay');
     }
@@ -379,7 +379,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         $outcome = $this->redeem(self::body($override), $member, self::actor($staff));
 
         $this->assertSame(EVC_Prepared_Redemption_Outcome::IDEMPOTENCY_CONFLICT, $outcome->kind());
-        $this->assertFalse($outcome->may_serve());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::DO_NOT_PREPARE, $outcome->instruction());
         $this->assertNull($outcome->redemption());
         $this->assertSame(array(), $outcome->details());
         $this->assertConsistent(1);
@@ -398,7 +398,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         $unknown = $this->redeem(self::body());
 
         $this->assertSame(EVC_Prepared_Redemption_Outcome::OUTCOME_UNKNOWN, $unknown->kind());
-        $this->assertFalse($unknown->may_serve());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::DO_NOT_PREPARE, $unknown->instruction());
         $this->assertNull($unknown->redemption());
         $this->assertSame(self::R1, $unknown->retry_request_id());
         $this->assertSame(1, $this->store->commit_attempts, 'an unknown commit is never retried blindly');
@@ -438,7 +438,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
             } catch (InvalidArgumentException $e) {
                 $this->assertSame('Not a definitive failure outcome.', $e->getMessage());
             }
-            $this->assertFalse(EVC_Prepared_Redemption_Outcome::unresolved($kind, self::R1)->may_serve());
+            $this->assertSame(EVC_Prepared_Redemption_Outcome::DO_NOT_PREPARE, EVC_Prepared_Redemption_Outcome::unresolved($kind, self::R1)->instruction());
         }
         $this->expectException(InvalidArgumentException::class);
         EVC_Prepared_Redemption_Outcome::unresolved(EVC_Prepared_Redemption_Outcome::REDEEMED, self::R1);
@@ -569,7 +569,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         $this->store->failures = array(array('before_ledger', new EVC_Db_Duplicate_Key_Exception('uq_redemptions_one_per_day', '23000', 1062)));
         $outcome = $this->redeem(self::body());
         $this->assertSame(EVC_Prepared_Redemption_Outcome::SERVER_ERROR, $outcome->kind());
-        $this->assertFalse($outcome->may_serve());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::DO_NOT_PREPARE, $outcome->instruction());
         $this->assertNothingWritten();
     }
 
@@ -680,7 +680,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         foreach (array(1, 2) as $attempt) {
             $outcome = $this->redeem(self::body());
             $this->assertSame(EVC_Prepared_Redemption_Outcome::RECORD_INTEGRITY_FAILURE, $outcome->kind(), 'attempt ' . $attempt);
-            $this->assertFalse($outcome->may_serve());
+            $this->assertSame(EVC_Prepared_Redemption_Outcome::DO_NOT_PREPARE, $outcome->instruction());
             $this->assertNull($outcome->redemption());
             $this->assertNull($outcome->retry_request_id());
             $this->assertSame(array('reason' => $reason), $outcome->details());
@@ -799,7 +799,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         $this->membership->set(501, $entitlement);
         $outcome = $this->redeem(self::body());
         $this->assertSame($kind, $outcome->kind());
-        $this->assertFalse($outcome->may_serve());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::DO_NOT_PREPARE, $outcome->instruction());
         $this->assertNothingWritten();
     }
 

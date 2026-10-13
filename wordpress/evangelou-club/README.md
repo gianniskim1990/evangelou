@@ -601,6 +601,18 @@ in-memory test fakes implement the store and catalogue authority; no SQL, no
 migration, no REST wiring. See `docs/prepared-redemption-transaction.md` for the
 state/failure model and how the future SQL transaction must satisfy it.
 
+## Safe fulfillment contract (UI-03D.C — pure PHP, NOT wired)
+
+A recorded redemption is not a physical handoff. Only a fresh commit instructs
+`prepare`; a replay never does (`verify_handoff` / `do_not_prepare` /
+`do_not_prepare_for_today`). `EVC_Handoff_Service` records a staff handoff
+confirmation (`handed_now` or `already_handed_earlier`, the latter with no
+invented handoff time) as one handoff record + one audit event, never touching
+the ledger or entitlement; one per redemption and per handoff request id; an
+unknown COMMIT is never confirmed. Late confirmation fails closed until the
+owner approves a grace policy. `EVC_Fulfillment_Read_Model` is a capability-
+gated, minimised read model (no endpoint). See `docs/fulfillment-contract.md`.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in
