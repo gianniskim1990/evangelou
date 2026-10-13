@@ -4,21 +4,18 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   EMPTY_ORDER,
-  NOTE_MAX,
   entitlementKey,
   extrasFor,
   historyPreparation,
   isComplete,
   missing,
-  noteProblem,
   optionsFor,
   orderReducer,
   preparationLine,
+  quickNoteLabels,
   preparationRows,
   selectCoffee,
   setChoice,
-  setNote,
-  confirmNote,
   isColdCoffee,
   quickNotesFor,
   toggleQuickNote,
@@ -29,6 +26,7 @@ import {
   visibleGroups,
   type CoffeeOrder,
 } from "../../src/preview/coffeeConfig";
+import * as coffeeConfigModule from "../../src/preview/coffeeConfig";
 import { CoffeeConfigurator, OrderSummary } from "../../src/preview/StaffOrder";
 import { COFFEES, MEMBERS, memberById, redemptionHistory, todaysRedemptions } from "../../src/preview/previewData";
 
@@ -135,19 +133,69 @@ describe("changing the coffee removes incompatible options", () => {
   });
 });
 
-describe("preparation notes", () => {
-  it("are single-line and limited to NOTE_MAX characters", () => {
-    const o = setNote(order("espresso"), "λίγο\n\nπάγο " + "α".repeat(200));
-    assert.ok(!o.note.includes("\n"));
-    assert.equal(o.note.length, NOTE_MAX);
+describe("UI-03C.R1 structured-only orders (no free text anywhere)", () => {
+  const STATE_KEYS = ["choices", "coffee", "extras", "quickNotes"];
+  const keysOf = (o: CoffeeOrder) => Object.keys(o).sort();
+
+  it("an order holds structured selections only: no text field, no review flag", () => {
+    assert.deepEqual(keysOf(EMPTY_ORDER), STATE_KEYS);
+    let o = selectCoffee(EMPTY_ORDER, "cappuccino");
+    assert.deepEqual(keysOf(o), STATE_KEYS);
+    o = setChoice(o, "shots", "double");
+    o = toggleExtra(o, "decaf");
+    o = toggleQuickNote(o, "takeaway");
+    o = selectCoffee(o, "freddo-cappuccino");
+    assert.deepEqual(keysOf(o), STATE_KEYS);
+    for (const k of STATE_KEYS) assert.ok(k in o);
+    for (const v of [o.coffee, ...o.extras, ...o.quickNotes, ...Object.values(o.choices)]) assert.ok(typeof v === "string" && v.length < 40);
   });
 
-  it("refuse phone, card or e-mail looking content and block completion", () => {
-    const base = order("espresso", { shots: "single", sweetness: "none" });
-    assert.equal(noteProblem("έξτρα αφρό"), null);
-    for (const bad of ["καλέστε 6912345678", "κάρτα 4111 1111 1111 1111", "x@example.invalid"]) {
-      assert.ok(noteProblem(bad), bad);
-      assert.equal(isComplete(setNote(base, bad)), false);
+  it("the module has no free-text API left (no setter, cleaner, validator, review or length limit)", () => {
+    const names = Object.keys(coffeeConfigModule);
+    for (const gone of ["setNote", "cleanNote", "confirmNote", "noteProblem", "noteParts", "NOTE_MAX", "NOTE_SUGGESTIONS"]) {
+      assert.ok(!names.includes(gone), gone);
+    }
+    assert.ok(names.includes("toggleQuickNote") && names.includes("quickNotesFor") && names.includes("quickNoteLabels"));
+  });
+
+  it("the reducer cannot be driven into holding text: unknown note actions change nothing", () => {
+    const base = orderReducer({ memberId: "m01", order: EMPTY_ORDER }, { type: "coffee", coffee: "espresso" });
+    for (const stray of [{ type: "note", note: "λίγο πάγο" }, { type: "note-ok" }, { type: "set-note", note: "x" }]) {
+      const next = orderReducer(base, stray as never);
+      assert.deepEqual(next, base, JSON.stringify(stray));
+      assert.deepEqual(keysOf(next.order), STATE_KEYS);
+    }
+  });
+
+  it("normalising an order rebuilds it from known fields, dropping any extra key", () => {
+    const sneaky = { ...order("espresso", { shots: "single", sweetness: "none" }), note: "κάτι", noteReview: true } as CoffeeOrder;
+    for (const next of [selectCoffee(sneaky, "espresso"), selectCoffee(sneaky, "cappuccino"), setChoice(sneaky, "shots", "double")]) {
+      assert.deepEqual(keysOf(next), STATE_KEYS);
+      assert.ok(!JSON.stringify(next).includes("κάτι"));
+    }
+  });
+
+  it("a prefill carrying extra text keys cannot smuggle free text in", () => {
+    const sneaky = { ...order("espresso", { shots: "single", sweetness: "none" }), note: "κάτι", noteReview: true } as CoffeeOrder;
+    const next = orderReducer({ memberId: "m01", order: EMPTY_ORDER }, { type: "prefill", order: sneaky });
+    assert.deepEqual(keysOf(next.order), STATE_KEYS);
+    assert.ok(!JSON.stringify(next.order).includes("κάτι"));
+  });
+
+  it("completeness depends on structured choices only", () => {
+    assert.equal(isComplete(order("espresso", { shots: "single", sweetness: "none" })), true);
+    assert.equal(isComplete(order("espresso", { shots: "single" })), false);
+    for (const c of COFFEES) assert.ok(!missing(order(c.code)).includes("Έλεγχος οδηγιών"), c.code);
+  });
+
+  it("the configurator renders no text input, counter, warning banner or confirmation button", () => {
+    const member = memberById("m01");
+    const noop = () => {};
+    const everyOrder = [EMPTY_ORDER, ...COFFEES.map((c) => order(c.code)), order("cappuccino", { shots: "single", sweetness: "none", milk: "regular" }), selectCoffee(toggleQuickNote(order("espresso"), "very_hot"), "freddo-espresso")];
+    for (const o of everyOrder) {
+      const html = renderToStaticMarkup(createElement(CoffeeConfigurator, { member, order: o, dispatch: noop, onContinue: noop })).replace(/<!-- -->/g, "");
+      assert.doesNotMatch(html, /<input\b|<textarea\b|contenteditable|maxLength|maxlength/i);
+      assert.doesNotMatch(html, /role="alert"|\/80|Ισχύουν|Άλλη οδηγία|Έλεγχος οδηγιών|γράφτηκαν για άλλο καφέ|προσωπικά στοιχεία|Οδηγίες παρασκευής/);
     }
   });
 });
@@ -222,12 +270,14 @@ describe("synthetic preferences and history snapshots", () => {
 describe("future redemption snapshot (design only)", () => {
   const meta = { redemptionId: "preview-1", memberId: "m01", athensDate: TODAY, athensTime: "09:05" };
 
-  it("captures the exact drink as one record with modifiers and note", () => {
-    const o = setNote(toggleExtra(order("cappuccino", { shots: "double", sweetness: "little", sweetener: "white", milk: "plant", foam: "extra" }), "decaf"), "έξτρα αφρό");
+  it("captures the exact drink as one structured record: modifiers and quick notes, never text", () => {
+    const o = toggleQuickNote(toggleExtra(order("cappuccino", { shots: "double", sweetness: "little", sweetener: "white", milk: "plant", foam: "extra" }), "decaf"), "cinnamon");
     const s = toSnapshot(o, meta);
     assert.equal(s.coffee.code, "cappuccino");
     assert.deepEqual(s.modifiers.map((m) => `${m.group}=${m.option}`), ["shots=double", "sweetness=little", "sweetener=white", "milk=plant", "foam=extra", "decaf=yes"]);
-    assert.equal(s.note, "έξτρα αφρό");
+    assert.deepEqual(s.quickNotes, [{ id: "cinnamon", label: "κανέλα στον αφρό" }]);
+    assert.deepEqual(Object.keys(s).sort(), ["athensDate", "athensTime", "catalogueVersion", "coffee", "memberId", "modifiers", "quickNotes", "redemptionId"]);
+    assert.ok(!("note" in s) && !("note_text" in s) && !("noteText" in s));
   });
 
   it("refuses incomplete orders", () => {
@@ -263,10 +313,10 @@ describe("configurator and summary rendering", () => {
     assert.doesNotMatch(btn(order("cappuccino", { shots: "single", sweetness: "none", milk: "regular" })), /disabled=""/);
   });
 
-  it("the confirmation summary lists every selection, the note and the Athens date", () => {
-    const o = setNote(toggleExtra(order("freddo-cappuccino", { shots: "double", sweetness: "medium", sweetener: "brown", milk: "lactose_free", foam: "extra" }), "decaf"), "λίγο πάγο");
+  it("the confirmation summary lists every structured selection, the quick notes and the Athens date", () => {
+    const o = toggleQuickNote(toggleExtra(order("freddo-cappuccino", { shots: "double", sweetness: "medium", sweetener: "brown", milk: "lactose_free", foam: "extra" }), "decaf"), "takeaway");
     const html = text(renderToStaticMarkup(createElement(OrderSummary, { member, order: o, today: TODAY })));
-    for (const want of [member.name, "Freddo Cappuccino", "Διπλός", "Μέτριος", "Καστανή ζάχαρη", "Χωρίς λακτόζη", "Έξτρα αφρός", "Χωρίς καφεΐνη", "λίγο πάγο", "Τρίτη 13 Οκτωβρίου 2026", "ώρα Ελλάδας"]) {
+    for (const want of [member.name, "Freddo Cappuccino", "Διπλός", "Μέτριος", "Καστανή ζάχαρη", "Χωρίς λακτόζη", "Έξτρα αφρός", "Χωρίς καφεΐνη", "σε ποτήρι για έξω", "Τρίτη 13 Οκτωβρίου 2026", "ώρα Ελλάδας"]) {
       assert.ok(html.includes(want), want);
     }
     assert.equal(preparationRows(o).length, 8);
@@ -331,46 +381,38 @@ describe("UI-02.R1a coffee-specific quick notes", () => {
     assert.deepEqual(selectCoffee(o, "espresso").quickNotes, ["very_hot", "takeaway"]);
   });
 
-  it("free text is never silently carried to another coffee: it is kept but must be reviewed", () => {
+  it("switching the coffee needs no review step: incompatible quick notes are simply removed", () => {
     const complete = order("cappuccino", { shots: "single", sweetness: "none", milk: "regular" });
-    const withText = setNote(complete, "πολύ αφρό από πάνω");
-    assert.equal(withText.noteReview, false);
-    const switched = selectCoffee(withText, "cappuccino");
-    assert.equal(switched.noteReview, false, "re-selecting the same coffee is not a change");
-    const other = selectCoffee(withText, "freddo-cappuccino");
-    assert.equal(other.note, "πολύ αφρό από πάνω");
-    assert.equal(other.noteReview, true);
-    const ready = setChoice(other, "shots", "single");
-    assert.ok(missing(ready).includes("Έλεγχος οδηγιών"));
-    assert.equal(isComplete(ready), false);
-    assert.equal(isComplete(confirmNote(ready)), true, "staff confirm the text still applies");
-    assert.equal(setNote(ready, "χωρίς αφρό").noteReview, false, "editing the text counts as reviewing it");
-    assert.equal(setNote(ready, "").noteReview, false, "clearing the text needs no review");
-    assert.equal(selectCoffee(complete, "espresso").noteReview, false, "no free text, nothing to review");
+    const withNotes = toggleQuickNote(toggleQuickNote(complete, "cinnamon"), "takeaway");
+    const other = selectCoffee(withNotes, "espresso");
+    assert.deepEqual(other.quickNotes, ["takeaway"], "foam note dropped, generic note kept");
+    assert.ok(!missing(other).includes("Έλεγχος οδηγιών"));
+    const needsMilk = selectCoffee(order("espresso", { shots: "single", sweetness: "none" }), "cappuccino");
+    assert.deepEqual(missing(needsMilk), ["Γάλα"], "only a missing structured choice blocks completion");
+    assert.equal(isComplete(needsMilk), false);
+    assert.equal(isComplete(selectCoffee(complete, "freddo-cappuccino")), true, "every kept choice is valid for the other coffee");
   });
 
-  it("the reducer exposes quick notes and review confirmation", () => {
+  it("the reducer exposes quick notes and prunes them on a coffee change", () => {
     let s = orderReducer({ memberId: "m01", order: EMPTY_ORDER }, { type: "coffee", coffee: "espresso" });
     s = orderReducer(s, { type: "quick-note", id: "very_hot" });
-    s = orderReducer(s, { type: "note", note: "σε μικρό φλιτζάνι" });
+    s = orderReducer(s, { type: "quick-note", id: "takeaway" });
     s = orderReducer(s, { type: "coffee", coffee: "freddo-espresso" });
-    assert.deepEqual(s.order.quickNotes, []);
-    assert.equal(s.order.noteReview, true);
-    s = orderReducer(s, { type: "note-ok" });
-    assert.equal(s.order.noteReview, false);
+    assert.deepEqual(s.order.quickNotes, ["takeaway"]);
   });
 
-  it("summaries and the design-only snapshot list quick notes by label, then the free text", () => {
+  it("summaries and the design-only snapshot list quick notes by label only", () => {
     let o = order("freddo-espresso", { shots: "double", sweetness: "none", milk: "none" });
-    o = setNote(toggleQuickNote(o, "no_straw"), "σε ψηλό ποτήρι");
-    assert.match(preparationLine(o), /«χωρίς καλαμάκι», «σε ψηλό ποτήρι»$/);
-    assert.deepEqual(preparationRows(o).at(-1), ["Οδηγίες", "χωρίς καλαμάκι, σε ψηλό ποτήρι"]);
+    o = toggleQuickNote(toggleQuickNote(o, "no_straw"), "takeaway");
+    assert.match(preparationLine(o), /«σε ποτήρι για έξω», «χωρίς καλαμάκι»$/);
+    assert.deepEqual(preparationRows(o).at(-1), ["Οδηγίες", "σε ποτήρι για έξω, χωρίς καλαμάκι"]);
+    assert.deepEqual(quickNoteLabels(o), ["σε ποτήρι για έξω", "χωρίς καλαμάκι"]);
     const snap = toSnapshot(o, { redemptionId: "preview-q", memberId: "m01", athensDate: TODAY, athensTime: "10:00" });
-    assert.deepEqual(snap.quickNotes, [{ id: "no_straw", label: "χωρίς καλαμάκι" }]);
-    assert.equal(snap.note, "σε ψηλό ποτήρι");
+    assert.deepEqual(snap.quickNotes, [{ id: "takeaway", label: "σε ποτήρι για έξω" }, { id: "no_straw", label: "χωρίς καλαμάκι" }]);
+    assert.ok(!("note" in snap));
   });
 
-  it("the configurator renders only the quick notes of the selected coffee and the review prompt", () => {
+  it("the configurator renders only the quick notes of the selected coffee", () => {
     const member = memberById("m01");
     const noop = () => {};
     const render = (o: CoffeeOrder) => text(renderToStaticMarkup(createElement(CoffeeConfigurator, { member, order: o, dispatch: noop, onContinue: noop })));
@@ -381,9 +423,8 @@ describe("UI-02.R1a coffee-specific quick notes", () => {
     assert.ok(hotPlain.includes("πολύ ζεστός"));
     assert.ok(!hotPlain.includes("πάγος στο πλάι") && !hotPlain.includes("κανέλα στον αφρό"));
     assert.ok(render(order("cappuccino")).includes("κανέλα στον αφρό"));
-    const flagged = render(selectCoffee(setNote(order("espresso"), "σε μικρό φλιτζάνι"), "filter"));
-    assert.match(flagged, /Οι οδηγίες γράφτηκαν για άλλο καφέ/);
-    assert.match(flagged, /Έλεγχος οδηγιών/);
+    const switched = render(selectCoffee(toggleQuickNote(order("espresso"), "very_hot"), "freddo-espresso"));
+    assert.ok(switched.includes("πάγος στο πλάι") && !switched.includes("πολύ ζεστός"));
     assert.equal(QUICK_NOTES.length, 7);
   });
 });

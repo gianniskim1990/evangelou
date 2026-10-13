@@ -1,6 +1,6 @@
 import type { Dispatch, ReactNode } from "react";
 import { COFFEES, coffeeName, greekDate, type PreviewMember } from "./previewData";
-import { EXTRAS, NOTE_MAX, extrasFor, quickNotesFor, groupLabel, GROUPS, missing, noteProblem, optionsFor, preparationLine, preparationRows, usualOrder, visibleGroups, isComplete, type CoffeeOrder, type OrderAction } from "./coffeeConfig";
+import { EXTRAS, extrasFor, quickNotesFor, groupLabel, GROUPS, missing, optionsFor, preparationLine, preparationRows, usualOrder, visibleGroups, isComplete, type CoffeeOrder, type OrderAction } from "./coffeeConfig";
 import { cx } from "./screens";
 import { DefRows, Glyph } from "./ds";
 
@@ -44,21 +44,20 @@ export function CoffeeConfigurator({ member, order, dispatch, onContinue }: { me
   const usual = usualOrder(member);
   const groups = visibleGroups(order);
   const gaps = missing(order);
-  const problem = noteProblem(order.note);
   const ready = isComplete(order);
   return (
     <>
       <div className="mx-auto max-w-[1280px] px-5 pt-6 pb-36 md:px-8 md:pt-8">
         <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 rounded-[14px] border border-[var(--rule-strong)] bg-[var(--paper)] px-5 py-4">
           <p className="t-body min-w-0 text-[var(--ink)]">
-            <span className="text-[var(--ink-2)]">Συνήθως: </span>
+            <span className="text-[var(--ink-2)]">Συνήθως (δείγμα): </span>
             <strong className="font-semibold">{coffeeName(usual.coffee!)}</strong>, {preparationLine(usual)}
           </p>
           <button type="button" onClick={() => dispatch({ type: "prefill", order: usual })} className="press min-h-12 flex-none rounded-full border border-[var(--roast)] px-5 text-[16px] font-semibold text-[var(--ink)] hover:bg-[var(--roast)] hover:text-[var(--milk)]">
             Όπως συνήθως
           </button>
         </div>
-        <p className="t-small mt-2 text-[var(--ink-3)]">Η συνήθης επιλογή συμπληρώνει μόνο τη σημερινή παραγγελία· ελέγξτε την και αλλάξτε ό,τι χρειάζεται.</p>
+        <p className="t-small mt-2 text-[var(--ink-3)]">Ενδεικτικό δείγμα. Η πραγματική πρόταση θα προκύπτει από το ιστορικό εξαργυρώσεων και δεν είναι επιβεβαιωμένη παραγγελία· ελέγξτε την και αλλάξτε ό,τι χρειάζεται.</p>
 
         <div className="mt-8 grid grid-cols-[minmax(0,1fr)] gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <section aria-labelledby="evc-order-coffee">
@@ -112,37 +111,12 @@ export function CoffeeConfigurator({ member, order, dispatch, onContinue }: { me
             {order.coffee && (
               <Row label="Οδηγίες" hint="Προαιρετικό">
                 <div>
-                  <div className="mb-3 flex flex-wrap gap-2" aria-label="Γρήγορες οδηγίες για αυτόν τον καφέ">
+                  <div className="flex flex-wrap gap-2" aria-label="Γρήγορες οδηγίες για αυτόν τον καφέ">
                     {quickNotesFor(order.coffee).map((q) => (
                       <Chip key={q.id} role="checkbox" selected={order.quickNotes.includes(q.id)} onClick={() => dispatch({ type: "quick-note", id: q.id })}>
                         {q.label}
                       </Chip>
                     ))}
-                  </div>
-                  {order.noteReview && (
-                    <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-[12px] bg-[var(--wait-tint)] px-4 py-3">
-                      <p className="t-small font-semibold text-[var(--wait)]">Οι οδηγίες γράφτηκαν για άλλο καφέ. Ελέγξτε ότι ισχύουν ή διορθώστε τες.</p>
-                      <button type="button" onClick={() => dispatch({ type: "note-ok" })} className="press min-h-11 rounded-full border border-[var(--wait)] px-4 text-[15px] font-semibold text-[var(--ink)]">
-                        Ισχύουν
-                      </button>
-                    </div>
-                  )}
-                  <input
-                    aria-label="Οδηγίες παρασκευής"
-                    aria-invalid={problem ? true : undefined}
-                    aria-describedby="evc-order-note-help"
-                    value={order.note}
-                    maxLength={NOTE_MAX}
-                    autoComplete="off"
-                    onChange={(e) => dispatch({ type: "note", note: e.target.value })}
-                    placeholder="Άλλη οδηγία (προαιρετικά)"
-                    className={cx("t-body min-h-12 w-full rounded-[12px] border bg-[var(--paper)] px-4 text-[var(--ink)] outline-none", problem ? "border-[var(--stop)]" : "border-[var(--rule-strong)] focus:border-[var(--ink)]")}
-                  />
-                  <div className="mt-1.5 flex items-start justify-between gap-4">
-                    <p id="evc-order-note-help" className={cx("t-small", problem ? "font-semibold text-[var(--stop)]" : "text-[var(--ink-3)]")}>{problem ?? "Μόνο για την παρασκευή. Μην γράφετε προσωπικά στοιχεία."}</p>
-                    <span className="t-small t-num flex-none text-[var(--ink-3)]">
-                      {order.note.length}/{NOTE_MAX}
-                    </span>
                   </div>
                 </div>
               </Row>
@@ -160,7 +134,7 @@ export function CoffeeConfigurator({ member, order, dispatch, onContinue }: { me
                 <span className="t-small block truncate text-[var(--ink-2)]">{preparationLine(order)}</span>
               </>
             ) : (
-              <span className="text-[var(--ink-2)]">{problem ? "Διορθώστε τις οδηγίες" : `Λείπει: ${gaps.join(", ")}`}</span>
+              <span className="text-[var(--ink-2)]">{`Λείπει: ${gaps.join(", ")}`}</span>
             )}
           </p>
           <button type="button" disabled={!ready} onClick={onContinue} className="press min-h-14 flex-none rounded-[12px] bg-[var(--roast)] px-8 text-[17px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)] disabled:cursor-not-allowed disabled:opacity-40">

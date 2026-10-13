@@ -378,8 +378,8 @@ const mutants = [
   {
     id: "U15-coffee-change-keeps-incompatible-options",
     file: "preview/coffeeConfig.ts",
-    search: "  return normalize({ ...order, coffee, noteReview:",
-    replace: "  return ({ ...order, coffee, noteReview:",
+    search: "  return normalize({ ...order, coffee });",
+    replace: "  return ({ ...order, coffee });",
   },
   {
     id: "U16-new-member-keeps-previous-order",
@@ -394,10 +394,10 @@ const mutants = [
     replace: ".filter((g) => false && GROUPS[g].required && order.choices[g] === undefined)",
   },
   {
-    id: "U18-note-accepts-personal-data",
+    id: "U18-prefill-bypasses-normalisation",
     file: "preview/coffeeConfig.ts",
-    search: '  if (digits || note.includes("@")) return',
-    replace: '  if (false && (digits || note.includes("@"))) return',
+    search: "order: normalize({ coffee: action.order.coffee, choices: { ...action.order.choices }, extras: [...action.order.extras], quickNotes: [...action.order.quickNotes] })",
+    replace: "order: { ...action.order }",
   },
   {
     id: "U19-continue-enabled-for-incomplete-order",
@@ -424,16 +424,46 @@ const mutants = [
     replace: "resolveExclusive(order.quickNotes)",
   },
   {
-    id: "U24-free-text-silently-carried-to-new-coffee",
+    id: "U24-normalize-keeps-extra-keys-of-input",
     file: "preview/coffeeConfig.ts",
-    search: 'noteReview: order.noteReview || (changed && order.note.trim() !== "")',
-    replace: "noteReview: order.noteReview",
+    search: "  return { coffee, choices, extras: order.extras.filter",
+    replace: "  return { ...order, coffee, choices, extras: order.extras.filter",
   },
   {
-    id: "U25-unreviewed-note-does-not-block",
+    id: "U25-reducer-accepts-unknown-actions",
     file: "preview/coffeeConfig.ts",
-    search: 'return order.noteReview ? [...gaps, "Έλεγχος οδηγιών"] : gaps;',
-    replace: "return gaps;",
+    search: "      // Unknown actions (including any attempt to add text) change nothing.\n      return state;",
+    replace: "      return { ...state, order: { ...state.order, ...(action as object) } as CoffeeOrder };",
+  },
+  {
+    id: "U30-completeness-ignores-structured-choices",
+    file: "preview/coffeeConfig.ts",
+    search: "  return missing(order).length === 0;",
+    replace: "  return true;",
+  },
+  {
+    id: "U31-snapshot-carries-a-note-field",
+    file: "preview/coffeeConfig.ts",
+    search: ".map((q) => ({ id: q.id, label: q.label })) };",
+    replace: ".map((q) => ({ id: q.id, label: q.label })), note: null } as RedemptionPreparationSnapshot;",
+  },
+  {
+    id: "U32-summary-drops-quick-notes",
+    file: "preview/coffeeConfig.ts",
+    search: '  if (quickNoteLabels(order).length) rows.push(["Οδηγίες", quickNoteLabels(order).join(", ")]);',
+    replace: "",
+  },
+  {
+    id: "U33-configurator-renders-a-text-input",
+    file: "preview/StaffOrder.tsx",
+    search: '                  <div className="flex flex-wrap gap-2" aria-label="Γρήγορες οδηγίες για αυτόν τον καφέ">',
+    replace: '                  <input aria-label="x" /><div className="flex flex-wrap gap-2" aria-label="Γρήγορες οδηγίες για αυτόν τον καφέ">',
+  },
+  {
+    id: "U34-state-keeps-a-text-field",
+    file: "preview/coffeeConfig.ts",
+    search: "export const EMPTY_ORDER: CoffeeOrder = { coffee: null, choices: {}, extras: [], quickNotes: [] };",
+    replace: 'export const EMPTY_ORDER: CoffeeOrder = { coffee: null, choices: {}, extras: [], quickNotes: [], note: "" } as CoffeeOrder;',
   },
   {
     id: "U26-inapplicable-quick-note-accepted",

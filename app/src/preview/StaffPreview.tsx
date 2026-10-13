@@ -316,7 +316,7 @@ function Confirm({ member, order, dispatch, today, go }: { member: PreviewMember
           </>
         ) : (
           <div className="mt-6">
-            <p className="t-body text-[var(--ink-2)]">Λείπει: {missing(order).join(", ") || "διόρθωση των οδηγιών"}. Τίποτα δεν συμπληρώνεται αυτόματα.</p>
+            <p className="t-body text-[var(--ink-2)]">Λείπει: {missing(order).join(", ")}. Τίποτα δεν συμπληρώνεται αυτόματα.</p>
             <div className="mt-6 flex flex-wrap gap-3">
               <button type="button" onClick={() => go("coffee")} className="press min-h-16 rounded-[14px] bg-[var(--roast)] px-8 text-[18px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επιστροφή στον καφέ</button>
               <Btn tone="line" onClick={() => dispatch({ type: "prefill", order: usualOrder(member) })} className="min-h-16 px-7">Δείγμα: η συνήθης επιλογή</Btn>
