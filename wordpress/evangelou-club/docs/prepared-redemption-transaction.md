@@ -62,7 +62,12 @@ request ──► SHAPE ──► PARSE ──► FINGERPRINT ──► REQUEST-
                           └─ other ───────────► server_error (rolled back)
 ```
 
-Only `redeemed` and `replayed` authorise serving (`may_serve()`).
+**Superseded by UI-03D.C** (`docs/fulfillment-contract.md`): `may_serve()` no longer
+exists. Only a FRESH commit instructs `prepare`. A replay reports
+`previously_recorded` plus the stored handoff status, and instructs
+`verify_handoff`, `do_not_prepare` or `do_not_prepare_for_today`, never `prepare`.
+A replayed commit proves the entitlement was consumed, not that a coffee was
+handed over.
 
 **Unresolved outcomes** are `outcome_unknown` and `server_error`. Both carry
 `retry_request_id()`, the original request id. The only safe recovery is to

@@ -20,10 +20,21 @@
  *                     acting at that moment (deterministic interleavings).
  *   $unavailable      every call throws (database down).
  *
+ * UI-03D.C handoff confirmations (EVC_Redemption_Fulfillment_Store) share the
+ * same state, as they will share the Club database: commit_handoff() stages
+ * the handoff record and its audit event the same way, enforces one handoff
+ * per redemption and one per handoff request id, and NEVER writes the ledger
+ * or a snapshot. Handoff failure points: before_handoff, after_handoff,
+ * after_handoff_audit, handoff_commit; $handoff_commit_unknown;
+ * one-shot $after_handoff_lookup / $before_handoff_commit hooks.
+ *
  * Single-process PHP says nothing about real database concurrency: the
  * hooks model interleavings, the SQL transaction must provide them for real.
  */
-final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redemption_Store {
+final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redemption_Store, EVC_Redemption_Fulfillment_Store {
+    const KEY_HANDOFF_REQUEST = 'uq_handoffs_request';
+    const KEY_HANDOFF_REDEMPTION = 'PRIMARY';
+
     const KEY_ONE_PER_DAY = 'uq_redemptions_one_per_day';
     const KEY_REQUEST = 'uq_redemptions_request';
 
@@ -35,8 +46,12 @@ final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redempti
         'by_day' => array(),
         'snapshots' => array(),
         'audit' => array(),
+        'handoffs' => array(),
+        'handoff_by_request' => array(),
+        'handoff_by_redemption' => array(),
         'next_id' => 1,
         'next_audit_id' => 1,
+        'next_handoff_id' => 1,
     );
 
     /** @var array<int,array{0:string,1:Throwable}> */
@@ -47,6 +62,14 @@ final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redempti
     public $after_request_lookup;
     /** @var callable|null */
     public $before_commit;
+    /** @var string|null */
+    public $handoff_commit_unknown = null;
+    /** @var callable|null */
+    public $after_handoff_lookup;
+    /** @var callable|null */
+    public $before_handoff_commit;
+    /** @var int */
+    public $handoff_commit_attempts = 0;
     /** @var bool */
     public $unavailable = false;
     /** @var bool */
@@ -163,7 +186,114 @@ final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redempti
         $this->rejections[] = $event;
     }
 
+    // ---- EVC_Redemption_Fulfillment_Store ----------------------------------------------------
+
+    public function find_redemption(string $redemption_request_id): ?array {
+        $this->guard();
+        $this->reads++;
+        return $this->read_request($redemption_request_id);
+    }
+
+    public function find_handoff_by_request_id(string $handoff_request_id): ?array {
+        $this->guard();
+        $this->reads++;
+        $id = $this->state['handoff_by_request'][$handoff_request_id] ?? null;
+        $result = $id === null ? null : $this->state['handoffs'][$id];
+        if ($this->after_handoff_lookup !== null) {
+            $hook = $this->after_handoff_lookup;
+            $this->after_handoff_lookup = null;
+            $hook($this);
+        }
+        return $result;
+    }
+
+    public function redemptions_for_business_date(string $business_date): array {
+        $this->guard();
+        $this->reads++;
+        $out = array();
+        foreach ($this->state['ledger'] as $id => $row) {
+            if ($row['business_date'] === $business_date) {
+                $out[] = $this->read_request($row['request_id']);
+            }
+        }
+        return $out;
+    }
+
+    public function commit_handoff(EVC_Handoff_Write $write): int {
+        $this->guard();
+        $this->handoff_commit_attempts++;
+        if ($this->before_handoff_commit !== null) {
+            $hook = $this->before_handoff_commit;
+            $this->before_handoff_commit = null;
+            $hook($this);
+        }
+        $staged = $this->state;
+
+        $this->reach('before_handoff');
+        $record = $write->record();
+        if (!isset($staged['ledger'][$record['redemption_id']])) {
+            throw new EVC_Db_Exception('Club database foreign key violated.', '23000', 1452);
+        }
+        if (isset($staged['handoff_by_request'][$record['handoff_request_id']])) {
+            throw new EVC_Db_Duplicate_Key_Exception(self::KEY_HANDOFF_REQUEST, '23000', 1062);
+        }
+        if (isset($staged['handoff_by_redemption'][$record['redemption_id']])) {
+            throw new EVC_Db_Duplicate_Key_Exception(self::KEY_HANDOFF_REDEMPTION, '23000', 1062);
+        }
+        $id = $staged['next_handoff_id']++;
+        $record['id'] = $id;
+        $staged['handoffs'][$id] = $record;
+        $staged['handoff_by_request'][$record['handoff_request_id']] = $id;
+        $staged['handoff_by_redemption'][$record['redemption_id']] = $id;
+        $this->reach('after_handoff');
+
+        $staged['audit'][$staged['next_audit_id']++] = $write->audit();
+        $this->reach('after_handoff_audit');
+
+        $this->reach('handoff_commit');
+        $unknown = $this->handoff_commit_unknown;
+        $this->handoff_commit_unknown = null;
+        if ($unknown === 'not_committed') {
+            throw new EVC_Db_Commit_Unknown_Exception('Club database commit outcome unknown.', '08S01', 2013);
+        }
+        $this->state = $staged;
+        if ($unknown === 'committed') {
+            throw new EVC_Db_Commit_Unknown_Exception('Club database commit outcome unknown.', '08S01', 2013);
+        }
+        return $id;
+    }
+
     // ---- inspection & tampering (tests only) -------------------------------------------------
+
+    /** @return array<int,array> committed handoff records */
+    public function handoff_rows(): array {
+        return array_values($this->state['handoffs']);
+    }
+
+    /** Everything a handoff must never change: ledger rows and snapshots. */
+    public function redemption_state(): array {
+        return array($this->state['ledger'], $this->state['snapshots'], $this->state['by_day'], $this->state['by_request']);
+    }
+
+    /** Replaces every handoff record of a redemption (raw rows; may be corrupt on purpose). */
+    public function tamper_handoffs(string $redemption_request_id, array $handoffs): void {
+        $rid = $this->state['by_request'][$redemption_request_id];
+        foreach ($this->state['handoffs'] as $id => $h) {
+            if ($h['redemption_id'] === $rid) {
+                unset($this->state['handoffs'][$id], $this->state['handoff_by_request'][$h['handoff_request_id']]);
+            }
+        }
+        unset($this->state['handoff_by_redemption'][$rid]);
+        foreach ($handoffs as $h) {
+            $id = $this->state['next_handoff_id']++;
+            $h['id'] = $h['id'] ?? $id;
+            $this->state['handoffs'][$id] = $h;
+            if (isset($h['handoff_request_id'])) {
+                $this->state['handoff_by_request'][$h['handoff_request_id']] = $id;
+            }
+            $this->state['handoff_by_redemption'][$rid] = $id;
+        }
+    }
 
     /** @return array<int,array> committed ledger rows */
     public function ledger_rows(): array {
@@ -195,7 +325,7 @@ final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redempti
             }
             $audits = 0;
             foreach ($this->state['audit'] as $event) {
-                $audits += $event['redemption_id'] === $id ? 1 : 0;
+                $audits += $event['event_type'] === 'redemption' && $event['redemption_id'] === $id ? 1 : 0;
             }
             if ($audits !== 1) {
                 $out[] = 'ledger ' . $id . ' without exactly one audit event';
@@ -209,6 +339,30 @@ final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redempti
         foreach ($this->state['audit'] as $event) {
             if (!isset($this->state['ledger'][$event['redemption_id']])) {
                 $out[] = 'orphan audit event';
+            }
+        }
+        $per_redemption = array();
+        foreach ($this->state['handoffs'] as $h) {
+            if (!isset($this->state['ledger'][$h['redemption_id']])) {
+                $out[] = 'orphan handoff';
+            }
+            $per_redemption[$h['redemption_id']] = ($per_redemption[$h['redemption_id']] ?? 0) + 1;
+            $audits = 0;
+            foreach ($this->state['audit'] as $event) {
+                $audits += $event['event_type'] === 'handoff' && $event['request_id'] === $h['handoff_request_id'] ? 1 : 0;
+            }
+            if ($audits !== 1) {
+                $out[] = 'handoff ' . $h['handoff_request_id'] . ' without exactly one audit event';
+            }
+        }
+        foreach ($per_redemption as $rid => $n) {
+            if ($n > 1) {
+                $out[] = 'two handoffs for redemption ' . $rid;
+            }
+        }
+        foreach ($this->state['audit'] as $event) {
+            if ($event['event_type'] === 'handoff' && !isset($this->state['handoff_by_request'][$event['request_id']])) {
+                $out[] = 'handoff audit event without a handoff';
             }
         }
         return $out;
@@ -254,7 +408,13 @@ final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redempti
         if ($id === null) {
             return null;
         }
-        return array('ledger' => $this->ledger_view($id), 'snapshots' => $this->state['snapshots'][$id] ?? array());
+        $handoffs = array();
+        foreach ($this->state['handoffs'] as $h) {
+            if (($h['redemption_id'] ?? null) === $id) {
+                $handoffs[] = $h;
+            }
+        }
+        return array('ledger' => $this->ledger_view($id), 'snapshots' => $this->state['snapshots'][$id] ?? array(), 'handoffs' => $handoffs);
     }
 
     private function ledger_view(int $id): array {
@@ -306,5 +466,37 @@ final class EVC_Fake_Prep_Catalogue_Authority implements EVC_Prep_Catalogue_Auth
 
     public function approved_digest(int $catalogue_version): ?string {
         return $this->approvals[$catalogue_version] ?? null;
+    }
+}
+
+/** TEST-ONLY staff authorizer (UI-03D.C). Never shipped. */
+final class EVC_Fake_Club_Staff_Authorizer implements EVC_Club_Staff_Authorizer {
+    /** @var array<int,string[]> wp user id => capabilities */
+    public $grants = array();
+    /** @var array[] */
+    public $checks = array();
+
+    public function allows(EVC_Staff_Actor $actor, string $capability): bool {
+        $this->checks[] = array($actor->wp_user_id(), $capability);
+        return in_array($capability, $this->grants[$actor->wp_user_id()] ?? array(), true);
+    }
+}
+
+/** TEST-ONLY late-confirmation policy with an explicit window (NOT an approved business rule). */
+final class EVC_Test_Window_Late_Handoff_Policy implements EVC_Late_Handoff_Policy {
+    /** @var string */
+    private $window;
+    /** @var array[] */
+    public $calls = array();
+
+    /** @param string $window DateTime modifier added to the START of the next Athens day, e.g. "+2 hours" */
+    public function __construct(string $window) {
+        $this->window = $window;
+    }
+
+    public function allows_late_confirmation(string $redemption_business_date, DateTimeImmutable $now_utc): bool {
+        $this->calls[] = array($redemption_business_date, $now_utc->format('Y-m-d H:i:s.u'));
+        $next_day = new DateTimeImmutable($redemption_business_date . ' 00:00:00', new DateTimeZone('Europe/Athens'));
+        return $now_utc < $next_day->modify('+1 day')->modify($this->window);
     }
 }

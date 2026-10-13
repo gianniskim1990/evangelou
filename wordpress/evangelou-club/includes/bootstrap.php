@@ -67,4 +67,7 @@ require_once $evc_includes . 'class-evc-prep-redeem-precheck.php';
 // rejects one); only test fakes exist.
 require_once $evc_includes . 'class-evc-prep-snapshot.php';
 require_once $evc_includes . 'class-evc-prepared-redemption.php';
+// UI-03D.C safe fulfillment contract: handoff confirmations are a separate
+// statement about a redemption, never a coffee. Definitions only, NOT wired.
+require_once $evc_includes . 'class-evc-handoff.php';
 unset($evc_includes);

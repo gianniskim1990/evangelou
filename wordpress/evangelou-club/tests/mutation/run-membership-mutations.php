@@ -11,7 +11,9 @@
  * pinned-fingerprint minting, row-ref stability) and Task 1D-I.R2 (K1-K4:
  * historical key integrity before minting) and UI-03C (M1-M14: preparation
  * contract core) and UI-03D.A (N1-N28: atomic redemption + preparation
- * transaction model, incl. the in-memory store's atomicity).
+ * transaction model, incl. the in-memory store's atomicity) and UI-03D.C
+ * (H1-H27: safe fulfillment contract — replay instructions, handoff
+ * idempotency/uniqueness/atomicity, late policy, authorisation, read model).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -753,7 +755,7 @@ $mutants = array(
         'id' => 'N8-commit-unknown-reported-as-redeemed',
         'file' => 'includes/class-evc-prepared-redemption.php',
         'search' => 'return EVC_Prepared_Redemption_Outcome::unresolved(EVC_Prepared_Redemption_Outcome::OUTCOME_UNKNOWN, $request_id);',
-        'replace' => 'return EVC_Prepared_Redemption_Outcome::success(EVC_Prepared_Redemption_Outcome::REDEEMED, self::view(0, $member_public_id, $ledger, $snapshot));',
+        'replace' => 'return EVC_Prepared_Redemption_Outcome::redeemed(self::view(0, $member_public_id, $ledger, $snapshot));',
     ),
     array(
         'id' => 'N9-commit-unknown-retried-blindly',
@@ -768,10 +770,10 @@ $mutants = array(
         'replace' => 'unresolved(EVC_Prepared_Redemption_Outcome::OUTCOME_UNKNOWN, null)',
     ),
     array(
-        'id' => 'N11-unresolved-outcome-may-serve',
+        'id' => 'N11-unresolved-outcome-instructs-prepare',
         'file' => 'includes/class-evc-prepared-redemption.php',
-        'search' => 'return $this->redemption !== null && ($this->kind === self::REDEEMED || $this->kind === self::REPLAYED);',
-        'replace' => 'return $this->kind !== self::SERVER_ERROR;',
+        'search' => '        return new self($kind, null, $details, $request_id, null, self::DO_NOT_PREPARE, null);',
+        'replace' => '        return new self($kind, null, $details, $request_id, null, self::PREPARE, null);',
     ),
     array(
         'id' => 'N12-retryable-failure-not-retried',
@@ -783,7 +785,7 @@ $mutants = array(
         'id' => 'N13-member-day-duplicate-served',
         'file' => 'includes/class-evc-prepared-redemption.php',
         'search' => 'return EVC_Prepared_Redemption_Outcome::failure(EVC_Prepared_Redemption_Outcome::ALREADY_REDEEMED, array(',
-        'replace' => 'return EVC_Prepared_Redemption_Outcome::success(EVC_Prepared_Redemption_Outcome::REPLAYED, array(',
+        'replace' => 'return EVC_Prepared_Redemption_Outcome::redeemed(array(',
     ),
     array(
         'id' => 'N14-body-may-carry-extra-keys',
@@ -872,8 +874,171 @@ $mutants = array(
     array(
         'id' => 'N28-fake-store-not-atomic',
         'file' => 'tests/support/class-evc-in-memory-prepared-redemption-store.php',
-        'search' => '        $staged = $this->state;' . "\n" . '',
-        'replace' => '        $staged = &$this->state;' . "\n" . '',
+        'search' => '        $staged = $this->state;' . "\n" . '' . "\n" . '        $this->reach(\'before_ledger\');',
+        'replace' => '        $staged = &$this->state;' . "\n" . '' . "\n" . '        $this->reach(\'before_ledger\');',
+    ),
+    // UI-03D.C safe fulfillment contract (H1-H27).
+    array(
+        'id' => 'H1-replay-instructs-prepare',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            $instruction = self::VERIFY_HANDOFF;',
+        'replace' => '            $instruction = self::PREPARE;',
+    ),
+    array(
+        'id' => 'H2-earlier-day-replay-treated-as-today',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '        if (!$same_business_date) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'H3-recorded-handoff-ignored-on-replay',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '        } elseif ($handoff !== null) {',
+        'replace' => '        } elseif (false) {',
+    ),
+    array(
+        'id' => 'H4-replay-business-date-not-compared',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            (string) $ledger[\'business_date\'] === EVC_Clock::business_date($this->now),',
+        'replace' => '            true,',
+    ),
+    array(
+        'id' => 'H5-replay-ignores-stored-handoff',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            count($stored[\'handoffs\']) === 1 ? EVC_Handoff_Record::view($stored[\'handoffs\'][0]) : null',
+        'replace' => '            null',
+    ),
+    array(
+        'id' => 'H6-handoff-integrity-not-checked-on-replay',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            $problem = EVC_Prepared_Redemption_Record::handoff_problem($ledger, $stored[\'handoffs\']);' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'H7-unknown-claims-entitlement-state',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '        if ($this->kind === self::OUTCOME_UNKNOWN || $this->kind === self::SERVER_ERROR || $this->kind === self::RECORD_INTEGRITY_FAILURE) {' . "\n" . '            return null;',
+        'replace' => '        if ($this->kind === self::OUTCOME_UNKNOWN || $this->kind === self::SERVER_ERROR || $this->kind === self::RECORD_INTEGRITY_FAILURE) {' . "\n" . '            return true;',
+    ),
+    array(
+        'id' => 'H8-refusal-instructs-prepare',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '        return new self($kind, null, $details, null, null, self::DO_NOT_PREPARE, null);',
+        'replace' => '        return new self($kind, null, $details, null, null, self::PREPARE, null);',
+    ),
+    array(
+        'id' => 'H9-unknown-handoff-claimed-confirmed',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => 'return EVC_Handoff_Outcome::unresolved(EVC_Handoff_Outcome::OUTCOME_UNKNOWN, $handoff_request_id);',
+        'replace' => 'return EVC_Handoff_Outcome::recorded(EVC_Handoff_Outcome::CONFIRMED, EVC_Handoff_Record::view($record));',
+    ),
+    array(
+        'id' => 'H10-unknown-handoff-retried-blindly',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '                $this->report(\'commit_unknown\', $e);' . "\n" . '                return',
+        'replace' => '                $this->report(\'commit_unknown\', $e);' . "\n" . '                continue;' . "\n" . '                return',
+    ),
+    array(
+        'id' => 'H11-store-allows-two-handoffs-per-redemption',
+        'file' => 'tests/support/class-evc-in-memory-prepared-redemption-store.php',
+        'search' => '        if (isset($staged[\'handoff_by_redemption\'][$record[\'redemption_id\']])) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'H12-same-id-race-reported-as-another-handoff',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '        if (count($stored[\'handoffs\']) === 1 && $stored[\'handoffs\'][0][\'handoff_request_id\'] === $handoff_request_id) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'H13-changed-handoff-payload-replays',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '        if (!is_string($existing[\'handoff_fingerprint\']) || !hash_equals($existing[\'handoff_fingerprint\'], $fingerprint)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'H14-other-members-redemption-confirmable',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '        if ($stored === null || $stored[\'ledger\'][\'member_public_id\'] !== $member_public_id) {' . "\n" . '            $this->audit_rejection(',
+        'replace' => '        if ($stored === null) {' . "\n" . '            $this->audit_rejection(',
+    ),
+    array(
+        'id' => 'H15-confirmation-without-permission',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '        if (!$this->authorizer->allows($actor, EVC_Club_Staff_Authorizer::CONFIRM_HANDOFF)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'H16-late-confirmation-without-policy',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            && !(strcmp($business_date, $today) < 0 && $this->late_policy->allows_late_confirmation($business_date, $this->now))) {',
+        'replace' => '            && false) {',
+    ),
+    array(
+        'id' => 'H17-shipped-policy-allows-late-confirmation',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '    public function allows_late_confirmation(string $redemption_business_date, DateTimeImmutable $now_utc): bool {' . "\n" . '        return false;',
+        'replace' => '    public function allows_late_confirmation(string $redemption_business_date, DateTimeImmutable $now_utc): bool {' . "\n" . '        return true;',
+    ),
+    array(
+        'id' => 'H18-earlier-claim-invents-a-handoff-time',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '        return $claim === self::CLAIM_HANDED_NOW ? $recorded_at_utc : null;',
+        'replace' => '        return $recorded_at_utc;',
+    ),
+    array(
+        'id' => 'H19-stored-handoff-not-verified',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '        return count($handoffs) === 1 ? EVC_Handoff_Record::problem($handoffs[0], $ledger) : null;',
+        'replace' => '        return null;',
+    ),
+    array(
+        'id' => 'H20-handoff-fingerprint-binding-unchecked',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            || !hash_equals($h[\'handoff_fingerprint\'], self::fingerprint((string) $ledger[\'member_public_id\'], (string) $ledger[\'request_id\'], $h[\'claim\'], $h[\'staff_wp_user_id\']))) {',
+        'replace' => '            || false) {',
+    ),
+    array(
+        'id' => 'H21-handoff-write-audit-unchecked',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            || $audit[\'request_id\'] !== $record[\'handoff_request_id\']' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'H22-status-of-other-members-redemption-disclosed',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            if ($stored === null || $stored[\'ledger\'][\'member_public_id\'] !== $member_public_id) {' . "\n" . '                return new EVC_Fulfillment_Read_Result(EVC_Fulfillment_Read_Result::NOT_FOUND);',
+        'replace' => '            if ($stored === null) {' . "\n" . '                return new EVC_Fulfillment_Read_Result(EVC_Fulfillment_Read_Result::NOT_FOUND);',
+    ),
+    array(
+        'id' => 'H23-review-without-permission',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '        if (!$this->authorizer->allows($actor, EVC_Club_Staff_Authorizer::REVIEW_FULFILLMENT)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'H24-status-integrity-unchecked',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            if (EVC_Handoff_Service::record_problem($stored) !== null) {' . "\n" . '                return new EVC_Fulfillment_Read_Result(EVC_Fulfillment_Read_Result::RECORD_INTEGRITY_FAILURE);',
+        'replace' => '            if (false) {' . "\n" . '                return new EVC_Fulfillment_Read_Result(EVC_Fulfillment_Read_Result::RECORD_INTEGRITY_FAILURE);',
+    ),
+    array(
+        'id' => 'H25-confirmation-skips-redemption-integrity',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '        $problem = self::record_problem($stored);' . "\n" . '        if ($problem !== null) {' . "\n" . '            $this->audit_rejection(EVC_Handoff_Outcome::RECORD_INTEGRITY_FAILURE, (int)',
+        'replace' => '        $problem = null;' . "\n" . '        if ($problem !== null) {' . "\n" . '            $this->audit_rejection(EVC_Handoff_Outcome::RECORD_INTEGRITY_FAILURE, (int)',
+    ),
+    array(
+        'id' => 'H26-handoff-body-may-carry-extra-keys',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            || !EVC_Prep_Catalogue::is_object_with($body, self::BODY_KEYS, array(\'device_ref\'))',
+        'replace' => '            || !is_array($body) || !isset($body[\'handoff_request_id\'], $body[\'redemption_request_id\'], $body[\'claim\'])',
+    ),
+    array(
+        'id' => 'H27-fake-store-handoff-not-atomic',
+        'file' => 'tests/support/class-evc-in-memory-prepared-redemption-store.php',
+        'search' => '        $staged = $this->state;' . "\n" . '' . "\n" . '        $this->reach(\'before_handoff\');',
+        'replace' => '        $staged = &$this->state;' . "\n" . '' . "\n" . '        $this->reach(\'before_handoff\');',
     ),
 );
 
