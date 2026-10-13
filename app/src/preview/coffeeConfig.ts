@@ -118,12 +118,16 @@ export type QuickNoteId = "takeaway" | "very_hot" | "lukewarm" | "ice_side" | "n
  * the coffee's (illustrative) profile, so a cold drink is never offered
  * "πολύ ζεστός" and foam notes appear only where there is foam.
  */
-type QuickNote = { id: QuickNoteId; label: string; when: "any" | "hot" | "cold" | "foam" };
+/**
+ * `exclusive`: notes in the same group contradict each other (a coffee cannot be
+ * both "πολύ ζεστός" and "χλιαρός"); selecting one replaces the other.
+ */
+type QuickNote = { id: QuickNoteId; label: string; when: "any" | "hot" | "cold" | "foam"; exclusive?: "temperature" };
 
 export const QUICK_NOTES: QuickNote[] = [
   { id: "takeaway", label: "σε ποτήρι για έξω", when: "any" },
-  { id: "very_hot", label: "πολύ ζεστός", when: "hot" },
-  { id: "lukewarm", label: "χλιαρός", when: "hot" },
+  { id: "very_hot", label: "πολύ ζεστός", when: "hot", exclusive: "temperature" },
+  { id: "lukewarm", label: "χλιαρός", when: "hot", exclusive: "temperature" },
   { id: "ice_side", label: "πάγος στο πλάι", when: "cold" },
   { id: "no_straw", label: "χωρίς καλαμάκι", when: "cold" },
   { id: "cinnamon", label: "κανέλα στον αφρό", when: "foam" },
@@ -191,7 +195,7 @@ function normalize(order: CoffeeOrder): CoffeeOrder {
   const again = visibleGroups(settled);
   for (const g of Object.keys(choices) as GroupId[]) if (!again.includes(g)) delete choices[g];
   const allowedNotes = quickNotesFor(coffee).map((q) => q.id);
-  return { ...settled, choices, extras: order.extras.filter((e) => PROFILES[coffee].extras.includes(e)), quickNotes: order.quickNotes.filter((q) => allowedNotes.includes(q)) };
+  return { ...settled, choices, extras: order.extras.filter((e) => PROFILES[coffee].extras.includes(e)), quickNotes: resolveExclusive(order.quickNotes.filter((q) => allowedNotes.includes(q))) };
 }
 
 export function selectCoffee(order: CoffeeOrder, coffee: CoffeeCode): CoffeeOrder {
@@ -216,9 +220,18 @@ export function toggleExtra(order: CoffeeOrder, extra: ExtraId): CoffeeOrder {
   return { ...order, extras };
 }
 
+/** Keep at most one note per exclusive group: the most recently selected one wins. */
+function resolveExclusive(ids: QuickNoteId[]): QuickNoteId[] {
+  const groupOf = (id: QuickNoteId) => QUICK_NOTES.find((q) => q.id === id)?.exclusive;
+  return ids.filter((id, i) => {
+    const g = groupOf(id);
+    return g === undefined || !ids.slice(i + 1).some((later) => groupOf(later) === g);
+  });
+}
+
 export function toggleQuickNote(order: CoffeeOrder, id: QuickNoteId): CoffeeOrder {
   if (!quickNotesFor(order.coffee).some((q) => q.id === id)) return order;
-  const quickNotes = order.quickNotes.includes(id) ? order.quickNotes.filter((q) => q !== id) : [...order.quickNotes, id];
+  const quickNotes = order.quickNotes.includes(id) ? order.quickNotes.filter((q) => q !== id) : resolveExclusive([...order.quickNotes, id]);
   return { ...order, quickNotes };
 }
 

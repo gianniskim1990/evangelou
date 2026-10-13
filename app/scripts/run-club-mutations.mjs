@@ -420,8 +420,8 @@ const mutants = [
   {
     id: "U23-coffee-change-keeps-incompatible-quick-notes",
     file: "preview/coffeeConfig.ts",
-    search: "quickNotes: order.quickNotes.filter((q) => allowedNotes.includes(q))",
-    replace: "quickNotes: order.quickNotes",
+    search: "resolveExclusive(order.quickNotes.filter((q) => allowedNotes.includes(q)))",
+    replace: "resolveExclusive(order.quickNotes)",
   },
   {
     id: "U24-free-text-silently-carried-to-new-coffee",
@@ -440,6 +440,24 @@ const mutants = [
     file: "preview/coffeeConfig.ts",
     search: "  if (!quickNotesFor(order.coffee).some((q) => q.id === id)) return order;\n",
     replace: "",
+  },
+  {
+    id: "U27-toggle-allows-contradictory-temperatures",
+    file: "preview/coffeeConfig.ts",
+    search: ": resolveExclusive([...order.quickNotes, id]);",
+    replace: ": [...order.quickNotes, id];",
+  },
+  {
+    id: "U28-normalize-keeps-contradictory-temperatures",
+    file: "preview/coffeeConfig.ts",
+    search: "quickNotes: resolveExclusive(order.quickNotes.filter((q) => allowedNotes.includes(q)))",
+    replace: "quickNotes: order.quickNotes.filter((q) => allowedNotes.includes(q))",
+  },
+  {
+    id: "U29-lukewarm-not-in-temperature-group",
+    file: "preview/coffeeConfig.ts",
+    search: '{ id: "lukewarm", label: "χλιαρός", when: "hot", exclusive: "temperature" }',
+    replace: '{ id: "lukewarm", label: "χλιαρός", when: "hot" }',
   },
   {
     id: "U20-summary-drops-extras",

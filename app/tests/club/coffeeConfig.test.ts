@@ -387,3 +387,61 @@ describe("UI-02.R1a coffee-specific quick notes", () => {
     assert.equal(QUICK_NOTES.length, 7);
   });
 });
+
+describe("UI-02.R1b mutually exclusive temperature notes", () => {
+  const hot = (c: Parameters<typeof order>[0] = "espresso") => order(c);
+  const both = (o: CoffeeOrder) => o.quickNotes.includes("very_hot") && o.quickNotes.includes("lukewarm");
+
+  it("selecting «χλιαρός» replaces «πολύ ζεστός» and vice versa", () => {
+    let o = toggleQuickNote(hot(), "very_hot");
+    o = toggleQuickNote(o, "lukewarm");
+    assert.deepEqual(o.quickNotes, ["lukewarm"]);
+    o = toggleQuickNote(o, "very_hot");
+    assert.deepEqual(o.quickNotes, ["very_hot"]);
+  });
+
+  it("other compatible notes stay independently selectable", () => {
+    let o = toggleQuickNote(hot("cappuccino"), "takeaway");
+    o = toggleQuickNote(o, "cinnamon");
+    o = toggleQuickNote(o, "very_hot");
+    o = toggleQuickNote(o, "lukewarm");
+    assert.deepEqual(o.quickNotes, ["takeaway", "cinnamon", "lukewarm"]);
+    assert.deepEqual(toggleQuickNote(o, "takeaway").quickNotes, ["cinnamon", "lukewarm"]);
+  });
+
+  it("a selected temperature note can still be cleared", () => {
+    assert.deepEqual(toggleQuickNote(toggleQuickNote(hot(), "lukewarm"), "lukewarm").quickNotes, []);
+  });
+
+  it("no sequence of taps on any hot coffee ever yields both temperatures", () => {
+    const taps = ["very_hot", "lukewarm", "takeaway"] as const;
+    for (const c of COFFEES.map((x) => x.code).filter((x) => !isColdCoffee(x))) {
+      const walk = (o: CoffeeOrder, depth: number) => {
+        assert.ok(!both(o), `${c}: ${o.quickNotes.join("+")}`);
+        if (depth === 0) return;
+        for (const t of taps) walk(toggleQuickNote(o, t), depth - 1);
+      };
+      walk(hot(c), 4);
+    }
+  });
+
+  it("contradictory input from any other path is resolved too (prefill, coffee change)", () => {
+    const contradictory: CoffeeOrder = { ...order("espresso", { shots: "single", sweetness: "none" }), quickNotes: ["very_hot", "takeaway", "lukewarm"] };
+    const s = orderReducer({ memberId: "m01", order: EMPTY_ORDER }, { type: "prefill", order: contradictory });
+    assert.deepEqual(s.order.quickNotes, ["takeaway", "lukewarm"], "the later selection wins");
+    assert.ok(!both(selectCoffee(contradictory, "cappuccino")));
+    assert.ok(!both(selectCoffee(contradictory, "filter")));
+  });
+
+  it("only temperature notes are exclusive", () => {
+    const exclusive = QUICK_NOTES.filter((q) => "exclusive" in q && q.exclusive).map((q) => q.id).sort();
+    assert.deepEqual(exclusive, ["lukewarm", "very_hot"]);
+  });
+
+  it("the configurator shows exactly one temperature as selected", () => {
+    const o = toggleQuickNote(toggleQuickNote(hot(), "very_hot"), "lukewarm");
+    const html = renderToStaticMarkup(createElement(CoffeeConfigurator, { member: memberById("m01"), order: o, dispatch: () => {}, onContinue: () => {} })).replace(/<!-- -->/g, "");
+    assert.match(html, /aria-checked="true"[^>]*>(<svg[\s\S]*?<\/svg>)?χλιαρός</);
+    assert.doesNotMatch(html, /aria-checked="true"[^>]*>(<svg[\s\S]*?<\/svg>)?πολύ ζεστός</);
+  });
+});
