@@ -644,6 +644,16 @@ replace or disable an identity; only an administrator with a policy reason disab
 a disabled account stays disabled whatever payment arrives. Sync never issues or rotates QR
 tokens. See `docs/member-sync.md`.
 
+## Staff REST contract v2 — pure response mapping (UI-04G — pure PHP, NOT wired)
+
+Response mappers turn the existing service outcomes (prepared redemption, handoff, redemption
+status, member lookup, usual coffee) into the exact snake_case bodies the strict staff parsers in
+`app/src/staff/redemptionRecovery/wire.ts` accept; `EVC_Contract_Http` recommends the status
+separately. Contradictory outcomes fail closed (server_error + the original id); an uncertain
+commit is 503 with a same-id retry, never a definite failure. Cross-language vectors generated
+from the real mappers (`tests/fixtures/contract/vectors.json`) are parsed by the real TS code.
+No routes, hooks or SQL. See `docs/rest-contract-v2.md`.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in

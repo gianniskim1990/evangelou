@@ -792,6 +792,97 @@ const mutants = [
     search: " || typeof o.coffeeCode !== \"string\" || !CODE.test(o.coffeeCode)) return null;",
     replace: " || typeof o.coffeeCode !== \"string\") return null;",
   },
+  // UI-04G lookup / usual coffee parsers and HTTP reply classification (X1-X15).
+  {
+    id: "X1-forged-lookup-ref-accepted",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: " || ref.length > 512 || !LOOKUP_REF.test(ref) ||",
+    replace: " || ref.length > 512 ||",
+  },
+  {
+    id: "X2-oversized-lookup-ref-accepted",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: " || ref.length > 512 || !LOOKUP_REF",
+    replace: " || !LOOKUP_REF",
+  },
+  {
+    id: "X3-lookup-member-extra-fields",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "if (!isObj(member) || !hasKeys(member, [\"member_public_id\", \"lookup_ref\", \"lookup_ref_expires_at_utc\"])) return null;",
+    replace: "if (!isObj(member)) return null;",
+  },
+  {
+    id: "X4-lookup-refusal-with-member",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "  if (member !== null || typeof result",
+    replace: "  if (typeof result",
+  },
+  {
+    id: "X5-lookup-expiry-not-canonical",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: " || !isUtcStamp(expires)) return null;",
+    replace: ") return null;",
+  },
+  {
+    id: "X6-usual-confirmed-order-accepted",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: " || raw.confirmed_order !== false) return null;",
+    replace: ") return null;",
+  },
+  {
+    id: "X7-usual-basis-impossible",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: " || (occurrences as number) > (considered as number)) return null;",
+    replace: ") return null;",
+  },
+  {
+    id: "X8-usual-modifier-codes-unchecked",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "typeof m.group !== \"string\" || !CODE.test(m.group) || typeof m.option !== \"string\" || !CODE.test(m.option) ||",
+    replace: "typeof m.group !== \"string\" || typeof m.option !== \"string\" ||",
+  },
+  {
+    id: "X9-usual-free-text-reason",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "USUAL_REASONS.includes(reason) ?",
+    replace: "reason.length > 0 ?",
+  },
+  {
+    id: "X10-error-envelope-routed-as-domain",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "if (isObj(body) && !(\"error\" in body) && ",
+    replace: "if (isObj(body) && ",
+  },
+  {
+    id: "X11-unknown-error-code-borrows-auth-status",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "if (code === \"unauthorized\" || (code === null && status === 401))",
+    replace: "if (code === \"unauthorized\" || status === 401)",
+  },
+  {
+    id: "X12-rate-limit-reported-unavailable",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "(code === null && status === 429)) return { kind: \"transport\", failure: \"rate_limited\" };",
+    replace: "(code === null && status === 429)) return { kind: \"transport\", failure: \"unavailable\" };",
+  },
+  {
+    id: "X13-foreign-body-routed-as-domain",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: " && (\"outcome\" in body || \"result\" in body)) return { kind: \"domain\", body };",
+    replace: ") return { kind: \"domain\", body };",
+  },
+  {
+    id: "X14-usual-suggestion-with-reason",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "    if (reason !== null || !isObj(s) || !hasKeys(s, [\"catalogue_version\"",
+    replace: "    if (!isObj(s) || !hasKeys(s, [\"catalogue_version\"",
+  },
+  {
+    id: "X15-no-suggestion-carrying-suggestion",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "  if (s !== null) return null;\n  if (result === \"no_suggestion\")",
+    replace: "  if (result === \"no_suggestion\")",
+  },
 ];
 
 const runSuite = () =>
