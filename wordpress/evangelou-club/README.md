@@ -634,6 +634,16 @@ lookup-context proof bound to staff, session, member, purpose and expiry
 (`EVC_Signed_Member_Context_Verifier`). TTL, token age and limits are open decisions. See
 `docs/member-lookup.md`.
 
+## Member identity and trusted synchronisation (UI-04F — pure PHP, NOT wired)
+
+WordPress user, Club identity, account status, paid period and today's coffee stay separate.
+Sync signals (PMPro/WooCommerce/gateway; never FluentCRM) are hints that carry no status: the
+service re-reads verified membership facts and creates exactly one identity per WordPress
+customer at the first verified eligible activation. Expiry, refund, cancellation and renewal never
+replace or disable an identity; only an administrator with a policy reason disables/re-enables;
+a disabled account stays disabled whatever payment arrives. Sync never issues or rotates QR
+tokens. See `docs/member-sync.md`.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in

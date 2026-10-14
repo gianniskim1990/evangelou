@@ -19,6 +19,8 @@
  * And UI-04B (T1-T11: strict canonical UTC timestamps, chronology, immutable
  * usual-coffee policy) and UI-04C (L1-L26: QR tokens, member lookup, rate
  * limiting, signed lookup-context proof).
+ * And UI-04F (S1-S20: member identity, trusted synchronisation, account
+ * status administration, QR coordination).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1401,6 +1403,127 @@ $mutants = array(
         'file' => 'includes/class-evc-member-lookup.php',
         'search' => '    public function grants_entitlement(): bool {' . "\n" . '        return false;',
         'replace' => '    public function grants_entitlement(): bool {' . "\n" . '        return true;',
+    ),
+    // UI-04F member identity + trusted synchronisation (S1-S20).
+    array(
+        'id' => 'S1-newsletter-source-accepted',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '    const SOURCES = array(\'pmpro\', \'woocommerce\', \'gateway\', \'scheduled_reconcile\');',
+        'replace' => '    const SOURCES = array(\'pmpro\', \'woocommerce\', \'gateway\', \'scheduled_reconcile\', \'fluentcrm\');',
+    ),
+    array(
+        'id' => 'S2-privileged-account-not-refused',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if ($kind === EVC_Wp_Account_Directory::RESTRICTED) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'S3-unknown-wordpress-account-provisioned',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if ($kind !== EVC_Wp_Account_Directory::CUSTOMER) {',
+        'replace' => '        if ($kind === \'never\') {',
+    ),
+    array(
+        'id' => 'S4-directory-failure-treated-as-customer',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '            $this->report(\'account\', $e);' . "\n" . '            return EVC_Member_Sync_Result::of(EVC_Member_Sync_Result::IDENTITY_UNAVAILABLE);',
+        'replace' => '            $kind = EVC_Wp_Account_Directory::CUSTOMER;',
+    ),
+    array(
+        'id' => 'S5-identity-without-paid-membership',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if (!$entitlement->is_eligible_at($now) || !$entitlement->payment_verified()) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'S6-membership-outage-misreported',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '            return EVC_Member_Sync_Result::of(EVC_Member_Sync_Result::MEMBERSHIP_UNAVAILABLE);',
+        'replace' => '            return EVC_Member_Sync_Result::of(EVC_Member_Sync_Result::NOT_ELIGIBLE);',
+    ),
+    array(
+        'id' => 'S7-payment-reenables-disabled-member',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if ($member[\'status\'] !== \'enabled\') {' . "\n" . '            // Manually disabled',
+        'replace' => '        if (false) {' . "\n" . '            // Manually disabled',
+    ),
+    array(
+        'id' => 'S8-identity-hint-mismatch-ignored',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '            || ($signal->member_public_id_hint() !== null && $signal->member_public_id_hint() !== $member[\'member_public_id\'])) {',
+        'replace' => '            ) {',
+    ),
+    array(
+        'id' => 'S9-foreign-identity-hint-allows-create',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if ($signal->member_public_id_hint() !== null && $this->members->find_by_public_id($signal->member_public_id_hint()) !== null) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'S10-concurrent-create-not-reread',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '            $winner = $this->members->find_by_wp_user($wp_user_id);' . "\n" . '            return $winner !== null ? $this->existing($winner, $signal) : EVC_Member_Sync_Result::of(EVC_Member_Sync_Result::SERVER_ERROR);',
+        'replace' => '            return EVC_Member_Sync_Result::of(EVC_Member_Sync_Result::SERVER_ERROR);',
+    ),
+    array(
+        'id' => 'S11-uncertain-create-reported-provisioned',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '            $this->report(\'commit_unknown\', $e);' . "\n" . '            return EVC_Member_Sync_Result::of(EVC_Member_Sync_Result::OUTCOME_UNKNOWN);',
+        'replace' => '            return EVC_Member_Sync_Result::member(EVC_Member_Sync_Result::PROVISIONED, array(\'member_public_id\' => $public_id, \'status\' => \'enabled\'));',
+    ),
+    array(
+        'id' => 'S12-malformed-public-id-accepted',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if (!EVC_Member_Id::is_valid_format($public_id)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'S13-status-change-without-capability',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if (!$this->authorizer->allows($actor, self::CAPABILITY)) {' . "\n" . '            return new EVC_Member_Account_Result(EVC_Member_Account_Result::FORBIDDEN);',
+        'replace' => '        if (false) {' . "\n" . '            return new EVC_Member_Account_Result(EVC_Member_Account_Result::FORBIDDEN);',
+    ),
+    array(
+        'id' => 'S14-status-reason-policy-ignored',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if (!in_array($reason, $allowed, true)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'S15-status-conflict-reported-changed',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '            } catch (EVC_Member_Status_Conflict $e) {' . "\n" . '                return new EVC_Member_Account_Result(EVC_Member_Account_Result::CONCURRENT_CHANGE);',
+        'replace' => '            } catch (EVC_Member_Status_Conflict $e) {' . "\n" . '                return new EVC_Member_Account_Result(EVC_Member_Account_Result::CHANGED, $target);',
+    ),
+    array(
+        'id' => 'S16-first-qr-offered-without-policy',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        return $result->kind() === EVC_Member_Sync_Result::PROVISIONED && $this->policy->offer_first_qr_after_provisioning()',
+        'replace' => '        return $result->kind() === EVC_Member_Sync_Result::PROVISIONED',
+    ),
+    array(
+        'id' => 'S17-first-qr-offered-despite-active-token',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        if ($this->tokens->active_token_hash($member[\'id\']) !== null) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'S18-sync-claims-entitlement',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '    public function grants_entitlement(): bool {' . "\n" . '        return false;' . "\n" . '    }' . "\n" . '' . "\n" . '    /** Synchronisation never issues',
+        'replace' => '    public function grants_entitlement(): bool {' . "\n" . '        return true;' . "\n" . '    }' . "\n" . '' . "\n" . '    /** Synchronisation never issues',
+    ),
+    array(
+        'id' => 'S19-sync-report-leaks-user',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '            call_user_func($this->error_reporter, array(\'stage\' => \'member_sync_\' . $stage, \'exception\' => get_class($e)));',
+        'replace' => '            call_user_func($this->error_reporter, array(\'stage\' => \'member_sync_\' . $stage, \'exception\' => get_class($e), \'detail\' => $e->getMessage()));',
+    ),
+    array(
+        'id' => 'S20-free-text-status-reason-accepted',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '|| !is_string($reason) || !preg_match(self::REASON_PATTERN, $reason)) {',
+        'replace' => '|| !is_string($reason)) {',
     ),
 );
 

@@ -78,4 +78,7 @@ require_once $evc_includes . 'class-evc-usual-coffee.php';
 // UI-04C QR tokens, secure member lookup and signed lookup-context proof:
 // definitions only, NOT wired (no keys, store, rate limiter, route or UI).
 require_once $evc_includes . 'class-evc-member-lookup.php';
+// UI-04F member identity + trusted synchronisation core: signals are hints,
+// identity never follows payment state. Definitions only, NOT wired.
+require_once $evc_includes . 'class-evc-member-sync.php';
 unset($evc_includes);
