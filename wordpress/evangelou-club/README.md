@@ -613,6 +613,16 @@ unknown COMMIT is never confirmed. Late confirmation fails closed until the
 owner approves a grace policy. `EVC_Fulfillment_Read_Model` is a capability-
 gated, minimised read model (no endpoint). See `docs/fulfillment-contract.md`.
 
+## Usual coffee recommendation core (UI-03E — pure PHP, NOT wired)
+
+`EVC_Usual_Coffee_Service` derives a member's usual coffee from their own intact,
+committed v2 redemption snapshots (owner decision D-USUAL): no stored preference,
+no writes, never an order. It needs a capability AND a server-side proof that
+this staff session just looked up this member, picks the most frequent COMPLETE
+observed preparation among the most recent valid redemptions (provisional
+thresholds), and suggests it only if the current authorised catalogue accepts it
+exactly (no substitution). See `docs/usual-coffee.md`.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in

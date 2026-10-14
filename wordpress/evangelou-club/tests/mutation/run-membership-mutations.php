@@ -14,6 +14,8 @@
  * transaction model, incl. the in-memory store's atomicity) and UI-03D.C
  * (H1-H27: safe fulfillment contract — replay instructions, handoff
  * idempotency/uniqueness/atomicity, late policy, authorisation, read model).
+ * And UI-03E (Q1-Q22: usual-coffee recommendation — authorisation, history
+ * filtering, ranking, thresholds, catalogue compatibility, privacy).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1039,6 +1041,139 @@ $mutants = array(
         'file' => 'tests/support/class-evc-in-memory-prepared-redemption-store.php',
         'search' => '        $staged = $this->state;' . "\n" . '' . "\n" . '        $this->reach(\'before_handoff\');',
         'replace' => '        $staged = &$this->state;' . "\n" . '' . "\n" . '        $this->reach(\'before_handoff\');',
+    ),
+    // UI-03E usual-coffee recommendation core (Q1-Q22).
+    array(
+        'id' => 'Q1-usual-without-capability',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        if (!$this->authorizer->allows($actor, self::CAPABILITY)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'Q2-usual-without-member-lookup-context',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        if (!$this->context->verify($actor, $member_public_id, $lookup_ref)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'Q3-disabled-member-gets-suggestion',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        if ($member === null || $member[\'status\'] !== \'enabled\') {',
+        'replace' => '        if ($member === null) {',
+    ),
+    array(
+        'id' => 'Q4-other-members-rows-counted',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            if (($ledger[\'member_id\'] ?? null) !== $member[\'id\'] || ($ledger[\'member_public_id\'] ?? null) !== $member[\'member_public_id\']) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'Q5-damaged-records-counted',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '                if (EVC_Handoff_Service::record_problem($stored) !== null) {',
+        'replace' => '                if (false) {',
+    ),
+    array(
+        'id' => 'Q6-lookback-window-ignored',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            if (strcmp($date, $from) < 0 || strcmp($date, $today) > 0) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'Q7-duplicated-request-ids-counted',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            if ($seen[$request_id] === 1) {',
+        'replace' => '            if (true) {',
+    ),
+    array(
+        'id' => 'Q8-recency-window-ignored',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        $considered = array_slice($valid, 0, $this->policy->max_considered);',
+        'replace' => '        $considered = $valid;',
+    ),
+    array(
+        'id' => 'Q9-oldest-redemptions-considered-first',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            return strcmp($b[\'sort\'], $a[\'sort\']);',
+        'replace' => '            return strcmp($a[\'sort\'], $b[\'sort\']);',
+    ),
+    array(
+        'id' => 'Q10-insufficient-history-suggested',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        if (count($considered) < $this->policy->min_valid) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'Q11-minimum-share-ignored',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            || $winner[\'count\'] * 100 < $this->policy->min_share_percent * count($considered)) {',
+        'replace' => '            ) {',
+    ),
+    array(
+        'id' => 'Q12-minimum-occurrences-ignored',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        if ($winner[\'count\'] < $this->policy->min_occurrences' . "\n" . '',
+        'replace' => '        if (false' . "\n" . '',
+    ),
+    array(
+        'id' => 'Q13-ties-not-broken-by-recency',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            $recency = strcmp($b[\'latest\'], $a[\'latest\']);',
+        'replace' => '            $recency = 0;',
+    ),
+    array(
+        'id' => 'Q14-least-frequent-wins',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '                return $b[\'count\'] - $a[\'count\'];',
+        'replace' => '                return $a[\'count\'] - $b[\'count\'];',
+    ),
+    array(
+        'id' => 'Q15-unofferable-usual-silently-substituted',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            return EVC_Usual_Coffee_Result::none(EVC_Usual_Coffee_Result::REASON_NOT_OFFERABLE);',
+        'replace' => '            $order = EVC_Prep_Validator::validate($catalogue, \'cappuccino\', array(\'milk\' => \'plant\', \'shots\' => \'single\', \'sweetness\' => \'none\'), array(\'cinnamon\'));',
+    ),
+    array(
+        'id' => 'Q16-unapproved-catalogue-trusted',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        return $approved !== null && hash_equals($approved, EVC_Prep_Catalogue_Digest::of($data)) ? $catalogue : null;',
+        'replace' => '        return $catalogue;',
+    ),
+    array(
+        'id' => 'Q17-illustrative-catalogue-without-opt-in',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            return $this->illustrative_opt_in === self::ALLOW_ILLUSTRATIVE_CATALOGUE_FOR_TESTS ? $catalogue : null;',
+        'replace' => '            return $catalogue;',
+    ),
+    array(
+        'id' => 'Q18-habit-split-by-catalogue-version',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '                \'key\' => EVC_Prep_Canonical::canonical(1, $snapshot[\'coffee_code\'], $modifiers, $quick),',
+        'replace' => '                \'key\' => EVC_Prep_Canonical::canonical($snapshot[\'catalogue_version\'], $snapshot[\'coffee_code\'], $modifiers, $quick),',
+    ),
+    array(
+        'id' => 'Q19-lookback-window-one-day-too-long',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        $from = self::shift_date($today, -($this->policy->lookback_days - 1));',
+        'replace' => '        $from = self::shift_date($today, -$this->policy->lookback_days);',
+    ),
+    array(
+        'id' => 'Q20-suggestion-claims-to-be-an-order',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '    public function is_confirmed_order(): bool {' . "\n" . '        return false;',
+        'replace' => '    public function is_confirmed_order(): bool {' . "\n" . '        return true;',
+    ),
+    array(
+        'id' => 'Q21-failure-report-leaks-details',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            call_user_func($this->error_reporter, array(\'stage\' => \'usual_coffee\', \'exception\' => get_class($e)));',
+        'replace' => '            call_user_func($this->error_reporter, array(\'stage\' => \'usual_coffee\', \'exception\' => get_class($e), \'message\' => $e->getMessage()));',
+    ),
+    array(
+        'id' => 'Q22-historical-labels-shown',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '            \'coffee_label\' => $order->coffee_label(),',
+        'replace' => '            \'coffee_label\' => $winner[\'coffee_code\'] === \'espresso\' ? \'Espresso\' : $order->coffee_label(),',
     ),
 );
 

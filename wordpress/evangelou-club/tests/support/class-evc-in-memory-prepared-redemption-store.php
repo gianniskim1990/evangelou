@@ -270,6 +270,20 @@ final class EVC_In_Memory_Prepared_Redemption_Store implements EVC_Prep_Redempti
         return array_values($this->state['handoffs']);
     }
 
+    /** Every committed redemption as {ledger, snapshots, handoffs}, in ledger-id order (tests only). */
+    public function all_redemptions(): array {
+        $out = array();
+        foreach ($this->state['ledger'] as $row) {
+            $out[] = $this->read_request($row['request_id']);
+        }
+        return $out;
+    }
+
+    /** The whole state, to prove that a read-only service wrote nothing (tests only). */
+    public function snapshot_of_state(): array {
+        return array($this->state, $this->rejections);
+    }
+
     /** Everything a handoff must never change: ledger rows and snapshots. */
     public function redemption_state(): array {
         return array($this->state['ledger'], $this->state['snapshots'], $this->state['by_day'], $this->state['by_request']);
@@ -498,5 +512,75 @@ final class EVC_Test_Window_Late_Handoff_Policy implements EVC_Late_Handoff_Poli
         $this->calls[] = array($redemption_business_date, $now_utc->format('Y-m-d H:i:s.u'));
         $next_day = new DateTimeImmutable($redemption_business_date . ' 00:00:00', new DateTimeZone('Europe/Athens'));
         return $now_utc < $next_day->modify('+1 day')->modify($this->window);
+    }
+}
+
+/** TEST-ONLY read-only history source over the in-memory store (UI-03E). Never shipped. */
+final class EVC_Fake_Redemption_History implements EVC_Redemption_History_Source {
+    /** @var EVC_In_Memory_Prepared_Redemption_Store */
+    private $store;
+    /** @var string asc | desc | shuffle */
+    public $order = 'asc';
+    /** @var int */
+    public $seed = 7;
+    /** @var bool return every member's rows (a faulty reader) */
+    public $leak_other_members = false;
+    /** @var bool ignore the requested date window (a faulty reader) */
+    public $ignore_window = false;
+    /** @var array[] raw rows appended to every answer */
+    public $extra_rows = array();
+    /** @var bool */
+    public $fail = false;
+    /** @var array[] */
+    public $calls = array();
+
+    public function __construct(EVC_In_Memory_Prepared_Redemption_Store $store) {
+        $this->store = $store;
+    }
+
+    public function find_member_by_public_id(string $member_public_id): ?array {
+        $this->calls[] = array('member', $member_public_id);
+        return $this->store->find_member_by_public_id($member_public_id);
+    }
+
+    public function member_redemptions(int $member_id, string $from_business_date, string $to_business_date): array {
+        $this->calls[] = array('history', $member_id, $from_business_date, $to_business_date);
+        if ($this->fail) {
+            throw new EVC_Db_Exception('Club database query failed.', 'HY000', 2006);
+        }
+        $rows = array();
+        foreach ($this->store->all_redemptions() as $r) {
+            $date = $r['ledger']['business_date'];
+            if (!$this->leak_other_members && $r['ledger']['member_id'] !== $member_id) {
+                continue;
+            }
+            if (!$this->ignore_window && ($date < $from_business_date || $date > $to_business_date)) {
+                continue;
+            }
+            $rows[] = $r;
+        }
+        $rows = array_merge($rows, $this->extra_rows);
+        if ($this->order === 'desc') {
+            $rows = array_reverse($rows);
+        } elseif ($this->order === 'shuffle') {
+            mt_srand($this->seed);
+            shuffle($rows);
+            mt_srand();
+        }
+        return $rows;
+    }
+}
+
+/** TEST-ONLY member lookup context (UI-03E): lookup ref => [wp user, session ref, member]. Never shipped. */
+final class EVC_Fake_Member_Context_Verifier implements EVC_Member_Context_Verifier {
+    /** @var array<string,array{0:int,1:?string,2:string}> */
+    public $lookups = array();
+
+    public function verify(EVC_Staff_Actor $actor, string $member_public_id, $lookup_ref): bool {
+        if (!is_string($lookup_ref) || !isset($this->lookups[$lookup_ref])) {
+            return false;
+        }
+        list($user, $session, $member) = $this->lookups[$lookup_ref];
+        return $user === $actor->wp_user_id() && $session === $actor->session_ref() && $member === $member_public_id;
     }
 }

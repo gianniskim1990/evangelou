@@ -70,4 +70,7 @@ require_once $evc_includes . 'class-evc-prepared-redemption.php';
 // UI-03D.C safe fulfillment contract: handoff confirmations are a separate
 // statement about a redemption, never a coffee. Definitions only, NOT wired.
 require_once $evc_includes . 'class-evc-handoff.php';
+// UI-03E usual-coffee recommendation core: derived from verified history only,
+// read-only, never an order. Definitions only, NOT wired.
+require_once $evc_includes . 'class-evc-usual-coffee.php';
 unset($evc_includes);
