@@ -75,4 +75,7 @@ require_once $evc_includes . 'class-evc-handoff.php';
 // UI-03E usual-coffee recommendation core: derived from verified history only,
 // read-only, never an order. Definitions only, NOT wired.
 require_once $evc_includes . 'class-evc-usual-coffee.php';
+// UI-04C QR tokens, secure member lookup and signed lookup-context proof:
+// definitions only, NOT wired (no keys, store, rate limiter, route or UI).
+require_once $evc_includes . 'class-evc-member-lookup.php';
 unset($evc_includes);

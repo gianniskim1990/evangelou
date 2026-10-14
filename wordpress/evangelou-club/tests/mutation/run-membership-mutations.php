@@ -17,7 +17,8 @@
  * And UI-03E (Q1-Q22: usual-coffee recommendation — authorisation, history
  * filtering, ranking, thresholds, catalogue compatibility, privacy).
  * And UI-04B (T1-T11: strict canonical UTC timestamps, chronology, immutable
- * usual-coffee policy).
+ * usual-coffee policy) and UI-04C (L1-L26: QR tokens, member lookup, rate
+ * limiting, signed lookup-context proof).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1243,6 +1244,163 @@ $mutants = array(
         'file' => 'includes/class-evc-usual-coffee.php',
         'search' => '    private $lookback_days;' . "\n" . '',
         'replace' => '    public $lookback_days;' . "\n" . '',
+    ),
+    // UI-04C QR tokens, member lookup and lookup-context proof (L1-L26).
+    array(
+        'id' => 'L1-lookup-without-capability',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '        if (!$this->authorizer->allows($actor, self::CAPABILITY) || $actor->session_ref() === null) {',
+        'replace' => '        if ($actor->session_ref() === null) {',
+    ),
+    array(
+        'id' => 'L2-lookup-without-session-binding',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '        if (!$this->authorizer->allows($actor, self::CAPABILITY) || $actor->session_ref() === null) {',
+        'replace' => '        if (!$this->authorizer->allows($actor, self::CAPABILITY)) {',
+    ),
+    array(
+        'id' => 'L3-rate-limit-ignored',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            if (!$this->limiter->allow($keys, $action)) {',
+        'replace' => '            if (!$this->limiter->allow($keys, $action) && false) {',
+    ),
+    array(
+        'id' => 'L4-unavailable-limiter-fails-open',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            $this->report($e);' . "\n" . '            return EVC_Member_Lookup_Result::of(EVC_Member_Lookup_Result::UNAVAILABLE);' . "\n" . '        }' . "\n" . '        try {' . "\n" . '            return $lookup($keys);',
+        'replace' => '            $this->report($e);' . "\n" . '        }' . "\n" . '        try {' . "\n" . '            return $lookup($keys);',
+    ),
+    array(
+        'id' => 'L5-revoked-token-accepted',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            if ($row === null || $row[\'status\'] !== \'active\' || $this->token_policy->is_expired($row[\'issued_at_utc\'], $now)) {',
+        'replace' => '            if ($row === null || $this->token_policy->is_expired($row[\'issued_at_utc\'], $now)) {',
+    ),
+    array(
+        'id' => 'L6-token-age-ignored',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            if ($row === null || $row[\'status\'] !== \'active\' || $this->token_policy->is_expired($row[\'issued_at_utc\'], $now)) {',
+        'replace' => '            if ($row === null || $row[\'status\'] !== \'active\') {',
+    ),
+    array(
+        'id' => 'L7-disabled-member-found-by-qr',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            if ($member === null || $member[\'status\'] !== \'enabled\') {' . "\n" . '                return $this->failed($keys, self::ACTION_QR);',
+        'replace' => '            if ($member === null) {' . "\n" . '                return $this->failed($keys, self::ACTION_QR);',
+    ),
+    array(
+        'id' => 'L8-ambiguous-phone-picks-a-member',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            if (count($members) > 1) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'L9-phone-not-canonical',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '        return \'+30\' . $digits;',
+        'replace' => '        return $digits;',
+    ),
+    array(
+        'id' => 'L10-plaintext-phone-in-limiter-keys',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => 'array(\'phone:\' . EVC_Phone_Canonical::pseudonym($this->keys, $canonical));',
+        'replace' => 'array(\'phone:\' . $canonical);',
+    ),
+    array(
+        'id' => 'L11-no-per-phone-limit',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '        $extra = $canonical === null ? array() : array(\'phone:\' . EVC_Phone_Canonical::pseudonym($this->keys, $canonical));',
+        'replace' => '        $extra = array();',
+    ),
+    array(
+        'id' => 'L12-failures-not-recorded',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            $this->limiter->record_failure($keys, $action);' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'L13-proof-mac-not-checked',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '        if (!hash_equals($expected, $parts[3])) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'L14-proof-not-bound-to-member',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            || !hash_equals($p[\'member\'], $member_public_id) || $p[\'purpose\'] !== $purpose) {',
+        'replace' => '            || $p[\'purpose\'] !== $purpose) {',
+    ),
+    array(
+        'id' => 'L15-proof-not-bound-to-session',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => ' || !hash_equals($p[\'session\'], (string) $actor->session_ref())' . "\n" . '',
+        'replace' => '' . "\n" . '',
+    ),
+    array(
+        'id' => 'L16-proof-not-bound-to-purpose',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            || !hash_equals($p[\'member\'], $member_public_id) || $p[\'purpose\'] !== $purpose) {',
+        'replace' => '            || !hash_equals($p[\'member\'], $member_public_id)) {',
+    ),
+    array(
+        'id' => 'L17-proof-expiry-ignored',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '        if ($now < $p[\'iat\'] || $now >= $p[\'exp\'] || ',
+        'replace' => '        if ($now < $p[\'iat\'] || ',
+    ),
+    array(
+        'id' => 'L18-proof-outlives-current-policy',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '$p[\'exp\'] - $p[\'iat\'] > $policy->ttl_seconds() || ',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'L19-proof-usable-before-issue',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '        if ($now < $p[\'iat\'] || $now >= $p[\'exp\']',
+        'replace' => '        if ($now >= $p[\'exp\']',
+    ),
+    array(
+        'id' => 'L20-member-may-issue-for-another-record',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            if ($member === null || $member[\'wp_user_id\'] !== $requester->wp_user_id()) {',
+        'replace' => '            if ($member === null) {',
+    ),
+    array(
+        'id' => 'L21-administrator-without-capability',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            && !$this->authorizer->allows($requester->actor(), self::CAPABILITY_MANAGE)) {',
+        'replace' => '            && false) {',
+    ),
+    array(
+        'id' => 'L22-disabled-member-gets-a-token',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            if ($member[\'status\'] !== \'enabled\') {' . "\n" . '                return EVC_Qr_Token_Result::of(EVC_Qr_Token_Result::MEMBER_DISABLED);',
+        'replace' => '            if (false) {' . "\n" . '                return EVC_Qr_Token_Result::of(EVC_Qr_Token_Result::MEMBER_DISABLED);',
+    ),
+    array(
+        'id' => 'L23-uncertain-token-returned',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '                return EVC_Qr_Token_Result::of(EVC_Qr_Token_Result::OUTCOME_UNKNOWN);' . "\n" . '            }' . "\n" . '            return EVC_Qr_Token_Result::issued($token, $now);',
+        'replace' => '                return EVC_Qr_Token_Result::issued($token, $now);' . "\n" . '            }' . "\n" . '            return EVC_Qr_Token_Result::issued($token, $now);',
+    ),
+    array(
+        'id' => 'L24-weak-key-accepted',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '|| strlen($secret) < self::MIN_SECRET_BYTES) {',
+        'replace' => '|| strlen($secret) < 1) {',
+    ),
+    array(
+        'id' => 'L25-disabled-member-counts-for-a-phone',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '                if ($member !== null && $member[\'status\'] === \'enabled\') {',
+        'replace' => '                if ($member !== null) {',
+    ),
+    array(
+        'id' => 'L26-lookup-claims-entitlement',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '    public function grants_entitlement(): bool {' . "\n" . '        return false;',
+        'replace' => '    public function grants_entitlement(): bool {' . "\n" . '        return true;',
     ),
 );
 
