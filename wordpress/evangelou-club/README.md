@@ -623,6 +623,17 @@ observed preparation among the most recent valid redemptions (provisional
 thresholds), and suggests it only if the current authorised catalogue accepts it
 exactly (no substitution). See `docs/usual-coffee.md`.
 
+## QR tokens and secure member lookup (UI-04C — pure PHP, NOT wired)
+
+QR tokens are member LOOKUP handles only (never staff auth, payment proof, entitlement or redeem
+permission): 192 random bits, stored as SHA-256 only, one active per member, rotated atomically
+(compare-and-set). Lookup by QR or canonical Greek phone needs `evc_lookup_member` + a session
+before any read, server-side rate limiting before any read (fail closed), answers generically
+(`not_found` / `ambiguous` with no data) and returns only the member id plus an HMAC-signed
+lookup-context proof bound to staff, session, member, purpose and expiry
+(`EVC_Signed_Member_Context_Verifier`). TTL, token age and limits are open decisions. See
+`docs/member-lookup.md`.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in

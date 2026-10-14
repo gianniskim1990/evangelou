@@ -19,5 +19,6 @@ require_once __DIR__ . '/support/trait-evc-provenance-store-contract.php';
 require_once __DIR__ . '/support/class-evc-faulty-pdo.php';
 require_once __DIR__ . '/support/class-evc-failing-audit-log.php';
 require_once __DIR__ . '/support/class-evc-in-memory-prepared-redemption-store.php';
+require_once __DIR__ . '/support/class-evc-fake-member-lookup.php';
 require_once __DIR__ . '/support/class-evc-test-database.php';
 require_once __DIR__ . '/support/class-evc-db-test-case.php';
