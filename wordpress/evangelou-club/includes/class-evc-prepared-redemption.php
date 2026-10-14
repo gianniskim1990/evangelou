@@ -169,6 +169,12 @@ final class EVC_Prepared_Redemption_Write {
             || $audit['occurred_at_utc'] !== $ledger['redeemed_at_utc']) {
             throw new InvalidArgumentException('Inconsistent redemption write: records disagree.');
         }
+        if (!EVC_Utc_Timestamp::is_canonical($ledger['redeemed_at_utc'])
+            || !EVC_Utc_Timestamp::is_canonical($ledger['membership_expires_at_utc'])
+            || EVC_Utc_Timestamp::athens_date($ledger['redeemed_at_utc']) !== $ledger['business_date']
+            || EVC_Utc_Timestamp::compare($ledger['redeemed_at_utc'], $ledger['membership_expires_at_utc']) >= 0) {
+            throw new InvalidArgumentException('Inconsistent redemption write: time.');
+        }
         $this->ledger = $ledger;
         $this->snapshot = $snapshot;
         $this->audit = $audit;
@@ -675,6 +681,11 @@ final class EVC_Prepared_Redemption_Record {
     public static function snapshot_problem(array $ledger, array $snapshots, ?string $canonical): ?string {
         if ($ledger['fingerprint_version'] !== EVC_Prep_Canonical::FINGERPRINT_VERSION) {
             return 'fingerprint_version';
+        }
+        // UI-04B: a canonical UTC instant that falls on the stored Athens business date.
+        if (!EVC_Utc_Timestamp::is_canonical($ledger['redeemed_at_utc'] ?? null)
+            || EVC_Utc_Timestamp::athens_date($ledger['redeemed_at_utc']) !== ($ledger['business_date'] ?? null)) {
+            return 'ledger_time_invalid';
         }
         if (count($snapshots) === 0) {
             return 'snapshot_missing';

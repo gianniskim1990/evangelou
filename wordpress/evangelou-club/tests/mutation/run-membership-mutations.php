@@ -16,6 +16,8 @@
  * idempotency/uniqueness/atomicity, late policy, authorisation, read model).
  * And UI-03E (Q1-Q22: usual-coffee recommendation — authorisation, history
  * filtering, ranking, thresholds, catalogue compatibility, privacy).
+ * And UI-04B (T1-T11: strict canonical UTC timestamps, chronology, immutable
+ * usual-coffee policy).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1088,7 +1090,7 @@ $mutants = array(
     array(
         'id' => 'Q8-recency-window-ignored',
         'file' => 'includes/class-evc-usual-coffee.php',
-        'search' => '        $considered = array_slice($valid, 0, $this->policy->max_considered);',
+        'search' => '        $considered = array_slice($valid, 0, $this->policy->max_considered());',
         'replace' => '        $considered = $valid;',
     ),
     array(
@@ -1100,19 +1102,19 @@ $mutants = array(
     array(
         'id' => 'Q10-insufficient-history-suggested',
         'file' => 'includes/class-evc-usual-coffee.php',
-        'search' => '        if (count($considered) < $this->policy->min_valid) {',
+        'search' => '        if (count($considered) < $this->policy->min_valid()) {',
         'replace' => '        if (false) {',
     ),
     array(
         'id' => 'Q11-minimum-share-ignored',
         'file' => 'includes/class-evc-usual-coffee.php',
-        'search' => '            || $winner[\'count\'] * 100 < $this->policy->min_share_percent * count($considered)) {',
+        'search' => '            || $winner[\'count\'] * 100 < $this->policy->min_share_percent() * count($considered)) {',
         'replace' => '            ) {',
     ),
     array(
         'id' => 'Q12-minimum-occurrences-ignored',
         'file' => 'includes/class-evc-usual-coffee.php',
-        'search' => '        if ($winner[\'count\'] < $this->policy->min_occurrences' . "\n" . '',
+        'search' => '        if ($winner[\'count\'] < $this->policy->min_occurrences()' . "\n" . '',
         'replace' => '        if (false' . "\n" . '',
     ),
     array(
@@ -1154,8 +1156,8 @@ $mutants = array(
     array(
         'id' => 'Q19-lookback-window-one-day-too-long',
         'file' => 'includes/class-evc-usual-coffee.php',
-        'search' => '        $from = self::shift_date($today, -($this->policy->lookback_days - 1));',
-        'replace' => '        $from = self::shift_date($today, -$this->policy->lookback_days);',
+        'search' => '        $from = self::shift_date($today, -($this->policy->lookback_days() - 1));',
+        'replace' => '        $from = self::shift_date($today, -$this->policy->lookback_days());',
     ),
     array(
         'id' => 'Q20-suggestion-claims-to-be-an-order',
@@ -1174,6 +1176,73 @@ $mutants = array(
         'file' => 'includes/class-evc-usual-coffee.php',
         'search' => '            \'coffee_label\' => $order->coffee_label(),',
         'replace' => '            \'coffee_label\' => $winner[\'coffee_code\'] === \'espresso\' ? \'Espresso\' : $order->coffee_label(),',
+    ),
+    // UI-04B pure-core hardening: strict UTC timestamps + immutable policy (T1-T11).
+    array(
+        'id' => 'T1-handoff-time-format-unchecked',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            || !EVC_Utc_Timestamp::is_canonical($h[\'recorded_at_utc\'])' . "\n" . '',
+        'replace' => '            || !is_string($h[\'recorded_at_utc\'])' . "\n" . '',
+    ),
+    array(
+        'id' => 'T2-handoff-before-redemption-accepted',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            || EVC_Utc_Timestamp::compare($h[\'recorded_at_utc\'], $ledger[\'redeemed_at_utc\']) < 0) {',
+        'replace' => '            || false) {',
+    ),
+    array(
+        'id' => 'T3-ledger-time-off-its-business-date',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            || EVC_Utc_Timestamp::athens_date($ledger[\'redeemed_at_utc\']) !== ($ledger[\'business_date\'] ?? null)) {',
+        'replace' => '            ) {',
+    ),
+    array(
+        'id' => 'T4-redemption-write-time-unchecked',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => '            throw new InvalidArgumentException(\'Inconsistent redemption write: time.\');' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'T5-handoff-write-time-unchecked',
+        'file' => 'includes/class-evc-handoff.php',
+        'search' => '            || !EVC_Utc_Timestamp::is_canonical($record[\'recorded_at_utc\'])' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'T6-timestamp-pattern-allows-trailing-newline',
+        'file' => 'includes/class-evc-utc-timestamp.php',
+        'search' => '(\\d{6})$/D\';',
+        'replace' => '(\\d{6})$/\';',
+    ),
+    array(
+        'id' => 'T7-impossible-dates-accepted',
+        'file' => 'includes/class-evc-utc-timestamp.php',
+        'search' => '            && checkdate((int) $m[2], (int) $m[3], $year)' . "\n" . '',
+        'replace' => '            && true' . "\n" . '',
+    ),
+    array(
+        'id' => 'T8-impossible-times-accepted',
+        'file' => 'includes/class-evc-utc-timestamp.php',
+        'search' => '            && (int) $m[4] <= 23 && (int) $m[5] <= 59 && (int) $m[6] <= 59;',
+        'replace' => '            && true;',
+    ),
+    array(
+        'id' => 'T9-chronology-reversed',
+        'file' => 'includes/class-evc-utc-timestamp.php',
+        'search' => '        return strcmp($a, $b) <=> 0;',
+        'replace' => '        return strcmp($b, $a) <=> 0;',
+    ),
+    array(
+        'id' => 'T10-policy-silently-mutable',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '        throw new LogicException(\'EVC_Usual_Coffee_Policy is immutable.\');' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'T11-policy-field-public',
+        'file' => 'includes/class-evc-usual-coffee.php',
+        'search' => '    private $lookback_days;' . "\n" . '',
+        'replace' => '    public $lookback_days;' . "\n" . '',
     ),
 );
 

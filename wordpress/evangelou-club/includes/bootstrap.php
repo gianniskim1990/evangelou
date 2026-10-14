@@ -5,6 +5,8 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
 // hooks, opens no connection and writes nothing.
 $evc_includes = __DIR__ . '/';
 require_once $evc_includes . 'class-evc-clock.php';
+// UI-04B strict canonical UTC timestamps (DATETIME(6) text).
+require_once $evc_includes . 'class-evc-utc-timestamp.php';
 require_once $evc_includes . 'interface-evc-clock-source.php';
 require_once $evc_includes . 'class-evc-system-clock.php';
 require_once $evc_includes . 'class-evc-qr-token.php';

@@ -39,15 +39,15 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  */
 final class EVC_Usual_Coffee_Policy {
     /** @var int */
-    public $lookback_days;
+    private $lookback_days;
     /** @var int */
-    public $max_considered;
+    private $max_considered;
     /** @var int */
-    public $min_valid;
+    private $min_valid;
     /** @var int */
-    public $min_occurrences;
+    private $min_occurrences;
     /** @var int */
-    public $min_share_percent;
+    private $min_share_percent;
 
     public function __construct(int $lookback_days, int $max_considered, int $min_valid, int $min_occurrences, int $min_share_percent) {
         if ($lookback_days < 1 || $lookback_days > 366 || $max_considered < 1 || $max_considered > 100
@@ -69,6 +69,33 @@ final class EVC_Usual_Coffee_Policy {
      */
     public static function provisional(): self {
         return new self(90, 10, 3, 2, 50);
+    }
+
+    // UI-04B: immutable — values are validated once and only readable afterwards.
+
+    public function lookback_days(): int {
+        return $this->lookback_days;
+    }
+
+    public function max_considered(): int {
+        return $this->max_considered;
+    }
+
+    public function min_valid(): int {
+        return $this->min_valid;
+    }
+
+    public function min_occurrences(): int {
+        return $this->min_occurrences;
+    }
+
+    public function min_share_percent(): int {
+        return $this->min_share_percent;
+    }
+
+    /** Refuse dynamic properties (they would shadow nothing, but must not be settable at all). */
+    public function __set(string $name, $value): void {
+        throw new LogicException('EVC_Usual_Coffee_Policy is immutable.');
     }
 }
 
@@ -233,7 +260,7 @@ final class EVC_Usual_Coffee_Service {
 
         // 2. Lookback window in Europe/Athens business dates (server clock).
         $today = EVC_Clock::business_date(EVC_Clock::to_utc($this->clock->now()));
-        $from = self::shift_date($today, -($this->policy->lookback_days - 1));
+        $from = self::shift_date($today, -($this->policy->lookback_days() - 1));
         $rows = $this->history->member_redemptions($member['id'], $from, $today);
 
         // 3.-4. Valid records of this member, most recent first.
@@ -241,15 +268,15 @@ final class EVC_Usual_Coffee_Service {
         usort($valid, function (array $a, array $b): int {
             return strcmp($b['sort'], $a['sort']);
         });
-        $considered = array_slice($valid, 0, $this->policy->max_considered);
-        if (count($considered) < $this->policy->min_valid) {
+        $considered = array_slice($valid, 0, $this->policy->max_considered());
+        if (count($considered) < $this->policy->min_valid()) {
             return EVC_Usual_Coffee_Result::none(EVC_Usual_Coffee_Result::REASON_INSUFFICIENT_HISTORY);
         }
 
         // 5.-6. Complete observed preparations, ranked deterministically.
         $winner = self::rank($considered);
-        if ($winner['count'] < $this->policy->min_occurrences
-            || $winner['count'] * 100 < $this->policy->min_share_percent * count($considered)) {
+        if ($winner['count'] < $this->policy->min_occurrences()
+            || $winner['count'] * 100 < $this->policy->min_share_percent() * count($considered)) {
             return EVC_Usual_Coffee_Result::none(EVC_Usual_Coffee_Result::REASON_NO_CLEAR_USUAL);
         }
 

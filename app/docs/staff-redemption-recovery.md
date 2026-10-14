@@ -29,7 +29,7 @@ bundle-graph test enforces that.
 | `submitting_redemption` / `checking_status` / `handoff_confirmation_pending` | a request is in flight | none (double taps are refused) |
 | `redemption_unresolved` | outcome unknown (lost response, 5xx, invalid reply, `outcome_unknown`) | retry_redemption (SAME id), check_status |
 | `recorded_now` | a fresh commit (`redeemed` + `prepare`) | acknowledge_prepare **once**; then confirm_handed_now / confirm_handed_earlier / finish |
-| `previously_recorded_unconfirmed` | replay or recovery, today, no confirmation recorded | manual verification: confirm_handed_now / confirm_handed_earlier / check_status / finish. **Never prepare** |
+| `previously_recorded_unconfirmed` | replay or recovery, today, no confirmation recorded | **Never prepare.** First `confirm_manual_verification` (UI-04B, see below), check_status or finish; only after verification: confirm_handed_now / confirm_handed_earlier |
 | `previously_recorded_confirmed` | replay or recovery, today, confirmation recorded | finish, check_status |
 | `previous_business_date` | the request belongs to an earlier Athens day | finish. Today's coffee needs a NEW intent |
 | `redemption_refused` | definitive refusal (e.g. `benefit_already_redeemed`) | finish |
@@ -49,8 +49,9 @@ bundle-graph test enforces that.
 2. **No new id is created automatically.** Retries and recovery reuse the
    original redemption request id and the original handoff request id. After
    an authoritative "not recorded", only an identical payload may be resent,
-   and it keeps the same id. The payload is bound with a non-security FNV-1a
-   hash.
+   and it keeps the same id. The order is bound by the SHA-256 of its canonical
+   text (UI-04B, injected hasher); the server's fingerprint v2 stays the
+   authority.
 3. **The server status is read before anything is offered after a reload or
    an uncertain outcome.**
    - If the status cannot be read, the machine stays unresolved and keeps both
@@ -83,9 +84,10 @@ bundle-graph test enforces that.
 
 ## Per-tab persistence (`RecoveryStorage`, injected)
 
-The persisted record has exactly `v`, `session_ref`, `member_id` (opaque
-`mem_…`), `redemption_request_id`, `payload_hash`, `stage`,
-`handoff_request_id` and `claim`.
+The persisted record (format **v2**, UI-04B) has exactly `v`, `session_ref`,
+`member_id` (opaque `mem_…`), `redemption_request_id`, `payload_sha256`,
+`stage`, `handoff_request_id` and `claim`. A v1 record (32-bit FNV-1a) gives
+`recovery_required(storage_outdated)` and is never trusted or queried.
 
 - **Never persisted:** tokens, nonces, names, phone numbers, preparation
   payloads, server replies or the device reference.
@@ -115,3 +117,34 @@ The persisted record has exactly `v`, `session_ref`, `member_id` (opaque
 - **Dispute resolution.**
 - **Device identification.**
 - **Retention.**
+
+## UI-04B hardening
+
+**Explicit manual verification.** `previously_recorded_unconfirmed` (a replay
+or recovery, with no confirmation recorded) no longer allows a handoff claim
+directly.
+
+- Staff first call `confirmManualVerification()`: they state they checked the
+  situation with the customer and/or the counter.
+- This is LOCAL workflow state (`manuallyVerified`). It is never persisted
+  or sent, and it is **not proof of a physical handoff**.
+- It never prepares, redeems, or restores an entitlement.
+- It is voided by any status read (authoritative or unreadable), a
+  reload or new machine instance, a session end (logout, lock, expiry,
+  403), and a member change (finish, then a new intent).
+- The fresh-redemption flow (`recorded_now` → acknowledge prepare → confirm)
+  is unchanged.
+- Handoff confirmation stays optional: `finish` remains available, and
+  whether it should be is an OPEN owner policy.
+
+**Exact payload identity.**
+- `freezePayload()` validates every code against the canonical id pattern, so
+  the canonical text `evc-staff-intent-v2\n…` is unambiguous. It also freezes a
+  deep copy, so later changes to the caller's object never reach a retry.
+- `MachineDeps.sha256Hex` (async, injected; a future browser adapter would use
+  `crypto.subtle.digest`) produces the 64-hex identity.
+- A failing or malformed digest refuses to start: no id is minted and nothing
+  is sent.
+- A session end during hashing makes the start stale.
+- The server's fingerprint v2 remains the authority. Even a colliding client
+  hash cannot reuse a request id for another order (`idempotency_key_reused`).
