@@ -69,6 +69,21 @@ describe("staff bundle isolation (real import graph)", () => {
     }
   });
 
+  it("the UI-03D.D recovery state machine is not wired into any shipped entry", async () => {
+    for (const entry of ["src/staff/main.tsx", "src/main.tsx"]) {
+      const { inputs, output } = await bundle(entry);
+      const hit = inputs.find((p) => p.includes("src/staff/redemptionRecovery/"));
+      assert.equal(hit, undefined, `${entry} must not include ${hit}`);
+      assert.ok(!output.includes("previously_recorded_unconfirmed"), `${entry} must not contain the recovery machine`);
+    }
+    const own = await bundle("src/staff/redemptionRecovery/machine.ts");
+    const local = own.inputs.filter((p) => !p.includes("node_modules")).map((p) => p.slice(p.lastIndexOf("src/"))).sort();
+    assert.deepEqual(local, ["src/club/format.ts", "src/staff/redemptionRecovery/machine.ts", "src/staff/redemptionRecovery/wire.ts"]);
+    for (const needle of ["fetch(", "sessionStorage", "localStorage", "XMLHttpRequest"]) {
+      assert.ok(!own.output.includes(needle), `recovery machine must not use ${needle}`);
+    }
+  });
+
   it("the public /club demo still runs on the mock service", async () => {
     const { inputs } = await bundle("src/club/ClubApp.tsx");
     assert.ok(inputs.some((p) => /src\/club\/clubService\.ts$/.test(p)));
