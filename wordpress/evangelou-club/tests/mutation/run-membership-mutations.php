@@ -21,6 +21,7 @@
  * limiting, signed lookup-context proof).
  * And UI-04F (S1-S20: member identity, trusted synchronisation, account
  * status administration, QR coordination).
+ * And UI-04G (C1-C26: pure REST response contracts and HTTP status map).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1524,6 +1525,163 @@ $mutants = array(
         'file' => 'includes/class-evc-member-sync.php',
         'search' => '|| !is_string($reason) || !preg_match(self::REASON_PATTERN, $reason)) {',
         'replace' => '|| !is_string($reason)) {',
+    ),
+    // UI-04G pure REST response contracts (C1-C26).
+    array(
+        'id' => 'C1-same-day-replay-instruction-unchecked',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '                if ($instruction !== ($handoff !== null ? \'do_not_prepare\' : \'verify_handoff\')) {',
+        'replace' => '                if (false) {',
+    ),
+    array(
+        'id' => 'C2-contradictory-fresh-commit-accepted',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '                if ($o->recording() !== EVC_Prepared_Redemption_Outcome::RECORDED_NOW || $o->instruction() !== EVC_Prepared_Redemption_Outcome::PREPARE' . "\n" . '                    || $o->fulfillment() !== EVC_Prepared_Redemption_Outcome::FULFILLMENT_UNCONFIRMED || $handoff !== null || $o->entitlement_consumed() !== true) {',
+        'replace' => '                if (false) {',
+    ),
+    array(
+        'id' => 'C3-earlier-day-replay-on-the-same-day',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '                if (strcmp($today, $record[\'business_date\']) <= 0) {',
+        'replace' => '                if (false) {',
+    ),
+    array(
+        'id' => 'C4-earlier-day-replay-reports-record-date',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '                $server_date = $today;' . "\n" . '            } else {',
+        'replace' => '                $server_date = $record[\'business_date\'];' . "\n" . '            } else {',
+    ),
+    array(
+        'id' => 'C5-fresh-commit-uses-response-clock-date',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '\'prepare\', true, $record[\'business_date\'], $record, null);',
+        'replace' => '\'prepare\', true, $today, $record, null);',
+    ),
+    array(
+        'id' => 'C6-record-of-another-request-accepted',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '            || $view[\'request_id\'] !== $request_id || !EVC_Member_Id::is_valid_format($view[\'member_public_id\'])',
+        'replace' => '            || !EVC_Member_Id::is_valid_format($view[\'member_public_id\'])',
+    ),
+    array(
+        'id' => 'C7-redeemed-at-off-business-date-accepted',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '            || EVC_Utc_Timestamp::athens_date($view[\'redeemed_at_utc\']) !== $view[\'business_date\']) {',
+        'replace' => '            ) {',
+    ),
+    array(
+        'id' => 'C8-refusal-claims-consumption',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '            return self::body($kind, $request_id, null, null, \'do_not_prepare\', false, $today, null, null);',
+        'replace' => '            return self::body($kind, $request_id, null, null, \'do_not_prepare\', true, $today, null, null);',
+    ),
+    array(
+        'id' => 'C9-uncertain-redemption-without-retry-id',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '        $body[\'retry_request_id\'] = $request_id;',
+        'replace' => '        $body[\'retry_request_id\'] = null;',
+    ),
+    array(
+        'id' => 'C10-unknown-commit-reported-as-error',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '            return self::unresolved($kind, $request_id, $today);',
+        'replace' => '            return self::unresolved(EVC_Prepared_Redemption_Outcome::SERVER_ERROR, $request_id, $today);',
+    ),
+    array(
+        'id' => 'C11-arbitrary-request-id-echoed',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '        return is_string($id) && preg_match(self::UUID_V4, $id) ? $id : null;',
+        'replace' => '        return is_string($id) ? $id : null;',
+    ),
+    array(
+        'id' => 'C12-handoff-ownership-unchecked',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '                || ($kind === EVC_Handoff_Outcome::ALREADY_CONFIRMED) !== ($view[\'handoff_request_id\'] !== $hid)) {',
+        'replace' => '                ) {',
+    ),
+    array(
+        'id' => 'C13-earlier-handoff-with-invented-time',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => 'CLAIM_ALREADY_HANDED_EARLIER && $v[\'handoff_at_utc\'] === null &&',
+        'replace' => 'CLAIM_ALREADY_HANDED_EARLIER &&',
+    ),
+    array(
+        'id' => 'C14-handed-now-time-not-recording-time',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '            return $v[\'handoff_at_utc\'] === $v[\'confirmation_recorded_at_utc\'] && $v[\'handoff_time\']',
+        'replace' => '            return $v[\'handoff_time\']',
+    ),
+    array(
+        'id' => 'C15-handoff-view-extra-fields',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '        if (!is_array($v) || array_keys($v) !== self::VIEW_KEYS ||',
+        'replace' => '        if (!is_array($v) ||',
+    ),
+    array(
+        'id' => 'C16-uncertain-handoff-without-retry-id',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '\'handoff\' => null, \'retry_handoff_request_id\' => $hid);',
+        'replace' => '\'handoff\' => null, \'retry_handoff_request_id\' => null);',
+    ),
+    array(
+        'id' => 'C17-status-fulfillment-contradicts-handoff',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '            || $d[\'fulfillment\'] !== ($d[\'handoff\'] === null ? \'unconfirmed\' : \'confirmed\')) {',
+        'replace' => '            ) {',
+    ),
+    array(
+        'id' => 'C18-status-extra-fields',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '        if (!is_array($d) || array_keys($d) !== self::DATA_KEYS ||',
+        'replace' => '        if (!is_array($d) ||',
+    ),
+    array(
+        'id' => 'C19-lookup-leaks-extra-member-data',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => 'array_keys($m) !== array(\'member_public_id\', \'lookup_ref\', \'lookup_ref_expires_at_utc\')',
+        'replace' => '!isset($m[\'member_public_id\'], $m[\'lookup_ref\'], $m[\'lookup_ref_expires_at_utc\'])',
+    ),
+    array(
+        'id' => 'C20-suggestion-presented-as-confirmed-order',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '\'suggestion\' => $suggestion, \'confirmed_order\' => false);',
+        'replace' => '\'suggestion\' => $suggestion, \'confirmed_order\' => true);',
+    ),
+    array(
+        'id' => 'C21-unknown-commit-as-definite-failure',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '        \'record_integrity_failure\' => 500, \'outcome_unknown\' => 503, \'server_error\' => 503,' . "\n" . '    );' . "\n" . '    const HANDOFF',
+        'replace' => '        \'record_integrity_failure\' => 500, \'outcome_unknown\' => 409, \'server_error\' => 503,' . "\n" . '    );' . "\n" . '    const HANDOFF',
+    ),
+    array(
+        'id' => 'C22-rate-limit-not-429',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '\'rate_limited\' => 429',
+        'replace' => '\'rate_limited\' => 503',
+    ),
+    array(
+        'id' => 'C23-unknown-body-gets-success-status',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => 'isset($map[$surface][$key]) ? $map[$surface][$key] : 500;',
+        'replace' => 'isset($map[$surface][$key]) ? $map[$surface][$key] : 200;',
+    ),
+    array(
+        'id' => 'C24-integrity-failure-claims-no-consumption',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '            return self::body($kind, $request_id, null, null, \'do_not_prepare\', null, $today, null, null);',
+        'replace' => '            return self::body($kind, $request_id, null, null, \'do_not_prepare\', false, $today, null, null);',
+    ),
+    array(
+        'id' => 'C25-replay-fulfillment-unchecked',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '$o->fulfillment() !== $expected_fulfillment || $o->entitlement_consumed() !== true',
+        'replace' => '$o->entitlement_consumed() !== true',
+    ),
+    array(
+        'id' => 'C26-domain-shape-superset-accepted',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '        return in_array($keys, $shapes, true);',
+        'replace' => '        foreach ($shapes as $shape) {' . "\n" . '            if (!array_diff($shape, $keys)) {' . "\n" . '                return true;' . "\n" . '            }' . "\n" . '        }' . "\n" . '        return false;',
     ),
 );
 

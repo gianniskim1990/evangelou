@@ -1,0 +1,1440 @@
+{
+    "schema": "evc-contract-vectors-v1",
+    "note": "Generated from the real PHP services and response mappers (UI-04G). Do not edit by hand.",
+    "vectors": [
+        {
+            "name": "redemption fresh commit",
+            "surface": "redemption",
+            "http_status": 201,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "recorded_now",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": null
+            },
+            "expect": {
+                "kind": "redeemed",
+                "instruction": "prepare"
+            }
+        },
+        {
+            "name": "redemption exact replay, unconfirmed",
+            "surface": "redemption",
+            "http_status": 200,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "replayed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "previously_recorded",
+                "fulfillment": "unconfirmed",
+                "instruction": "verify_handoff",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": null
+            },
+            "expect": {
+                "kind": "replayed",
+                "instruction": "verify_handoff",
+                "fulfillment": "unconfirmed"
+            }
+        },
+        {
+            "name": "redemption second coffee same day",
+            "surface": "redemption",
+            "http_status": 409,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000002",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "benefit_already_redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000002",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": false,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "benefit_already_redeemed"
+            }
+        },
+        {
+            "name": "redemption request id reused for another member",
+            "surface": "redemption",
+            "http_status": 409,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_fedcba9876543210fedcba9876543210"
+            },
+            "body": {
+                "outcome": "idempotency_key_reused",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": false,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "idempotency_key_reused"
+            }
+        },
+        {
+            "name": "redemption expired membership",
+            "surface": "redemption",
+            "http_status": 409,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000003",
+                "member_id": "mem_fedcba9876543210fedcba9876543210"
+            },
+            "body": {
+                "outcome": "membership_inactive",
+                "request_id": "00000000-0000-4000-8000-000000000003",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": false,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "membership_inactive"
+            }
+        },
+        {
+            "name": "redemption unknown member",
+            "surface": "redemption",
+            "http_status": 404,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000004",
+                "member_id": "mem_11111111111111111111111111111111"
+            },
+            "body": {
+                "outcome": "member_not_found",
+                "request_id": "00000000-0000-4000-8000-000000000004",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": false,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "member_not_found"
+            }
+        },
+        {
+            "name": "redemption invalid coffee",
+            "surface": "redemption",
+            "http_status": 400,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000005",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "invalid_coffee",
+                "request_id": "00000000-0000-4000-8000-000000000005",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": false,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "invalid_coffee"
+            }
+        },
+        {
+            "name": "redemption catalogue not authorised",
+            "surface": "redemption",
+            "http_status": 503,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000006",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "catalogue_not_authorised",
+                "request_id": "00000000-0000-4000-8000-000000000006",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": false,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "catalogue_not_authorised"
+            }
+        },
+        {
+            "name": "redemption replay after handoff",
+            "surface": "redemption",
+            "http_status": 200,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "replayed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "previously_recorded",
+                "fulfillment": "confirmed",
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-000000000007",
+                    "redemption_request_id": "00000000-0000-4000-8000-000000000001",
+                    "claim": "handed_now",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_time": "stated_at_recording"
+                }
+            },
+            "expect": {
+                "kind": "replayed",
+                "instruction": "do_not_prepare",
+                "fulfillment": "confirmed"
+            }
+        },
+        {
+            "name": "redemption replay on a later Athens day",
+            "surface": "redemption",
+            "http_status": 200,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "replayed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "previously_recorded",
+                "fulfillment": "confirmed",
+                "instruction": "do_not_prepare_for_today",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-15",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-000000000007",
+                    "redemption_request_id": "00000000-0000-4000-8000-000000000001",
+                    "claim": "handed_now",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_time": "stated_at_recording"
+                }
+            },
+            "expect": {
+                "kind": "replayed",
+                "instruction": "do_not_prepare_for_today",
+                "fulfillment": "confirmed"
+            }
+        },
+        {
+            "name": "redemption unknown commit",
+            "surface": "redemption",
+            "http_status": 503,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000008",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "outcome_unknown",
+                "request_id": "00000000-0000-4000-8000-000000000008",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": null,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null,
+                "retry_request_id": "00000000-0000-4000-8000-000000000008"
+            },
+            "expect": {
+                "kind": "unresolved",
+                "code": "outcome_unknown"
+            }
+        },
+        {
+            "name": "redemption server error",
+            "surface": "redemption",
+            "http_status": 503,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000009",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "server_error",
+                "request_id": "00000000-0000-4000-8000-000000000009",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": null,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null,
+                "retry_request_id": "00000000-0000-4000-8000-000000000009"
+            },
+            "expect": {
+                "kind": "unresolved",
+                "code": "server_error"
+            }
+        },
+        {
+            "name": "redemption record integrity failure",
+            "surface": "redemption",
+            "http_status": 500,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-00000000000a",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "record_integrity_failure",
+                "request_id": "00000000-0000-4000-8000-00000000000a",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": null,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "integrity_failure"
+            }
+        },
+        {
+            "name": "redemption malformed request",
+            "surface": "redemption",
+            "http_status": 400,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-00000000000b",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "invalid_request",
+                "request_id": "00000000-0000-4000-8000-00000000000b",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": false,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "invalid_request"
+            }
+        },
+        {
+            "name": "handoff first confirmation (handed now)",
+            "surface": "handoff",
+            "http_status": 201,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "handoff_confirmed",
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                "fulfillment": "confirmed",
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                    "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                    "claim": "handed_now",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:35:00.000000",
+                    "handoff_at_utc": "2026-10-14 07:35:00.000000",
+                    "handoff_time": "stated_at_recording"
+                }
+            },
+            "expect": {
+                "kind": "recorded",
+                "how": "confirmed",
+                "handoff_time": "stated_at_recording"
+            }
+        },
+        {
+            "name": "handoff exact replay",
+            "surface": "handoff",
+            "http_status": 200,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "handoff_replayed",
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                "fulfillment": "confirmed",
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                    "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                    "claim": "handed_now",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:35:00.000000",
+                    "handoff_at_utc": "2026-10-14 07:35:00.000000",
+                    "handoff_time": "stated_at_recording"
+                }
+            },
+            "expect": {
+                "kind": "recorded",
+                "how": "replayed",
+                "handoff_time": "stated_at_recording"
+            }
+        },
+        {
+            "name": "handoff previously confirmed by another request",
+            "surface": "handoff",
+            "http_status": 200,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000f",
+                "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                "claim": "already_handed_earlier"
+            },
+            "body": {
+                "outcome": "handoff_already_confirmed",
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000f",
+                "fulfillment": "confirmed",
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                    "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                    "claim": "handed_now",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:35:00.000000",
+                    "handoff_at_utc": "2026-10-14 07:35:00.000000",
+                    "handoff_time": "stated_at_recording"
+                }
+            },
+            "expect": {
+                "kind": "recorded",
+                "how": "already_confirmed",
+                "handoff_time": "stated_at_recording"
+            }
+        },
+        {
+            "name": "handoff request id reused with another claim",
+            "surface": "handoff",
+            "http_status": 409,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                "claim": "already_handed_earlier"
+            },
+            "body": {
+                "outcome": "idempotency_key_reused",
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000e",
+                "fulfillment": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "idempotency_key_reused"
+            }
+        },
+        {
+            "name": "handoff of an unknown redemption",
+            "surface": "handoff",
+            "http_status": 404,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-000000000010",
+                "redemption_request_id": "00000000-0000-4000-8000-00000000000d",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "redemption_not_found",
+                "handoff_request_id": "00000000-0000-4000-8000-000000000010",
+                "fulfillment": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "redemption_not_found"
+            }
+        },
+        {
+            "name": "handoff of another member's redemption",
+            "surface": "handoff",
+            "http_status": 404,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-000000000011",
+                "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "redemption_not_found",
+                "handoff_request_id": "00000000-0000-4000-8000-000000000011",
+                "fulfillment": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "redemption_not_found"
+            }
+        },
+        {
+            "name": "handoff already handed earlier (no invented time)",
+            "surface": "handoff",
+            "http_status": 201,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-000000000013",
+                "redemption_request_id": "00000000-0000-4000-8000-000000000012",
+                "claim": "already_handed_earlier"
+            },
+            "body": {
+                "outcome": "handoff_confirmed",
+                "handoff_request_id": "00000000-0000-4000-8000-000000000013",
+                "fulfillment": "confirmed",
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-000000000013",
+                    "redemption_request_id": "00000000-0000-4000-8000-000000000012",
+                    "claim": "already_handed_earlier",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_at_utc": null,
+                    "handoff_time": "not_recorded"
+                }
+            },
+            "expect": {
+                "kind": "recorded",
+                "how": "confirmed",
+                "handoff_time": "not_recorded"
+            }
+        },
+        {
+            "name": "handoff unknown commit",
+            "surface": "handoff",
+            "http_status": 503,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-000000000015",
+                "redemption_request_id": "00000000-0000-4000-8000-000000000014",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "outcome_unknown",
+                "handoff_request_id": "00000000-0000-4000-8000-000000000015",
+                "fulfillment": null,
+                "handoff": null,
+                "retry_handoff_request_id": "00000000-0000-4000-8000-000000000015"
+            },
+            "expect": {
+                "kind": "unresolved",
+                "code": "outcome_unknown"
+            }
+        },
+        {
+            "name": "handoff late confirmation not authorised",
+            "surface": "handoff",
+            "http_status": 409,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-000000000017",
+                "redemption_request_id": "00000000-0000-4000-8000-000000000016",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "late_confirmation_not_authorised",
+                "handoff_request_id": "00000000-0000-4000-8000-000000000017",
+                "fulfillment": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "refused",
+                "code": "late_confirmation_not_authorised"
+            }
+        },
+        {
+            "name": "handoff record integrity failure",
+            "surface": "handoff",
+            "http_status": 500,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-000000000018",
+                "redemption_request_id": "00000000-0000-4000-8000-000000000016",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "record_integrity_failure",
+                "handoff_request_id": "00000000-0000-4000-8000-000000000018",
+                "fulfillment": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "integrity_failure"
+            }
+        },
+        {
+            "name": "handoff forbidden",
+            "surface": "handoff",
+            "http_status": 403,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-000000000019",
+                "redemption_request_id": "00000000-0000-4000-8000-000000000016",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "forbidden",
+                "handoff_request_id": "00000000-0000-4000-8000-000000000019",
+                "fulfillment": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "forbidden"
+            }
+        },
+        {
+            "name": "handoff server error",
+            "surface": "handoff",
+            "http_status": 503,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-00000000001a",
+                "redemption_request_id": "00000000-0000-4000-8000-000000000016",
+                "claim": "handed_now"
+            },
+            "body": {
+                "outcome": "server_error",
+                "handoff_request_id": "00000000-0000-4000-8000-00000000001a",
+                "fulfillment": null,
+                "handoff": null,
+                "retry_handoff_request_id": "00000000-0000-4000-8000-00000000001a"
+            },
+            "expect": {
+                "kind": "unresolved",
+                "code": "server_error"
+            }
+        },
+        {
+            "name": "status recorded, no handoff confirmation",
+            "surface": "status",
+            "http_status": 200,
+            "sent": {
+                "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "result": "found",
+                "data": {
+                    "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000",
+                    "is_current_business_date": true,
+                    "coffee_label": "Espresso",
+                    "modifiers": {
+                        "Δόση": "Διπλός",
+                        "Ζάχαρη": "Σκέτος"
+                    },
+                    "quick_notes": [
+                        "σε ποτήρι για έξω"
+                    ],
+                    "fulfillment": "unconfirmed",
+                    "handoff": null
+                }
+            },
+            "expect": {
+                "kind": "found",
+                "fulfillment": "unconfirmed",
+                "is_current_business_date": true
+            }
+        },
+        {
+            "name": "status confirmed, earlier day",
+            "surface": "status",
+            "http_status": 200,
+            "sent": {
+                "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "result": "found",
+                "data": {
+                    "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000",
+                    "is_current_business_date": false,
+                    "coffee_label": "Espresso",
+                    "modifiers": {
+                        "Δόση": "Διπλός",
+                        "Ζάχαρη": "Σκέτος"
+                    },
+                    "quick_notes": [
+                        "σε ποτήρι για έξω"
+                    ],
+                    "fulfillment": "confirmed",
+                    "handoff": {
+                        "handoff_request_id": "00000000-0000-4000-8000-00000000001c",
+                        "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                        "claim": "already_handed_earlier",
+                        "confirmation_recorded_at_utc": "2026-10-14 07:30:00.000000",
+                        "handoff_at_utc": null,
+                        "handoff_time": "not_recorded"
+                    }
+                }
+            },
+            "expect": {
+                "kind": "found",
+                "fulfillment": "confirmed",
+                "is_current_business_date": false
+            }
+        },
+        {
+            "name": "status of another member's redemption",
+            "surface": "status",
+            "http_status": 404,
+            "sent": {
+                "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                "member_id": "mem_fedcba9876543210fedcba9876543210"
+            },
+            "body": {
+                "result": "not_found",
+                "data": null
+            },
+            "expect": {
+                "kind": "not_found"
+            }
+        },
+        {
+            "name": "status forbidden",
+            "surface": "status",
+            "http_status": 403,
+            "sent": {
+                "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "result": "forbidden",
+                "data": null
+            },
+            "expect": {
+                "kind": "forbidden"
+            }
+        },
+        {
+            "name": "status record integrity failure",
+            "surface": "status",
+            "http_status": 500,
+            "sent": {
+                "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "result": "record_integrity_failure",
+                "data": null
+            },
+            "expect": {
+                "kind": "integrity_failure"
+            }
+        },
+        {
+            "name": "lookup by QR found",
+            "surface": "lookup",
+            "http_status": 200,
+            "sent": [],
+            "body": {
+                "result": "found",
+                "member": {
+                    "member_public_id": "mem_0123456789abcdef0123456789abcdef",
+                    "lookup_ref": "lkp1.k1.eyJ2IjoxLCJzdGFmZiI6Nywic2Vzc2lvbiI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwibWVtYmVyIjoibWVtXzAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwicHVycG9zZSI6Im1lbWJlcl92aWV3IiwiaWF0IjoxNzkxOTYzMDAwLCJleHAiOjE3OTE5NjMzMDAsIm5vbmNlIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAifQ.OmYOltun7u53FhvSaNb3DVihfsL9ZIYhd8h3MLgQxr8",
+                    "lookup_ref_expires_at_utc": "2026-10-14 07:35:00.000000"
+                }
+            },
+            "expect": {
+                "kind": "found"
+            }
+        },
+        {
+            "name": "lookup by unknown QR",
+            "surface": "lookup",
+            "http_status": 404,
+            "sent": [],
+            "body": {
+                "result": "not_found",
+                "member": null
+            },
+            "expect": {
+                "kind": "not_found"
+            }
+        },
+        {
+            "name": "lookup by shared phone",
+            "surface": "lookup",
+            "http_status": 409,
+            "sent": [],
+            "body": {
+                "result": "ambiguous",
+                "member": null
+            },
+            "expect": {
+                "kind": "ambiguous"
+            }
+        },
+        {
+            "name": "lookup by invalid phone",
+            "surface": "lookup",
+            "http_status": 400,
+            "sent": [],
+            "body": {
+                "result": "invalid_phone",
+                "member": null
+            },
+            "expect": {
+                "kind": "invalid_phone"
+            }
+        },
+        {
+            "name": "lookup forbidden",
+            "surface": "lookup",
+            "http_status": 403,
+            "sent": [],
+            "body": {
+                "result": "forbidden",
+                "member": null
+            },
+            "expect": {
+                "kind": "forbidden"
+            }
+        },
+        {
+            "name": "lookup rate limiter unavailable",
+            "surface": "lookup",
+            "http_status": 503,
+            "sent": [],
+            "body": {
+                "result": "unavailable",
+                "member": null
+            },
+            "expect": {
+                "kind": "unavailable"
+            }
+        },
+        {
+            "name": "lookup rate limited",
+            "surface": "lookup",
+            "http_status": 429,
+            "sent": [],
+            "body": {
+                "result": "rate_limited",
+                "member": null
+            },
+            "expect": {
+                "kind": "rate_limited"
+            }
+        },
+        {
+            "name": "usual coffee suggested",
+            "surface": "usual",
+            "http_status": 200,
+            "sent": [],
+            "body": {
+                "result": "suggested",
+                "reason": null,
+                "suggestion": {
+                    "catalogue_version": 1,
+                    "coffee_code": "espresso",
+                    "coffee_label": "Espresso",
+                    "modifiers": [
+                        {
+                            "group": "shots",
+                            "option": "double",
+                            "group_label": "Δόση",
+                            "label": "Διπλός"
+                        },
+                        {
+                            "group": "sweetness",
+                            "option": "none",
+                            "group_label": "Ζάχαρη",
+                            "label": "Σκέτος"
+                        }
+                    ],
+                    "quick_notes": [
+                        {
+                            "id": "takeaway",
+                            "label": "σε ποτήρι για έξω"
+                        }
+                    ],
+                    "basis": {
+                        "occurrences": 3,
+                        "considered": 3
+                    }
+                },
+                "confirmed_order": false
+            },
+            "expect": {
+                "kind": "suggested"
+            }
+        },
+        {
+            "name": "usual coffee insufficient history",
+            "surface": "usual",
+            "http_status": 200,
+            "sent": [],
+            "body": {
+                "result": "no_suggestion",
+                "reason": "insufficient_history",
+                "suggestion": null,
+                "confirmed_order": false
+            },
+            "expect": {
+                "kind": "no_suggestion"
+            }
+        },
+        {
+            "name": "usual coffee without lookup context",
+            "surface": "usual",
+            "http_status": 403,
+            "sent": [],
+            "body": {
+                "result": "forbidden",
+                "reason": null,
+                "suggestion": null,
+                "confirmed_order": false
+            },
+            "expect": {
+                "kind": "forbidden"
+            }
+        },
+        {
+            "name": "NEG redemption wrong request id",
+            "surface": "redemption",
+            "http_status": 201,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "redeemed",
+                "request_id": "6f9619ff-8b86-4011-b42d-00c04fc964ff",
+                "recording": "recorded_now",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": null
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG redemption wrong member id",
+            "surface": "redemption",
+            "http_status": 201,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "recorded_now",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_fedcba9876543210fedcba9876543210",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": null
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG redemption extra field",
+            "surface": "redemption",
+            "http_status": 201,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "recorded_now",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": null,
+                "note": "x"
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG redemption missing field",
+            "surface": "redemption",
+            "http_status": 201,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "recorded_now",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                }
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG replay that says prepare",
+            "surface": "redemption",
+            "http_status": 200,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "replayed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "previously_recorded",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": null
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG confirmed replay that says verify",
+            "surface": "redemption",
+            "http_status": 200,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "replayed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "previously_recorded",
+                "fulfillment": "confirmed",
+                "instruction": "verify_handoff",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-000000000007",
+                    "redemption_request_id": "00000000-0000-4000-8000-000000000001",
+                    "claim": "handed_now",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_time": "stated_at_recording"
+                }
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG redeemed_at without microseconds",
+            "surface": "redemption",
+            "http_status": 201,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "recorded_now",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00"
+                },
+                "handoff": null
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG redeemed_at on another Athens day",
+            "surface": "redemption",
+            "http_status": 201,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "recorded_now",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 21:30:00.000000"
+                },
+                "handoff": null
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG fresh commit on another server day",
+            "surface": "redemption",
+            "http_status": 201,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000001",
+                "recording": "recorded_now",
+                "fulfillment": "unconfirmed",
+                "instruction": "prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-15",
+                "redemption": {
+                    "request_id": "00000000-0000-4000-8000-000000000001",
+                    "member_id": "mem_0123456789abcdef0123456789abcdef",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000"
+                },
+                "handoff": null
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG unknown commit with another retry id",
+            "surface": "redemption",
+            "http_status": 503,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000008",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "outcome_unknown",
+                "request_id": "00000000-0000-4000-8000-000000000008",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": null,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null,
+                "retry_request_id": "6f9619ff-8b86-4011-b42d-00c04fc964ff"
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG refusal claiming consumption",
+            "surface": "redemption",
+            "http_status": 409,
+            "sent": {
+                "request_id": "00000000-0000-4000-8000-000000000002",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "outcome": "benefit_already_redeemed",
+                "request_id": "00000000-0000-4000-8000-000000000002",
+                "recording": null,
+                "fulfillment": null,
+                "instruction": "do_not_prepare",
+                "entitlement_consumed": true,
+                "server_business_date": "2026-10-14",
+                "redemption": null,
+                "handoff": null
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG handoff with an invented time for an earlier claim",
+            "surface": "handoff",
+            "http_status": 201,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-000000000013",
+                "redemption_request_id": "00000000-0000-4000-8000-000000000012",
+                "claim": "already_handed_earlier"
+            },
+            "body": {
+                "outcome": "handoff_confirmed",
+                "handoff_request_id": "00000000-0000-4000-8000-000000000013",
+                "fulfillment": "confirmed",
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-000000000013",
+                    "redemption_request_id": "00000000-0000-4000-8000-000000000012",
+                    "claim": "already_handed_earlier",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_at_utc": "2026-10-14 07:30:00.000000",
+                    "handoff_time": "not_recorded"
+                }
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG already confirmed carrying our own id",
+            "surface": "handoff",
+            "http_status": 200,
+            "sent": {
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000f",
+                "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                "claim": "already_handed_earlier"
+            },
+            "body": {
+                "outcome": "handoff_already_confirmed",
+                "handoff_request_id": "00000000-0000-4000-8000-00000000000f",
+                "fulfillment": "confirmed",
+                "handoff": {
+                    "handoff_request_id": "00000000-0000-4000-8000-00000000000f",
+                    "redemption_request_id": "00000000-0000-4000-8000-00000000000c",
+                    "claim": "handed_now",
+                    "confirmation_recorded_at_utc": "2026-10-14 07:35:00.000000",
+                    "handoff_at_utc": "2026-10-14 07:35:00.000000",
+                    "handoff_time": "stated_at_recording"
+                }
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG status confirmed without a handoff",
+            "surface": "status",
+            "http_status": 200,
+            "sent": {
+                "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "result": "found",
+                "data": {
+                    "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000",
+                    "is_current_business_date": true,
+                    "coffee_label": "Espresso",
+                    "modifiers": {
+                        "Δόση": "Διπλός",
+                        "Ζάχαρη": "Σκέτος"
+                    },
+                    "quick_notes": [
+                        "σε ποτήρι για έξω"
+                    ],
+                    "fulfillment": "confirmed",
+                    "handoff": null
+                }
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG status with a staff field",
+            "surface": "status",
+            "http_status": 200,
+            "sent": {
+                "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                "member_id": "mem_0123456789abcdef0123456789abcdef"
+            },
+            "body": {
+                "result": "found",
+                "data": {
+                    "redemption_request_id": "00000000-0000-4000-8000-00000000001b",
+                    "business_date": "2026-10-14",
+                    "redeemed_at_utc": "2026-10-14 07:30:00.000000",
+                    "is_current_business_date": true,
+                    "coffee_label": "Espresso",
+                    "modifiers": {
+                        "Δόση": "Διπλός",
+                        "Ζάχαρη": "Σκέτος"
+                    },
+                    "quick_notes": [
+                        "σε ποτήρι για έξω"
+                    ],
+                    "fulfillment": "unconfirmed",
+                    "handoff": null,
+                    "staff_wp_user_id": 7
+                }
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG lookup leaking a phone",
+            "surface": "lookup",
+            "http_status": 200,
+            "sent": [],
+            "body": {
+                "result": "found",
+                "member": {
+                    "member_public_id": "mem_0123456789abcdef0123456789abcdef",
+                    "lookup_ref": "lkp1.k1.eyJ2IjoxLCJzdGFmZiI6Nywic2Vzc2lvbiI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwibWVtYmVyIjoibWVtXzAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwicHVycG9zZSI6Im1lbWJlcl92aWV3IiwiaWF0IjoxNzkxOTYzMDAwLCJleHAiOjE3OTE5NjMzMDAsIm5vbmNlIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAifQ.OmYOltun7u53FhvSaNb3DVihfsL9ZIYhd8h3MLgQxr8",
+                    "lookup_ref_expires_at_utc": "2026-10-14 07:35:00.000000",
+                    "phone": "6900000001"
+                }
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG lookup with a forged ref",
+            "surface": "lookup",
+            "http_status": 200,
+            "sent": [],
+            "body": {
+                "result": "found",
+                "member": {
+                    "member_public_id": "mem_0123456789abcdef0123456789abcdef",
+                    "lookup_ref": "lkp1.k1.forged",
+                    "lookup_ref_expires_at_utc": "2026-10-14 07:35:00.000000"
+                }
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        },
+        {
+            "name": "NEG usual coffee presented as a confirmed order",
+            "surface": "usual",
+            "http_status": 200,
+            "sent": [],
+            "body": {
+                "result": "suggested",
+                "reason": null,
+                "suggestion": {
+                    "catalogue_version": 1,
+                    "coffee_code": "espresso",
+                    "coffee_label": "Espresso",
+                    "modifiers": [
+                        {
+                            "group": "shots",
+                            "option": "double",
+                            "group_label": "Δόση",
+                            "label": "Διπλός"
+                        },
+                        {
+                            "group": "sweetness",
+                            "option": "none",
+                            "group_label": "Ζάχαρη",
+                            "label": "Σκέτος"
+                        }
+                    ],
+                    "quick_notes": [
+                        {
+                            "id": "takeaway",
+                            "label": "σε ποτήρι για έξω"
+                        }
+                    ],
+                    "basis": {
+                        "occurrences": 3,
+                        "considered": 3
+                    }
+                },
+                "confirmed_order": true
+            },
+            "expect": {
+                "kind": "invalid"
+            }
+        }
+    ]
+}

@@ -1,4 +1,5 @@
 import { athensBusinessDate } from "../../club/format";
+import type { TransportFailureKind } from "./machine";
 
 /**
  * UI-03D.D — strict parsers for the FUTURE staff redemption, handoff and
@@ -279,4 +280,98 @@ export function parseStatusReply(raw: unknown, query: { redemptionRequestId: str
   if (data.handoff !== null && handoff === null) return { kind: "unavailable" };
   if (data.fulfillment !== (handoff ? "confirmed" : "unconfirmed")) return { kind: "unavailable" };
   return { kind: "found", record, isCurrentBusinessDate: data.is_current_business_date, fulfillment: data.fulfillment as Fulfillment, handoff };
+}
+
+// ---- UI-04G: member lookup, usual coffee and HTTP reply classification ----------------------
+
+export type LookupReply =
+  | { kind: "found"; memberPublicId: string; lookupRef: string; lookupRefExpiresAtUtc: string }
+  | { kind: "not_found" | "ambiguous" | "invalid_phone" | "forbidden" | "rate_limited" | "unavailable" };
+const LOOKUP_REFUSALS: readonly string[] = ["not_found", "ambiguous", "invalid_phone", "forbidden", "rate_limited", "unavailable"];
+const LOOKUP_REF = /^lkp1\.[a-z0-9]{1,16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/;
+
+/** Member lookup = identity only: the member id and a short-lived proof, nothing else. */
+export function parseLookupReply(raw: unknown): LookupReply | null {
+  if (!isObj(raw) || !hasKeys(raw, ["result", "member"])) return null;
+  const { result, member } = raw;
+  if (result === "found") {
+    if (!isObj(member) || !hasKeys(member, ["member_public_id", "lookup_ref", "lookup_ref_expires_at_utc"])) return null;
+    const { member_public_id: id, lookup_ref: ref, lookup_ref_expires_at_utc: expires } = member;
+    if (typeof id !== "string" || !MEMBER_ID.test(id) || typeof ref !== "string" || ref.length > 512 || !LOOKUP_REF.test(ref) || !isUtcStamp(expires)) return null;
+    return { kind: "found", memberPublicId: id, lookupRef: ref, lookupRefExpiresAtUtc: expires };
+  }
+  if (member !== null || typeof result !== "string" || !LOOKUP_REFUSALS.includes(result)) return null;
+  return { kind: result as Exclude<LookupReply["kind"], "found"> };
+}
+
+export interface UsualCoffeeSuggestion {
+  catalogueVersion: number;
+  coffeeCode: string;
+  coffeeLabel: string;
+  modifiers: { group: string; option: string; groupLabel: string; label: string }[];
+  quickNotes: { id: string; label: string }[];
+  basis: { occurrences: number; considered: number };
+}
+
+export type UsualCoffeeReply =
+  | { kind: "suggested"; suggestion: UsualCoffeeSuggestion }
+  | { kind: "no_suggestion"; reason: string }
+  | { kind: "forbidden" | "invalid_request" | "member_not_found" | "server_error" };
+const USUAL_REASONS: readonly string[] = ["insufficient_history", "no_clear_usual", "not_offerable_with_current_catalogue", "catalogue_not_authorised"];
+const USUAL_REFUSALS: readonly string[] = ["forbidden", "invalid_request", "member_not_found", "server_error"];
+const CODE = /^[a-z][a-z0-9_]{1,31}$/;
+
+function isLabel(v: unknown): v is string {
+  return typeof v === "string" && v.length > 0 && v.trim() === v;
+}
+
+/** A suggestion is NEVER a confirmed order (confirmed_order must be false). */
+export function parseUsualCoffeeReply(raw: unknown): UsualCoffeeReply | null {
+  if (!isObj(raw) || !hasKeys(raw, ["result", "reason", "suggestion", "confirmed_order"]) || raw.confirmed_order !== false) return null;
+  const { result, reason, suggestion: s } = raw;
+  if (result === "suggested") {
+    if (reason !== null || !isObj(s) || !hasKeys(s, ["catalogue_version", "coffee_code", "coffee_label", "modifiers", "quick_notes", "basis"])) return null;
+    if (!Number.isInteger(s.catalogue_version) || (s.catalogue_version as number) < 1 || typeof s.coffee_code !== "string" || !CODE.test(s.coffee_code) || !isLabel(s.coffee_label)) return null;
+    if (!Array.isArray(s.modifiers) || !Array.isArray(s.quick_notes) || !isObj(s.basis) || !hasKeys(s.basis, ["occurrences", "considered"])) return null;
+    const modifiers: UsualCoffeeSuggestion["modifiers"] = [];
+    for (const m of s.modifiers) {
+      if (!isObj(m) || !hasKeys(m, ["group", "option", "group_label", "label"])) return null;
+      if (typeof m.group !== "string" || !CODE.test(m.group) || typeof m.option !== "string" || !CODE.test(m.option) || !isLabel(m.group_label) || !isLabel(m.label)) return null;
+      modifiers.push({ group: m.group, option: m.option, groupLabel: m.group_label, label: m.label });
+    }
+    const quickNotes: UsualCoffeeSuggestion["quickNotes"] = [];
+    for (const n of s.quick_notes) {
+      if (!isObj(n) || !hasKeys(n, ["id", "label"]) || typeof n.id !== "string" || !CODE.test(n.id) || !isLabel(n.label)) return null;
+      quickNotes.push({ id: n.id, label: n.label });
+    }
+    const { occurrences, considered } = s.basis;
+    if (!Number.isInteger(occurrences) || !Number.isInteger(considered) || (occurrences as number) < 1 || (occurrences as number) > (considered as number)) return null;
+    return {
+      kind: "suggested",
+      suggestion: { catalogueVersion: s.catalogue_version as number, coffeeCode: s.coffee_code, coffeeLabel: s.coffee_label, modifiers, quickNotes, basis: { occurrences: occurrences as number, considered: considered as number } },
+    };
+  }
+  if (s !== null) return null;
+  if (result === "no_suggestion") {
+    return typeof reason === "string" && USUAL_REASONS.includes(reason) ? { kind: "no_suggestion", reason } : null;
+  }
+  if (reason !== null || typeof result !== "string" || !USUAL_REFUSALS.includes(result)) return null;
+  return { kind: result as "forbidden" | "invalid_request" | "member_not_found" | "server_error" };
+}
+
+
+/**
+ * Splits an HTTP reply into a v2 DOMAIN body (always handed to the strict
+ * parsers, whatever the status: a 503 outcome_unknown body keeps its
+ * same-id retry semantics) or a TRANSPORT failure (the v1 `{"error":…}`
+ * envelope used before any service ran, or a non-JSON reply such as a proxy
+ * page). A transport failure never says whether anything was committed.
+ */
+export function classifyHttpReply(status: number, body: unknown): { kind: "domain"; body: Obj } | { kind: "transport"; failure: TransportFailureKind } {
+  if (isObj(body) && !("error" in body) && ("outcome" in body || "result" in body)) return { kind: "domain", body };
+  const code = isObj(body) && isObj(body.error) && typeof body.error.code === "string" ? body.error.code : null;
+  if (code === "unauthorized" || (code === null && status === 401)) return { kind: "transport", failure: "unauthorized" };
+  if (code === "forbidden" || (code === null && status === 403)) return { kind: "transport", failure: "forbidden" };
+  if (code === "rate_limited" || (code === null && status === 429)) return { kind: "transport", failure: "rate_limited" };
+  return { kind: "transport", failure: "unavailable" };
 }
