@@ -82,13 +82,20 @@ export interface MachineDeps {
   sessionRef: string;
   /** Audit-only tablet reference. Never an authentication or decision input. */
   deviceRef: string;
-  hash?: (text: string) => string;
+  /**
+   * SHA-256 of a UTF-8 string as 64 lowercase hex characters (UI-04B). A
+   * future browser adapter would use crypto.subtle.digest; tests use Node's
+   * crypto. Binds a retry to the exact order; the server's fingerprint v2
+   * stays the authority.
+   */
+  sha256Hex: (text: string) => Promise<string>;
 }
 
 export interface RedemptionIntent {
   memberId: string;
   requestId: string;
-  payloadHash: string;
+  /** SHA-256 of canonicalPayload(): exact identity of the order this intent was created for. */
+  payloadSha256: string;
 }
 
 export interface HandoffIntent {
@@ -117,6 +124,8 @@ export type RecoveryReason =
   | "session_changed"
   /** Persisted context unreadable: nothing can be recovered by id. */
   | "storage_corrupt"
+  /** Persisted context written by an older, weaker format: never trusted (UI-04B). */
+  | "storage_outdated"
   /** The server status could not be read; the original ids are kept (fail closed). */
   | "status_unavailable";
 
@@ -128,7 +137,14 @@ export type MachineState =
   | { phase: "redemption_unresolved"; intent: RedemptionIntent; reason: UnresolvedReason }
   | { phase: "checking_status"; intent: RedemptionIntent; handoffIntent: HandoffIntent | null }
   | { phase: "recorded_now"; intent: RedemptionIntent; record: RecordedRedemption; prepareAcknowledged: boolean }
-  | { phase: "previously_recorded_unconfirmed"; intent: RedemptionIntent; record: RecordedRedemption }
+  /**
+   * Recorded earlier, no confirmation recorded. `manuallyVerified` is LOCAL
+   * workflow state only: staff consciously checked with the customer and/or
+   * the counter. It is never persisted, never sent and never proof of a
+   * physical handoff; any status read, reload, session end or new machine
+   * resets it.
+   */
+  | { phase: "previously_recorded_unconfirmed"; intent: RedemptionIntent; record: RecordedRedemption; manuallyVerified: boolean }
   | { phase: "previously_recorded_confirmed"; intent: RedemptionIntent; record: RecordedRedemption; handoff: HandoffView }
   | { phase: "previous_business_date"; intent: RedemptionIntent; record: RecordedRedemption; handoff: HandoffView | null }
   | { phase: "redemption_refused"; intent: RedemptionIntent; code: RedemptionRefusal }
@@ -145,6 +161,7 @@ export type Phase = MachineState["phase"];
 export type Action =
   | "start_redemption"
   | "acknowledge_prepare"
+  | "confirm_manual_verification"
   | "retry_redemption"
   | "resubmit_same_intent"
   | "check_status"
@@ -159,34 +176,59 @@ export type Action =
 
 /** Persisted per-tab context: ids and stage only (no names, phones, nonces, tokens or payloads). */
 interface PersistedContext {
-  v: 1;
+  v: 2;
   session_ref: string;
   member_id: string;
   redemption_request_id: string;
-  payload_hash: string;
+  payload_sha256: string;
   stage: "redemption_sent" | "recorded" | "handoff_sent";
   handoff_request_id: string | null;
   claim: HandoffClaim | null;
 }
-const PERSISTED_KEYS = ["v", "session_ref", "member_id", "redemption_request_id", "payload_hash", "stage", "handoff_request_id", "claim"];
+/** v2 (UI-04B): SHA-256 payload identity. v1 (32-bit FNV-1a) records are never trusted. */
+const PERSISTED_VERSION = 2;
+const PERSISTED_KEYS = ["v", "session_ref", "member_id", "redemption_request_id", "payload_sha256", "stage", "handoff_request_id", "claim"];
 const SESSION_REF = /^[0-9a-f]{32}$/;
-const PAYLOAD_HASH = /^[0-9a-f]{8}$/;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const CODE = /^[a-z][a-z0-9_]{1,31}$/;
 
-/** Canonical text of a prepared order (order-independent), for binding a retry to its intent. */
+/**
+ * Validated, frozen deep copy of an order, or null. Every code must match the
+ * canonical id pattern (so ":" "=" and newlines can never occur and the
+ * canonical text below is unambiguous); the catalogue version is a positive
+ * integer. Later changes to the caller's object never reach a retry.
+ */
+export function freezePayload(p: unknown): PreparedOrderPayload | null {
+  if (typeof p !== "object" || p === null) return null;
+  const o = p as Partial<PreparedOrderPayload>;
+  const prep = o.preparation as Partial<PreparedOrderPayload["preparation"]> | undefined;
+  if (!Number.isInteger(o.catalogueVersion) || (o.catalogueVersion as number) < 1 || typeof o.coffeeCode !== "string" || !CODE.test(o.coffeeCode)) return null;
+  if (!prep || !Array.isArray(prep.modifiers) || !Array.isArray(prep.quick_notes)) return null;
+  const modifiers: { group: string; option: string }[] = [];
+  for (const m of prep.modifiers) {
+    if (typeof m !== "object" || m === null || typeof m.group !== "string" || typeof m.option !== "string" || !CODE.test(m.group) || !CODE.test(m.option)) return null;
+    modifiers.push(Object.freeze({ group: m.group, option: m.option }));
+  }
+  const notes: string[] = [];
+  for (const n of prep.quick_notes) {
+    if (typeof n !== "string" || !CODE.test(n)) return null;
+    notes.push(n);
+  }
+  return Object.freeze({
+    catalogueVersion: o.catalogueVersion as number,
+    coffeeCode: o.coffeeCode,
+    preparation: Object.freeze({ modifiers: Object.freeze(modifiers) as unknown as { group: string; option: string }[], quick_notes: Object.freeze(notes) as unknown as string[] }),
+  });
+}
+
+/**
+ * Canonical text of a VALIDATED order (order-independent, injective for
+ * canonical codes): the exact identity hashed with SHA-256.
+ */
 export function canonicalPayload(p: PreparedOrderPayload): string {
   const mods = [...p.preparation.modifiers].map((m) => `${m.group}:${m.option}`).sort();
   const notes = [...p.preparation.quick_notes].sort();
-  return [`v=${p.catalogueVersion}`, `c=${p.coffeeCode}`, ...mods.map((m) => `m=${m}`), ...notes.map((n) => `n=${n}`)].join("\n");
-}
-
-/** FNV-1a 32-bit: binding only (same payload => same intent), NOT a security hash. */
-export function fnv1a(text: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, "0");
+  return ["evc-staff-intent-v2", `v=${p.catalogueVersion}`, `c=${p.coffeeCode}`, ...mods.map((m) => `m=${m}`), ...notes.map((n) => `n=${n}`)].join("\n");
 }
 
 /** Actions the UI may offer in a state. "prepare" exists ONLY as acknowledge_prepare in a fresh recorded_now. */
@@ -204,8 +246,11 @@ export function availableActions(s: MachineState): Action[] {
       // "finish" without a confirmation is allowed: whether confirming is mandatory is an OPEN owner decision.
       return s.prepareAcknowledged ? ["confirm_handed_now", "confirm_handed_earlier", "finish"] : ["acknowledge_prepare"];
     case "previously_recorded_unconfirmed":
-      // Manual verification: never "prepare"; staff record what they establish.
-      return ["confirm_handed_now", "confirm_handed_earlier", "check_status", "finish"];
+      // Never "prepare". A handoff can be recorded only after an explicit
+      // manual verification (local workflow state, not proof of delivery).
+      return s.manuallyVerified
+        ? ["confirm_handed_now", "confirm_handed_earlier", "check_status", "finish"]
+        : ["confirm_manual_verification", "check_status", "finish"];
     case "previously_recorded_confirmed":
     case "handoff_confirmed":
       return ["finish", "check_status"];
@@ -225,7 +270,7 @@ export function availableActions(s: MachineState): Action[] {
     case "recovery_required":
       if (s.reason === "not_recorded") return ["resubmit_same_intent", "abandon_intent"];
       if (s.reason === "session_changed") return ["resume_recovery"];
-      if (s.reason === "storage_corrupt") return ["abandon_intent", "manager_review"];
+      if (s.reason === "storage_corrupt" || s.reason === "storage_outdated") return ["abandon_intent", "manager_review"];
       return ["check_status", "manager_review"];
   }
 }
@@ -240,7 +285,6 @@ export type Result = "applied" | "ignored" | "stale" | "rejected";
 export class StaffRedemptionMachine {
   private state: MachineState = { phase: "idle" };
   private readonly deps: MachineDeps;
-  private readonly hash: (text: string) => string;
   /** Operation sequence: only the newest operation may apply its reply. */
   private seq = 0;
   private busy = false;
@@ -250,7 +294,16 @@ export class StaffRedemptionMachine {
 
   constructor(deps: MachineDeps) {
     this.deps = deps;
-    this.hash = deps.hash ?? fnv1a;
+  }
+
+  /** SHA-256 of the canonical order, or null when it cannot be computed or is malformed (fail closed). */
+  private async identityOf(payload: PreparedOrderPayload): Promise<string | null> {
+    try {
+      const digest = await this.deps.sha256Hex(canonicalPayload(payload));
+      return typeof digest === "string" && SHA256_HEX.test(digest) ? digest : null;
+    } catch {
+      return null;
+    }
   }
 
   getState = (): MachineState => this.state;
@@ -268,7 +321,7 @@ export class StaffRedemptionMachine {
   // ---- persistence (fail-safe: storage errors never change a decision) ---------------------
 
   private persist(ctx: Omit<PersistedContext, "v" | "session_ref">): void {
-    const value: PersistedContext = { v: 1, session_ref: this.deps.sessionRef, ...ctx };
+    const value: PersistedContext = { v: PERSISTED_VERSION, session_ref: this.deps.sessionRef, ...ctx };
     try {
       this.deps.storage.write(JSON.stringify(value));
     } catch {
@@ -288,7 +341,7 @@ export class StaffRedemptionMachine {
     this.persist({
       member_id: intent.memberId,
       redemption_request_id: intent.requestId,
-      payload_hash: intent.payloadHash,
+      payload_sha256: intent.payloadSha256,
       stage,
       handoff_request_id: handoff ? handoff.handoffRequestId : null,
       claim: handoff ? handoff.claim : null,
@@ -312,11 +365,15 @@ export class StaffRedemptionMachine {
       return "applied";
     }
     const ctx = parsePersisted(raw);
+    if (ctx === "outdated") {
+      this.set({ phase: "recovery_required", intent: null, handoffIntent: null, reason: "storage_outdated" });
+      return "applied";
+    }
     if (!ctx) {
       this.set({ phase: "recovery_required", intent: null, handoffIntent: null, reason: "storage_corrupt" });
       return "applied";
     }
-    const intent: RedemptionIntent = { memberId: ctx.member_id, requestId: ctx.redemption_request_id, payloadHash: ctx.payload_hash };
+    const intent: RedemptionIntent = { memberId: ctx.member_id, requestId: ctx.redemption_request_id, payloadSha256: ctx.payload_sha256 };
     const handoffIntent = ctx.handoff_request_id && ctx.claim ? { handoffRequestId: ctx.handoff_request_id, claim: ctx.claim } : null;
     if (ctx.session_ref !== this.deps.sessionRef) {
       this.set({ phase: "recovery_required", intent, handoffIntent, reason: "session_changed" });
@@ -338,11 +395,19 @@ export class StaffRedemptionMachine {
   /** A NEW logical intent: only from idle (an open intent must be resolved or finished first). */
   async startRedemption(memberId: string, payload: PreparedOrderPayload): Promise<Result> {
     if (this.state.phase !== "idle" || this.busy || !MEMBER_ID.test(memberId)) return "rejected";
+    const frozen = freezePayload(payload);
+    if (!frozen) return "rejected";
+    // Hashing is asynchronous: hold the machine so nothing else starts meanwhile.
+    this.busy = true;
+    const guard = this.seq;
+    const digest = await this.identityOf(frozen);
+    this.busy = false;
+    if (guard !== this.seq || this.state.phase !== "idle") return "stale";
+    if (digest === null) return "rejected";
     const requestId = this.deps.newId();
     if (!UUID_V4.test(requestId)) return "rejected";
-    const intent: RedemptionIntent = { memberId, requestId, payloadHash: this.hash(canonicalPayload(payload)) };
-    this.payload = payload;
-    return this.submitRedemption(intent);
+    this.payload = frozen;
+    return this.submitRedemption({ memberId, requestId, payloadSha256: digest });
   }
 
   /** Repeat the SAME request (same id, same payload) after an unresolved outcome. */
@@ -359,8 +424,16 @@ export class StaffRedemptionMachine {
   async resubmitSameIntent(payload: PreparedOrderPayload): Promise<Result> {
     const s = this.state;
     if (s.phase !== "recovery_required" || s.reason !== "not_recorded" || !s.intent || this.busy) return "rejected";
-    if (this.hash(canonicalPayload(payload)) !== s.intent.payloadHash) return "rejected";
-    this.payload = payload;
+    const frozen = freezePayload(payload);
+    if (!frozen) return "rejected";
+    this.busy = true;
+    const guard = this.seq;
+    const digest = await this.identityOf(frozen);
+    this.busy = false;
+    if (guard !== this.seq || this.state !== s) return "stale";
+    // Exact identity: SHA-256 of the canonical order must equal the original intent's.
+    if (digest === null || digest !== s.intent.payloadSha256) return "rejected";
+    this.payload = frozen;
     return this.submitRedemption(s.intent);
   }
 
@@ -416,6 +489,20 @@ export class StaffRedemptionMachine {
     }
     // A lost or failed response is NOT a failed transaction: the intent stays open.
     this.set({ phase: "redemption_unresolved", intent, reason: unresolvedOf(err) });
+    return "applied";
+  }
+
+  /**
+   * Staff state they consciously checked the situation with the customer
+   * and/or the counter (UI-04B). Local only: it unlocks recording a handoff
+   * claim for a replayed/recovered redemption; it never prepares, redeems,
+   * restores an entitlement or proves a handoff. Reset by any status read,
+   * reload, new machine, session end or member change.
+   */
+  confirmManualVerification(): Result {
+    const s = this.state;
+    if (s.phase !== "previously_recorded_unconfirmed" || s.manuallyVerified || this.busy) return "rejected";
+    this.set({ ...s, manuallyVerified: true });
     return "applied";
   }
 
@@ -510,7 +597,7 @@ export class StaffRedemptionMachine {
           return "applied";
         }
         // Recorded, no confirmation: manual verification, NEVER "prepare".
-        this.set({ phase: "previously_recorded_unconfirmed", intent, record: status.record });
+        this.set({ phase: "previously_recorded_unconfirmed", intent, record: status.record, manuallyVerified: false });
         return "applied";
       }
     }
@@ -522,7 +609,7 @@ export class StaffRedemptionMachine {
   async confirmHandoff(claim: HandoffClaim): Promise<Result> {
     const s = this.state;
     if (this.busy || !HANDOFF_CLAIMS.includes(claim)) return "rejected";
-    const allowed = (s.phase === "recorded_now" && s.prepareAcknowledged) || s.phase === "previously_recorded_unconfirmed";
+    const allowed = (s.phase === "recorded_now" && s.prepareAcknowledged) || (s.phase === "previously_recorded_unconfirmed" && s.manuallyVerified);
     if (!allowed) return "rejected";
     const handoffRequestId = this.deps.newId();
     if (!UUID_V4.test(handoffRequestId)) return "rejected";
@@ -621,7 +708,7 @@ export class StaffRedemptionMachine {
    */
   abandonIntent(): Result {
     const s = this.state;
-    if (s.phase !== "recovery_required" || (s.reason !== "not_recorded" && s.reason !== "storage_corrupt") || this.busy) return "rejected";
+    if (s.phase !== "recovery_required" || (s.reason !== "not_recorded" && s.reason !== "storage_corrupt" && s.reason !== "storage_outdated") || this.busy) return "rejected";
     this.reset();
     return "applied";
   }
@@ -667,7 +754,7 @@ export class StaffRedemptionMachine {
 function recordedState(intent: RedemptionIntent, record: RecordedRedemption, earlierDay: boolean, handoff: HandoffView | null): MachineState {
   if (earlierDay) return { phase: "previous_business_date", intent, record, handoff };
   if (handoff) return { phase: "previously_recorded_confirmed", intent, record, handoff };
-  return { phase: "previously_recorded_unconfirmed", intent, record };
+  return { phase: "previously_recorded_unconfirmed", intent, record, manuallyVerified: false };
 }
 
 function knownHandoff(s: MachineState): HandoffView | null {
@@ -680,7 +767,9 @@ function unresolvedAfterStatus(intent: RedemptionIntent, handoffIntent: HandoffI
   // Keep a known recorded/confirmed state; otherwise stay unresolved (fail closed).
   if (before.phase === "handoff_confirmed" || before.phase === "previously_recorded_confirmed" || before.phase === "previous_business_date") return before;
   if (handoffIntent && "record" in before) return { phase: "handoff_unresolved", intent, record: before.record, handoffIntent, reason };
-  if (before.phase === "previously_recorded_unconfirmed" || before.phase === "handoff_refused") return before;
+  // An unreadable status is not authoritative, but it still voids a manual verification.
+  if (before.phase === "previously_recorded_unconfirmed") return { ...before, manuallyVerified: false };
+  if (before.phase === "handoff_refused") return before;
   // Nothing is known yet (e.g. right after a reload): keep BOTH original ids.
   if (handoffIntent || before.phase === "recovery_required" || before.phase === "idle") {
     return { phase: "recovery_required", intent, handoffIntent, reason: "status_unavailable" };
@@ -702,7 +791,7 @@ function unresolvedOf(err: unknown): UnresolvedReason {
   return "unexpected_error";
 }
 
-function parsePersisted(raw: string): PersistedContext | null {
+function parsePersisted(raw: string): PersistedContext | "outdated" | null {
   let v: unknown;
   try {
     v = JSON.parse(raw);
@@ -711,12 +800,13 @@ function parsePersisted(raw: string): PersistedContext | null {
   }
   if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
+  if (o.v === 1) return "outdated";
   const keys = Object.keys(o);
   if (keys.length !== PERSISTED_KEYS.length || !PERSISTED_KEYS.every((k) => keys.includes(k))) return null;
-  if (o.v !== 1 || typeof o.session_ref !== "string" || !SESSION_REF.test(o.session_ref)) return null;
+  if (o.v !== PERSISTED_VERSION || typeof o.session_ref !== "string" || !SESSION_REF.test(o.session_ref)) return null;
   if (typeof o.member_id !== "string" || !MEMBER_ID.test(o.member_id)) return null;
   if (typeof o.redemption_request_id !== "string" || !UUID_V4.test(o.redemption_request_id)) return null;
-  if (typeof o.payload_hash !== "string" || !PAYLOAD_HASH.test(o.payload_hash)) return null;
+  if (typeof o.payload_sha256 !== "string" || !SHA256_HEX.test(o.payload_sha256)) return null;
   if (o.stage !== "redemption_sent" && o.stage !== "recorded" && o.stage !== "handoff_sent") return null;
   const hasHandoff = o.handoff_request_id !== null || o.claim !== null;
   if (hasHandoff) {

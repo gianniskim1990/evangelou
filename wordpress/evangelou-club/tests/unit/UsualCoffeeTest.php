@@ -455,10 +455,17 @@ final class UsualCoffeeTest extends TestCase {
         $original = $this->store->all_redemptions()[0];
         $redated = function (string $date, string $prefix) use ($original): array {
             $copy = $original;
+            // Re-dated CONSISTENTLY: 09:00 UTC is on the same Athens business date.
             $copy['ledger']['business_date'] = $date;
+            $copy['ledger']['redeemed_at_utc'] = $date . ' 09:00:00.000000';
             $copy['ledger']['request_id'] = $prefix . substr($original['ledger']['request_id'], 1);
             return $copy;
         };
+        // UI-04B: a row whose instant is not on its stated Athens date is damaged and never counted.
+        $inconsistent = $redated('2026-09-01', 'c');
+        $inconsistent['ledger']['redeemed_at_utc'] = '2026-08-31 20:59:59.999999'; // 23:59:59.999999 Athens on 31 August
+        $this->history->extra_rows = array($inconsistent);
+        $this->assertSame(array('occurrences' => 3, 'considered' => 3), $this->suggest()->suggestion()['basis'], 'inconsistent ledger time is excluded');
         $this->history->ignore_window = true;
         $this->history->extra_rows = array($redated('2026-07-17', 'e'));
         $this->clock->set('2026-10-14T21:30:00Z');
@@ -471,7 +478,21 @@ final class UsualCoffeeTest extends TestCase {
 
     public function test_the_provisional_policy_and_its_limits(): void {
         $p = EVC_Usual_Coffee_Policy::provisional();
-        $this->assertSame(array(90, 10, 3, 2, 50), array($p->lookback_days, $p->max_considered, $p->min_valid, $p->min_occurrences, $p->min_share_percent));
+        $this->assertSame(array(90, 10, 3, 2, 50), array($p->lookback_days(), $p->max_considered(), $p->min_valid(), $p->min_occurrences(), $p->min_share_percent()));
+        // UI-04B: immutable after construction (existing and dynamic properties alike).
+        foreach (array('lookback_days', 'max_considered', 'min_valid', 'min_occurrences', 'min_share_percent', 'anything_else') as $field) {
+            try {
+                $p->$field = 1;
+                $this->fail('mutated ' . $field);
+            } catch (LogicException $e) {
+                $this->assertSame('EVC_Usual_Coffee_Policy is immutable.', $e->getMessage());
+            }
+        }
+        $this->assertSame(array(90, 10, 3, 2, 50), array($p->lookback_days(), $p->max_considered(), $p->min_valid(), $p->min_occurrences(), $p->min_share_percent()));
+        $reflection = new ReflectionClass('EVC_Usual_Coffee_Policy');
+        foreach ($reflection->getProperties() as $property) {
+            $this->assertTrue($property->isPrivate(), $property->getName() . ' must be private');
+        }
         foreach (array(array(0, 10, 3, 2, 50), array(90, 0, 3, 2, 50), array(90, 10, 11, 2, 50), array(90, 10, 3, 11, 50), array(90, 10, 3, 2, 0), array(90, 10, 3, 2, 101), array(400, 10, 3, 2, 50)) as $bad) {
             try {
                 new EVC_Usual_Coffee_Policy(...$bad);

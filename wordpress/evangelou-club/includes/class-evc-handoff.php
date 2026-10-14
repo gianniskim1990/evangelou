@@ -71,9 +71,14 @@ final class EVC_Handoff_Record {
         if (!EVC_Prep_Catalogue::is_object_with($h, array_merge(array('id'), self::KEYS))
             || $h['fingerprint_version'] !== self::FINGERPRINT_VERSION
             || !in_array($h['claim'], self::CLAIMS, true)
-            || !is_string($h['recorded_at_utc'])
+            || !EVC_Utc_Timestamp::is_canonical($h['recorded_at_utc'])
             || $h['handoff_at_utc'] !== self::handoff_at($h['claim'], $h['recorded_at_utc'])) {
             return 'handoff_corrupt';
+        }
+        // A confirmation cannot be recorded before the redemption it confirms.
+        if (!EVC_Utc_Timestamp::is_canonical($ledger['redeemed_at_utc'] ?? null)
+            || EVC_Utc_Timestamp::compare($h['recorded_at_utc'], $ledger['redeemed_at_utc']) < 0) {
+            return 'handoff_conflict';
         }
         if ($h['redemption_id'] !== $ledger['id'] || $h['member_id'] !== $ledger['member_id']
             || $h['redemption_request_id'] !== $ledger['request_id']
@@ -173,6 +178,7 @@ final class EVC_Handoff_Write {
             throw new InvalidArgumentException('Inconsistent handoff write: shape.');
         }
         if ($record['fingerprint_version'] !== EVC_Handoff_Record::FINGERPRINT_VERSION
+            || !EVC_Utc_Timestamp::is_canonical($record['recorded_at_utc'])
             || !in_array($record['claim'], EVC_Handoff_Record::CLAIMS, true)
             || $record['handoff_at_utc'] !== EVC_Handoff_Record::handoff_at($record['claim'], $record['recorded_at_utc'])
             || $audit['event_type'] !== 'handoff'

@@ -572,13 +572,13 @@ const mutants = [
   {
     id: "R2-replay-state-offers-prepare",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "  return { phase: \"previously_recorded_unconfirmed\", intent, record };\n}",
+    search: "  return { phase: \"previously_recorded_unconfirmed\", intent, record, manuallyVerified: false };\n}",
     replace: "  return { phase: \"recorded_now\", intent, record, prepareAcknowledged: false };\n}",
   },
   {
     id: "R3-status-recovery-offers-prepare",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "        this.set({ phase: \"previously_recorded_unconfirmed\", intent, record: status.record });",
+    search: "        this.set({ phase: \"previously_recorded_unconfirmed\", intent, record: status.record, manuallyVerified: false });",
     replace: "        this.set({ phase: \"recorded_now\", intent, record: status.record, prepareAcknowledged: false });",
   },
   {
@@ -608,8 +608,8 @@ const mutants = [
   {
     id: "R8-resubmit-ignores-payload-binding",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    if (this.hash(canonicalPayload(payload)) !== s.intent.payloadHash) return \"rejected\";\n",
-    replace: "",
+    search: "    if (digest === null || digest !== s.intent.payloadSha256) return \"rejected\";",
+    replace: "    if (digest === null) return \"rejected\";",
   },
   {
     id: "R9-handoff-retry-mints-new-id",
@@ -686,7 +686,7 @@ const mutants = [
   {
     id: "R21-unresolved-intent-abandonable",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    if (s.phase !== \"recovery_required\" || (s.reason !== \"not_recorded\" && s.reason !== \"storage_corrupt\") || this.busy) return \"rejected\";",
+    search: "    if (s.phase !== \"recovery_required\" || (s.reason !== \"not_recorded\" && s.reason !== \"storage_corrupt\" && s.reason !== \"storage_outdated\") || this.busy) return \"rejected\";",
     replace: "    if (this.busy) return \"rejected\";",
   },
   {
@@ -728,8 +728,69 @@ const mutants = [
   {
     id: "R27-handoff-double-tap-sent",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    if (this.busy || !HANDOFF_CLAIMS.includes(claim)) return \"rejected\";\n    const allowed = (s.phase === \"recorded_now\" && s.prepareAcknowledged) || s.phase === \"previously_recorded_unconfirmed\";",
-    replace: "    if (!HANDOFF_CLAIMS.includes(claim)) return \"rejected\";\n    const allowed = (s.phase === \"recorded_now\" && s.prepareAcknowledged) || s.phase === \"previously_recorded_unconfirmed\" || s.phase === \"handoff_confirmation_pending\";",
+    search: "    if (this.busy || !HANDOFF_CLAIMS.includes(claim)) return \"rejected\";\n    const allowed = (s.phase === \"recorded_now\" && s.prepareAcknowledged) || (s.phase === \"previously_recorded_unconfirmed\" && s.manuallyVerified);",
+    replace: "    if (!HANDOFF_CLAIMS.includes(claim)) return \"rejected\";\n    const allowed = (s.phase === \"recorded_now\" && s.prepareAcknowledged) || (s.phase === \"previously_recorded_unconfirmed\" && s.manuallyVerified) || s.phase === \"handoff_confirmation_pending\";",
+  },
+  // UI-04B pure-core hardening: manual verification + SHA-256 payload identity (W1-W10).
+  {
+    id: "W1-replay-handoff-without-manual-verification",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "(s.phase === \"previously_recorded_unconfirmed\" && s.manuallyVerified)",
+    replace: "s.phase === \"previously_recorded_unconfirmed\"",
+  },
+  {
+    id: "W2-status-read-marks-verified",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "        this.set({ phase: \"previously_recorded_unconfirmed\", intent, record: status.record, manuallyVerified: false });",
+    replace: "        this.set({ phase: \"previously_recorded_unconfirmed\", intent, record: status.record, manuallyVerified: true });",
+  },
+  {
+    id: "W3-verification-survives-unreadable-status",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "  if (before.phase === \"previously_recorded_unconfirmed\") return { ...before, manuallyVerified: false };",
+    replace: "  if (before.phase === \"previously_recorded_unconfirmed\") return before;",
+  },
+  {
+    id: "W4-unverified-replay-lists-handoff-actions",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "        : [\"confirm_manual_verification\", \"check_status\", \"finish\"];",
+    replace: "        : [\"confirm_handed_now\", \"confirm_handed_earlier\", \"check_status\", \"finish\"];",
+  },
+  {
+    id: "W5-malformed-digest-accepted",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      return typeof digest === \"string\" && SHA256_HEX.test(digest) ? digest : null;",
+    replace: "      return typeof digest === \"string\" ? digest : null;",
+  },
+  {
+    id: "W6-outdated-record-not-identified",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "  if (o.v === 1) return \"outdated\";\n",
+    replace: "",
+  },
+  {
+    id: "W7-retry-uses-callers-mutable-object",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    this.payload = frozen;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest });",
+    replace: "    this.payload = payload;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest });",
+  },
+  {
+    id: "W8-session-end-during-hashing-ignored",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (guard !== this.seq || this.state.phase !== \"idle\") return \"stale\";",
+    replace: "    if (this.state.phase === \"submitting_redemption\") return \"stale\";",
+  },
+  {
+    id: "W9-double-tap-during-hashing",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    this.busy = true;\n    const guard = this.seq;\n    const digest = await this.identityOf(frozen);\n    this.busy = false;\n    if (guard !== this.seq || this.state.phase !== \"idle\") return \"stale\";",
+    replace: "    const guard = this.seq;\n    const digest = await this.identityOf(frozen);\n    this.busy = false;\n    if (guard !== this.seq || this.state.phase !== \"idle\") return \"stale\";",
+  },
+  {
+    id: "W10-non-canonical-codes-accepted",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: " || typeof o.coffeeCode !== \"string\" || !CODE.test(o.coffeeCode)) return null;",
+    replace: " || typeof o.coffeeCode !== \"string\") return null;",
   },
 ];
 

@@ -174,3 +174,26 @@ The mutation guards are H1–H27 in `tests/mutation/run-membership-mutations.php
 - Device identification. `device_ref` is audit-only.
 - Retention of member-linked history (D9).
 - The customer dispute policy.
+
+## UI-04B: strict UTC timestamps
+
+`EVC_Utc_Timestamp::is_canonical()` accepts only canonical DATETIME(6) UTC text
+`YYYY-MM-DD HH:MM:SS.ffffff`. It checks real calendar dates (leap years
+included), hours ≤ 23, minutes and seconds ≤ 59, and requires exactly six
+fraction digits. It rejects any `T`, `Z`, offset or surrounding whitespace,
+and years before 1970.
+
+Applied on read:
+- A v2 ledger row's `redeemed_at_utc` must be canonical AND fall on its stored
+  Europe/Athens `business_date`; otherwise `ledger_time_invalid`.
+- A handoff's `recorded_at_utc` must be canonical; otherwise `handoff_corrupt`.
+- A handoff must not be recorded before the redemption it confirms; otherwise
+  `handoff_conflict`.
+- `already_handed_earlier` still stores no handoff time.
+- v1 rows keep their own `fingerprint_version` refusal.
+
+Applied on write:
+- `EVC_Prepared_Redemption_Write` requires canonical redemption and
+  membership-expiry times, the Athens business date of the redemption time,
+  and expiry strictly after redemption.
+- `EVC_Handoff_Write` requires a canonical confirmation time.

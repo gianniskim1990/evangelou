@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -8,7 +9,7 @@ import {
   StaffTransportError,
   availableActions,
   canonicalPayload,
-  fnv1a,
+  freezePayload,
   shouldOfferPrepare,
   type MachineState,
   type PreparedOrderPayload,
@@ -55,6 +56,12 @@ function uuid(): string {
 
 function stampOf(d: Date): string {
   return `${d.toISOString().slice(0, 19).replace("T", " ")}.000000`;
+}
+
+/** Lets queued microtasks run until the condition holds (the async SHA-256 step precedes every request). */
+async function until(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 100 && !condition(); i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(condition(), "condition reached");
 }
 
 function deferred<T>() {
@@ -120,7 +127,8 @@ class FakeServer implements StaffRedemptionTransport {
 
   redeem(call: { memberId: string; requestId: string; payload: PreparedOrderPayload }): Promise<unknown> {
     this.calls.push({ op: "redeem", id: call.requestId });
-    return this.run("redeem", () => this.doRedeem(call.memberId, call.requestId, fnv1a(canonicalPayload(call.payload))));
+    // The server's own fingerprint stand-in: the exact canonical order (authoritative).
+    return this.run("redeem", () => this.doRedeem(call.memberId, call.requestId, canonicalPayload(call.payload)));
   }
 
   confirmHandoff(call: { memberId: string; handoffRequestId: string; redemptionRequestId: string; claim: HandoffClaim; deviceRef: string }): Promise<unknown> {
@@ -242,7 +250,9 @@ const loseBeforeCommit: Hook = async () => {
 };
 const replyWith = (raw: unknown): Hook => async () => raw;
 
-function tablet(server: FakeServer, opts: { storage?: TabStorage; session?: string; device?: string; ids?: () => string } = {}) {
+const sha256Hex = async (text: string): Promise<string> => createHash("sha256").update(text, "utf8").digest("hex");
+
+function tablet(server: FakeServer, opts: { storage?: TabStorage; session?: string; device?: string; ids?: () => string; sha?: (text: string) => Promise<string> } = {}) {
   const storage = opts.storage ?? new TabStorage();
   let ids = 0;
   const newId = () => {
@@ -255,6 +265,7 @@ function tablet(server: FakeServer, opts: { storage?: TabStorage; session?: stri
     newId,
     sessionRef: opts.session ?? SESSION_1,
     deviceRef: opts.device ?? DEVICE_1,
+    sha256Hex: opts.sha ?? sha256Hex,
   });
   return { machine, storage, idsMinted: () => ids };
 }
@@ -419,7 +430,7 @@ describe("UI-03D.D redemption: prepare only once, from a fresh commit", () => {
     assert.equal(await reloaded.machine.restore(), "applied");
     assert.equal(phase(reloaded.machine), "previously_recorded_unconfirmed");
     neverPrepares(reloaded.machine.getState());
-    assert.deepEqual(availableActions(reloaded.machine.getState()), ["confirm_handed_now", "confirm_handed_earlier", "check_status", "finish"]);
+    assert.deepEqual(availableActions(reloaded.machine.getState()), ["confirm_manual_verification", "check_status", "finish"]);
     assert.equal(reloaded.idsMinted(), 0, "recovery never mints a request id");
   });
 
@@ -772,6 +783,7 @@ describe("UI-03D.D session, storage and device safety", () => {
       const held = deferred<unknown>();
       server.hooks.redeem.push((real) => held.promise.then(real));
       const pending = t.machine.startRedemption(MEMBER_A, ESPRESSO);
+      await until(() => server.calls.some((c) => c.op === "redeem")); // the request is in flight
       t.machine.sessionEnded(reason);
       held.resolve(undefined);
       assert.equal(await pending, "stale");
@@ -836,7 +848,9 @@ describe("UI-03D.D session, storage and device safety", () => {
     await t.machine.confirmHandoff("handed_now");
     for (const written of t.storage.writes) {
       const o = JSON.parse(written);
-      assert.deepEqual(Object.keys(o).sort(), ["claim", "handoff_request_id", "member_id", "payload_hash", "redemption_request_id", "session_ref", "stage", "v"]);
+      assert.deepEqual(Object.keys(o).sort(), ["claim", "handoff_request_id", "member_id", "payload_sha256", "redemption_request_id", "session_ref", "stage", "v"]);
+      assert.equal(o.v, 2);
+      assert.equal(o.payload_sha256, createHash("sha256").update(canonicalPayload(ESPRESSO), "utf8").digest("hex"));
       for (const forbidden of ["espresso", "double", "takeaway", "Espresso", "nonce", DEVICE_1, "token", "phone"]) {
         assert.ok(!written.includes(forbidden), `persisted context must not contain "${forbidden}"`);
       }
@@ -845,11 +859,11 @@ describe("UI-03D.D session, storage and device safety", () => {
 
   it("corrupted or unreadable storage fails closed and can only be abandoned explicitly", async () => {
     const valid = {
-      v: 1,
+      v: 2,
       session_ref: SESSION_1,
       member_id: MEMBER_A,
       redemption_request_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      payload_hash: "0123abcd",
+      payload_sha256: "a".repeat(64),
       stage: "redemption_sent",
       handoff_request_id: null,
       claim: null,
@@ -857,13 +871,16 @@ describe("UI-03D.D session, storage and device safety", () => {
     const corrupt = [
       "{not json",
       "[]",
-      JSON.stringify({ ...valid, v: 2 }),
+      JSON.stringify({ ...valid, v: 3 }),
+      JSON.stringify({ ...valid, payload_sha256: "0123abcd" }),
+      JSON.stringify({ ...valid, payload_sha256: "A".repeat(64) }),
+      JSON.stringify((({ payload_sha256: _x, ...rest }) => ({ ...rest, payload_hash: "0123abcd" }))(valid)),
       JSON.stringify({ ...valid, member_name: "Μαρία" }),
       JSON.stringify({ ...valid, redemption_request_id: "123" }),
       JSON.stringify({ ...valid, member_id: "member-1" }),
       JSON.stringify({ ...valid, stage: "handoff_sent" }),
       JSON.stringify({ ...valid, handoff_request_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7", claim: "handed_now" }),
-      JSON.stringify({ ...valid, stage: "recorded", payload_hash: "zz" }),
+      JSON.stringify({ ...valid, stage: "recorded", payload_sha256: "zz" }),
     ];
     for (const raw of corrupt) {
       const storage = new TabStorage();
@@ -951,6 +968,7 @@ describe("UI-03D.D two tablets on the shared staff account", () => {
     const holdA = deferred<unknown>();
     const holdB = deferred<unknown>();
     server.hooks.handoff.push((real) => holdA.promise.then(real), (real) => holdB.promise.then(real));
+    assert.equal(b.machine.confirmManualVerification(), "applied", "tablet B is on a replay: explicit verification first");
     const pa = a.machine.confirmHandoff("handed_now");
     const pb = b.machine.confirmHandoff("already_handed_earlier");
     holdB.resolve(undefined);
@@ -1023,6 +1041,8 @@ describe("UI-03D.D two tablets on the shared staff account", () => {
     await b.machine.startRedemption(MEMBER_A, ESPRESSO);
     a.machine.acknowledgePrepare();
     await a.machine.confirmHandoff("already_handed_earlier");
+    assert.equal(await b.machine.confirmHandoff("handed_now"), "rejected", "no direct confirmation from a replay");
+    b.machine.confirmManualVerification();
     await b.machine.confirmHandoff("handed_now");
     const s = b.machine.getState();
     assert.ok(s.phase === "handoff_confirmed");
@@ -1066,6 +1086,7 @@ describe("UI-03D.D Athens business-date boundary (server-authoritative)", () => 
       return reply;
     });
     const pending = t.machine.startRedemption(MEMBER_A, ESPRESSO);
+    await until(() => server.redemptions.size === 1); // committed at 23:59:59 Athens, reply still held
     server.now = new Date("2026-10-14T21:00:30Z");
     held.resolve(undefined);
     await pending;
@@ -1113,5 +1134,218 @@ describe("UI-03D.D purity", () => {
         assert.ok(!text.includes(needle), `${f} must not use ${needle}`);
       }
     }
+  });
+});
+
+// ---- UI-04B: explicit manual verification + SHA-256 payload identity -------------------------
+
+describe("UI-04B explicit manual verification before a handoff claim from a replay", () => {
+  async function replayState(server: FakeServer) {
+    const first = tablet(server);
+    await first.machine.startRedemption(MEMBER_A, ESPRESSO);
+    const reloaded = tablet(server, { storage: first.storage });
+    await reloaded.machine.restore();
+    assert.equal(phase(reloaded.machine), "previously_recorded_unconfirmed");
+    return reloaded;
+  }
+
+  it("blocks any handoff claim until staff explicitly verify, and verification itself does nothing else", async () => {
+    const server = new FakeServer();
+    const t = await replayState(server);
+    const calls = server.calls.length;
+    assert.equal(await t.machine.confirmHandoff("handed_now"), "rejected");
+    assert.equal(await t.machine.confirmHandoff("already_handed_earlier"), "rejected");
+    assert.deepEqual(availableActions(t.machine.getState()), ["confirm_manual_verification", "check_status", "finish"]);
+
+    assert.equal(t.machine.confirmManualVerification(), "applied");
+    assert.equal(t.machine.confirmManualVerification(), "rejected", "once");
+    const s = t.machine.getState();
+    assert.ok(s.phase === "previously_recorded_unconfirmed" && s.manuallyVerified);
+    neverPrepares(s);
+    assert.equal(server.calls.length, calls, "verification sends nothing: no redemption, no handoff");
+    assert.equal(server.redemptions.size, 1);
+    assert.equal(server.handoffCount(), 0, "verification is not a handoff");
+    assert.ok(!(t.storage.value ?? "").includes("verif"), "never persisted");
+    assert.deepEqual(availableActions(s), ["confirm_handed_now", "confirm_handed_earlier", "check_status", "finish"]);
+
+    assert.equal(await t.machine.confirmHandoff("already_handed_earlier"), "applied");
+    assert.equal(phase(t.machine), "handoff_confirmed");
+    assert.equal(server.handoffCount(), 1);
+  });
+
+  it("is voided by any status read, an unreadable status, a reload, a session end and a member change", async () => {
+    const server = new FakeServer();
+    const t = await replayState(server);
+
+    t.machine.confirmManualVerification();
+    await t.machine.checkStatus();
+    assert.equal((t.machine.getState() as { manuallyVerified?: boolean }).manuallyVerified, false, "authoritative status read");
+
+    t.machine.confirmManualVerification();
+    server.hooks.status.push(loseBeforeCommit);
+    await t.machine.checkStatus();
+    assert.equal((t.machine.getState() as { manuallyVerified?: boolean }).manuallyVerified, false, "unreadable status");
+
+    t.machine.confirmManualVerification();
+    const reloaded = tablet(server, { storage: t.storage });
+    await reloaded.machine.restore();
+    assert.equal((reloaded.machine.getState() as { manuallyVerified?: boolean }).manuallyVerified, false, "new machine / refresh");
+
+    reloaded.machine.confirmManualVerification();
+    reloaded.machine.sessionEnded("locked");
+    assert.equal(phase(reloaded.machine), "blocked_authorization");
+    const relogged = tablet(server, { storage: reloaded.storage, session: SESSION_2 });
+    await relogged.machine.restore();
+    await relogged.machine.resumeRecovery();
+    assert.equal((relogged.machine.getState() as { manuallyVerified?: boolean }).manuallyVerified, false, "session change");
+
+    relogged.machine.confirmManualVerification();
+    assert.equal(relogged.machine.finish(), "applied");
+    await relogged.machine.startRedemption(MEMBER_B, CAPPUCCINO);
+    assert.equal(phase(relogged.machine), "recorded_now", "another member starts from a fresh commit");
+    assert.equal(await relogged.machine.confirmHandoff("handed_now"), "rejected", "nothing carried over");
+  });
+
+  it("is only possible in the replay state and never offers prepare", async () => {
+    const server = new FakeServer();
+    const t = tablet(server);
+    assert.equal(t.machine.confirmManualVerification(), "rejected", "idle");
+    await t.machine.startRedemption(MEMBER_A, ESPRESSO);
+    assert.equal(t.machine.confirmManualVerification(), "rejected", "a fresh commit needs no verification");
+    t.machine.acknowledgePrepare();
+    assert.equal(await t.machine.confirmHandoff("handed_now"), "applied", "the fresh-redemption flow is unchanged");
+    assert.equal(t.machine.confirmManualVerification(), "rejected");
+  });
+
+  it("never allows a second redemption or restores an entitlement", async () => {
+    const server = new FakeServer();
+    const t = await replayState(server);
+    t.machine.confirmManualVerification();
+    assert.equal(await t.machine.startRedemption(MEMBER_A, CAPPUCCINO), "rejected", "an open intent blocks a new one");
+    t.machine.finish();
+    await t.machine.startRedemption(MEMBER_A, CAPPUCCINO);
+    assert.equal(phase(t.machine), "redemption_refused");
+    assert.equal(server.redemptions.size, 1);
+  });
+});
+
+describe("UI-04B exact payload identity (SHA-256) for recovery", () => {
+  it("persists the SHA-256 of the canonical order and nothing of the order itself", async () => {
+    const server = new FakeServer();
+    const t = tablet(server);
+    await t.machine.startRedemption(MEMBER_A, ESPRESSO);
+    const stored = JSON.parse(t.storage.value as string);
+    assert.match(stored.payload_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(stored.payload_sha256, await sha256Hex(canonicalPayload(ESPRESSO)));
+    for (const leak of ["espresso", "double", "takeaway", "shots"]) assert.ok(!(t.storage.value as string).includes(leak));
+  });
+
+  it("an old v1 (32-bit) record is outdated and never trusted", async () => {
+    const storage = new TabStorage();
+    storage.value = JSON.stringify({ v: 1, session_ref: SESSION_1, member_id: MEMBER_A, redemption_request_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6", payload_hash: "0123abcd", stage: "redemption_sent", handoff_request_id: null, claim: null });
+    const server = new FakeServer();
+    const t = tablet(server, { storage });
+    await t.machine.restore();
+    const s = t.machine.getState();
+    assert.equal(s.phase === "recovery_required" && s.reason, "storage_outdated");
+    assert.equal(server.calls.length, 0, "no status read from an untrusted record");
+    assert.deepEqual(availableActions(s), ["abandon_intent", "manager_review"]);
+    assert.equal(t.machine.abandonIntent(), "applied");
+  });
+
+  it("a changed order is rejected before sending, and the server fingerprint stays the authority", async () => {
+    const server = new FakeServer();
+    const t = tablet(server);
+    server.hooks.redeem.push(loseBeforeCommit);
+    await t.machine.startRedemption(MEMBER_A, ESPRESSO);
+    const reloaded = tablet(server, { storage: t.storage });
+    await reloaded.machine.restore();
+    const changed = { ...ESPRESSO, preparation: { ...ESPRESSO.preparation, quick_notes: [] } };
+    const sent = server.calls.length;
+    assert.equal(await reloaded.machine.resubmitSameIntent(changed), "rejected");
+    assert.equal(server.calls.length, sent, "nothing sent");
+
+    assert.equal(await reloaded.machine.resubmitSameIntent(ESPRESSO), "applied", "the identical order keeps its id");
+    const original = requestIdOf(reloaded.machine);
+
+    // Even a client whose hasher collided on everything could not create a second
+    // coffee: the server binds the request id to the exact order and refuses the change.
+    const attacker = tablet(server, { ids: () => original, sha: async () => "f".repeat(64) });
+    await attacker.machine.startRedemption(MEMBER_A, CAPPUCCINO);
+    const s = attacker.machine.getState();
+    assert.equal(s.phase === "redemption_refused" && s.code, "idempotency_key_reused");
+    neverPrepares(s);
+    assert.equal(server.redemptions.size, 1);
+  });
+
+  it("a failing, malformed or uppercase digest refuses to start and sends nothing", async () => {
+    for (const sha of [
+      async () => {
+        throw new Error("no crypto");
+      },
+      async () => "abc",
+      async () => "A".repeat(64),
+      async () => 42 as unknown as string,
+    ]) {
+      const server = new FakeServer();
+      const t = tablet(server, { sha });
+      assert.equal(await t.machine.startRedemption(MEMBER_A, ESPRESSO), "rejected");
+      assert.equal(server.calls.length, 0);
+      assert.equal(t.idsMinted(), 0, "no request id is minted for an order without an identity");
+      assert.equal(phase(t.machine), "idle");
+    }
+  });
+
+  it("only canonical codes are accepted, so the canonical text is unambiguous", () => {
+    const bad = [
+      { ...ESPRESSO, coffeeCode: "espresso\nm=x:y" },
+      { ...ESPRESSO, coffeeCode: "Espresso" },
+      { ...ESPRESSO, catalogueVersion: 0 },
+      { ...ESPRESSO, catalogueVersion: 1.5 },
+      { ...ESPRESSO, preparation: { modifiers: [{ group: "shots:x", option: "double" }], quick_notes: [] } },
+      { ...ESPRESSO, preparation: { modifiers: [{ group: "shots", option: "double" }], quick_notes: ["take away"] } },
+      { ...ESPRESSO, preparation: { modifiers: "shots", quick_notes: [] } },
+      null,
+    ];
+    for (const p of bad) assert.equal(freezePayload(p), null, JSON.stringify(p));
+    const variants = [
+      ESPRESSO,
+      CAPPUCCINO,
+      { ...ESPRESSO, catalogueVersion: 2 },
+      { ...ESPRESSO, preparation: { ...ESPRESSO.preparation, quick_notes: [] } },
+      { ...ESPRESSO, preparation: { modifiers: [{ group: "shots", option: "single" }, { group: "sweetness", option: "none" }], quick_notes: ["takeaway"] } },
+      { ...ESPRESSO, preparation: { modifiers: [{ group: "shots", option: "double" }], quick_notes: ["takeaway", "sweetness"] } },
+    ];
+    const texts = variants.map((v) => canonicalPayload(freezePayload(v) as PreparedOrderPayload));
+    assert.equal(new Set(texts).size, variants.length, "different orders never share a canonical text");
+    const reordered = { ...ESPRESSO, preparation: { modifiers: [...ESPRESSO.preparation.modifiers].reverse(), quick_notes: [...ESPRESSO.preparation.quick_notes] } };
+    assert.equal(canonicalPayload(reordered), canonicalPayload(ESPRESSO), "order of selections is irrelevant");
+  });
+
+  it("a retry sends the order as it was, even if the caller's object changes later", async () => {
+    const server = new FakeServer();
+    const t = tablet(server);
+    const order = JSON.parse(JSON.stringify(ESPRESSO)) as PreparedOrderPayload;
+    server.hooks.redeem.push(commitThenLose);
+    await t.machine.startRedemption(MEMBER_A, order);
+    order.coffeeCode = "cappuccino";
+    order.preparation.modifiers.push({ group: "milk", option: "plant" });
+    await t.machine.retryRedemption();
+    assert.equal(phase(t.machine), "previously_recorded_unconfirmed", "same order => exact replay, not a conflict");
+  });
+
+  it("a session ending while the identity is being computed sends nothing", async () => {
+    const server = new FakeServer();
+    const gate = deferred<void>();
+    const t = tablet(server, { sha: async (text) => (await gate.promise, sha256Hex(text)) });
+    const pending = t.machine.startRedemption(MEMBER_A, ESPRESSO);
+    const doubleTap = t.machine.startRedemption(MEMBER_A, CAPPUCCINO); // not awaited: must settle on its own
+    t.machine.sessionEnded("locked");
+    gate.resolve();
+    assert.equal(await doubleTap, "rejected", "a double tap while hashing is refused immediately");
+    assert.equal(await pending, "stale");
+    assert.equal(server.calls.length, 0);
+    assert.equal(t.idsMinted(), 0);
+    assert.equal(phase(t.machine), "blocked_authorization");
   });
 });

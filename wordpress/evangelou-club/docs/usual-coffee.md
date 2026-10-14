@@ -81,7 +81,10 @@ A suggestion is **not an order**: `is_confirmed_order()` is always false.
 | `min_share_percent` | 50 | the winner's share of the considered redemptions |
 
 `EVC_Usual_Coffee_Policy` validates the ranges; the defaults live in
-`EVC_Usual_Coffee_Policy::provisional()`.
+`EVC_Usual_Coffee_Policy::provisional()`. Since UI-04B the policy is
+**immutable**: private fields, read through getters (`lookback_days()`,
+`max_considered()`, `min_valid()`, `min_occurrences()`, `min_share_percent()`),
+and any property assignment throws.
 
 ## Catalogue compatibility rules
 
