@@ -84,6 +84,20 @@ describe("staff bundle isolation (real import graph)", () => {
     }
   });
 
+  it("the UI-04L recovery view model is pure presentation and is not wired", async () => {
+    const own = await bundle("src/staff/redemptionRecovery/viewModel.ts");
+    const local = own.inputs.filter((p) => !p.includes("node_modules")).map((p) => p.slice(p.lastIndexOf("src/"))).sort();
+    assert.deepEqual(local, ["src/club/format.ts", "src/staff/redemptionRecovery/machine.ts", "src/staff/redemptionRecovery/viewModel.ts", "src/staff/redemptionRecovery/wire.ts"]);
+    for (const needle of ["fetch(", "sessionStorage", "localStorage", "indexedDB", "document.", "window.", "XMLHttpRequest", "console.", "React"]) {
+      assert.ok(!own.output.includes(needle), `view model must not use ${needle}`);
+    }
+    for (const entry of ["src/staff/main.tsx", "src/main.tsx"]) {
+      const { inputs, output } = await bundle(entry);
+      assert.equal(inputs.find((p) => p.endsWith("viewModel.ts") && p.includes("redemptionRecovery")), undefined, `${entry} must not import the view model`);
+      assert.ok(!output.includes("Δοκιμή καταχώρησης ξανά"), `${entry} must not contain the recovery copy`);
+    }
+  });
+
   it("the UI-04J browser storage adapter uses per-tab sessionStorage only and is not wired", async () => {
     const own = await bundle("src/staff/redemptionRecovery/browserStorage.ts");
     const local = own.inputs.filter((p) => !p.includes("node_modules")).map((p) => p.slice(p.lastIndexOf("src/"))).sort();

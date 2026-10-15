@@ -1048,6 +1048,109 @@ const mutants = [
     search: "      this.set({ phase: \"persistence_blocked\", operation: \"redemption\", intent, mayHaveBeenSent });\n      return \"applied\";\n",
     replace: "      this.set({ phase: \"persistence_blocked\", operation: \"redemption\", intent, mayHaveBeenSent });\n",
   },
+  // UI-04L staff recovery view model (VM1-VM17).
+  {
+    id: "VM1-action-not-from-the-machine",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "  const offered = availableActions(state);",
+    replace: "  const offered: Action[] = [...availableActions(state), \"start_redemption\"];",
+  },
+  {
+    id: "VM2-prepare-allowed-not-from-the-machine",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "    prepareAllowed: shouldOfferPrepare(state),",
+    replace: "    prepareAllowed: state.phase === \"recorded_now\",",
+  },
+  {
+    id: "VM3-escalation-never-derived",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "  const level: EscalationLevel = !hasManager ? \"none\" : offered.length === 1 ? \"required\" : \"recommended\";",
+    replace: "  const level: EscalationLevel = \"none\";",
+  },
+  {
+    id: "VM4-sole-manager-action-not-required",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "offered.length === 1 ? \"required\" : \"recommended\"",
+    replace: "offered.length === 1 ? \"recommended\" : \"recommended\"",
+  },
+  {
+    id: "VM5-manager-review-not-quiet",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "    const quiet = action === \"manager_review\";",
+    replace: "    const quiet = false;",
+  },
+  {
+    id: "VM6-never-sent-shown-as-unknown",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "              uncertain: false,\n              redemption: \"not_sent\",",
+    replace: "              uncertain: true,\n              redemption: \"unknown\",",
+  },
+  {
+    id: "VM7-possibly-sent-claims-nothing-recorded",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "Δεν γνωρίζουμε αν έχει γίνει η καταχώρηση. Ελέγξτε την καταχώρηση ή δοκιμάστε ξανά.",
+    replace: "Δεν έχει καταχωρηθεί καφές. Δοκιμάστε ξανά.",
+  },
+  {
+    id: "VM8-unknown-outcome-worded-as-success",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "headline: \"Δεν έχει επιβεβαιωθεί το αποτέλεσμα\",",
+    replace: "headline: \"Η καταχώρηση ολοκληρώθηκε\",",
+  },
+  {
+    id: "VM9-replay-tells-staff-to-prepare",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "Ο καφές έχει καταχωρηθεί νωρίτερα. Μην ετοιμάσετε νέο καφέ.",
+    replace: "Ετοιμάστε τον καφέ του πελάτη.",
+  },
+  {
+    id: "VM10-handoff-statement-presented-as-proof",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "Το προσωπικό έχει δηλώσει ότι ο καφές παραδόθηκε. Αυτό δεν είναι ανεξάρτητη απόδειξη.",
+    replace: "Ο καφές παραδόθηκε και επιβεβαιώθηκε η παράδοση.",
+  },
+  {
+    id: "VM11-manual-verification-presented-as-proof",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "Ο δικός σας έλεγχος δεν αποτελεί απόδειξη παράδοσης.",
+    replace: "Ο δικός σας έλεγχος επιβεβαίωσε την παράδοση.",
+  },
+  {
+    id: "VM12-confirmed-handoff-fact-dropped",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "        redemption: \"recorded\",\n        handoff: \"staff_statement_recorded\",\n      };\n    case \"previous_business_date\":",
+    replace: "        redemption: \"recorded\",\n        handoff: \"none\",\n      };\n    case \"previous_business_date\":",
+  },
+  {
+    id: "VM13-lock-copy-drops-recovery-note",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "body: [c.body, RECOVER_AFTER_LOGIN], tone",
+    replace: "body: [c.body], tone",
+  },
+  {
+    id: "VM14-unreadable-storage-copy-allows-new-start",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "Μην ξεκινήσετε νέα καταχώρηση. Δοκιμάστε ξανά ή ζητήστε βοήθεια.",
+    replace: "Δοκιμάστε ξανά.",
+  },
+  {
+    id: "VM15-label-collision",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "  retry_persistence: \"Δοκιμή καταχώρησης ξανά\",",
+    replace: "  retry_persistence: \"Δοκιμή ξανά\",",
+  },
+  {
+    id: "VM16-escalation-steps-dropped",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "steps: level === \"none\" ? Object.freeze([]) : ESCALATION_STEPS",
+    replace: "steps: Object.freeze([])",
+  },
+  {
+    id: "VM17-state-interpolated-into-copy",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "        body: [\"Η καταχώρηση έχει ασυνέπεια και δεν μπορεί να συνεχιστεί από εδώ.\",",
+    replace: "        body: [\"Η καταχώρηση \" + s.redemptionRequestId + \" έχει ασυνέπεια και δεν μπορεί να συνεχιστεί από εδώ.\",",
+  },
 ];
 
 const runSuite = () =>
