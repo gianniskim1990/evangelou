@@ -654,6 +654,25 @@ commit is 503 with a same-id retry, never a definite failure. Cross-language vec
 from the real mappers (`tests/fixtures/contract/vectors.json`) are parsed by the real TS code.
 No routes, hooks or SQL. See `docs/rest-contract-v2.md`.
 
+## Staff REST v2 boundary and test-only HTTP harness (UI-04H — NOT wired)
+
+- **Route table.** The designated v2 route table (`EVC_Rest_V2_Routes`) and a
+  fail-closed, route-aware envelope policy (`EVC_Rest_V2_Envelope_Policy`)
+  are pure definitions.
+- **Domain bodies.** Only a sealed `EVC_Rest_V2_Domain_Response` on its
+  designated route and method, unchanged, with its contract status and an
+  authenticated user, may leave as a v2 domain body. A matching JSON key set
+  alone never does.
+- **Not wired.** Nothing registers a v2 route or hooks the v2 filter in
+  shipped code. v1 is unchanged and redemption stays 503.
+- **Test-only harness.** It exercises the real WordPress REST lifecycle
+  (wp-phpunit) and real HTTP (`php -S`, packaged plugin). Captured replies
+  are parsed by the real TypeScript code.
+- **Capability audit.** Handoff, status and usual-coffee capabilities are
+  not granted by the staff role (owner decision).
+
+See `docs/rest-v2-boundary.md`.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in
