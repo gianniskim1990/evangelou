@@ -138,15 +138,9 @@ reviewed):**
    - show "this redemption is open in another tab".
 
    Do not use localStorage or a shared cross-tab key.
-2. **Durability loss on a failed write.** A `QuotaExceededError` during
-   `persist()` is swallowed (by design, the decision is unchanged), so a
-   reload cannot recover that id. The server still prevents a second coffee
-   (a new intent is refused), but the staff lose the recovery link.
-   **Proposed fix (not implemented; owner/UX decision):** expose a
-   `recoveryDurable` flag and either warn before sending, or refuse to
-   *start* a new intent while the store is not writable. It is not
-   implemented because no unsafe transition results; it changes service
-   availability.
+2. ~~Durability loss on a failed write.~~ **Closed in UI-04K** (see
+   "Persistence before side effects" below): a request is no longer sent
+   when its recovery context cannot be made durable.
 3. A failed `remove()` after `finish()` leaves a **settled** context. After a
    reload it resolves through the server to a recorded state and never
    prepares. Cosmetic only.
@@ -176,3 +170,72 @@ reviewed):**
 - **`tests/staff/redemptionRecovery.test.ts`:** the unreadable-store test
   was tightened (the stored intent is untouched; retry recovers it).
   Fixtures moved unchanged to `tests/staff/support/recoveryFixtures.ts`.
+
+## Persistence before side effects (UI-04K)
+
+**The gap (reproduced first).**
+- `persist()` swallowed write errors, so `submitRedemption()` and
+  `submitHandoff()` still called the transport. A request could reach the
+  server with no recoverable local context.
+- Seven adversarial tests (`app/tests/staff/persistBeforeSend.test.ts`, first
+  block) failed on the unchanged machine. Every failure mode let the request
+  through: `SecurityError`, `QuotaExceededError`, a value stored and then an
+  exception, a write that stored nothing, a write that stored something
+  else, a failing read-back, and a handoff on a full store.
+
+**The gate.** Before every redemption or handoff request, new or retried,
+`persistDurably()`:
+1. writes the exact strict v2 context (`redemption_sent`, or `handoff_sent`
+   with the original handoff id and claim);
+2. reads it back;
+3. sends only on an **exact** read-back match.
+
+Any exception or mismatch means "not durable", even if the browser might
+have stored the value before throwing. A store that already holds exactly
+that context is durable.
+
+**If the context is not durable,** nothing is sent and the machine enters
+`persistence_blocked`, keeping the **same** ids in memory:
+
+| Operation | Previous attempt may have reached the server? | Actions offered |
+|---|---|---|
+| redemption | no (new intent, or "not recorded" resubmit) | `retry_persistence`, `abandon_intent` |
+| redemption | yes (retry after an unresolved outcome) | `retry_persistence`, `check_status` |
+| handoff | no (new statement) | `retry_persistence`, `check_status`, `finish` (the redemption stays committed and unconfirmed) |
+| handoff | yes (retry after an unresolved outcome) | `retry_persistence`, `check_status` |
+
+What the blocked state guarantees:
+- `retryPersistence()` writes again and sends the **same** request: the same
+  id, the same frozen payload, the same claim.
+- No new id is ever minted because storage failed, and nothing reports a
+  server success or failure.
+- It never offers "prepare", never invents a handoff, and never consumes
+  another entitlement.
+- Every other action is rejected, `restore()` included.
+- `sessionEnded()` blocks as before. The in-memory intent is dropped, while
+  the last **durable** context stays for the authorised recovery.
+
+**Why a new state.** No existing phase means "this request was not sent".
+`redemption_unresolved` means "it may have been committed". Reusing that
+phase would have allowed `check_status` for a never-sent intent and hidden
+the difference between the two.
+
+**Post-reply writes stay best-effort.** Writes such as `recorded` after a
+server reply, or the session rebind in `resumeRecovery()`, cannot cause a
+side effect. If one fails, the store keeps the earlier stage, and a reload
+still resolves through the server (never "prepare").
+
+**What the adapter can and cannot guarantee.**
+- **Can:** `write()` + `read()` on `sessionStorage` proves that the value is
+  in this tab's storage area now, and that it survives a reload of the same
+  tab.
+- **Cannot:** sessionStorage has no fsync. A browser or OS crash, a killed
+  tab process, or "clear site data" can lose it. A tab closed and not
+  restored loses it too, depending on the browser's session-restore
+  behaviour. Durability is therefore "survives a same-tab reload", not
+  "survives a crash".
+- After an actual loss, the server's idempotent ids and one-coffee-per-day
+  rule are the remaining guarantee: a new intent is refused and never
+  prepares.
+
+**Mutation guards:** Z1–Z13.

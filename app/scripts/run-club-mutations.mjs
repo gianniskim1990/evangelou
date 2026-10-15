@@ -602,8 +602,8 @@ const mutants = [
   {
     id: "R7-redemption-retry-mints-new-id",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    if (s.phase !== \"redemption_unresolved\" || this.busy || !this.payload) return \"rejected\";\n    return this.submitRedemption(s.intent);",
-    replace: "    if (s.phase !== \"redemption_unresolved\" || this.busy || !this.payload) return \"rejected\";\n    return this.submitRedemption({ ...s.intent, requestId: this.deps.newId() });",
+    search: "    // The earlier attempt may have committed: if this retry is blocked, it can never be abandoned.\n    return this.submitRedemption(s.intent, true);",
+    replace: "    // The earlier attempt may have committed: if this retry is blocked, it can never be abandoned.\n    return this.submitRedemption({ ...s.intent, requestId: this.deps.newId() }, true);",
   },
   {
     id: "R8-resubmit-ignores-payload-binding",
@@ -614,8 +614,8 @@ const mutants = [
   {
     id: "R9-handoff-retry-mints-new-id",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    return this.submitHandoff(s.intent, s.record, s.handoffIntent);",
-    replace: "    return this.submitHandoff(s.intent, s.record, { ...s.handoffIntent, handoffRequestId: this.deps.newId() });",
+    search: "    return this.submitHandoff(s.intent, s.record, s.handoffIntent, true);",
+    replace: "    return this.submitHandoff(s.intent, s.record, { ...s.handoffIntent, handoffRequestId: this.deps.newId() }, true);",
   },
   {
     id: "R10-handoff-reply-accepts-foreign-confirmation",
@@ -686,7 +686,7 @@ const mutants = [
   {
     id: "R21-unresolved-intent-abandonable",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    if (s.phase !== \"recovery_required\" || (s.reason !== \"not_recorded\" && s.reason !== \"storage_corrupt\" && s.reason !== \"storage_outdated\") || this.busy) return \"rejected\";",
+    search: "    if (this.busy || (!neverSent && (s.phase !== \"recovery_required\" || (s.reason !== \"not_recorded\" && s.reason !== \"storage_corrupt\" && s.reason !== \"storage_outdated\")))) return \"rejected\";",
     replace: "    if (this.busy) return \"rejected\";",
   },
   {
@@ -771,8 +771,8 @@ const mutants = [
   {
     id: "W7-retry-uses-callers-mutable-object",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    this.payload = frozen;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest });",
-    replace: "    this.payload = payload;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest });",
+    search: "    this.payload = frozen;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest }, false);",
+    replace: "    this.payload = payload;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest }, false);",
   },
   {
     id: "W8-session-end-during-hashing-ignored",
@@ -968,6 +968,85 @@ const mutants = [
     file: "staff/redemptionRecovery/browserStorage.ts",
     search: "  if (typeof window === \"undefined\") return null;\n",
     replace: "",
+  },
+  // UI-04K persistence before side effects (Z1-Z13).
+  {
+    id: "Z1-redemption-sent-without-durable-context",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (!this.persistDurably(intent, \"redemption_sent\", null)) {",
+    replace: "    if (false) {",
+  },
+  {
+    id: "Z2-write-result-not-verified",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      this.deps.storage.write(text);\n      return this.deps.storage.read() === text;",
+    replace: "      this.deps.storage.write(text);\n      this.deps.storage.read();\n      return true;",
+  },
+  {
+    id: "Z3-read-back-skipped",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      this.deps.storage.write(text);\n      return this.deps.storage.read() === text;",
+    replace: "      this.deps.storage.write(text);\n      return true;",
+  },
+  {
+    id: "Z4-storage-exception-treated-as-durable",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      return this.deps.storage.read() === text;\n    } catch {\n      return false;\n    }",
+    replace: "      return this.deps.storage.read() === text;\n    } catch {\n      return true;\n    }",
+  },
+  {
+    id: "Z5-handoff-sent-without-durable-context",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (!this.persistDurably(intent, \"handoff_sent\", handoffIntent)) {",
+    replace: "    if (false) {",
+  },
+  {
+    id: "Z6-retried-redemption-treated-as-never-sent",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    return this.submitRedemption(s.intent, true);",
+    replace: "    return this.submitRedemption(s.intent, false);",
+  },
+  {
+    id: "Z7-retried-handoff-treated-as-never-sent",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    return this.submitHandoff(s.intent, s.record, s.handoffIntent, true);",
+    replace: "    return this.submitHandoff(s.intent, s.record, s.handoffIntent, false);",
+  },
+  {
+    id: "Z8-new-id-minted-after-storage-failure",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    return this.submitRedemption(s.intent, s.mayHaveBeenSent);",
+    replace: "    return this.submitRedemption({ ...s.intent, requestId: this.deps.newId() }, s.mayHaveBeenSent);",
+  },
+  {
+    id: "Z9-possibly-committed-intent-abandoned",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    const neverSent = s.phase === \"persistence_blocked\" && s.operation === \"redemption\" && !s.mayHaveBeenSent;",
+    replace: "    const neverSent = s.phase === \"persistence_blocked\" && s.operation === \"redemption\";",
+  },
+  {
+    id: "Z10-possibly-sent-statement-finished",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      (s.phase === \"persistence_blocked\" && s.operation === \"handoff\" && !s.mayHaveBeenSent);",
+    replace: "      (s.phase === \"persistence_blocked\" && s.operation === \"handoff\");",
+  },
+  {
+    id: "Z11-status-read-for-never-sent-redemption",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (s.phase === \"persistence_blocked\" && (s.mayHaveBeenSent || s.operation === \"handoff\")) {",
+    replace: "    if (s.phase === \"persistence_blocked\") {",
+  },
+  {
+    id: "Z12-blocked-actions-ignore-may-have-been-sent",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "if (s.operation === \"redemption\") return s.mayHaveBeenSent ? [\"retry_persistence\", \"check_status\"] : [\"retry_persistence\", \"abandon_intent\"];",
+    replace: "if (s.operation === \"redemption\") return [\"retry_persistence\", \"abandon_intent\"];",
+  },
+  {
+    id: "Z13-blocked-redemption-still-sent",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      this.set({ phase: \"persistence_blocked\", operation: \"redemption\", intent, mayHaveBeenSent });\n      return \"applied\";\n",
+    replace: "      this.set({ phase: \"persistence_blocked\", operation: \"redemption\", intent, mayHaveBeenSent });\n",
   },
 ];
 
