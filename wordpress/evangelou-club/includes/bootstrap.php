@@ -86,4 +86,6 @@ require_once $evc_includes . 'class-evc-member-sync.php';
 require_once $evc_includes . 'class-evc-response-contract.php';
 // UI-04H v2 route table + route-aware envelope policy (pure, never registered).
 require_once $evc_includes . 'class-evc-rest-v2-boundary.php';
+// UI-04I versioned staff-role upgrade: PURE planner/dry-run validator (never applied, never hooked).
+require_once $evc_includes . 'class-evc-staff-role-upgrade.php';
 unset($evc_includes);

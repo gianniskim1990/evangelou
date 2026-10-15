@@ -38,4 +38,6 @@ require_once $evc_root . '/tests/support/class-evc-test-database.php';
 require_once $evc_root . '/tests/support/class-evc-in-memory-prepared-redemption-store.php';
 require_once $evc_root . '/tests/support/class-evc-fake-member-lookup.php';
 require_once __DIR__ . '/support/class-evc-test-v2-harness.php';
+// UI-04I TEST-ONLY role-upgrade snapshot reader + simulated applier (never shipped).
+require_once __DIR__ . '/support/class-evc-test-role-upgrade.php';
 require_once __DIR__ . '/class-evc-wp-test-case.php';
