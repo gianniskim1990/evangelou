@@ -34,4 +34,8 @@ require $evc_tests_dir . '/includes/bootstrap.php';
 require_once $evc_root . '/tests/support/class-evc-fixed-clock.php';
 require_once $evc_root . '/tests/support/class-evc-mock-membership-adapter.php';
 require_once $evc_root . '/tests/support/class-evc-test-database.php';
+// UI-04H TEST-ONLY v2 harness (fakes + designated routes; installed per test, never shipped).
+require_once $evc_root . '/tests/support/class-evc-in-memory-prepared-redemption-store.php';
+require_once $evc_root . '/tests/support/class-evc-fake-member-lookup.php';
+require_once __DIR__ . '/support/class-evc-test-v2-harness.php';
 require_once __DIR__ . '/class-evc-wp-test-case.php';

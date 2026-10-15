@@ -84,4 +84,6 @@ require_once $evc_includes . 'class-evc-member-sync.php';
 // UI-04G pure v2 JSON response contracts + HTTP status recommendations.
 // Definitions only: no route, no WP_REST_Response, no hook.
 require_once $evc_includes . 'class-evc-response-contract.php';
+// UI-04H v2 route table + route-aware envelope policy (pure, never registered).
+require_once $evc_includes . 'class-evc-rest-v2-boundary.php';
 unset($evc_includes);

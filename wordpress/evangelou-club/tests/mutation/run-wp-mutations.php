@@ -77,6 +77,19 @@ $mutants = array(
         "        EVC_Staff_Session::revoke_current();\n", ''),
     array('W31-rewrite-flushed-on-every-request', 'enabled', $staff . 'class-evc-staff-shell.php',
         "        if (\$current === \$state) {\n            return;\n        }\n", ''),
+    // UI-04H v2 boundary WordPress adapter (inactive in production; exercised by the test-only harness).
+    array('W32-v2-output-shaping-params-not-read', 'enabled', 'includes/staff/class-evc-rest-v2-security.php',
+        "'transport_params' => count(array_intersect(array_keys(\$query), EVC_Rest_V2_Envelope_Policy::TRANSPORT_PARAMS)) > 0,",
+        "'transport_params' => false,"),
+    array('W33-v2-envelope-decision-not-applied', 'enabled', 'includes/staff/class-evc-rest-v2-security.php',
+        "            \$response = EVC_Rest_Security::error_response(\$decision['code'], \$decision['status']);\n",
+        ""),
+    array('W34-v2-any-response-treated-as-sealed', 'enabled', 'includes/staff/class-evc-rest-v2-security.php',
+        "\$sealed = \$response instanceof EVC_Rest_V2_Domain_Response ? \$response->evc_seal() : null;",
+        "\$sealed = \$response instanceof EVC_Rest_V2_Domain_Response ? \$response->evc_seal() : (is_array(\$response->get_data()) && \$response->get_matched_route() ? array('route_id' => (string) (EVC_Rest_V2_Routes::designated(\$response->get_matched_route(), \$request->get_method())['id'] ?? ''), 'surface' => (string) (EVC_Rest_V2_Routes::designated(\$response->get_matched_route(), \$request->get_method())['surface'] ?? ''), 'body' => \$response->get_data(), 'status' => (int) \$response->get_status()) : null);"),
+    array('W35-domain-response-accepts-any-body', 'enabled', 'includes/staff/class-evc-rest-v2-security.php',
+        "        if (\$route === null || !EVC_Contract_Envelope_Rule::is_domain_body_for(\$route['surface'], \$body)) {",
+        "        if (\$route === null) {"),
 );
 
 function evc_wp_suite(string $root, string $mode): int {

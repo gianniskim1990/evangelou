@@ -275,6 +275,17 @@ final class EVC_Contract_Http {
         $key = isset($body['outcome']) ? $body['outcome'] : (isset($body['result']) ? $body['result'] : null);
         return is_string($key) && isset($map[$surface][$key]) ? $map[$surface][$key] : 500;
     }
+
+    /**
+     * UI-04H: the body's outcome/result is one this surface can produce (an
+     * unknown key maps to 500 above, which must never be mistaken for the
+     * legitimate 500 of record_integrity_failure).
+     */
+    public static function knows(string $surface, array $body): bool {
+        $map = array('redemption' => self::REDEMPTION, 'handoff' => self::HANDOFF, 'status' => self::STATUS, 'lookup' => self::LOOKUP, 'usual' => self::USUAL);
+        $field = $surface === 'redemption' || $surface === 'handoff' ? 'outcome' : 'result';
+        return isset($map[$surface]) && isset($body[$field]) && is_string($body[$field]) && isset($map[$surface][$body[$field]]);
+    }
 }
 
 /**
@@ -300,5 +311,34 @@ final class EVC_Contract_Envelope_Rule {
             array('confirmed_order', 'reason', 'result', 'suggestion'),
         );
         return in_array($keys, $shapes, true);
+    }
+
+    /**
+     * UI-04H: the exact shape(s) of ONE surface. A shape match alone is never
+     * authorization (EVC_Rest_V2_Envelope_Policy also binds route, method,
+     * sealed source and status); it only rules out a body of another surface.
+     *
+     * @param mixed $data
+     */
+    public static function is_domain_body_for(string $surface, $data): bool {
+        if (!self::is_domain_body($data)) {
+            return false;
+        }
+        $keys = array_keys($data);
+        sort($keys);
+        $shapes = array(
+            'redemption' => array(
+                array('entitlement_consumed', 'fulfillment', 'handoff', 'instruction', 'outcome', 'recording', 'redemption', 'request_id', 'server_business_date'),
+                array('entitlement_consumed', 'fulfillment', 'handoff', 'instruction', 'outcome', 'recording', 'redemption', 'request_id', 'retry_request_id', 'server_business_date'),
+            ),
+            'handoff' => array(
+                array('fulfillment', 'handoff', 'handoff_request_id', 'outcome'),
+                array('fulfillment', 'handoff', 'handoff_request_id', 'outcome', 'retry_handoff_request_id'),
+            ),
+            'status' => array(array('data', 'result')),
+            'lookup' => array(array('member', 'result')),
+            'usual' => array(array('confirmed_order', 'reason', 'result', 'suggestion')),
+        );
+        return isset($shapes[$surface]) && in_array($keys, $shapes[$surface], true) && EVC_Contract_Http::knows($surface, $data);
     }
 }

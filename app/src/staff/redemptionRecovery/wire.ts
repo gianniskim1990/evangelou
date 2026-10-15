@@ -359,16 +359,50 @@ export function parseUsualCoffeeReply(raw: unknown): UsualCoffeeReply | null {
   return { kind: result as "forbidden" | "invalid_request" | "member_not_found" | "server_error" };
 }
 
+export type ReplySurface = "redemption" | "handoff" | "status" | "lookup" | "usual";
 
 /**
- * Splits an HTTP reply into a v2 DOMAIN body (always handed to the strict
- * parsers, whatever the status: a 503 outcome_unknown body keeps its
- * same-id retry semantics) or a TRANSPORT failure (the v1 `{"error":…}`
- * envelope used before any service ran, or a non-JSON reply such as a proxy
- * page). A transport failure never says whether anything was committed.
+ * The recommended status of every v2 domain body (mirror of PHP
+ * EVC_Contract_Http; the contract test compares it with the map exported
+ * into the PHP-generated vectors).
  */
-export function classifyHttpReply(status: number, body: unknown): { kind: "domain"; body: Obj } | { kind: "transport"; failure: TransportFailureKind } {
-  if (isObj(body) && !("error" in body) && ("outcome" in body || "result" in body)) return { kind: "domain", body };
+export const CONTRACT_STATUS: Readonly<Record<ReplySurface, Readonly<Record<string, number>>>> = {
+  redemption: {
+    redeemed: 201, replayed: 200,
+    invalid_request: 400, invalid_preparation: 400, invalid_coffee: 400,
+    catalogue_version_stale: 409, catalogue_not_authorised: 503,
+    member_not_found: 404, membership_inactive: 409, benefit_already_redeemed: 409, idempotency_key_reused: 409,
+    record_integrity_failure: 500, outcome_unknown: 503, server_error: 503,
+  },
+  handoff: {
+    handoff_confirmed: 201, handoff_replayed: 200, handoff_already_confirmed: 200,
+    invalid_request: 400, forbidden: 403, redemption_not_found: 404,
+    late_confirmation_not_authorised: 409, idempotency_key_reused: 409,
+    record_integrity_failure: 500, outcome_unknown: 503, server_error: 503,
+  },
+  status: { found: 200, not_found: 404, forbidden: 403, invalid_request: 400, record_integrity_failure: 500, server_error: 503 },
+  lookup: { found: 200, not_found: 404, ambiguous: 409, invalid_phone: 400, forbidden: 403, rate_limited: 429, unavailable: 503 },
+  usual: { suggested: 200, no_suggestion: 200, forbidden: 403, invalid_request: 400, member_not_found: 404, server_error: 503 },
+};
+
+/**
+ * Splits an HTTP reply for a request to `surface` into a v2 DOMAIN body or
+ * a TRANSPORT failure. A body is DOMAIN only when its outcome/result belongs
+ * to that surface AND the HTTP status is exactly the contract status for it
+ * (a 503 outcome_unknown keeps its same-id retry; a 401 is NEVER a domain
+ * body). A contradictory status/body pair, the v1 `{"error":…}` envelope
+ * (used before any service ran) and non-JSON replies (proxy pages, JSONP,
+ * `_envelope` wrappers) are transport failures, which never say whether
+ * anything was committed.
+ */
+export function classifyHttpReply(surface: ReplySurface, status: number, body: unknown): { kind: "domain"; body: Obj } | { kind: "transport"; failure: TransportFailureKind } {
+  if (isObj(body) && !("error" in body) && status !== 401) {
+    const key = surface === "redemption" || surface === "handoff" ? body.outcome : body.result;
+    const map = CONTRACT_STATUS[surface];
+    if (typeof key === "string" && Object.prototype.hasOwnProperty.call(map, key)) {
+      return map[key] === status ? { kind: "domain", body } : { kind: "transport", failure: "unavailable" };
+    }
+  }
   const code = isObj(body) && isObj(body.error) && typeof body.error.code === "string" ? body.error.code : null;
   if (code === "unauthorized" || (code === null && status === 401)) return { kind: "transport", failure: "unauthorized" };
   if (code === "forbidden" || (code === null && status === 403)) return { kind: "transport", failure: "forbidden" };

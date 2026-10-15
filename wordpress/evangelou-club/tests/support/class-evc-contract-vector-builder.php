@@ -31,6 +31,7 @@ final class EVC_Contract_Vector_Builder {
         return array(
             'schema' => 'evc-contract-vectors-v1',
             'note' => 'Generated from the real PHP services and response mappers (UI-04G). Do not edit by hand.',
+            'http_map' => array('redemption' => EVC_Contract_Http::REDEMPTION, 'handoff' => EVC_Contract_Http::HANDOFF, 'status' => EVC_Contract_Http::STATUS, 'lookup' => EVC_Contract_Http::LOOKUP, 'usual' => EVC_Contract_Http::USUAL),
             'vectors' => $b->vectors,
         );
     }

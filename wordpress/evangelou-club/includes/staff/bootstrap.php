@@ -11,6 +11,7 @@ require_once $evc_staff . 'class-evc-staff-auth.php';
 require_once $evc_staff . 'class-evc-login-throttle.php';
 require_once $evc_staff . 'class-evc-staff-admin-guard.php';
 require_once $evc_staff . 'class-evc-rest-security.php';
+require_once $evc_staff . 'class-evc-rest-v2-security.php';
 require_once $evc_staff . 'class-evc-redemption-backend.php';
 require_once $evc_staff . 'class-evc-rest-redeem-controller.php';
 require_once $evc_staff . 'class-evc-rest-session-controller.php';

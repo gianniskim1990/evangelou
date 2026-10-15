@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  CONTRACT_STATUS,
   classifyHttpReply,
   parseHandoffReply,
   parseLookupReply,
@@ -34,7 +35,7 @@ interface Vector {
 const appDir = process.env.EVC_APP_DIR ?? process.cwd();
 const fixture = JSON.parse(
   readFileSync(join(appDir, "..", "wordpress", "evangelou-club", "tests", "fixtures", "contract", "vectors.json"), "utf8"),
-) as { schema: string; vectors: Vector[] };
+) as { schema: string; http_map: Record<string, Record<string, number>>; vectors: Vector[] };
 const vectors = fixture.vectors;
 
 function sentOf(v: Vector): Record<string, string> {
@@ -101,7 +102,7 @@ describe("contract vectors (PHP mappers -> TS parsers)", () => {
   for (const v of positives) {
     it(`accepts: ${v.name}`, () => {
       // Every PHP domain body is handed to the parser, whatever its HTTP status.
-      const routed = classifyHttpReply(v.http_status, v.body);
+      const routed = classifyHttpReply(v.surface, v.http_status, v.body);
       assert.equal(routed.kind, "domain");
       const r = parse(v);
       assert.ok(r, `parser rejected a body produced by the PHP mapper: ${JSON.stringify(v.body)}`);
@@ -165,30 +166,66 @@ describe("contract vectors (PHP mappers -> TS parsers)", () => {
 });
 
 describe("classifyHttpReply (v1 transport envelope vs v2 domain body)", () => {
+  it("mirrors the PHP status map exactly", () => {
+    assert.deepEqual(CONTRACT_STATUS, fixture.http_map);
+  });
+
   it("maps the v1 error envelope to a transport failure, never to a domain outcome", () => {
     const env = (code: string) => ({ error: { code, message: "x" } });
-    assert.deepEqual(classifyHttpReply(401, env("unauthorized")), { kind: "transport", failure: "unauthorized" });
-    assert.deepEqual(classifyHttpReply(403, env("forbidden")), { kind: "transport", failure: "forbidden" });
-    assert.deepEqual(classifyHttpReply(429, env("rate_limited")), { kind: "transport", failure: "rate_limited" });
-    assert.deepEqual(classifyHttpReply(503, env("server_error")), { kind: "transport", failure: "unavailable" });
-    assert.deepEqual(classifyHttpReply(500, env("server_error")), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("redemption", 401, env("unauthorized")), { kind: "transport", failure: "unauthorized" });
+    assert.deepEqual(classifyHttpReply("redemption", 403, env("forbidden")), { kind: "transport", failure: "forbidden" });
+    assert.deepEqual(classifyHttpReply("lookup", 429, env("rate_limited")), { kind: "transport", failure: "rate_limited" });
+    assert.deepEqual(classifyHttpReply("redemption", 503, env("server_error")), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("status", 500, env("server_error")), { kind: "transport", failure: "unavailable" });
     // An error key wins even next to domain-looking keys.
-    assert.deepEqual(classifyHttpReply(200, { error: { code: "forbidden" }, outcome: "redeemed" }), { kind: "transport", failure: "forbidden" });
+    assert.deepEqual(classifyHttpReply("redemption", 201, { error: { code: "forbidden" }, outcome: "redeemed" }), { kind: "transport", failure: "forbidden" });
   });
 
   it("falls back to the status for a non-JSON or foreign body", () => {
-    assert.deepEqual(classifyHttpReply(401, "<html>"), { kind: "transport", failure: "unauthorized" });
-    assert.deepEqual(classifyHttpReply(403, null), { kind: "transport", failure: "forbidden" });
-    assert.deepEqual(classifyHttpReply(429, {}), { kind: "transport", failure: "rate_limited" });
-    assert.deepEqual(classifyHttpReply(502, "<html>"), { kind: "transport", failure: "unavailable" });
-    assert.deepEqual(classifyHttpReply(200, { foo: 1 }), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("redemption", 401, "<html>"), { kind: "transport", failure: "unauthorized" });
+    assert.deepEqual(classifyHttpReply("redemption", 403, null), { kind: "transport", failure: "forbidden" });
+    assert.deepEqual(classifyHttpReply("lookup", 429, {}), { kind: "transport", failure: "rate_limited" });
+    assert.deepEqual(classifyHttpReply("redemption", 502, "<html>"), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("redemption", 200, { foo: 1 }), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("redemption", 200, "/**/cb({\"outcome\":\"redeemed\"})"), { kind: "transport", failure: "unavailable" });
+    // A WordPress _envelope wrapper: 200 around a failure is never a domain reply.
+    assert.deepEqual(classifyHttpReply("redemption", 200, { body: { error: { code: "unauthorized" } }, status: 401, headers: {} }), { kind: "transport", failure: "unavailable" });
     // An unknown error code never borrows the auth meaning of its status.
-    assert.deepEqual(classifyHttpReply(401, { error: { code: "server_error" } }), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("redemption", 401, { error: { code: "server_error" } }), { kind: "transport", failure: "unavailable" });
   });
 
-  it("hands a domain body to the parsers whatever the status", () => {
-    assert.equal(classifyHttpReply(503, { outcome: "outcome_unknown" }).kind, "domain");
-    assert.equal(classifyHttpReply(404, { result: "not_found", data: null }).kind, "domain");
+  it("accepts a domain body only with its exact contract status", () => {
+    for (const v of positives) {
+      const surface = v.surface;
+      assert.equal(classifyHttpReply(surface, v.http_status, v.body).kind, "domain", v.name);
+      for (const status of [200, 201, 400, 401, 403, 404, 409, 429, 500, 502, 503]) {
+        if (status === v.http_status) continue;
+        const r = classifyHttpReply(surface, status, v.body);
+        assert.equal(r.kind, "transport", `${v.name} with ${status}`);
+      }
+    }
+    // 503 outcome_unknown keeps its same-id retry; the same body on 200/409 is contradictory.
+    const unknown = positives.find((v) => v.name === "redemption unknown commit")!.body;
+    assert.equal(classifyHttpReply("redemption", 503, unknown).kind, "domain");
+    assert.deepEqual(classifyHttpReply("redemption", 200, unknown), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("redemption", 409, unknown), { kind: "transport", failure: "unavailable" });
+  });
+
+  it("never accepts 401 as an authenticated domain success", () => {
+    for (const v of positives) {
+      assert.deepEqual(classifyHttpReply(v.surface, 401, v.body), { kind: "transport", failure: "unauthorized" }, v.name);
+    }
+  });
+
+  it("never routes a body to the parser of another surface", () => {
+    const lookup = positives.find((v) => v.name === "lookup by QR found")!.body;
+    const fresh = positives.find((v) => v.name === "redemption fresh commit")!.body;
+    assert.equal(classifyHttpReply("lookup", 200, lookup).kind, "domain");
+    assert.deepEqual(classifyHttpReply("redemption", 200, lookup), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("lookup", 201, fresh), { kind: "transport", failure: "unavailable" });
+    // Prototype keys are not outcomes.
+    assert.deepEqual(classifyHttpReply("redemption", 200, { outcome: "constructor" }), { kind: "transport", failure: "unavailable" });
+    assert.deepEqual(classifyHttpReply("status", 200, { result: "__proto__" }), { kind: "transport", failure: "unavailable" });
   });
 });
 
