@@ -261,6 +261,31 @@ jobs:
           php tests/http/run-http-checks.php off
           kill "$(cat "$RUNNER_TEMP/server.pid")"
 
+      - name: Real HTTP checks - TEST-ONLY v2 harness (UI-04H, isolated CI site only)
+        working-directory: wordpress/evangelou-club
+        run: |
+          # The harness mu-plugin exists ONLY for this step, ONLY in the disposable site.
+          mkdir -p "$EVC_WP/wp-content/mu-plugins"
+          cp tests/http/mu-plugins/evc-v2-harness.php "$EVC_WP/wp-content/mu-plugins/"
+          EVC_HTTP_FLAG=on EVC_HTTP_HARNESS=on EVC_HARNESS_PLUGIN_SRC="$PWD" php -S 127.0.0.1:8089 -t "$EVC_WP" "$PWD/tests/http/router.php" > "$RUNNER_TEMP/server-harness.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 30); do curl -s -o /dev/null "$EVC_HTTP_BASE/wp-login.php" && break; sleep 1; done
+          EVC_HTTP_CAPTURES="$RUNNER_TEMP/http-captures.json" php tests/http/run-http-checks.php harness
+          kill "$(cat "$RUNNER_TEMP/server.pid")"
+          rm "$EVC_WP/wp-content/mu-plugins/evc-v2-harness.php"
+
+      - name: Real WordPress replies through the real TypeScript classifier and parsers (UI-04H)
+        working-directory: app
+        run: node scripts/check-http-captures.mjs "$RUNNER_TEMP/http-captures.json"
+
+      - name: Packaged plugin contains no v2 harness, route registration or v2 hook
+        run: |
+          set +e
+          grep -rnF -e 'EVC_Test_V2_Harness' -e 'v2-shadow' -e 'register_rest_route(EVC_Rest_V2_Routes' -e "'EVC_Rest_V2_Security'" -e 'EVC_Rest_V2_Security::filter_post_dispatch' -e 'new EVC_Rest_V2_Domain_Response' app/dist-plugin/evangelou-club
+          rc=$?
+          set -e
+          if [ "$rc" -ne 1 ]; then echo "::error::v2 harness/wiring found in the package (or grep failed, rc=$rc)"; exit 1; fi
+
       - name: Server logs (diagnostics)
         if: always()
         run: tail -n 50 "$RUNNER_TEMP"/server-*.log || true

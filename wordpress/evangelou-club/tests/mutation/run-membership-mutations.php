@@ -22,6 +22,7 @@
  * And UI-04F (S1-S20: member identity, trusted synchronisation, account
  * status administration, QR coordination).
  * And UI-04G (C1-C26: pure REST response contracts and HTTP status map).
+ * And UI-04H (V2-1..V2-15: route-aware v2 envelope policy).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1683,15 +1684,109 @@ $mutants = array(
         'search' => '        return in_array($keys, $shapes, true);',
         'replace' => '        foreach ($shapes as $shape) {' . "\n" . '            if (!array_diff($shape, $keys)) {' . "\n" . '                return true;' . "\n" . '            }' . "\n" . '        }' . "\n" . '        return false;',
     ),
+    // UI-04H route-aware v2 envelope policy (V2-1..V2-15).
+    array(
+        'id' => 'V2-1-namespace-prefix-accepted',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        return $route === $base || strpos($route, $base . \'/\') === 0;' . "\n" . '    }' . "\n" . '' . "\n" . '    /** @return array|null the route definition',
+        'replace' => '        return strpos($route, $base) === 0;' . "\n" . '    }' . "\n" . '' . "\n" . '    /** @return array|null the route definition',
+    ),
+    array(
+        'id' => 'V2-2-sealed-body-outside-v2-passes',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '            return $sealed !== null ? self::envelope(\'server_error\', 500) : array(\'action\' => self::IGNORE);',
+        'replace' => '            return array(\'action\' => self::IGNORE);',
+    ),
+    array(
+        'id' => 'V2-3-http-401-may-carry-domain-body',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        if ($status === 401) {' . "\n" . '            // HTTP 401 is always',
+        'replace' => '        if (false) {' . "\n" . '            // HTTP 401 is always',
+    ),
+    array(
+        'id' => 'V2-4-unsealed-mapping-skipped',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        if ($sealed === null) {' . "\n" . '            return self::unsealed(',
+        'replace' => '        if ($sealed === null && false) {' . "\n" . '            return self::unsealed(',
+    ),
+    array(
+        'id' => 'V2-5-output-shaping-params-ignored',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        if (!empty($in[\'transport_params\'])) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'V2-6-unauthenticated-domain-body',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        if (empty($in[\'authenticated\'])) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'V2-7-seal-not-bound-to-route',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '            || $sealed[\'route_id\'] !== $route[\'id\'] || $sealed[\'surface\'] !== $route[\'surface\']) {',
+        'replace' => '            ) {',
+    ),
+    array(
+        'id' => 'V2-8-designation-ignores-method',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '$matched_route === \'/\' . self::NAMESPACE_V2 . $r[\'route\'] && $method === $r[\'method\']',
+        'replace' => '$matched_route === \'/\' . self::NAMESPACE_V2 . $r[\'route\']',
+    ),
+    array(
+        'id' => 'V2-9-tampered-data-passes',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        if (!array_key_exists(\'data\', $in) || $in[\'data\'] !== $body || $status !== $sealed[\'status\']',
+        'replace' => '        if (!array_key_exists(\'data\', $in) || $status !== $sealed[\'status\']',
+    ),
+    array(
+        'id' => 'V2-10-contract-status-unchecked',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '            || $status !== EVC_Contract_Http::status($route[\'surface\'], $body)) {',
+        'replace' => '            ) {',
+    ),
+    array(
+        'id' => 'V2-11-surface-shape-unchecked',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '            || !EVC_Contract_Envelope_Rule::is_domain_body_for($route[\'surface\'], $body)' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'V2-12-invalid-nonce-not-unauthorized',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        if ($code === \'rest_cookie_invalid_nonce\' || $status === 401) {',
+        'replace' => '        if ($status === 401) {',
+    ),
+    array(
+        'id' => 'V2-13-unknown-success-becomes-client-error',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        if ($status >= 400 && $status < 500) {',
+        'replace' => '        if ($status >= 200 && $status < 500) {',
+    ),
+    array(
+        'id' => 'V2-14-unavailable-becomes-500',
+        'file' => 'includes/class-evc-rest-v2-boundary.php',
+        'search' => '        if ($status === 503) {' . "\n" . '            return self::envelope(\'server_error\', 503);',
+        'replace' => '        if ($status === 503) {' . "\n" . '            return self::envelope(\'server_error\', 500);',
+    ),
+    array(
+        'id' => 'V2-15-unknown-outcome-recognised',
+        'file' => 'includes/class-evc-response-contract.php',
+        'search' => '        return isset($shapes[$surface]) && in_array($keys, $shapes[$surface], true) && EVC_Contract_Http::knows($surface, $data);',
+        'replace' => '        return isset($shapes[$surface]) && in_array($keys, $shapes[$surface], true);',
+    ),
 );
 
+/** Output of the most recent suite run (printed only when the baseline fails). */
+$evc_last_output = '';
+
 function evc_run_suite(array $command): int {
+    global $evc_last_output;
     $proc = proc_open($command, array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
     if (!is_resource($proc)) {
         return 255;
     }
-    stream_get_contents($pipes[1]);
-    stream_get_contents($pipes[2]);
+    $evc_last_output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
     fclose($pipes[1]);
     fclose($pipes[2]);
     return proc_close($proc);
@@ -1709,6 +1804,7 @@ echo "Baseline (unmutated) unit run...\n";
 $baseline = evc_run_suite($phpunit);
 if ($baseline !== 0) {
     fwrite(STDERR, "ABORT: baseline unit suite is not green (exit $baseline); mutation results would be meaningless.\n");
+    fwrite(STDERR, substr($evc_last_output, -6000) . "\n");
     exit(1);
 }
 echo "Baseline: PASS\n";

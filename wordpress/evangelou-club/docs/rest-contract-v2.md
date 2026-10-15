@@ -149,16 +149,18 @@ There are two kinds of failure response:
   flag OFF, route unavailable) keep the existing v1 envelope:
   `EVC_Rest_Security::error_response()` gives `{"error":{"code","message"}}`
   with a 401, 403, 429 or 503 status.
-- **v2 domain bodies** are recognised by
-  `EVC_Contract_Envelope_Rule::is_domain_body()`. It checks for one of 7 exact
-  key shapes and rejects any `error` key. The future wiring must make
-  `filter_post_dispatch` leave these bodies untouched; today it rewrites every
-  body of 400 or above that has no `error` key.
+- **v2 domain bodies**: `EVC_Contract_Envelope_Rule::is_domain_body()` only
+  recognises the 7 exact key shapes. **UI-04H superseded this as an
+  authorization rule:** a key set alone never grants the exemption. The
+  route-aware, sealed-source mechanism is in `docs/rest-v2-boundary.md` §3.
 
-The TypeScript side (`classifyHttpReply`):
-- A body with `outcome` or `result` and no `error` key goes to the strict
-  parser **whatever the status**. A 503 `outcome_unknown` keeps its same-id
-  retry.
+The TypeScript side (`classifyHttpReply(surface, status, body)`, tightened
+in UI-04H):
+- A body goes to the strict parser only when its outcome/result belongs to
+  the requested surface **and** the HTTP status is exactly its contract
+  status. A 503 `outcome_unknown` keeps its same-id retry.
+- **401 is never a domain body.** A contradictory status/body pair becomes
+  transport `unavailable`.
 - A v1 envelope or a non-JSON reply becomes a transport failure:
   `unauthorized`, `forbidden`, `rate_limited` or `unavailable`.
 - An unknown error code never borrows the auth meaning of its status.
@@ -167,25 +169,16 @@ The TypeScript side (`classifyHttpReply`):
 
 ## Future auth boundary (NOT implemented)
 
-Every v2 staff route must check, in this order, before any service runs:
-1. An **active staff session**: the D1 shared staff account with a
-   server-side session row.
-2. **Capability** (`EVC_Staff_Role`): `evc_redeem_benefit` for redemption,
-   handoff and status; `evc_lookup_member` for lookup; `evc_view_usual_coffee`
-   for the usual coffee. `evc_manage_club` is never implied.
-3. The **WP REST nonce** (`X-WP-Nonce`, `wp_rest`) bound to the session.
-4. A **session revocation check** on every request. A revoked or idle-expired
-   session gives 401 and never reaches a service.
-5. **Rate limiting** per session and per device. The lookup limiter fails
-   closed: if it is unavailable the result is `unavailable`, never "allowed".
-6. **Lookup proof verification**:
-   - Usual coffee and any member-scoped read require a valid, unexpired,
-     same-staff, same-session `lookup_ref` for that member.
-   - The redemption request carries the member id that the proof was issued
-     for.
-
-Failures in steps 1–5 use the v1 envelope. A missing or invalid lookup proof
-is a domain `forbidden`.
+Superseded by `docs/rest-v2-boundary.md` §1–§2 (UI-04H). Two corrections to
+the UI-04G text:
+- **Capabilities.** Handoff, status and usual coffee require
+  `evc_confirm_handoff`, `evc_view_redemption_status` and
+  `evc_view_usual_coffee`. **None of these is granted** by `EVC_Staff_Role`
+  today; see the capability audit (§5 there).
+- **Lookup proof.** For redemption a missing or invalid proof is a **403
+  transport envelope** (the redemption contract has no `forbidden` outcome,
+  and nothing is recorded). For usual coffee it remains a domain
+  `forbidden`.
 
 ## Privacy
 

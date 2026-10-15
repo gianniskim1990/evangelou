@@ -866,10 +866,10 @@ const mutants = [
     replace: "(code === null && status === 429)) return { kind: \"transport\", failure: \"unavailable\" };",
   },
   {
-    id: "X13-foreign-body-routed-as-domain",
+    id: "X13-contradictory-status-routed-as-domain",
     file: "staff/redemptionRecovery/wire.ts",
-    search: " && (\"outcome\" in body || \"result\" in body)) return { kind: \"domain\", body };",
-    replace: ") return { kind: \"domain\", body };",
+    search: "return map[key] === status ? { kind: \"domain\", body } : { kind: \"transport\", failure: \"unavailable\" };",
+    replace: "return { kind: \"domain\", body };",
   },
   {
     id: "X14-usual-suggestion-with-reason",
@@ -882,6 +882,19 @@ const mutants = [
     file: "staff/redemptionRecovery/wire.ts",
     search: "  if (s !== null) return null;\n  if (result === \"no_suggestion\")",
     replace: "  if (result === \"no_suggestion\")",
+  },
+  // UI-04H surface-aware status/body consistency (X13 re-aimed, X16-X17).
+  {
+    id: "X16-http-401-accepted-as-domain",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "if (isObj(body) && !(\"error\" in body) && status !== 401) {",
+    replace: "if (isObj(body) && !(\"error\" in body)) {",
+  },
+  {
+    id: "X17-body-of-another-surface-routed",
+    file: "staff/redemptionRecovery/wire.ts",
+    search: "    const key = surface === \"redemption\" || surface === \"handoff\" ? body.outcome : body.result;\n    const map = CONTRACT_STATUS[surface];",
+    replace: "    const key = surface === \"redemption\" || surface === \"handoff\" ? body.outcome : body.result;\n    const map = { ...CONTRACT_STATUS.redemption, ...CONTRACT_STATUS.lookup };",
   },
 ];
 
