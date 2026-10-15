@@ -673,6 +673,27 @@ No routes, hooks or SQL. See `docs/rest-contract-v2.md`.
 
 See `docs/rest-v2-boundary.md`.
 
+## Staff capability upgrade preparation (UI-04I — PROPOSAL, nothing granted)
+
+- **Shipped role unchanged.** The staff role is exactly version 1:
+  `evc_lookup_member`, `evc_redeem_benefit` and
+  `evc_view_redemption_history`.
+- **Version 2 is proposed only.** It adds `evc_confirm_handoff`,
+  `evc_view_redemption_status` and `evc_view_usual_coffee` (UI-04H audit),
+  and is not owner-approved. `evc_review_fulfillment` and `evc_manage_club`
+  stay manager-only.
+- **Pure planner.** `EVC_Staff_Role_Upgrade_Planner` (dry run + verify) is
+  shipped inert: no applier, no option write, no hook. It:
+  - refuses any grant without an exact owner approval;
+  - fails closed on any unexpected privilege;
+  - detects partial upgrades;
+  - verifies that unrelated roles are untouched.
+- **Rollout coupling.** Tests prove the role upgrade must ship together
+  with a version-aware allowlist and `register()`. Until then an upgraded
+  role makes the shared account fail closed.
+
+See `docs/staff-role-upgrade.md`.
+
 ## Database requirements
 
 - Separate MySQL **8.0** or MariaDB **10.11** database (the versions tested in

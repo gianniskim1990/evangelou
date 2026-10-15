@@ -23,6 +23,7 @@
  * status administration, QR coordination).
  * And UI-04G (C1-C26: pure REST response contracts and HTTP status map).
  * And UI-04H (V2-1..V2-15: route-aware v2 envelope policy).
+ * And UI-04I (RU1-RU20: versioned staff-role upgrade planner).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1774,6 +1775,127 @@ $mutants = array(
         'file' => 'includes/class-evc-response-contract.php',
         'search' => '        return isset($shapes[$surface]) && in_array($keys, $shapes[$surface], true) && EVC_Contract_Http::knows($surface, $data);',
         'replace' => '        return isset($shapes[$surface]) && in_array($keys, $shapes[$surface], true);',
+    ),
+    // UI-04I versioned staff-role upgrade planner / dry-run validator (RU1-RU20).
+    array(
+        'id' => 'RU1-grant-without-approval',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        if (array_diff($add, $shipped) && !self::approved($approval, $target, $target_caps)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RU2-approval-for-another-version',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => 'return $approval !== null && $approval->target_version() === $target && $approval->capabilities() === $target_caps;',
+        'replace' => 'return $approval !== null && $approval->capabilities() === $target_caps;',
+    ),
+    array(
+        'id' => 'RU3-approval-capabilities-not-exact',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => 'return $approval !== null && $approval->target_version() === $target && $approval->capabilities() === $target_caps;',
+        'replace' => 'return $approval !== null && $approval->target_version() === $target;',
+    ),
+    array(
+        'id' => 'RU4-unexpected-role-capability-ignored',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        if ($unexpected) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RU5-role-denial-ignored',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '            if ($granted !== true) {',
+        'replace' => '            if ($granted === null) {',
+    ),
+    array(
+        'id' => 'RU6-staff-capability-on-other-role-ignored',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '            if ($leaked) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'RU7-extra-role-on-staff-account-ignored',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '            if (array_values($u[\'roles\']) !== array(EVC_Staff_Role_Versions::ROLE) || $u[\'caps\']',
+        'replace' => '            if ($u[\'caps\']',
+    ),
+    array(
+        'id' => 'RU8-direct-capability-on-staff-account-ignored',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => ' || $u[\'caps\'] !== array(EVC_Staff_Role_Versions::ROLE => true) || $u[\'super_admin\']',
+        'replace' => ' || $u[\'super_admin\']',
+    ),
+    array(
+        'id' => 'RU9-super-admin-staff-account-ignored',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => ' || $u[\'super_admin\'] !== false) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'RU10-direct-club-grants-ignored',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        if ($direct) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RU11-manager-direct-grants-ignored',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        $club = array_merge($union, EVC_Staff_Role_Versions::MANAGER_ONLY);',
+        'replace' => '        $club = $union;',
+    ),
+    array(
+        'id' => 'RU12-unknown-stored-version-accepted',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        if ($stored !== null && EVC_Staff_Role_Versions::caps($stored) === null) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RU13-version-rewritten-when-up-to-date',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '            \'set_version\' => $up_to_date ? null : $target,',
+        'replace' => '            \'set_version\' => $target,',
+    ),
+    array(
+        'id' => 'RU14-version-mismatch-not-partial',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '            || ($stored !== null && EVC_Staff_Role_Versions::caps($stored) !== $current)' . "\n" . '',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'RU15-unrelated-role-change-not-verified',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        if (self::other_roles_fingerprint($after[\'roles\']) !== $p[\'other_roles_fingerprint\']) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RU16-version-record-not-verified',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        if ($after[\'stored_version\'] !== $p[\'target_version\']) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RU17-role-denial-not-verified',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => ' || count($after[\'staff_role\']) !== count($caps)) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'RU18-fingerprint-includes-staff-role',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        unset($roles[EVC_Staff_Role_Versions::ROLE]);' . "\n" . '        ksort($roles);',
+        'replace' => '        ksort($roles);',
+    ),
+    array(
+        'id' => 'RU19-snapshot-staff-role-inconsistency-accepted',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '        return $in_roles === $s[\'staff_role\'];',
+        'replace' => '        return true;',
+    ),
+    array(
+        'id' => 'RU20-shipped-version-raised',
+        'file' => 'includes/class-evc-staff-role-upgrade.php',
+        'search' => '    const SHIPPED = 1;',
+        'replace' => '    const SHIPPED = 2;',
     ),
 );
 
