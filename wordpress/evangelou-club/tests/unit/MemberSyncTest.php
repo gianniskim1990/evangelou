@@ -394,13 +394,71 @@ final class MemberSyncTest extends TestCase {
 
     // ---- privacy and zero legacy -----------------------------------------------------------
 
+    /**
+     * Structure-based privacy check (UI-04J follow-up). The previous version
+     * searched print_r() for the substring "501", which also matched a
+     * RANDOM valid member id that happened to contain those digits
+     * (e.g. mem_da9f5e49d708ed217794baa501030f1c; ~0.7 % of ids). The result
+     * is now checked by what it EXPOSES: its exact properties and methods,
+     * each value against its fixed vocabulary, no WordPress user id as a
+     * value, and — with the one legitimate free value (the member id)
+     * redacted — no digit or personal-data word anywhere in the dump.
+     */
+    private function assertMinimalSyncResult(EVC_Member_Sync_Result $result, string $label): void {
+        $class = new ReflectionClass($result);
+        $props = array_map(function (ReflectionProperty $p) {
+            return $p->getName();
+        }, $class->getProperties());
+        sort($props);
+        $this->assertSame(array('account_status', 'kind', 'member_public_id'), $props, $label . ': exposed fields');
+        $methods = array();
+        foreach ($class->getMethods(ReflectionMethod::IS_PUBLIC) as $m) {
+            $methods[] = ($m->isStatic() ? 'static ' : '') . $m->getName();
+        }
+        sort($methods);
+        $this->assertSame(array('account_status', 'grants_entitlement', 'issued_qr', 'kind', 'member_public_id', 'static member', 'static of'), $methods, $label . ': public surface');
+
+        $values = array();
+        foreach ($class->getProperties() as $p) {
+            $p->setAccessible(true);
+            $values[$p->getName()] = $p->getValue($result);
+        }
+        $this->assertContains($values['kind'], array_values($class->getConstants()), $label . ': kind vocabulary');
+        $id = $values['member_public_id'];
+        $this->assertTrue($id === null || (is_string($id) && EVC_Member_Id::is_valid_format($id)), $label . ': member id is an opaque id or null');
+        $this->assertContains($values['account_status'], array(null, 'enabled', 'disabled'), $label . ': status vocabulary');
+        $this->assertSame($id === null, $values['account_status'] === null, $label . ': identity and status come together');
+        foreach ($values as $name => $value) {
+            // Whole-value comparison: a WordPress user id is never a field value.
+            $this->assertNotSame(self::CUSTOMER, $value, $label . ': ' . $name);
+            $this->assertNotSame((string) self::CUSTOMER, $value, $label . ': ' . $name);
+        }
+
+        $dump = print_r($result, true);
+        if ($id !== null) {
+            $this->assertSame(1, substr_count($dump, $id), $label . ': the id appears once');
+            $dump = str_replace($id, '<member_public_id>', $dump);
+        }
+        $this->assertDoesNotMatchRegularExpression('/[0-9]/', $dump, $label . ': no number outside the id');
+        foreach (array('wp_user', 'mail', 'phone', 'name', 'payment', 'expires') as $absent) {
+            $this->assertStringNotContainsString($absent, $dump, $label);
+        }
+    }
+
     public function test_outputs_and_reports_are_minimal_and_there_is_no_import_path(): void {
         $this->paid();
-        $result = $this->sync();
-        $dump = print_r($result, true);
-        foreach (array('501', 'wp_user', 'mail', 'phone', 'name', 'payment', 'expires') as $absent) {
-            $this->assertStringNotContainsString($absent, $dump);
+        $this->assertMinimalSyncResult($this->sync(), 'provisioned');
+        $this->assertMinimalSyncResult($this->sync(), 'already member');
+        $this->accounts_service()->disable(self::manager(), $this->members->all()[0]['member_public_id'], 'suspected_misuse');
+        $this->assertMinimalSyncResult($this->sync(), 'disabled member');
+        foreach (array(
+            EVC_Member_Sync_Result::NOT_ELIGIBLE, EVC_Member_Sync_Result::REFUSED_ACCOUNT, EVC_Member_Sync_Result::IDENTITY_UNAVAILABLE,
+            EVC_Member_Sync_Result::MEMBERSHIP_UNAVAILABLE, EVC_Member_Sync_Result::IDENTITY_CONFLICT, EVC_Member_Sync_Result::INVALID_SIGNAL,
+            EVC_Member_Sync_Result::OUTCOME_UNKNOWN, EVC_Member_Sync_Result::SERVER_ERROR,
+        ) as $kind) {
+            $this->assertMinimalSyncResult(EVC_Member_Sync_Result::of($kind), $kind);
         }
+        $this->setUp();
         $this->members->unavailable = true;
         $this->sync();
         $this->assertSame(array(array('stage' => 'member_sync_sync', 'exception' => 'EVC_Db_Exception')), $this->reports);
@@ -412,6 +470,31 @@ final class MemberSyncTest extends TestCase {
             }
         }
         $this->assertNotContains('fluentcrm', EVC_Member_Sync_Signal::SOURCES);
+    }
+
+    /** @return array<string,array{string}> valid ids that contain the digits of the test WordPress user id */
+    public static function ids_containing_the_wp_user_id(): array {
+        return array(
+            'in the middle (the CI failure)' => array('mem_da9f5e49d708ed217794baa501030f1c'),
+            'at the start' => array('mem_501aaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+            'at the end' => array('mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaa501'),
+            'repeated' => array('mem_50150150150150150150150150150150'),
+            'the whole id is digits' => array('mem_95015015015015015015015015015015'),
+        );
+    }
+
+    /** @dataProvider ids_containing_the_wp_user_id */
+    public function test_a_valid_member_id_containing_the_wp_user_id_digits_is_not_a_privacy_failure(string $id): void {
+        $this->assertTrue(EVC_Member_Id::is_valid_format($id));
+        $this->paid();
+        $result = $this->sync_service(function () use ($id) {
+            return $id;
+        })->sync(EVC_Member_Sync_Signal::of('pmpro', 'membership_changed', self::CUSTOMER, null));
+        $this->assertSame($id, $result->member_public_id());
+        // Precondition: the old substring check really would have failed here.
+        $this->assertStringContainsString('501', print_r($result, true));
+        $this->assertMinimalSyncResult($result, $id);
+        $this->assertSame(self::CUSTOMER, $this->members->all()[0]['wp_user_id'], 'the store keeps the link; the result never exposes it');
     }
 
     public function test_result_factories_refuse_inconsistent_construction(): void {

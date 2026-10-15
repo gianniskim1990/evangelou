@@ -91,13 +91,16 @@ $mutants = array(
     ),
 );
 
+/** Output of the most recent suite run (printed only when the baseline fails). */
+$evc_last_output = '';
+
 function evc_run_suite(array $command): int {
+    global $evc_last_output;
     $proc = proc_open($command, array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
     if (!is_resource($proc)) {
         return 255;
     }
-    stream_get_contents($pipes[1]);
-    stream_get_contents($pipes[2]);
+    $evc_last_output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
     fclose($pipes[1]);
     fclose($pipes[2]);
     return proc_close($proc);
@@ -115,6 +118,7 @@ echo "Baseline (unmutated) run...\n";
 $baseline = evc_run_suite($phpunit);
 if ($baseline !== 0) {
     fwrite(STDERR, "ABORT: baseline suite is not green (exit $baseline); mutation results would be meaningless.\n");
+    fwrite(STDERR, substr($evc_last_output, -6000) . "\n");
     exit(1);
 }
 echo "Baseline: PASS\n";
