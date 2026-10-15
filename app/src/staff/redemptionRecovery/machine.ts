@@ -40,6 +40,12 @@ import {
  *  7. 401 / 403 / lock / logout block the machine; record integrity failures
  *     block it for management review.
  *  8. Only parsed server values set the fulfillment status.
+ *  9. PERSISTENCE BEFORE SIDE EFFECTS (UI-04K): a redemption or handoff
+ *     request is sent only after its recovery context (original ids, order
+ *     identity, claim) was written to the per-tab store AND read back
+ *     unchanged. Otherwise nothing is sent and the machine stays
+ *     `persistence_blocked` with the SAME ids (no new id is ever minted
+ *     because storage failed; a storage failure is never a server failure).
  */
 
 export interface PreparedOrderPayload {
@@ -161,7 +167,24 @@ export type MachineState =
   | { phase: "handoff_refused"; intent: RedemptionIntent; record: RecordedRedemption; code: HandoffRefusal }
   | { phase: "blocked_integrity"; redemptionRequestId: string | null }
   | { phase: "blocked_authorization"; reason: BlockReason }
-  | { phase: "recovery_required"; intent: RedemptionIntent | null; handoffIntent: HandoffIntent | null; reason: RecoveryReason };
+  | { phase: "recovery_required"; intent: RedemptionIntent | null; handoffIntent: HandoffIntent | null; reason: RecoveryReason }
+  /**
+   * UI-04K: the recovery context of the NEXT request could not be made
+   * durable, so the request was NOT sent. The ids are kept (in memory) for a
+   * retry once the store works again. `mayHaveBeenSent` is true when an
+   * EARLIER attempt with the same id may already have reached the server
+   * (a retry after an unresolved outcome): such an intent can never be
+   * abandoned or finished from here, only retried or checked by status.
+   */
+  | { phase: "persistence_blocked"; operation: "redemption"; intent: RedemptionIntent; mayHaveBeenSent: boolean }
+  | {
+      phase: "persistence_blocked";
+      operation: "handoff";
+      intent: RedemptionIntent;
+      record: RecordedRedemption;
+      handoffIntent: HandoffIntent;
+      mayHaveBeenSent: boolean;
+    };
 
 export type Phase = MachineState["phase"];
 
@@ -181,7 +204,9 @@ export type Action =
   | "reauthenticate"
   | "manager_review"
   /** Read the per-tab store again (restore()) after it could not be read. */
-  | "retry_restore";
+  | "retry_restore"
+  /** UI-04K: make the SAME intent's context durable again, then send it. */
+  | "retry_persistence";
 
 /** Persisted per-tab context: ids and stage only (no names, phones, nonces, tokens or payloads). */
 export interface PersistedContext {
@@ -276,6 +301,10 @@ export function availableActions(s: MachineState): Action[] {
       return ["manager_review"];
     case "blocked_authorization":
       return ["reauthenticate"];
+    case "persistence_blocked":
+      if (s.operation === "redemption") return s.mayHaveBeenSent ? ["retry_persistence", "check_status"] : ["retry_persistence", "abandon_intent"];
+      // The redemption itself is committed: a never-sent statement may be dropped (confirmation is optional today).
+      return s.mayHaveBeenSent ? ["retry_persistence", "check_status"] : ["retry_persistence", "check_status", "finish"];
     case "recovery_required":
       if (s.reason === "not_recorded") return ["resubmit_same_intent", "abandon_intent"];
       if (s.reason === "session_changed") return ["resume_recovery"];
@@ -348,14 +377,26 @@ export class StaffRedemptionMachine {
   }
 
   private persistIntent(intent: RedemptionIntent, stage: PersistedContext["stage"], handoff: HandoffIntent | null): void {
-    this.persist({
-      member_id: intent.memberId,
-      redemption_request_id: intent.requestId,
-      payload_sha256: intent.payloadSha256,
-      stage,
-      handoff_request_id: handoff ? handoff.handoffRequestId : null,
-      claim: handoff ? handoff.claim : null,
-    });
+    this.persist(contextOf(intent, stage, handoff));
+  }
+
+  /**
+   * UI-04K write-before-send gate: write the exact v2 context, then read it
+   * back. True only when the store returns exactly what was written. A
+   * throwing write (SecurityError, QuotaExceededError, ...), a write that
+   * stored something else or nothing, and a failing read-back are all
+   * "not durable" — even if the value might have been stored before the
+   * exception. Best-effort writes (after a server reply) stay in persist().
+   */
+  private persistDurably(intent: RedemptionIntent, stage: PersistedContext["stage"], handoff: HandoffIntent | null): boolean {
+    const value: PersistedContext = { v: PERSISTED_VERSION, session_ref: this.deps.sessionRef, ...contextOf(intent, stage, handoff) };
+    const text = JSON.stringify(value);
+    try {
+      this.deps.storage.write(text);
+      return this.deps.storage.read() === text;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -422,14 +463,15 @@ export class StaffRedemptionMachine {
     const requestId = this.deps.newId();
     if (!UUID_V4.test(requestId)) return "rejected";
     this.payload = frozen;
-    return this.submitRedemption({ memberId, requestId, payloadSha256: digest });
+    return this.submitRedemption({ memberId, requestId, payloadSha256: digest }, false);
   }
 
   /** Repeat the SAME request (same id, same payload) after an unresolved outcome. */
   async retryRedemption(): Promise<Result> {
     const s = this.state;
     if (s.phase !== "redemption_unresolved" || this.busy || !this.payload) return "rejected";
-    return this.submitRedemption(s.intent);
+    // The earlier attempt may have committed: if this retry is blocked, it can never be abandoned.
+    return this.submitRedemption(s.intent, true);
   }
 
   /**
@@ -449,12 +491,30 @@ export class StaffRedemptionMachine {
     // Exact identity: SHA-256 of the canonical order must equal the original intent's.
     if (digest === null || digest !== s.intent.payloadSha256) return "rejected";
     this.payload = frozen;
-    return this.submitRedemption(s.intent);
+    // The server authoritatively reported "not recorded" for this id.
+    return this.submitRedemption(s.intent, false);
   }
 
-  private async submitRedemption(intent: RedemptionIntent): Promise<Result> {
+  /**
+   * UI-04K: after `persistence_blocked`, try again to make the SAME
+   * intent's context durable; only then is the SAME request (same ids, same
+   * frozen payload, same claim) sent.
+   */
+  async retryPersistence(): Promise<Result> {
+    const s = this.state;
+    if (s.phase !== "persistence_blocked" || this.busy) return "rejected";
+    if (s.operation === "handoff") return this.submitHandoff(s.intent, s.record, s.handoffIntent, s.mayHaveBeenSent);
+    if (!this.payload) return "rejected";
+    return this.submitRedemption(s.intent, s.mayHaveBeenSent);
+  }
+
+  private async submitRedemption(intent: RedemptionIntent, mayHaveBeenSent: boolean): Promise<Result> {
     const payload = this.payload as PreparedOrderPayload;
-    this.persistIntent(intent, "redemption_sent", null);
+    if (!this.persistDurably(intent, "redemption_sent", null)) {
+      // Nothing is sent: no server transaction, no "prepare", the SAME id is kept.
+      this.set({ phase: "persistence_blocked", operation: "redemption", intent, mayHaveBeenSent });
+      return "applied";
+    }
     this.set({ phase: "submitting_redemption", intent });
     const op = this.begin();
     let raw: unknown;
@@ -545,6 +605,9 @@ export class StaffRedemptionMachine {
       return this.queryStatus(s.intent, null);
     }
     if (s.phase === "handoff_unresolved") return this.queryStatus(s.intent, s.handoffIntent);
+    if (s.phase === "persistence_blocked" && (s.mayHaveBeenSent || s.operation === "handoff")) {
+      return this.queryStatus(s.intent, s.operation === "handoff" ? s.handoffIntent : null);
+    }
     if (s.phase === "recovery_required" && s.intent && (s.reason === "redemption_missing" || s.reason === "not_recorded" || s.reason === "status_unavailable")) {
       return this.queryStatus(s.intent, s.handoffIntent);
     }
@@ -628,18 +691,22 @@ export class StaffRedemptionMachine {
     if (!allowed) return "rejected";
     const handoffRequestId = this.deps.newId();
     if (!UUID_V4.test(handoffRequestId)) return "rejected";
-    return this.submitHandoff(s.intent, s.record, { handoffRequestId, claim });
+    return this.submitHandoff(s.intent, s.record, { handoffRequestId, claim }, false);
   }
 
   /** Repeat the SAME confirmation (same handoff id and claim) after an unresolved outcome. */
   async retryHandoff(): Promise<Result> {
     const s = this.state;
     if (s.phase !== "handoff_unresolved" || this.busy) return "rejected";
-    return this.submitHandoff(s.intent, s.record, s.handoffIntent);
+    return this.submitHandoff(s.intent, s.record, s.handoffIntent, true);
   }
 
-  private async submitHandoff(intent: RedemptionIntent, record: RecordedRedemption, handoffIntent: HandoffIntent): Promise<Result> {
-    this.persistIntent(intent, "handoff_sent", handoffIntent);
+  private async submitHandoff(intent: RedemptionIntent, record: RecordedRedemption, handoffIntent: HandoffIntent, mayHaveBeenSent: boolean): Promise<Result> {
+    if (!this.persistDurably(intent, "handoff_sent", handoffIntent)) {
+      // No statement is sent; the committed redemption identity is kept; no handoff is invented.
+      this.set({ phase: "persistence_blocked", operation: "handoff", intent, record, handoffIntent, mayHaveBeenSent });
+      return "applied";
+    }
     this.set({ phase: "handoff_confirmation_pending", intent, record, handoffIntent });
     const op = this.begin();
     let raw: unknown;
@@ -710,7 +777,9 @@ export class StaffRedemptionMachine {
       s.phase === "previously_recorded_unconfirmed" ||
       s.phase === "redemption_refused" ||
       s.phase === "previous_business_date" ||
-      (s.phase === "recorded_now" && s.prepareAcknowledged);
+      (s.phase === "recorded_now" && s.prepareAcknowledged) ||
+      // A handoff statement that was never sent; the redemption itself is committed.
+      (s.phase === "persistence_blocked" && s.operation === "handoff" && !s.mayHaveBeenSent);
     if (!settled || this.busy) return "rejected";
     this.reset();
     return "applied";
@@ -723,7 +792,9 @@ export class StaffRedemptionMachine {
    */
   abandonIntent(): Result {
     const s = this.state;
-    if (s.phase !== "recovery_required" || (s.reason !== "not_recorded" && s.reason !== "storage_corrupt" && s.reason !== "storage_outdated") || this.busy) return "rejected";
+    // UI-04K: a redemption that never reached the server (its context could not be made durable).
+    const neverSent = s.phase === "persistence_blocked" && s.operation === "redemption" && !s.mayHaveBeenSent;
+    if (this.busy || (!neverSent && (s.phase !== "recovery_required" || (s.reason !== "not_recorded" && s.reason !== "storage_corrupt" && s.reason !== "storage_outdated")))) return "rejected";
     this.reset();
     return "applied";
   }
@@ -764,6 +835,17 @@ export class StaffRedemptionMachine {
   private current(op: number): boolean {
     return op === this.seq;
   }
+}
+
+function contextOf(intent: RedemptionIntent, stage: PersistedContext["stage"], handoff: HandoffIntent | null): Omit<PersistedContext, "v" | "session_ref"> {
+  return {
+    member_id: intent.memberId,
+    redemption_request_id: intent.requestId,
+    payload_sha256: intent.payloadSha256,
+    stage,
+    handoff_request_id: handoff ? handoff.handoffRequestId : null,
+    claim: handoff ? handoff.claim : null,
+  };
 }
 
 function recordedState(intent: RedemptionIntent, record: RecordedRedemption, earlierDay: boolean, handoff: HandoffView | null): MachineState {

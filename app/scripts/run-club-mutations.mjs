@@ -969,6 +969,85 @@ const mutants = [
     search: "  if (typeof window === \"undefined\") return null;\n",
     replace: "",
   },
+  // UI-04K persistence before side effects (Z1-Z13).
+  {
+    id: "Z1-redemption-sent-without-durable-context",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (!this.persistDurably(intent, \"redemption_sent\", null)) {",
+    replace: "    if (false) {",
+  },
+  {
+    id: "Z2-write-result-not-verified",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      this.deps.storage.write(text);\n      return this.deps.storage.read() === text;",
+    replace: "      this.deps.storage.write(text);\n      this.deps.storage.read();\n      return true;",
+  },
+  {
+    id: "Z3-read-back-skipped",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      this.deps.storage.write(text);\n      return this.deps.storage.read() === text;",
+    replace: "      this.deps.storage.write(text);\n      return true;",
+  },
+  {
+    id: "Z4-storage-exception-treated-as-durable",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      return this.deps.storage.read() === text;\n    } catch {\n      return false;\n    }",
+    replace: "      return this.deps.storage.read() === text;\n    } catch {\n      return true;\n    }",
+  },
+  {
+    id: "Z5-handoff-sent-without-durable-context",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (!this.persistDurably(intent, \"handoff_sent\", handoffIntent)) {",
+    replace: "    if (false) {",
+  },
+  {
+    id: "Z6-retried-redemption-treated-as-never-sent",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    return this.submitRedemption(s.intent, true);",
+    replace: "    return this.submitRedemption(s.intent, false);",
+  },
+  {
+    id: "Z7-retried-handoff-treated-as-never-sent",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    return this.submitHandoff(s.intent, s.record, s.handoffIntent, true);",
+    replace: "    return this.submitHandoff(s.intent, s.record, s.handoffIntent, false);",
+  },
+  {
+    id: "Z8-new-id-minted-after-storage-failure",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    return this.submitRedemption(s.intent, s.mayHaveBeenSent);",
+    replace: "    return this.submitRedemption({ ...s.intent, requestId: this.deps.newId() }, s.mayHaveBeenSent);",
+  },
+  {
+    id: "Z9-possibly-committed-intent-abandoned",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    const neverSent = s.phase === \"persistence_blocked\" && s.operation === \"redemption\" && !s.mayHaveBeenSent;",
+    replace: "    const neverSent = s.phase === \"persistence_blocked\" && s.operation === \"redemption\";",
+  },
+  {
+    id: "Z10-possibly-sent-statement-finished",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      (s.phase === \"persistence_blocked\" && s.operation === \"handoff\" && !s.mayHaveBeenSent);",
+    replace: "      (s.phase === \"persistence_blocked\" && s.operation === \"handoff\");",
+  },
+  {
+    id: "Z11-status-read-for-never-sent-redemption",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (s.phase === \"persistence_blocked\" && (s.mayHaveBeenSent || s.operation === \"handoff\")) {",
+    replace: "    if (s.phase === \"persistence_blocked\") {",
+  },
+  {
+    id: "Z12-blocked-actions-ignore-may-have-been-sent",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "if (s.operation === \"redemption\") return s.mayHaveBeenSent ? [\"retry_persistence\", \"check_status\"] : [\"retry_persistence\", \"abandon_intent\"];",
+    replace: "if (s.operation === \"redemption\") return [\"retry_persistence\", \"abandon_intent\"];",
+  },
+  {
+    id: "Z13-blocked-redemption-still-sent",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      this.set({ phase: \"persistence_blocked\", operation: \"redemption\", intent, mayHaveBeenSent });\n      return \"applied\";\n",
+    replace: "      this.set({ phase: \"persistence_blocked\", operation: \"redemption\", intent, mayHaveBeenSent });\n",
+  },
 ];
 
 const runSuite = () =>

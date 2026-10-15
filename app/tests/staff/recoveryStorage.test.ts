@@ -586,22 +586,30 @@ describe("UI-04J storage failures never produce a false recovery", () => {
     }
   });
 
-  it("a failed write never changes a decision; the server prevents a second coffee after the lost context", async () => {
+  it("a failed write (quota) sends nothing; the SAME intent is sent once the store works (UI-04K closes the UI-04J durability gap)", async () => {
     const server = new FakeServer();
     const store = new FakeBrowserStorage();
     store.quota = 10;
     const t = browserTablet(server, store);
     await t.machine.startRedemption(MEMBER_A, ESPRESSO);
-    assert.equal(phase(t.machine), "recorded_now", "the fresh commit still prepares once");
-    assert.equal(store.raw(RECOVERY_STORAGE_KEY), null, "durability was lost (documented limitation)");
-    // A reload cannot recover the id; a new intent is refused authoritatively — never a second prepare.
+    assert.equal(phase(t.machine), "persistence_blocked");
+    assert.equal(server.calls.length, 0, "no request without a durable recovery context");
+    assert.equal(store.raw(RECOVERY_STORAGE_KEY), null);
+    neverPrepares(t.machine.getState());
+    const rid = requestIdOf(t.machine);
+    store.quota = Infinity;
+    await t.machine.retryPersistence();
+    assert.equal(requestIdOf(t.machine), rid, "no new id because storage failed");
+    assert.equal(phase(t.machine), "recorded_now");
+    assert.equal(JSON.parse(store.raw(RECOVERY_STORAGE_KEY) as string).redemption_request_id, rid);
+    // A reload now recovers the id and never prepares again.
     const reloaded = browserTablet(server, store);
     await reloaded.machine.restore();
-    assert.equal(phase(reloaded.machine), "idle");
-    store.quota = Infinity;
-    await reloaded.machine.startRedemption(MEMBER_A, CAPPUCCINO);
-    assert.equal(phase(reloaded.machine), "redemption_refused");
+    assert.equal(phase(reloaded.machine), "previously_recorded_unconfirmed");
     neverPrepares(reloaded.machine.getState());
+    reloaded.machine.finish();
+    await reloaded.machine.startRedemption(MEMBER_A, CAPPUCCINO);
+    assert.equal(phase(reloaded.machine), "redemption_refused", "one coffee per Athens day stays server-authoritative");
   });
 
   it("a failed remove leaves only a settled context, which can never prepare", async () => {

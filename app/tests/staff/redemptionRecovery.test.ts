@@ -674,13 +674,22 @@ describe("UI-03D.D session, storage and device safety", () => {
     assert.deepEqual(server.calls.map((c) => c.op), ["status"]);
   });
 
-  it("a failing storage write never changes a decision", async () => {
+  it("a failing storage write blocks the request instead of sending it without a recovery context (UI-04K)", async () => {
     const server = new FakeServer();
     const storage = new TabStorage();
     storage.failWrites = true;
     const t = tablet(server, { storage });
     await t.machine.startRedemption(MEMBER_A, ESPRESSO);
+    assert.equal(phase(t.machine), "persistence_blocked");
+    assert.equal(server.calls.length, 0, "nothing reached the server");
+    neverPrepares(t.machine.getState());
+    const rid = requestIdOf(t.machine);
+    // The store works again: the SAME intent is persisted, then sent; it is a genuine first commit.
+    storage.failWrites = false;
+    await t.machine.retryPersistence();
     assert.equal(phase(t.machine), "recorded_now");
+    assert.equal(requestIdOf(t.machine), rid);
+    assert.deepEqual(server.calls.map((c) => c.id), [rid]);
   });
 
   it("the device reference is audit-only and never decides anything", async () => {
