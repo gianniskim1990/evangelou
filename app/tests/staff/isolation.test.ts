@@ -84,6 +84,21 @@ describe("staff bundle isolation (real import graph)", () => {
     }
   });
 
+  it("the UI-04J browser storage adapter uses per-tab sessionStorage only and is not wired", async () => {
+    const own = await bundle("src/staff/redemptionRecovery/browserStorage.ts");
+    const local = own.inputs.filter((p) => !p.includes("node_modules")).map((p) => p.slice(p.lastIndexOf("src/"))).sort();
+    assert.deepEqual(local, ["src/club/format.ts", "src/staff/redemptionRecovery/browserStorage.ts", "src/staff/redemptionRecovery/machine.ts", "src/staff/redemptionRecovery/wire.ts"]);
+    assert.ok(own.output.includes("window.sessionStorage"));
+    for (const needle of ["fetch(", "localStorage", "indexedDB", "document.cookie", "XMLHttpRequest", "sendBeacon", "BroadcastChannel", "console."]) {
+      assert.ok(!own.output.includes(needle), `adapter must not use ${needle}`);
+    }
+    for (const entry of ["src/staff/main.tsx", "src/main.tsx"]) {
+      const { inputs, output } = await bundle(entry);
+      assert.equal(inputs.find((p) => p.endsWith("browserStorage.ts")), undefined, `${entry} must not import the adapter`);
+      assert.ok(!output.includes("evc-staff-redemption-recovery"), `${entry} must not contain the recovery key`);
+    }
+  });
+
   it("the public /club demo still runs on the mock service", async () => {
     const { inputs } = await bundle("src/club/ClubApp.tsx");
     assert.ok(inputs.some((p) => /src\/club\/clubService\.ts$/.test(p)));

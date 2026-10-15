@@ -92,7 +92,11 @@ $mutants = array(
         "        if (\$route === null) {"),
 );
 
+/** Output of the most recent suite run (printed only when the baseline fails). */
+$evc_last_output = '';
+
 function evc_wp_suite(string $root, string $mode): int {
+    global $evc_last_output;
     $suite = $mode === 'enabled' ? 'wp-common,wp-enabled' : 'wp-common,wp-disabled';
     $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => $mode));
     $proc = proc_open(
@@ -105,8 +109,7 @@ function evc_wp_suite(string $root, string $mode): int {
     if (!is_resource($proc)) {
         return 255;
     }
-    stream_get_contents($pipes[1]);
-    stream_get_contents($pipes[2]);
+    $evc_last_output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
     fclose($pipes[1]);
     fclose($pipes[2]);
     return proc_close($proc);
@@ -121,6 +124,7 @@ foreach (array('disabled', 'enabled') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");
+        fwrite(STDERR, substr($evc_last_output, -6000) . "\n");
         exit(1);
     }
 }

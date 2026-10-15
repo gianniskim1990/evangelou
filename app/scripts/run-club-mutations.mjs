@@ -896,6 +896,79 @@ const mutants = [
     search: "    const key = surface === \"redemption\" || surface === \"handoff\" ? body.outcome : body.result;\n    const map = CONTRACT_STATUS[surface];",
     replace: "    const key = surface === \"redemption\" || surface === \"handoff\" ? body.outcome : body.result;\n    const map = { ...CONTRACT_STATUS.redemption, ...CONTRACT_STATUS.lookup };",
   },
+  // UI-04J per-tab recovery storage adapter + unreadable-store fix (Y1-Y12).
+  {
+    id: "Y1-unreadable-store-treated-as-corrupt",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      this.set({ phase: \"recovery_required\", intent: null, handoffIntent: null, reason: \"storage_unavailable\" });\n      return \"applied\";\n    }\n    if (raw === null) {",
+    replace: "      this.set({ phase: \"recovery_required\", intent: null, handoffIntent: null, reason: \"storage_corrupt\" });\n      return \"applied\";\n    }\n    if (raw === null) {",
+  },
+  {
+    id: "Y2-unreadable-store-treated-as-empty",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      this.set({ phase: \"recovery_required\", intent: null, handoffIntent: null, reason: \"storage_unavailable\" });\n      return \"applied\";\n    }\n    if (raw === null) {",
+    replace: "      raw = null;\n    }\n    if (raw === null) {",
+  },
+  {
+    id: "Y3-unreadable-store-offers-abandon",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "if (s.reason === \"storage_unavailable\") return [\"retry_restore\", \"manager_review\"];",
+    replace: "if (s.reason === \"storage_unavailable\") return [\"abandon_intent\", \"retry_restore\", \"manager_review\"];",
+  },
+  {
+    id: "Y4-unreadable-store-can-be-abandoned",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "(s.reason !== \"not_recorded\" && s.reason !== \"storage_corrupt\" && s.reason !== \"storage_outdated\")",
+    replace: "(s.reason !== \"not_recorded\" && s.reason !== \"storage_corrupt\" && s.reason !== \"storage_outdated\" && s.reason !== \"storage_unavailable\")",
+  },
+  {
+    id: "Y5-restore-overrides-live-flow",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (this.busy || !(s.phase === \"idle\" || (s.phase === \"recovery_required\" && s.reason === \"storage_unavailable\"))) return \"rejected\";",
+    replace: "    if (this.busy) return \"rejected\";",
+  },
+  {
+    id: "Y6-restore-not-retryable",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "    if (this.busy || !(s.phase === \"idle\" || (s.phase === \"recovery_required\" && s.reason === \"storage_unavailable\"))) return \"rejected\";",
+    replace: "    if (this.busy || !(s.phase === \"idle\")) return \"rejected\";",
+  },
+  {
+    id: "Y7-unavailable-store-reads-as-empty",
+    file: "staff/redemptionRecovery/browserStorage.ts",
+    search: "    read(): string | null {\n      const s = storageOf(provider);",
+    replace: "    read(): string | null {\n      let s: Storage;\n      try {\n        s = storageOf(provider);\n      } catch {\n        return null;\n      }",
+  },
+  {
+    id: "Y8-read-error-reads-as-empty",
+    file: "staff/redemptionRecovery/browserStorage.ts",
+    search: "      try {\n        value = s.getItem(RECOVERY_STORAGE_KEY);\n      } catch (err) {\n        throw new RecoveryStorageError(failureOf(err));\n      }",
+    replace: "      try {\n        value = s.getItem(RECOVERY_STORAGE_KEY);\n      } catch {\n        return null;\n      }",
+  },
+  {
+    id: "Y9-any-value-stored",
+    file: "staff/redemptionRecovery/browserStorage.ts",
+    search: "      if (parsed === null || parsed === \"outdated\") throw new RecoveryStorageError(\"refused\");\n",
+    replace: "",
+  },
+  {
+    id: "Y10-key-collides-with-lock-marker",
+    file: "staff/redemptionRecovery/browserStorage.ts",
+    search: "export const RECOVERY_STORAGE_KEY = \"evc-staff-redemption-recovery:v2\";",
+    replace: "export const RECOVERY_STORAGE_KEY = \"evc-staff-locked-session\";",
+  },
+  {
+    id: "Y11-security-error-hidden",
+    file: "staff/redemptionRecovery/browserStorage.ts",
+    search: "throw new RecoveryStorageError(failureOf(err) === \"security\" ? \"security\" : \"unavailable\");",
+    replace: "throw new RecoveryStorageError(\"unavailable\");",
+  },
+  {
+    id: "Y12-window-touched-eagerly",
+    file: "staff/redemptionRecovery/browserStorage.ts",
+    search: "  if (typeof window === \"undefined\") return null;\n",
+    replace: "",
+  },
 ];
 
 const runSuite = () =>

@@ -124,6 +124,13 @@ export type RecoveryReason =
   | "session_changed"
   /** Persisted context unreadable: nothing can be recovered by id. */
   | "storage_corrupt"
+  /**
+   * The per-tab store could not be READ (unavailable, SecurityError, read
+   * error). Unlike storage_corrupt, a valid unresolved intent may still be
+   * stored there: it is never abandoned (UI-04J); only a retried restore or
+   * a manager may proceed.
+   */
+  | "storage_unavailable"
   /** Persisted context written by an older, weaker format: never trusted (UI-04B). */
   | "storage_outdated"
   /** The server status could not be read; the original ids are kept (fail closed). */
@@ -172,10 +179,12 @@ export type Action =
   | "finish"
   | "abandon_intent"
   | "reauthenticate"
-  | "manager_review";
+  | "manager_review"
+  /** Read the per-tab store again (restore()) after it could not be read. */
+  | "retry_restore";
 
 /** Persisted per-tab context: ids and stage only (no names, phones, nonces, tokens or payloads). */
-interface PersistedContext {
+export interface PersistedContext {
   v: 2;
   session_ref: string;
   member_id: string;
@@ -271,6 +280,7 @@ export function availableActions(s: MachineState): Action[] {
       if (s.reason === "not_recorded") return ["resubmit_same_intent", "abandon_intent"];
       if (s.reason === "session_changed") return ["resume_recovery"];
       if (s.reason === "storage_corrupt" || s.reason === "storage_outdated") return ["abandon_intent", "manager_review"];
+      if (s.reason === "storage_unavailable") return ["retry_restore", "manager_review"];
       return ["check_status", "manager_review"];
   }
 }
@@ -354,11 +364,16 @@ export class StaffRedemptionMachine {
    * authoritative status BEFORE offering any action.
    */
   async restore(): Promise<Result> {
+    const s = this.state;
+    // Boot only (or a retry after an unreadable store): never over a live flow.
+    if (this.busy || !(s.phase === "idle" || (s.phase === "recovery_required" && s.reason === "storage_unavailable"))) return "rejected";
     let raw: string | null;
     try {
       raw = this.deps.storage.read();
     } catch {
-      raw = "";
+      // Not "nothing saved" and not "corrupt": an unresolved intent may be stored there.
+      this.set({ phase: "recovery_required", intent: null, handoffIntent: null, reason: "storage_unavailable" });
+      return "applied";
     }
     if (raw === null) {
       this.set({ phase: "idle" });
@@ -791,7 +806,8 @@ function unresolvedOf(err: unknown): UnresolvedReason {
   return "unexpected_error";
 }
 
-function parsePersisted(raw: string): PersistedContext | "outdated" | null {
+/** Strict v2 envelope validator (exact keys and formats); "outdated" for a v1 record. Also used by the browser adapter. */
+export function parsePersisted(raw: string): PersistedContext | "outdated" | null {
   let v: unknown;
   try {
     v = JSON.parse(raw);

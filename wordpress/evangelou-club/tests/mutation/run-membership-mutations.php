@@ -1897,6 +1897,37 @@ $mutants = array(
         'search' => '    const SHIPPED = 1;',
         'replace' => '    const SHIPPED = 2;',
     ),
+    // UI-04J follow-up: structure-based sync-result privacy (S21-S25).
+    array(
+        'id' => 'S21-result-exposes-wp-user-id-field',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '    /** @var string|null */' . "\n" . '    private $account_status;' . "\n" . '',
+        'replace' => '    /** @var string|null */' . "\n" . '    private $account_status;' . "\n" . '    /** @var int */' . "\n" . '    private $wp_user_id = 501;' . "\n" . '',
+    ),
+    array(
+        'id' => 'S22-result-exposes-wp-user-id-method',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '    /** Synchronisation never grants a coffee. */' . "\n" . '',
+        'replace' => '    public function wp_user_id(): int {' . "\n" . '        return 501;' . "\n" . '    }' . "\n" . '' . "\n" . '    /** Synchronisation never grants a coffee. */' . "\n" . '',
+    ),
+    array(
+        'id' => 'S23-result-status-carries-wp-user-id',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        return new self($kind, $member[\'member_public_id\'], $member[\'status\']);',
+        'replace' => '        return new self($kind, $member[\'member_public_id\'], $member[\'status\'] . \' \' . $member[\'wp_user_id\']);',
+    ),
+    array(
+        'id' => 'S24-result-id-is-the-wp-user-id',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '        return new self($kind, $member[\'member_public_id\'], $member[\'status\']);',
+        'replace' => '        return new self($kind, (string) $member[\'wp_user_id\'], $member[\'status\']);',
+    ),
+    array(
+        'id' => 'S25-result-exposes-personal-data-field',
+        'file' => 'includes/class-evc-member-sync.php',
+        'search' => '    /** @var string|null */' . "\n" . '    private $account_status;' . "\n" . '',
+        'replace' => '    /** @var string|null */' . "\n" . '    private $account_status;' . "\n" . '    /** @var string */' . "\n" . '    private $email = \'member@example.org\';' . "\n" . '',
+    ),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
