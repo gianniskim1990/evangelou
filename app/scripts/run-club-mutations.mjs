@@ -602,8 +602,8 @@ const mutants = [
   {
     id: "R7-redemption-retry-mints-new-id",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    if (s.phase !== \"redemption_unresolved\" || this.busy || !this.payload) return \"rejected\";\n    return this.submitRedemption(s.intent);",
-    replace: "    if (s.phase !== \"redemption_unresolved\" || this.busy || !this.payload) return \"rejected\";\n    return this.submitRedemption({ ...s.intent, requestId: this.deps.newId() });",
+    search: "    // The earlier attempt may have committed: if this retry is blocked, it can never be abandoned.\n    return this.submitRedemption(s.intent, true);",
+    replace: "    // The earlier attempt may have committed: if this retry is blocked, it can never be abandoned.\n    return this.submitRedemption({ ...s.intent, requestId: this.deps.newId() }, true);",
   },
   {
     id: "R8-resubmit-ignores-payload-binding",
@@ -614,8 +614,8 @@ const mutants = [
   {
     id: "R9-handoff-retry-mints-new-id",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    return this.submitHandoff(s.intent, s.record, s.handoffIntent);",
-    replace: "    return this.submitHandoff(s.intent, s.record, { ...s.handoffIntent, handoffRequestId: this.deps.newId() });",
+    search: "    return this.submitHandoff(s.intent, s.record, s.handoffIntent, true);",
+    replace: "    return this.submitHandoff(s.intent, s.record, { ...s.handoffIntent, handoffRequestId: this.deps.newId() }, true);",
   },
   {
     id: "R10-handoff-reply-accepts-foreign-confirmation",
@@ -686,7 +686,7 @@ const mutants = [
   {
     id: "R21-unresolved-intent-abandonable",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    if (s.phase !== \"recovery_required\" || (s.reason !== \"not_recorded\" && s.reason !== \"storage_corrupt\" && s.reason !== \"storage_outdated\") || this.busy) return \"rejected\";",
+    search: "    if (this.busy || (!neverSent && (s.phase !== \"recovery_required\" || (s.reason !== \"not_recorded\" && s.reason !== \"storage_corrupt\" && s.reason !== \"storage_outdated\")))) return \"rejected\";",
     replace: "    if (this.busy) return \"rejected\";",
   },
   {
@@ -771,8 +771,8 @@ const mutants = [
   {
     id: "W7-retry-uses-callers-mutable-object",
     file: "staff/redemptionRecovery/machine.ts",
-    search: "    this.payload = frozen;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest });",
-    replace: "    this.payload = payload;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest });",
+    search: "    this.payload = frozen;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest }, false);",
+    replace: "    this.payload = payload;\n    return this.submitRedemption({ memberId, requestId, payloadSha256: digest }, false);",
   },
   {
     id: "W8-session-end-during-hashing-ignored",
