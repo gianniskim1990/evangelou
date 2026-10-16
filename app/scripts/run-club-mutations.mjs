@@ -1188,6 +1188,140 @@ const mutants = [
     search: "Η δωρεάν παροχή δεν είναι διαθέσιμη. Με το συγκεκριμένο αίτημα δεν καταχωρήθηκε καφές.",
     replace: "Η δωρεάν παροχή δεν είναι διαθέσιμη.",
   },
+  // ---- UI-04M accessibility / focus / announcement contract
+  {
+    id: "AX1-invented-action",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "const actions = view.actions.map((a, order) =>",
+    replace: "const actions = [...view.actions, { action: \"start_redemption\" as const, label: ACTION_LABELS.start_redemption, emphasis: \"secondary\" as const }].map((a, order) =>",
+  },
+  {
+    id: "AX2-keyboard-order-not-machine-order",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "const actions = view.actions.map((a, order) =>",
+    replace: "const actions = view.actions.slice().reverse().map((a, order) =>",
+  },
+  {
+    id: "AX3-everything-is-an-alert",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "  return isUrgentBlock(view.caseKey) ? \"assertive\" : \"polite\";",
+    replace: "  return \"assertive\";",
+  },
+  {
+    id: "AX4-urgent-block-only-polite",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "  return caseKey.startsWith(\"blocked_authorization:\") || caseKey === \"blocked_integrity\";",
+    replace: "  return false;",
+  },
+  {
+    id: "AX5-repeated-announcement-on-rerender",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "  if (prev !== null && prev.caseKey === next.caseKey) return null;\n",
+    replace: "",
+  },
+  {
+    id: "AX6-stale-success-after-lock-announced",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "  if (suspectAfterBlock(prev, next)) return null;\n",
+    replace: "",
+  },
+  {
+    id: "AX7-uncertain-marker-not-announced",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "const text = [next.certainty === \"uncertain\" && !next.waiting ? UNCERTAIN_MARKER + \".\" : null,",
+    replace: "const text = [null,",
+  },
+  {
+    id: "AX8-focus-moves-to-first-button",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "  return next.waiting ? { kind: \"status\" } : { kind: \"heading\" };",
+    replace: "  return next.actions.length > 0 ? ({ kind: \"action\", action: next.actions[0].action } as unknown as FocusIntent) : { kind: \"heading\" };",
+  },
+  {
+    id: "AX9-focus-stolen-on-poll",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "    if (focusedAction === null) return { kind: \"keep\" };",
+    replace: "    if (focusedAction === null) return { kind: \"heading\" };",
+  },
+  {
+    id: "AX10-focus-kept-on-vanished-action",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "    return next.actions.some((a) => a.action === focusedAction) ? { kind: \"keep\" } : { kind: \"heading\" };",
+    replace: "    return { kind: \"keep\" };",
+  },
+  {
+    id: "AX11-touch-target-too-small",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "minTargetCssPx: TOUCH_TARGET.preferredCssPx }",
+    replace: "minTargetCssPx: 32 }",
+  },
+  {
+    id: "AX12-uncertainty-by-colour-only",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "    uncertainMarker: view.certainty === \"uncertain\" && !view.waiting ? UNCERTAIN_MARKER : null,",
+    replace: "    uncertainMarker: null,",
+  },
+  {
+    id: "AX13-busy-state-not-exposed",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "    busy: view.waiting,",
+    replace: "    busy: false,",
+  },
+  {
+    id: "AX14-prepare-shown-on-replay",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "    showPrepare: view.prepareAllowed,",
+    replace: "    showPrepare: view.redemption === \"recorded\",",
+  },
+  {
+    id: "AX15-required-escalation-downgraded",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "view.escalation.level === \"required\" ? \"panel_primary\" : \"panel_secondary\"",
+    replace: "\"panel_secondary\"",
+  },
+  {
+    id: "AX16-input-not-locked-while-busy",
+    file: "staff/redemptionRecovery/a11yContract.ts",
+    search: "    inputLocked: view.waiting,",
+    replace: "    inputLocked: false,",
+  },
+  // ---- isolated-build comparator and cleanup helpers (scripts/isolated-build-compare.mjs)
+  {
+    id: "IB1-compare-ignores-content-hashes",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "  const changed = [...a.keys()].filter((k) => b.has(k) && a.get(k) !== b.get(k));",
+    replace: "  const changed = [];",
+  },
+  {
+    id: "IB2-changed-files-not-part-of-same",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "onlyB.length === 0 && changed.length === 0, onlyA",
+    replace: "onlyB.length === 0, onlyA",
+  },
+  {
+    id: "IB3-added-files-ignored",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "onlyA.length === 0 && onlyB.length === 0 && changed",
+    replace: "onlyA.length === 0 && changed",
+  },
+  {
+    id: "IB4-removed-files-ignored",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "onlyA.length === 0 && onlyB.length === 0 && changed",
+    replace: "onlyB.length === 0 && changed",
+  },
+  {
+    id: "IB5-unlink-deletes-real-directories",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "  if (!stat.isSymbolicLink()) return false;\n",
+    replace: "",
+  },
+  {
+    id: "IB6-cleanup-without-proving-link-gone",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "  if (!unlinkLinkOnly(link)) return false;\n",
+    replace: "",
+  },
 ];
 
 const runSuite = () =>
