@@ -28,7 +28,7 @@
 // Exit: 0 = unchanged output, 1 = output changed (or canary undetected), 2 = usage/error.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -66,35 +66,53 @@ const head = git(repoRoot, "rev-parse", "HEAD").out.toString().trim();
 const work = mkdtempSync(join(tmpdir(), "evc-isolated-build-"));
 const trees = [];
 
+// Identical dependencies for every tree: ONE link to the real node_modules,
+// placed in the temp directory ABOVE the worktrees (module resolution walks up
+// the directory tree). It must never live inside a worktree: removing a
+// worktree must not be able to follow the link into the real node_modules
+// (an earlier draft did exactly that and emptied it).
+const modulesLink = join(work, "node_modules");
+symlinkSync(join(appDir, "node_modules"), modulesLink, "junction");
+
 function makeTree(label) {
   const dir = join(work, label);
   const r = git(repoRoot, "worktree", "add", "--detach", "--quiet", dir, head);
   if (!r.ok) throw new Error(`git worktree add failed: ${r.err}`);
   trees.push(dir);
-  // Identical dependencies: the very same node_modules for every tree.
-  symlinkSync(join(appDir, "node_modules"), join(dir, appRel, "node_modules"), "junction");
   return dir;
 }
 
 function cleanup() {
   for (const dir of trees) git(repoRoot, "worktree", "remove", "--force", dir);
   git(repoRoot, "worktree", "prune");
+  // Drop the link itself first (never its target), then the temp directory.
+  try {
+    if (lstatSync(modulesLink).isSymbolicLink()) {
+      try {
+        unlinkSync(modulesLink);
+      } catch {
+        rmdirSync(modulesLink);
+      }
+    }
+  } catch {
+    // already gone
+  }
   rmSync(work, { recursive: true, force: true });
 }
 
 function viteBuild(tree, config) {
   const cwd = join(tree, appRel);
-  const argv = [join(cwd, "node_modules", "vite", "bin", "vite.js"), "build", ...(config ? ["--config", config] : [])];
+  const argv = [join(modulesLink, "vite", "bin", "vite.js"), "build", ...(config ? ["--config", config] : [])];
   const r = spawnSync(process.execPath, argv, { cwd, encoding: "utf8", env: { ...process.env, CI: "1" } });
   if (r.status !== 0) throw new Error(`vite build failed in ${tree} (${config ?? "ordering"}):\n${r.stdout}\n${r.stderr}`);
 }
 
-function listFiles(dir, base = dir) {
+function listFiles(dir) {
   const out = [];
   if (!existsSync(dir)) return out;
   for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...listFiles(p, base));
+    if (statSync(p).isDirectory()) out.push(...listFiles(p));
     else out.push(p);
   }
   return out;
@@ -140,7 +158,7 @@ function compare(a, b) {
 /** Repo-relative paths of every module in the shipped import graph (staff + ordering entries). */
 async function shippedGraph(tree) {
   const cwd = join(tree, appRel);
-  const mod = await import(pathToFileURL(join(cwd, "node_modules", "esbuild", "lib", "main.js")).href);
+  const mod = await import(pathToFileURL(join(appDir, "node_modules", "esbuild", "lib", "main.js")).href);
   const esbuild = mod.default ?? mod;
   const shipped = new Set();
   for (const entry of ["src/main.tsx", "src/staff/main.tsx"]) {
