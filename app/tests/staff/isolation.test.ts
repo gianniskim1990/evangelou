@@ -98,6 +98,26 @@ describe("staff bundle isolation (real import graph)", () => {
     }
   });
 
+  it("the UI-04M accessibility contract is pure (no DOM, focus or React) and is not wired", async () => {
+    const own = await bundle("src/staff/redemptionRecovery/a11yContract.ts");
+    const local = own.inputs.filter((p) => !p.includes("node_modules")).map((p) => p.slice(p.lastIndexOf("src/"))).sort();
+    assert.deepEqual(local, [
+      "src/club/format.ts",
+      "src/staff/redemptionRecovery/a11yContract.ts",
+      "src/staff/redemptionRecovery/machine.ts",
+      "src/staff/redemptionRecovery/viewModel.ts",
+      "src/staff/redemptionRecovery/wire.ts",
+    ]);
+    for (const needle of ["fetch(", "sessionStorage", "localStorage", "document.", "window.", ".focus(", "setAttribute", "XMLHttpRequest", "React", "setTimeout"]) {
+      assert.ok(!own.output.includes(needle), `a11y contract must not use ${needle}`);
+    }
+    for (const entry of ["src/staff/main.tsx", "src/main.tsx"]) {
+      const { inputs, output } = await bundle(entry);
+      assert.equal(inputs.find((p) => p.endsWith("a11yContract.ts")), undefined, `${entry} must not import the a11y contract`);
+      assert.ok(!output.includes("panel_primary"), `${entry} must not contain the a11y contract`);
+    }
+  });
+
   it("the UI-04J browser storage adapter uses per-tab sessionStorage only and is not wired", async () => {
     const own = await bundle("src/staff/redemptionRecovery/browserStorage.ts");
     const local = own.inputs.filter((p) => !p.includes("node_modules")).map((p) => p.slice(p.lastIndexOf("src/"))).sort();
