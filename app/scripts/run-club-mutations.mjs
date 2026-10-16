@@ -1285,6 +1285,43 @@ const mutants = [
     search: "    inputLocked: view.waiting,",
     replace: "    inputLocked: false,",
   },
+  // ---- isolated-build comparator and cleanup helpers (scripts/isolated-build-compare.mjs)
+  {
+    id: "IB1-compare-ignores-content-hashes",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "  const changed = [...a.keys()].filter((k) => b.has(k) && a.get(k) !== b.get(k));",
+    replace: "  const changed = [];",
+  },
+  {
+    id: "IB2-changed-files-not-part-of-same",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "onlyB.length === 0 && changed.length === 0, onlyA",
+    replace: "onlyB.length === 0, onlyA",
+  },
+  {
+    id: "IB3-added-files-ignored",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "onlyA.length === 0 && onlyB.length === 0 && changed",
+    replace: "onlyA.length === 0 && changed",
+  },
+  {
+    id: "IB4-removed-files-ignored",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "onlyA.length === 0 && onlyB.length === 0 && changed",
+    replace: "onlyB.length === 0 && changed",
+  },
+  {
+    id: "IB5-unlink-deletes-real-directories",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "  if (!stat.isSymbolicLink()) return false;\n",
+    replace: "",
+  },
+  {
+    id: "IB6-cleanup-without-proving-link-gone",
+    file: "../scripts/isolated-build-compare.mjs",
+    search: "  if (!unlinkLinkOnly(link)) return false;\n",
+    replace: "",
+  },
 ];
 
 const runSuite = () =>

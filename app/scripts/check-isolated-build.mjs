@@ -28,10 +28,11 @@
 // Exit: 0 = unchanged output, 1 = output changed (or canary undetected), 2 = usage/error.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { compare, removeTempTree, selectors } from "./isolated-build-compare.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -85,19 +86,11 @@ function makeTree(label) {
 function cleanup() {
   for (const dir of trees) git(repoRoot, "worktree", "remove", "--force", dir);
   git(repoRoot, "worktree", "prune");
-  // Drop the link itself first (never its target), then the temp directory.
-  try {
-    if (lstatSync(modulesLink).isSymbolicLink()) {
-      try {
-        unlinkSync(modulesLink);
-      } catch {
-        rmdirSync(modulesLink);
-      }
-    }
-  } catch {
-    // already gone
+  // Drops the link itself first (never its target); if that cannot be proven the
+  // temp directory is left behind rather than risk the real node_modules.
+  if (!removeTempTree(work, modulesLink)) {
+    console.error(`WARNING: could not prove the dependency link was removed; left ${work} in place.`);
   }
-  rmSync(work, { recursive: true, force: true });
 }
 
 function viteBuild(tree, config) {
@@ -138,21 +131,11 @@ function buildAll(tree, apps) {
   return outputOf(tree, apps.map((a) => a.dir));
 }
 
-function selectors(css) {
-  return new Set(css.match(/\.[a-zA-Z][\w\\:\-[\]/.%]*(?=[{,:])/g) ?? []);
-}
-
 function cssOf(tree, part, outputMap) {
   const css = [...outputMap.keys()].filter((k) => k.startsWith(`${part}/assets/`) && k.endsWith(".css"));
   // The shared stylesheet is the entry CSS (index-*.css / staff-*.css), not a lazy chunk's.
   const name = css.find((k) => /\/(index|staff)-[^/]*\.css$/.test(k)) ?? css[0];
   return name ? readFileSync(join(tree, appRel, name), "utf8") : "";
-}
-
-function compare(a, b) {
-  const onlyA = [...a.keys()].filter((k) => !b.has(k));
-  const onlyB = [...b.keys()].filter((k) => !a.has(k));
-  return { same: onlyA.length === 0 && onlyB.length === 0, onlyA, onlyB };
 }
 
 /** Repo-relative paths of every module in the shipped import graph (staff + ordering entries). */
@@ -212,6 +195,7 @@ function revert(tree, path) {
 function report(title, a, b, treeA, treeB) {
   console.log(`\n${title}`);
   const cmp = compare(a, b);
+  for (const name of cmp.changed) console.log(`  same name, DIFFERENT content:         ${name}`);
   for (const name of cmp.onlyB) console.log(`  only without the non-shipped changes: ${name}`);
   for (const name of cmp.onlyA) console.log(`  only with the non-shipped changes:    ${name}`);
   for (const part of ["dist-staff", "dist"]) {
@@ -241,7 +225,7 @@ async function main() {
       console.error(`CANARY NOT DETECTED: a docs-only file containing a bare utility word did not change the staff build; the check is blind.`);
       return 1;
     }
-    console.log(`canary detected: a docs-only file changed the staff output (${cmp.onlyA.length} file(s) differ).`);
+    console.log(`canary detected: a docs-only file changed the staff output (${cmp.onlyA.length + cmp.onlyB.length} added/removed, ${cmp.changed.length} changed-content file(s)).`);
     return 0;
   }
 
