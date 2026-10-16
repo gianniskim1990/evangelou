@@ -1151,6 +1151,43 @@ const mutants = [
     search: "        body: [\"Η καταχώρηση έχει ασυνέπεια και δεν μπορεί να συνεχιστεί από εδώ.\",",
     replace: "        body: [\"Η καταχώρηση \" + s.redemptionRequestId + \" έχει ασυνέπεια και δεν μπορεί να συνεχιστεί από εδώ.\",",
   },
+  // ---- UI-04L follow-up: request-scoped Greek copy
+  {
+    id: "VM18-refusal-copy-claims-member-day",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "Ο επιλεγμένος καφές δεν γίνεται δεκτός. Με το συγκεκριμένο αίτημα δεν καταχωρήθηκε καφές.",
+    replace: "Ο επιλεγμένος καφές δεν γίνεται δεκτός. Δεν έχει καταχωρηθεί καφές.",
+  },
+  {
+    id: "VM19-not-recorded-headline-overbroad",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "headline: \"Δεν βρέθηκε καταχώρηση για το συγκεκριμένο αίτημα\",",
+    replace: "headline: \"Ο διακομιστής δεν έχει καταχώρηση\",",
+  },
+  {
+    id: "VM20-not-sent-claims-nothing-was-sent",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "γι' αυτό το συγκεκριμένο αίτημα δεν στάλθηκε.",
+    replace: "γι' αυτό δεν στάλθηκε τίποτα.",
+  },
+  {
+    id: "VM21-already-redeemed-narrowed-to-request",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "body: \"Ο πελάτης έχει ήδη καφέ για σήμερα. Δεν δημιουργείται δεύτερος.\" },",
+    replace: "body: \"Με το συγκεκριμένο αίτημα δεν καταχωρήθηκε καφές.\" },",
+  },
+  {
+    id: "VM22-idle-claims-nothing-pending-anywhere",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "headline: \"Δεν υπάρχει εκκρεμές αίτημα σε αυτή την οθόνη\",",
+    replace: "headline: \"Δεν υπάρχει εκκρεμότητα\",",
+  },
+  {
+    id: "VM23-refusal-loses-request-scope",
+    file: "staff/redemptionRecovery/viewModel.ts",
+    search: "Η δωρεάν παροχή δεν είναι διαθέσιμη. Με το συγκεκριμένο αίτημα δεν καταχωρήθηκε καφές.",
+    replace: "Η δωρεάν παροχή δεν είναι διαθέσιμη.",
+  },
 ];
 
 const runSuite = () =>

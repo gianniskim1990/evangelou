@@ -47,7 +47,7 @@ RecoveryView {
 
 | Fact | `redemption` / `handoff` | Meaning |
 |---|---|---|
-| A | `not_sent` | The request was **definitely not sent**. "Δεν έχει καταχωρηθεί καφές." |
+| A | `not_sent` | The request was **definitely not sent**. "Με το συγκεκριμένο αίτημα δεν καταχωρήθηκε καφές." (about THIS request only) |
 | B | `unknown` | It **may have reached the server**. Never worded as success or failure ("Δεν γνωρίζουμε αν…"). |
 | C | `recorded` | **The server confirmed** the redemption. |
 | D | `staff_statement_recorded` | The server recorded a **statement by staff** that the coffee was handed over. Never independent physical proof. |
@@ -79,7 +79,7 @@ The view model contains no markup and no class names.
 | `recovery_required:storage_corrupt` | Η τοπική εγγραφή δεν είναι αναγνώσιμη | uncertain | Κλείσιμο αιτήματος · Ενημέρωση υπευθύνου |
 | `recovery_required:storage_outdated` | Η τοπική εγγραφή είναι παλιάς έκδοσης | uncertain | Κλείσιμο αιτήματος · Ενημέρωση υπευθύνου |
 | `recovery_required:session_changed` | Βρέθηκε εκκρεμής συναλλαγή | uncertain | Ανάκτηση συναλλαγής |
-| `recovery_required:not_recorded` | Ο διακομιστής δεν έχει καταχώρηση | definite | Αποστολή του ίδιου αιτήματος · Κλείσιμο αιτήματος |
+| `recovery_required:not_recorded` | Δεν βρέθηκε καταχώρηση για το συγκεκριμένο αίτημα | definite | Αποστολή του ίδιου αιτήματος · Κλείσιμο αιτήματος |
 | `recovery_required:redemption_missing` / `status_unavailable` | Δεν βρέθηκε η καταχώρηση / Δεν ήταν δυνατός ο έλεγχος | uncertain | Έλεγχος καταχώρησης · Ενημέρωση υπευθύνου |
 | `redemption_unresolved` | Δεν έχει επιβεβαιωθεί το αποτέλεσμα | uncertain (B) | Δοκιμή ξανά · Έλεγχος καταχώρησης |
 | `handoff_unresolved` | Η δήλωση παράδοσης δεν έχει επιβεβαιωθεί | uncertain | Δοκιμή δήλωσης ξανά · Έλεγχος καταχώρησης |
@@ -90,11 +90,11 @@ The view model contains no markup and no class names.
 | `previously_recorded_confirmed` | Η παράδοση έχει δηλωθεί | definite (C + D) | Ολοκλήρωση · Έλεγχος καταχώρησης |
 | `previous_business_date` | Καταχώρηση προηγούμενης ημέρας | definite | Ολοκλήρωση |
 | `handoff_confirmed:*` | Η δήλωση παράδοσης καταγράφηκε / είναι ήδη καταγραμμένη / Υπήρχε ήδη δήλωση | definite (D) | Ολοκλήρωση · Έλεγχος καταχώρησης |
-| `redemption_refused:*` (9 codes) | One headline per code | definite; "Δεν έχει καταχωρηθεί καφές" | Ολοκλήρωση |
+| `redemption_refused:*` (9 codes) | One headline per code | definite; "Με το συγκεκριμένο αίτημα δεν καταχωρήθηκε καφές" (already-redeemed: authoritative "έχει ήδη χρησιμοποιηθεί") | Ολοκλήρωση |
 | `handoff_refused:*` (4 codes) | One headline per code | definite | Έλεγχος καταχώρησης · Ενημέρωση υπευθύνου |
 | `blocked_integrity` | Απαιτείται έλεγχος από υπεύθυνο | uncertain | Ενημέρωση υπευθύνου (**required**) |
 | `blocked_authorization:*` (5 reasons) | Απαιτείται νέα σύνδεση / Η οθόνη κλειδώθηκε / … | uncertain | Νέα σύνδεση (the only action) |
-| `idle`, `submitting_redemption`, `checking_status`, `handoff_confirmation_pending` | Δεν υπάρχει εκκρεμότητα / Αποστολή… / Έλεγχος… / Καταγραφή… | waiting states offer no action | — |
+| `idle`, `submitting_redemption`, `checking_status`, `handoff_confirmation_pending` | Δεν υπάρχει εκκρεμές αίτημα σε αυτή την οθόνη / Αποστολή… / Έλεγχος… / Καταγραφή… | waiting states offer no action | — |
 
 46 case keys in total. The tests enumerate every one.
 
@@ -139,7 +139,7 @@ shared staff role.
 - **No success words for uncertain states.** Views with
   `certainty: "uncertain"` never contain success or failure wording (the
   Greek for "succeeded", "failed", "completed", "was recorded" or "did not
-  happen"), nor "Δεν έχει καταχωρηθεί", and never use the `positive` tone.
+  happen"), nor "δεν καταχωρήθηκε", and never use the `positive` tone.
 - **"Prepare" only for a fresh commit.** The prepare instruction ("Ετοιμάστε
   …") appears only in `recorded_now:prepare`. Replays and reloads say "Μην
   ετοιμάσετε νέο καφέ".

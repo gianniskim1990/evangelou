@@ -207,7 +207,7 @@ describe("UI-04L safety of the messages", () => {
       if (v.certainty !== "uncertain") continue;
       uncertain++;
       assert.doesNotMatch(v.headline + " " + v.body.join(" "), OUTCOME_WORDS, v.caseKey);
-      assert.doesNotMatch(v.body.join(" "), /Δεν έχει καταχωρηθεί/, `${v.caseKey} must not claim nothing was recorded`);
+      assert.doesNotMatch(v.body.join(" "), /Δεν έχει καταχωρηθεί|δεν καταχωρήθηκε/, `${v.caseKey} must not claim nothing was recorded`);
       assert.notEqual(v.tone, "positive", v.caseKey);
       assert.ok(v.redemption !== "recorded" || v.handoff === "unknown" || v.handoff === "none", v.caseKey);
     }
@@ -228,12 +228,12 @@ describe("UI-04L safety of the messages", () => {
     assert.equal(neverSent.redemption, "not_sent");
     assert.equal(neverSent.certainty, "definite");
     assert.match(neverSent.headline, /δεν στάλθηκε/);
-    assert.match(neverSent.body.join(" "), /Δεν έχει καταχωρηθεί καφές/);
+    assert.match(neverSent.body.join(" "), /Με το συγκεκριμένο αίτημα δεν καταχωρήθηκε καφές/);
     // B
     assert.equal(maybe.redemption, "unknown");
     assert.equal(maybe.certainty, "uncertain");
     assert.match(maybe.body.join(" "), /ίσως έχει φτάσει στον διακομιστή/);
-    assert.doesNotMatch(maybe.body.join(" "), /Δεν έχει καταχωρηθεί/);
+    assert.doesNotMatch(maybe.body.join(" "), /Δεν έχει καταχωρηθεί|δεν καταχωρήθηκε/);
     // C
     assert.equal(confirmed.redemption, "recorded");
     assert.match(confirmed.body.join(" "), /επιβεβαίωσε/);
@@ -329,14 +329,80 @@ describe("UI-04L safety of the messages", () => {
     assert.equal(describeRecovery({ phase: "submitting_redemption", intent }).waiting, true);
   });
 
-  it("refusals say plainly that no coffee was recorded (or that today's is used) and offer only 'finish'", () => {
+  it("refusals say plainly that THIS request recorded no coffee (or that today's is used) and offer only 'finish'", () => {
     for (const code of Object.keys(REDEMPTION_CODES) as RedemptionRefusal[]) {
       const v = describeRecovery({ phase: "redemption_refused", intent, code });
       assert.deepEqual(v.actions.map((a) => a.action), ["finish"]);
       assert.equal(v.redemption, "refused");
       assert.equal(v.certainty, "definite");
-      assert.match(v.body.join(" "), /Δεν έχει καταχωρηθεί καφές|Δεν δημιουργείται/, code);
+      assert.match(v.body.join(" "), /Με το συγκεκριμένο αίτημα δεν καταχωρήθηκε καφές|Δεν δημιουργείται/, code);
     }
+  });
+});
+
+describe("UI-04L request-scoped copy: one request id never speaks for the member's day", () => {
+  /** Absence / availability claims about the MEMBER or the DAY, never allowed from one request's outcome. */
+  const MEMBER_DAY_CLAIMS = [
+    /Δεν έχει καταχωρηθεί καφές/, // "no coffee has been recorded" (for anyone)
+    /Ο διακομιστής δεν έχει καταχώρηση/, // "the server has no record" (at all)
+    /δεν στάλθηκε τίποτα/, // "nothing was sent" (by any tablet)
+    /Δεν υπάρχει εκκρεμότητα\b/, // "nothing pending" (anywhere)
+    /δεν έχει (?:ήδη )?(?:πάρει|χρησιμοποιήσει)/i, // "has not had / used it"
+    /(?:δικαιούται|μπορεί να πάρει|είναι διαθέσιμη η παροχή|η παροχή είναι διαθέσιμη)/i, // eligibility claims
+  ];
+  const textOf = (v: RecoveryView) => [v.headline, ...v.body].join(" ");
+  const sentences = (v: RecoveryView) => textOf(v).split(/(?<=\.)\s+/);
+
+  it("no case claims the member or the day has no coffee, or that the benefit is available", () => {
+    for (const state of allStates()) {
+      const v = describeRecovery(state);
+      for (const claim of MEMBER_DAY_CLAIMS) assert.doesNotMatch(textOf(v), claim, `${v.caseKey}: ${claim}`);
+    }
+  });
+
+  it("every 'not recorded' sentence is explicitly about THIS request", () => {
+    let found = 0;
+    for (const state of allStates()) {
+      const v = describeRecovery(state);
+      for (const sentence of sentences(v)) {
+        if (/δεν καταχωρήθηκε|δεν βρέθηκε|δεν στάλθηκε/i.test(sentence) && /αίτημα|καταχώρηση για/.test(sentence)) found++;
+        if (/δεν καταχωρήθηκε καφές/.test(sentence)) {
+          assert.match(sentence, /συγκεκριμένο αίτημα/, `${v.caseKey}: "${sentence}"`);
+        }
+      }
+    }
+    assert.ok(found >= 9, `request-scoped sentences found: ${found}`);
+  });
+
+  it("cases that only know this request's outcome are request-scoped", () => {
+    const scoped: MachineState[] = [
+      ...(Object.keys(REDEMPTION_CODES) as RedemptionRefusal[])
+        .filter((code) => code !== "benefit_already_redeemed" && code !== "idempotency_key_reused")
+        .map((code): MachineState => ({ phase: "redemption_refused", intent, code })),
+      { phase: "recovery_required", intent, reason: "not_recorded" } as MachineState,
+      { phase: "persistence_blocked", operation: "redemption", intent, mayHaveBeenSent: false } as MachineState,
+    ];
+    for (const state of scoped) {
+      const v = describeRecovery(state);
+      assert.match(textOf(v), /συγκεκριμένο αίτημα/, v.caseKey);
+      assert.equal(v.certainty, "definite", v.caseKey);
+    }
+    const notRecorded = describeRecovery({ phase: "recovery_required", intent, reason: "not_recorded" } as MachineState);
+    assert.equal(notRecorded.headline, "Δεν βρέθηκε καταχώρηση για το συγκεκριμένο αίτημα");
+    assert.equal(notRecorded.redemption, "not_recorded");
+  });
+
+  it("the authoritative 'already used today' answer is still stated plainly", () => {
+    const v = describeRecovery({ phase: "redemption_refused", intent, code: "benefit_already_redeemed" });
+    assert.equal(v.headline, "Η σημερινή παροχή έχει ήδη χρησιμοποιηθεί");
+    assert.match(v.body.join(" "), /Δεν δημιουργείται δεύτερος/);
+    assert.doesNotMatch(textOf(v), /συγκεκριμένο αίτημα/, "a server answer about the day is not narrowed to the request");
+  });
+
+  it("the idle screen speaks only for this screen and leaves availability to the server", () => {
+    const v = describeRecovery({ phase: "idle" } as MachineState);
+    assert.equal(v.headline, "Δεν υπάρχει εκκρεμές αίτημα σε αυτή την οθόνη");
+    assert.match(v.body.join(" "), /ελέγχει ο διακομιστής/);
   });
 });
 
