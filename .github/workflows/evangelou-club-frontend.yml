@@ -11,6 +11,8 @@ on:
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/src/index.css'
       - 'app/scripts/run-club-*.mjs'
+      - 'app/scripts/check-isolated-build.mjs'
+      - 'app/docs/**'
       - 'app/docs/evangelou-club-api.md'
       - 'app/package.json'
       - 'app/package-lock.json'
@@ -27,6 +29,8 @@ on:
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/src/index.css'
       - 'app/scripts/run-club-*.mjs'
+      - 'app/scripts/check-isolated-build.mjs'
+      - 'app/docs/**'
       - 'app/docs/evangelou-club-api.md'
       - 'app/package.json'
       - 'app/package-lock.json'
@@ -45,6 +49,8 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the isolated-build check needs the PR base to diff against
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -63,6 +69,11 @@ jobs:
         run: npm run test:club
       - name: Club mutation tests (retry / idempotency / error mapping)
         run: npm run test:club:mutation
+      - name: Isolated-build detector can fail (canary)
+        run: node scripts/check-isolated-build.mjs --canary
+      - name: Non-shipped files (tests, docs, scripts, unwired modules) do not change the shipped build
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-isolated-build.mjs --base origin/${{ github.base_ref }}
       - name: Confirm sources unchanged by test runs
         working-directory: .
         run: git diff --exit-code -- app/src app/tests app/scripts

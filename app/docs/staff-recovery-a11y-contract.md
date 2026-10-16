@@ -92,12 +92,19 @@ order. Nothing traps focus. Focus never triggers a request.
 
 ## Build isolation note
 
-Tailwind scans every source file for class-name candidates. A first draft
-used the string value `"outline"`, which added an `.outline` utility to the
-shipped staff CSS and changed its hash. The value is now `"bordered"`, and the
-shipped bundle is again `staff-CrPA0l2H.js` / `staff-DtlY_JJO.css`. Future
-pure modules must avoid bare Tailwind utility names as string values, or
-check the build hash.
+Tailwind scans every non-ignored file under `app/` (source, tests, scripts
+**and docs**) for class-name candidates. A bare utility word anywhere, even in
+a sentence of this document, adds that utility to the shared CSS. That changes
+the CSS hash and, through the asset reference, the JS hash of both the staff
+and the ordering bundles, although the application code is byte-identical.
+
+UI-04M first shipped with such a word in this very section (and, earlier, as
+a button-variant string value). The shipped bundles changed (staff
+`staff-vlnHp30b.js` / `staff-Bv41w6Sp.css` instead of `staff-CrPA0l2H.js` /
+`staff-DtlY_JJO.css`). The follow-up removed the word; do not write bare
+utility names in docs, tests or scripts. `npm run check:isolated-build --
+--base <ref>` rebuilds the staff and ordering apps with and without the
+change's non-shipped files and fails if the output differs.
 
 ## Open owner decisions
 
