@@ -1322,6 +1322,103 @@ const mutants = [
     search: "  if (!unlinkLinkOnly(link)) return false;\n",
     replace: "",
   },
+  // ---- UI-04N standalone Staff Recovery Screen (DOM tests)
+  {
+    id: "RS1-click-sends-another-action",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "onClick={() => onAction(a.action)}",
+    replace: "onClick={() => onAction(\"start_redemption\")}",
+  },
+  {
+    id: "RS2-actions-in-reverse-order",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "{contract.actions.map((a) => (",
+    replace: "{[...contract.actions].reverse().map((a) => (",
+  },
+  {
+    id: "RS3-focus-moves-to-a-button",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "if (intent.kind === \"heading\") headingRef.current?.focus();",
+    replace: "if (intent.kind === \"heading\") (headingRef.current?.parentElement?.parentElement?.querySelector(\"button\") ?? headingRef.current)?.focus();",
+  },
+  {
+    id: "RS4-focus-stolen-on-rerender",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "const intent = focusFor(prev, view, focusedAction.current);",
+    replace: "const intent = focusFor(null, view, null);",
+  },
+  {
+    id: "RS5-announcement-ignores-previous-state",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "announcementFor(prev, view)",
+    replace: "announcementFor(null, view)",
+  },
+  {
+    id: "RS6-busy-not-exposed",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "aria-busy={contract.busy ? \"true\" : \"false\"}",
+    replace: "aria-busy=\"false\"",
+  },
+  {
+    id: "RS7-prepare-callout-always-shown",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "evc-rs__body${contract.showPrepare ? \" evc-rs__body--prepare\" : \"\"}",
+    replace: "evc-rs__body evc-rs__body--prepare",
+  },
+  {
+    id: "RS8-alert-region-never-used",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "if (announcement.priority === \"assertive\") {",
+    replace: "if (false) {",
+  },
+  {
+    id: "RS9-uncertain-marker-dropped",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "{contract.uncertainMarker !== null && (",
+    replace: "{false && (",
+  },
+  {
+    id: "RS10-escalation-panel-dropped",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "{escalation.presentation !== \"hidden\" && (",
+    replace: "{false && (",
+  },
+  {
+    id: "RS11-touch-target-too-small",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "`${TOUCH_TARGET.preferredCssPx}px`",
+    replace: "`32px`",
+  },
+  {
+    id: "RS12-tone-icon-dropped",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "<ToneIcon icon={contract.icon} />",
+    replace: "",
+  },
+  {
+    id: "RS13-spinner-read-by-screen-readers",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "<span className=\"evc-rs__spinner\" aria-hidden=\"true\" />",
+    replace: "<span className=\"evc-rs__spinner\" />",
+  },
+  {
+    id: "RS14-click-makes-a-request",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "onClick={() => onAction(a.action)}",
+    replace: "onClick={() => { void fetch(\"/api\"); onAction(a.action); }}",
+  },
+  {
+    id: "RS15-busy-status-not-focusable",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "else if (intent.kind === \"status\") busyRef.current?.focus();",
+    replace: "else if (intent.kind === \"status\") headingRef.current?.focus();",
+  },
+  {
+    id: "RS16-decoy-disabled-control",
+    file: "staff/recoveryScreen/RecoveryScreen.tsx",
+    search: "{contract.actions.length > 0 && (",
+    replace: "{contract.actions.length >= 0 && (",
+  },
 ];
 
 const runSuite = () =>

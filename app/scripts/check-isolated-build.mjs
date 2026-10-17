@@ -175,7 +175,9 @@ function nonShippedChanges(shipped) {
     if (!path.startsWith(`${appRel}/`)) continue; // outside app/: never scanned or built
     const inApp = path.slice(appRel.length + 1);
     const isSource = /^src\/.*\.(ts|tsx)$/.test(inApp);
-    const nonShipped = /^(tests|docs|scripts)\//.test(inApp) || (isSource && !shipped.has(path));
+    // Root HTML other than the two build entries (e.g. the local-only recovery preview page) is scanned by Tailwind but never built.
+    const strayHtml = /^[^/]+\.html$/.test(inApp) && inApp !== "index.html" && inApp !== "staff.html";
+    const nonShipped = /^(tests|docs|scripts)\//.test(inApp) || strayHtml || (isSource && !shipped.has(path));
     if (nonShipped) files.push(path);
   }
   return files;
