@@ -1439,6 +1439,27 @@ if (runSuite() !== 0) {
 }
 console.log("Baseline: PASS");
 
+// A mutated file is written back even if this process is interrupted
+// (Ctrl-C, SIGTERM from a CI runner shutdown, an uncaught error).
+// SIGKILL cannot be handled; CI additionally ends with a git diff check.
+let active = null;
+const restoreActive = () => {
+  if (!active) return;
+  try {
+    writeFileSync(active.path, active.original);
+    active = null;
+  } catch {
+    // Leave `active` set so the exit handler retries.
+  }
+};
+process.on("exit", restoreActive);
+for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) {
+  process.on(sig, () => {
+    restoreActive();
+    process.exit(code);
+  });
+}
+
 const survivors = [];
 let killed = 0;
 for (const m of mutants) {
@@ -1453,10 +1474,12 @@ for (const m of mutants) {
   }
   let status;
   try {
+    active = { path, original };
     writeFileSync(path, original.replace(search, m.replace.replaceAll("\n", eol)));
     status = runSuite();
   } finally {
     writeFileSync(path, original);
+    active = null;
   }
   if (status !== 0) killed++;
   else survivors.push(m.id);
