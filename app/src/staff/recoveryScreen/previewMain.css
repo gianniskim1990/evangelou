@@ -1,0 +1,50 @@
+/* UI-04N local preview chrome only (prefix evc-rp). Not used by the screen itself. */
+body {
+  margin: 0;
+  background: var(--color-cream, #faf8f3);
+}
+.evc-rp {
+  padding: 16px;
+  color: var(--color-espresso, #1e1812);
+  font-family: system-ui, sans-serif;
+}
+.evc-rp__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border: 2px dashed #9a2f2b;
+  border-radius: 10px;
+}
+.evc-rp__scenarios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.evc-rp__scenario,
+.evc-rp__toggle {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid #86764f;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.evc-rp__scenario[aria-pressed="true"],
+.evc-rp__toggle[aria-pressed="true"] {
+  background: #5f5335;
+  color: #ffffff;
+}
+.evc-rp__stage {
+  padding: 8px 0 24px;
+}
+.evc-rp__log {
+  max-width: 44rem;
+  margin: 0 auto;
+  font-size: 0.9375rem;
+}

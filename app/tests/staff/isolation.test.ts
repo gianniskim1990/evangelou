@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -96,6 +96,33 @@ describe("staff bundle isolation (real import graph)", () => {
       assert.equal(inputs.find((p) => p.endsWith("viewModel.ts") && p.includes("redemptionRecovery")), undefined, `${entry} must not import the view model`);
       assert.ok(!output.includes("Δοκιμή καταχώρησης ξανά"), `${entry} must not contain the recovery copy`);
     }
+  });
+
+  it("the UI-04N recovery screen is presentation only, makes no request and is wired into no shipped entry", async () => {
+    const own = await bundle("src/staff/recoveryScreen/RecoveryScreen.tsx");
+    const local = own.inputs.filter((p) => !p.includes("node_modules")).map((p) => p.slice(p.lastIndexOf("src/"))).sort();
+    assert.deepEqual(
+      local.filter((p) => !p.endsWith(".css")),
+      [
+        "src/club/format.ts",
+        "src/staff/recoveryScreen/RecoveryScreen.tsx",
+        "src/staff/redemptionRecovery/a11yContract.ts",
+        "src/staff/redemptionRecovery/machine.ts",
+        "src/staff/redemptionRecovery/viewModel.ts",
+        "src/staff/redemptionRecovery/wire.ts",
+      ],
+    );
+    for (const needle of ["fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "sessionStorage", "localStorage", "indexedDB", "setTimeout", "setInterval", "location."]) {
+      assert.ok(!own.output.includes(needle), `recovery screen must not use ${needle}`);
+    }
+    for (const entry of ["src/staff/main.tsx", "src/main.tsx"]) {
+      const { inputs, output } = await bundle(entry);
+      assert.equal(inputs.find((p) => p.includes("src/staff/recoveryScreen/")), undefined, `${entry} must not import the recovery screen or its preview`);
+      assert.ok(!output.includes("evc-rs"), `${entry} must not contain the recovery screen`);
+    }
+    // The local preview is a dev-server page only: it is not an input of either production build.
+    const prod = [readFileSync(join(appDir ?? "", "vite.config.ts"), "utf8"), readFileSync(join(appDir ?? "", "vite.staff.config.ts"), "utf8")].join("\n");
+    assert.ok(!prod.includes("recovery-preview"), "no production build config references the preview page");
   });
 
   it("the UI-04M accessibility contract is pure (no DOM, focus or React) and is not wired", async () => {

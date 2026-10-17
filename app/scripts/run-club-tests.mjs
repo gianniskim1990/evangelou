@@ -42,7 +42,7 @@ try {
     sourcemap: "inline",
     logLevel: "warning",
     // The staff UI imports a PNG; esbuild is used only by the graph test at runtime.
-    loader: { ".png": "file" },
+    loader: { ".png": "file", ".css": "empty" },
     external: ["esbuild"],
   });
   const files = readdirSync(outDir, { recursive: true })
