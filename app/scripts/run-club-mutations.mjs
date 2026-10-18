@@ -1480,12 +1480,18 @@ const killTree = (child) => {
     // already gone
   }
 };
-const SUITE_TIME_LIMIT_MS = 180_000;
-const runSuite = () =>
+const BASELINE_LIMIT_MS = 180_000;
+let mutantLimitMs = BASELINE_LIMIT_MS; // tightened after the baseline: 3x its duration, at least 30 s
+// A mutant can make the suite allocate without bound (a focus/re-render loop grew past 4 GB in
+// about a minute and took a 7 GB CI runner down, which GitHub reports as a cancelled job).
+// A heap cap makes the test process abort itself instead; the runner then reports a failing
+// suite (exit 1) = killed by the tests, and the CI runner stays healthy.
+const HEAP_CAP = "--max-old-space-size=1024";
+const runSuite = (limitMs) =>
   new Promise((resolve) => {
     // detached: its own process group on POSIX, so the whole tree can be killed
     const child = spawn(process.execPath, [join(appDir, "scripts", "run-club-tests.mjs")], {
-      env: { ...process.env, EVC_QUIET_TESTS: "1" },
+      env: { ...process.env, EVC_QUIET_TESTS: "1", NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} ${HEAP_CAP}`.trim() },
       stdio: "ignore",
       detached: process.platform !== "win32",
     });
@@ -1495,7 +1501,7 @@ const runSuite = () =>
     const timer = setTimeout(() => {
       timedOut = true;
       killTree(child);
-    }, SUITE_TIME_LIMIT_MS);
+    }, limitMs);
     child.on("error", (error) => {
       clearTimeout(timer);
       currentChild = null;
@@ -1525,11 +1531,13 @@ for (const m of mutants) {
 
 console.log(`Shard ${shardLabel}: ${assigned.length} of ${mutants.length} mutants`);
 console.log("Baseline (unmutated) run...");
-if ((await runSuite()).status !== 0) {
+const baselineStart = Date.now();
+if ((await runSuite(BASELINE_LIMIT_MS)).status !== 0) {
   console.error("ABORT: baseline Club tests are not green; mutation results would be meaningless.");
   process.exit(1);
 }
-console.log("Baseline: PASS");
+mutantLimitMs = Math.max(30_000, 3 * (Date.now() - baselineStart));
+console.log(`Baseline: PASS (${Math.round((Date.now() - baselineStart) / 1000)} s; a mutant hanging past ${Math.round(mutantLimitMs / 1000)} s counts as killed)`);
 
 const results = {};
 const restoredNow = () => [...touched].every(([path, hash]) => sha(path) === hash);
@@ -1573,7 +1581,7 @@ for (const m of assigned) {
   try {
     active = { path, original };
     writeFileSync(path, original.replace(search, m.replace.replaceAll("\n", eol)));
-    const run = await runSuite();
+    const run = await runSuite(mutantLimitMs);
     outcome = classifyRun(run);
     detail = run.error ? `error ${run.error.code}` : run.signal ? `signal ${run.signal}` : `exit ${run.status}`;
   } finally {
