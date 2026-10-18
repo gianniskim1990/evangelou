@@ -1,0 +1,194 @@
+/*
+ * UI-04N Staff Recovery Screen styles. Plain CSS, every selector prefixed
+ * "evc-rs", and imported ONLY by RecoveryScreen.tsx, so nothing here can enter
+ * the shared Tailwind stylesheet of the shipped staff / ordering bundles.
+ *
+ * Colours come from the app's existing theme variables (--color-*, which flip
+ * in dark mode) with the same literals as fallbacks. The positive / wait /
+ * stop accents are the approved design-system tones (src/preview/preview.css).
+ * Meaning never relies on colour alone: each tone also has its own icon, and
+ * uncertain outcomes carry a text marker.
+ */
+.evc-rs {
+  --evc-rs-ink: var(--color-espresso, #1e1812);
+  --evc-rs-paper: var(--color-surface, #ffffff);
+  --evc-rs-cream: var(--color-cream, #faf8f3);
+  --evc-rs-rule: var(--color-hairline, #e5dfd1);
+  --evc-rs-bronze: var(--color-bronze-dark, #5f5335);
+  --evc-rs-ok: #1f6a47;
+  --evc-rs-wait: #8a6212;
+  --evc-rs-stop: #9a2f2b;
+  --evc-rs-accent: var(--evc-rs-bronze);
+  color: var(--evc-rs-ink);
+  font-family: var(--font-commissioner, "Commissioner"), system-ui, sans-serif;
+  max-width: 44rem;
+  margin: 0 auto;
+}
+:root.dark .evc-rs {
+  --evc-rs-ok: #6fcf9d;
+  --evc-rs-wait: #e0b765;
+  --evc-rs-stop: #f08c86;
+}
+
+.evc-rs__card {
+  background: var(--evc-rs-paper);
+  border: 1px solid var(--evc-rs-rule);
+  border-left: 8px solid var(--evc-rs-accent);
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 4px 18px rgba(30, 24, 18, 0.06);
+}
+.evc-rs--positive {
+  --evc-rs-accent: var(--evc-rs-ok);
+}
+.evc-rs--attention,
+.evc-rs--warning {
+  --evc-rs-accent: var(--evc-rs-wait);
+}
+.evc-rs--blocked {
+  --evc-rs-accent: var(--evc-rs-stop);
+}
+
+.evc-rs__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.evc-rs__icon {
+  flex: none;
+  color: var(--evc-rs-accent);
+}
+.evc-rs__title {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  font-weight: 650;
+}
+.evc-rs__title:focus,
+.evc-rs__busy:focus {
+  outline: 3px solid var(--evc-rs-accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.evc-rs__marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 6px 12px;
+  border: 2px dashed var(--evc-rs-accent);
+  border-radius: 999px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.evc-rs__body {
+  margin-top: 14px;
+  font-size: 1.125rem;
+  line-height: 1.55;
+}
+.evc-rs__body p {
+  margin: 0 0 8px;
+}
+.evc-rs__body--prepare {
+  padding: 14px 16px;
+  border: 2px solid var(--evc-rs-ok);
+  border-radius: 12px;
+}
+
+.evc-rs__busy {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.evc-rs__spinner {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 18px;
+  border: 3px solid var(--evc-rs-rule);
+  border-top-color: var(--evc-rs-accent);
+  border-radius: 50%;
+  animation: evc-rs-spin 1s linear infinite;
+}
+@keyframes evc-rs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .evc-rs__spinner {
+    animation: none;
+  }
+}
+
+.evc-rs__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--evc-rs-gap, 12px);
+  margin-top: 22px;
+}
+.evc-rs__btn {
+  min-height: var(--evc-rs-target, 48px);
+  min-width: var(--evc-rs-target, 48px);
+  padding: 12px 22px;
+  border-radius: 12px;
+  border: 2px solid var(--evc-rs-bronze);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.evc-rs__btn--filled {
+  background: var(--evc-rs-bronze);
+  color: #ffffff;
+}
+.evc-rs__btn--bordered {
+  background: var(--evc-rs-paper);
+  color: var(--evc-rs-ink);
+}
+.evc-rs__btn--text {
+  background: transparent;
+  border-color: transparent;
+  color: var(--evc-rs-ink);
+  text-decoration: underline;
+}
+.evc-rs__btn:focus-visible {
+  outline: 3px solid var(--evc-rs-ink);
+  outline-offset: 3px;
+}
+
+.evc-rs__escalation {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 2px solid var(--evc-rs-rule);
+  background: var(--evc-rs-cream);
+}
+.evc-rs__escalation--primary {
+  border-color: var(--evc-rs-stop);
+}
+.evc-rs__escalation-title {
+  margin: 0 0 6px;
+  font-size: 1.0625rem;
+}
+.evc-rs__escalation ul {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.5;
+}
+
+/* Visually removed, still read by assistive technology (live regions). */
+.evc-rs__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

@@ -26,3 +26,7 @@ dist-ssr
 # Club staff build + plugin package (Task 1C-D)
 dist-staff
 dist-plugin
+
+# sharded mutation run output (UI-04N)
+mutation-shard-*.json
+mutation-reports/

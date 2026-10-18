@@ -14,7 +14,8 @@
     "test:club:mutation": "node scripts/run-club-mutations.mjs",
     "build:staff": "vite build --config vite.staff.config.ts",
     "package:club-plugin": "node scripts/package-club-plugin.mjs",
-    "check:isolated-build": "node scripts/check-isolated-build.mjs"
+    "check:isolated-build": "node scripts/check-isolated-build.mjs",
+    "recovery:preview": "vite --host 127.0.0.1 --open /recovery-preview.html"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.4",
@@ -23,12 +24,14 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vercel/node": "^12.0.1",
     "@vitejs/plugin-react": "^6.1.0",
     "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3",
     "oxlint": "^1.79.0",
     "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3",
