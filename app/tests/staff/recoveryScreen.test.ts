@@ -144,7 +144,7 @@ describe("UI-04N RecoveryScreen: focus", () => {
       assert.ok(a, v.caseKey);
       assert.notEqual(a.tagName, "BUTTON", v.caseKey);
       if (v.waiting) assert.equal(a.className, "evc-rs__busy", `${v.caseKey}: busy status`);
-      else assert.equal(a, q("h2"), `${v.caseKey}: heading`);
+      else assert.ok(a === q("h2"), `${v.caseKey}: heading`);
     }
   });
 
@@ -166,7 +166,7 @@ describe("UI-04N RecoveryScreen: focus", () => {
       assert.ok(a);
       assert.notEqual(a.tagName, "BUTTON", `${view(from).caseKey} -> ${next.caseKey}`);
       if (next.waiting) assert.equal(a.className, "evc-rs__busy");
-      else assert.equal(a, q("h2"));
+      else assert.ok(a === q("h2"), `${view(from).caseKey} -> ${next.caseKey}: heading`);
     }
   });
 
@@ -177,7 +177,7 @@ describe("UI-04N RecoveryScreen: focus", () => {
     await dom.focus(second);
     await show(view(state)); // new but equal view object, as a poll would produce
     await show(view(state));
-    assert.equal(active(), qa("button")[1]);
+    assert.ok(active() === qa("button")[1], "focus stays on the focused action");
     assert.equal(active()?.dataset.action, "check_status");
   });
 
@@ -186,7 +186,7 @@ describe("UI-04N RecoveryScreen: focus", () => {
     await show(view(before));
     await dom.focus(qa('[data-action="confirm_manual_verification"]')[0]);
     await show(view({ phase: "previously_recorded_unconfirmed", intent, record, manuallyVerified: true }));
-    assert.equal(active(), q("h2"));
+    assert.ok(active() === q("h2"), "focus falls back to the heading");
     assert.equal(qa('[data-action="confirm_manual_verification"]').length, 0);
   });
 
@@ -194,7 +194,7 @@ describe("UI-04N RecoveryScreen: focus", () => {
     await show(view({ phase: "blocked_authorization", reason: "locked" }));
     await dom.focus(qa("button")[0]);
     await show(view({ phase: "recorded_now", intent, record, prepareAcknowledged: false }));
-    assert.equal(active(), q("h2"));
+    assert.ok(active() === q("h2"), "focus falls back to the heading");
   });
 
   it("headings and the busy status are focusable by script only (tabindex -1), buttons keep natural order", async () => {
@@ -335,7 +335,7 @@ describe("UI-04N RecoveryScreen: prepare, session lock, manager review", () => {
       assert.equal(qa("button")[0].textContent, ACTION_LABELS.reauthenticate);
       assert.notEqual(assertive(), "", reason);
       assert.equal(polite(), "", reason);
-      assert.equal(q(".evc-rs__body--prepare"), null);
+      assert.ok(q(".evc-rs__body--prepare") === null, "no prepare body");
     }
   });
 
@@ -354,7 +354,7 @@ describe("UI-04N RecoveryScreen: prepare, session lock, manager review", () => {
 
     await dom.reset();
     await show(view({ phase: "handoff_confirmed", intent, record, handoff, via: "confirmed" }));
-    assert.equal(q("aside"), null);
+    assert.ok(q("aside") === null, "no escalation panel");
     assert.equal(qa("button").some((b) => b.dataset.action === "manager_review"), false);
   });
 
@@ -362,7 +362,7 @@ describe("UI-04N RecoveryScreen: prepare, session lock, manager review", () => {
     await show(view({ phase: "submitting_redemption", intent }));
     assert.equal(q("section")?.getAttribute("aria-busy"), "true");
     assert.equal(qa("button").length, 0);
-    assert.equal(q('[role="group"]'), null, "no empty actions group while there is nothing to press");
+    assert.ok(q('[role="group"]') === null, "no empty actions group while there is nothing to press");
     assert.ok(q(".evc-rs__busy")?.textContent?.includes("Μην πατήσετε ξανά"));
     assert.equal(q(".evc-rs__spinner")?.getAttribute("aria-hidden"), "true");
   });
