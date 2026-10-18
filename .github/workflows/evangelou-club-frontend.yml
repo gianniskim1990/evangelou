@@ -13,6 +13,9 @@ on:
       - 'app/src/index.css'
       - 'app/scripts/run-club-*.mjs'
       - 'app/scripts/check-isolated-build.mjs'
+      - 'app/scripts/check-mutation-coverage.mjs'
+      - 'app/scripts/mutation-shard.*'
+      - 'app/scripts/isolated-build-compare.*'
       - 'app/docs/**'
       - 'app/docs/evangelou-club-api.md'
       - 'app/package.json'
@@ -32,6 +35,9 @@ on:
       - 'app/src/index.css'
       - 'app/scripts/run-club-*.mjs'
       - 'app/scripts/check-isolated-build.mjs'
+      - 'app/scripts/check-mutation-coverage.mjs'
+      - 'app/scripts/mutation-shard.*'
+      - 'app/scripts/isolated-build-compare.*'
       - 'app/docs/**'
       - 'app/docs/evangelou-club-api.md'
       - 'app/package.json'
@@ -43,10 +49,11 @@ permissions:
   contents: read
 
 jobs:
+  # Validation: independent of the mutation shards below, so a mutation failure or
+  # cancellation can never skip typecheck, lint, builds, tests, packaging, the
+  # isolation check or the canary (and vice versa).
   club-frontend:
     runs-on: ubuntu-latest
-    # The sequential mutation run alone takes ~13-15 min (232 mutants x ~3 s);
-    # a 15 min cap cancelled push run 39021571054 mid-mutation.
     timeout-minutes: 30
     defaults:
       run:
@@ -71,8 +78,10 @@ jobs:
         run: npm run package:club-plugin
       - name: Club + staff tests (fake fetch/clock, no network, TZ=UTC+14)
         run: npm run test:club
-      - name: Club mutation tests (retry / idempotency / error mapping)
-        run: npm run test:club:mutation
+      - name: Mutation partition is exact (232 mutants, 2 shards of 116, nothing duplicated or missing)
+        run: |
+          node scripts/run-club-mutations.mjs --verify-partition 2
+          test "$(node scripts/run-club-mutations.mjs --list | wc -l)" = "232"
       - name: Isolated-build detector can fail (canary)
         run: node scripts/check-isolated-build.mjs --canary
       - name: Non-shipped files (tests, docs, scripts, unwired modules) do not change the shipped build
@@ -81,3 +90,101 @@ jobs:
       - name: Confirm sources unchanged by test runs
         working-directory: .
         run: git diff --exit-code -- app/src app/tests app/scripts
+
+  # Mutation testing, split into two independent jobs of 116 mutants each (shard K/2:
+  # mutants whose index % 2 == K-1). Each has its own checkout, npm ci and working
+  # tree. A shard passes only if it ran ALL of its mutants, every one was killed by
+  # the test suite (or hung until the runner's own limit) and the sources were
+  # restored. A cancelled job or a runner shutdown is an infrastructure failure and
+  # is never a mutation result.
+  club-mutation-shard-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Mutation shard 1/2 (116 mutants)
+        run: node scripts/run-club-mutations.mjs --shard 1/2 --expect-total 232 --out mutation-shard-1.json
+      - name: Upload the shard report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-shard-1
+          path: app/mutation-shard-1.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Confirm sources unchanged by the mutation run
+        if: always()
+        working-directory: .
+        run: git diff --exit-code -- app/src app/tests app/scripts
+
+  club-mutation-shard-2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Mutation shard 2/2 (116 mutants)
+        run: node scripts/run-club-mutations.mjs --shard 2/2 --expect-total 232 --out mutation-shard-2.json
+      - name: Upload the shard report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-shard-2
+          path: app/mutation-shard-2.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Confirm sources unchanged by the mutation run
+        if: always()
+        working-directory: .
+        run: git diff --exit-code -- app/src app/tests app/scripts
+
+  # Proves the two shards TOGETHER covered all 232 mutants exactly once. It runs even
+  # when a shard failed or was cancelled (if: always()) and then fails on the missing
+  # or incomplete report, so the workflow can never be green on a partial run.
+  club-mutation-coverage:
+    needs: [club-mutation-shard-1, club-mutation-shard-2]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download the shard reports
+        uses: actions/download-artifact@v4
+        continue-on-error: true # a missing artifact is reported by the coverage check below
+        with:
+          path: app/mutation-reports
+      - name: Require both shards to have passed
+        run: |
+          echo "shard 1: ${{ needs.club-mutation-shard-1.result }}"
+          echo "shard 2: ${{ needs.club-mutation-shard-2.result }}"
+          test "${{ needs.club-mutation-shard-1.result }}" = "success"
+          test "${{ needs.club-mutation-shard-2.result }}" = "success"
+      - name: Shards together cover every mutant exactly once
+        if: always()
+        run: >
+          node scripts/check-mutation-coverage.mjs --expect-total 232 --shards 2
+          mutation-reports/mutation-shard-1/mutation-shard-1.json
+          mutation-reports/mutation-shard-2/mutation-shard-2.json

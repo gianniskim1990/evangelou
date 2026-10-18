@@ -2,11 +2,13 @@
 // rules. Each mutant applies ONE exact source edit, runs the Club test suite
 // and must make it FAIL. Sources are restored in `finally` and verified by
 // SHA-256 at the end. Line endings (LF/CRLF) are handled transparently.
-import { spawnSync } from "node:child_process";
+// CI runs it as two independent shards (see the driver at the bottom of this file).
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertUniqueIds, classifyRun, evidenceLine, parseShard, summarize, validatePlan, verifyPartition } from "./mutation-shard.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = (f) => join(appDir, "src", f.includes("/") ? f : `club/${f}`);
@@ -1421,23 +1423,119 @@ const mutants = [
   },
 ];
 
+// ---- Driver ---------------------------------------------------------------
+//
+// Usage (from app/):
+//   node scripts/run-club-mutations.mjs --shard K/N --expect-total T [--out report.json]
+//   node scripts/run-club-mutations.mjs --list                 ids, one per line
+//   node scripts/run-club-mutations.mjs --verify-partition N   proves N shards cover every mutant once
+//   node scripts/run-club-mutations.mjs                        legacy: every mutant in one process (slow; CI shards it)
+//
+// A mutant counts as KILLED only when the test suite FAILED (exit 1) or the
+// mutant hung until the runner's own time limit. A signal, a runner shutdown
+// or any unexpected exit is INFRASTRUCTURE: it never counts as a kill, the
+// shard reports complete=no and exits 3.
+const argv = process.argv.slice(2);
+const optionValue = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
+
+if (argv.includes("--list")) {
+  assertUniqueIds(mutants);
+  for (const m of mutants) console.log(m.id);
+  process.exit(0);
+}
+if (argv.includes("--verify-partition")) {
+  const count = Number(optionValue("--verify-partition"));
+  try {
+    const sizes = verifyPartition(mutants, count);
+    console.log(`partition OK: ${mutants.length} mutants in ${count} shards of ${sizes.join(" + ")}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`PARTITION INVALID: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+let shard;
+let assigned;
+const expectTotal = optionValue("--expect-total") === undefined ? undefined : Number(optionValue("--expect-total"));
+try {
+  shard = optionValue("--shard") === undefined ? undefined : parseShard(optionValue("--shard"));
+  assigned = validatePlan(mutants, { expectTotal, shard });
+} catch (err) {
+  console.error(`ABORT: ${err.message}`);
+  process.exit(1);
+}
+const shardLabel = shard ? `${shard.index + 1}/${shard.count}` : "all";
+const outFile = optionValue("--out");
+
+// The suite runs as an ASYNC child so that SIGINT/SIGTERM handlers run at once
+// (a blocking spawnSync would delay them until the suite finished): on a signal the
+// whole child tree is stopped and the mutated file restored.
+let currentChild = null;
+const killTree = (child) => {
+  try {
+    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    else process.kill(-child.pid, "SIGKILL");
+  } catch {
+    // already gone
+  }
+};
+const SUITE_TIME_LIMIT_MS = 180_000;
 const runSuite = () =>
-  spawnSync(process.execPath, [join(appDir, "scripts", "run-club-tests.mjs")], {
-    env: { ...process.env, EVC_QUIET_TESTS: "1" },
-    stdio: "ignore",
+  new Promise((resolve) => {
+    // detached: its own process group on POSIX, so the whole tree can be killed
+    const child = spawn(process.execPath, [join(appDir, "scripts", "run-club-tests.mjs")], {
+      env: { ...process.env, EVC_QUIET_TESTS: "1" },
+      stdio: "ignore",
+      detached: process.platform !== "win32",
+    });
+    currentChild = child;
+    let timedOut = false;
     // A mutant that hangs the suite (e.g. a removed timeout) counts as killed.
-    timeout: 180_000,
-  }).status;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killTree(child);
+    }, SUITE_TIME_LIMIT_MS);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      currentChild = null;
+      resolve({ status: null, signal: null, error });
+    });
+    child.on("close", (status, signal) => {
+      clearTimeout(timer);
+      currentChild = null;
+      resolve(timedOut ? { status: null, signal, error: { code: "ETIMEDOUT" } } : { status, signal, error: null });
+    });
+  });
 
 const sha = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 const touched = new Map([...new Set(mutants.map((m) => src(m.file)))].map((p) => [p, sha(p)]));
 
+// Pre-flight over EVERY mutant (not only this shard's): each pattern must occur
+// exactly once in the pristine source, so a drifted mutant fails both shards early.
+for (const m of mutants) {
+  const original = readFileSync(src(m.file), "utf8");
+  const eol = original.includes("\r\n") ? "\r\n" : "\n";
+  const count = original.split(m.search.replaceAll("\n", eol)).length - 1;
+  if (count !== 1) {
+    console.error(`ABORT: ${m.id} pattern found ${count} times in ${m.file} (expected 1).`);
+    process.exit(1);
+  }
+}
+
+console.log(`Shard ${shardLabel}: ${assigned.length} of ${mutants.length} mutants`);
 console.log("Baseline (unmutated) run...");
-if (runSuite() !== 0) {
+if ((await runSuite()).status !== 0) {
   console.error("ABORT: baseline Club tests are not green; mutation results would be meaningless.");
   process.exit(1);
 }
 console.log("Baseline: PASS");
+
+const results = {};
+const restoredNow = () => [...touched].every(([path, hash]) => sha(path) === hash);
+const writeReport = (report) => {
+  if (outFile) writeFileSync(outFile, `${JSON.stringify(report, null, 2)}\n`);
+};
 
 // A mutated file is written back even if this process is interrupted
 // (Ctrl-C, SIGTERM from a CI runner shutdown, an uncaught error).
@@ -1455,46 +1553,48 @@ const restoreActive = () => {
 process.on("exit", restoreActive);
 for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) {
   process.on(sig, () => {
+    if (currentChild) killTree(currentChild);
     restoreActive();
+    // An interrupted shard is INCOMPLETE: it reports no success and never counts the running mutant.
+    const report = summarize({ shardLabel, expectTotal, total: mutants.length, assigned: assigned.length, results, sourcesRestored: restoredNow(), interrupted: sig });
+    writeReport(report);
+    console.log(evidenceLine(report));
     process.exit(code);
   });
 }
 
-const survivors = [];
-let killed = 0;
-for (const m of mutants) {
+for (const m of assigned) {
   const path = src(m.file);
   const original = readFileSync(path, "utf8");
   const eol = original.includes("\r\n") ? "\r\n" : "\n";
   const search = m.search.replaceAll("\n", eol);
-  const count = original.split(search).length - 1;
-  if (count !== 1) {
-    console.error(`ABORT: ${m.id} pattern found ${count} times in ${m.file} (expected 1).`);
-    process.exit(1);
-  }
-  let status;
+  let outcome;
+  let detail = "";
   try {
     active = { path, original };
     writeFileSync(path, original.replace(search, m.replace.replaceAll("\n", eol)));
-    status = runSuite();
+    const run = await runSuite();
+    outcome = classifyRun(run);
+    detail = run.error ? `error ${run.error.code}` : run.signal ? `signal ${run.signal}` : `exit ${run.status}`;
   } finally {
     writeFileSync(path, original);
     active = null;
   }
-  if (status !== 0) killed++;
-  else survivors.push(m.id);
-  console.log(`${m.id.padEnd(44)} ${status !== 0 ? "KILLED" : "SURVIVED"} (exit ${status})`);
+  results[m.id] = outcome;
+  const label = { killed_tests: "KILLED", killed_timeout: "KILLED (timeout)", survived: "SURVIVED", infrastructure: "INFRASTRUCTURE" }[outcome];
+  console.log(`${m.id.padEnd(44)} ${label} (${detail})`);
+  if (outcome === "infrastructure") break; // the run is no longer trustworthy: stop instead of guessing
 }
 
-let restored = true;
-for (const [path, hash] of touched) {
-  if (sha(path) !== hash) {
-    restored = false;
-    console.error(`NOT RESTORED: ${path}`);
-  }
+const report = summarize({ shardLabel, expectTotal, total: mutants.length, assigned: assigned.length, results, sourcesRestored: restoredNow() });
+for (const path of [...touched.keys()].filter((p) => sha(p) !== touched.get(p))) console.error(`NOT RESTORED: ${path}`);
+writeReport(report);
+console.log(evidenceLine(report));
+// The pre-sharding line, kept for readers and tools that grep it (only meaningful for an unsharded run).
+if (!shard) console.log(`[evidence] club-frontend-mutation: total=${mutants.length} killed=${report.killed} survived=${report.survivors.length} sources_restored=${report.sourcesRestored ? "yes" : "NO"}`);
+if (report.survivors.length) console.error(`Surviving mutants: ${report.survivors.join(", ")}`);
+if (report.infrastructure.length || !report.complete) {
+  console.error(`INCOMPLETE: infrastructure failure or interruption; this is not a mutation result (${report.completed}/${report.assigned} completed).`);
+  process.exit(3);
 }
-console.log(
-  `[evidence] club-frontend-mutation: total=${mutants.length} killed=${killed} survived=${survivors.length} sources_restored=${restored ? "yes" : "NO"}`,
-);
-if (survivors.length) console.error(`Surviving mutants: ${survivors.join(", ")}`);
-process.exit(survivors.length || !restored ? 1 : 0);
+process.exit(report.survivors.length || !report.sourcesRestored ? 1 : 0);
