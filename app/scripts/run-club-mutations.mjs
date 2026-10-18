@@ -1421,6 +1421,91 @@ const mutants = [
     search: "{contract.actions.length > 0 && (",
     replace: "{contract.actions.length >= 0 && (",
   },
+  // ---- UI-04O integrated counter-flow preview (flow, DOM and payload tests)
+  {
+    id: "CF1-retry-starts-a-new-intent",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "result = await m.retryRedemption();",
+    replace: "result = await m.startRedemption(this.summary?.member.id ?? \"\", this.intentPayload!);",
+  },
+  {
+    id: "CF2-navigation-allowed-during-open-intent",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: 'return this.controller?.getState().phase === "ready" && this.machine.getState().phase === "idle" && !this.busy;',
+    replace: 'return this.controller?.getState().phase === "ready" && !this.busy;',
+  },
+  {
+    id: "CF3-member-data-kept-after-session-loss",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "      // Fail closed: member data goes, and the redemption machine stops accepting replies.\n      this.clearMemberContext();\n",
+    replace: "      // Fail closed: member data goes, and the redemption machine stops accepting replies.\n",
+  },
+  {
+    id: "CF4-machine-not-told-about-session-end",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: 'if (reason && machine.getState().phase !== "blocked_authorization") machine.sessionEnded(reason);',
+    replace: 'if (reason && machine.getState().phase === "never") machine.sessionEnded(reason);',
+  },
+  {
+    id: "CF5-coffee-selection-without-available-benefit",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: 'if (!this.canNavigate() || !this.summary || this.summary.benefit.state !== "available") return;',
+    replace: "if (!this.canNavigate() || !this.summary) return;",
+  },
+  {
+    id: "CF6-resend-without-the-original-order",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "if (!this.intentPayload) {",
+    replace: "if (false) {",
+  },
+  {
+    id: "CF7-member-data-survives-reload",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    this.generation++;\n    this.clearMemberContext();\n",
+    replace: "    this.generation++;\n",
+  },
+  {
+    id: "CF8-order-shown-for-every-recorded-state",
+    file: "staff/counterPreview/CounterApp.tsx",
+    search: "const prepare = shouldOfferPrepare(state.machine) && state.person !== null;",
+    replace: 'const prepare = state.machine.phase !== "idle" && state.person !== null;',
+  },
+  {
+    id: "CF9-401-not-routed-through-the-controller",
+    file: "staff/counterPreview/previewTransport.ts",
+    search: 'if (classified.failure === "unauthorized") throw new StaffApiError("unauthorized", 401);',
+    replace: 'if (classified.failure === "unauthorized") throw new StaffApiError("server", 401);',
+  },
+  {
+    id: "CF10-transport-body-trusted-without-classification",
+    file: "staff/counterPreview/previewTransport.ts",
+    search: 'if (classified.kind === "domain") return classified.body;',
+    replace: 'if (classified.kind === "domain" || reply.status === 401 || reply.status === 403) return reply.body;',
+  },
+  {
+    id: "CF11-decaf-dropped-from-payload",
+    file: "staff/counterPreview/orderPayload.ts",
+    search: 'if (order.extras.includes("decaf")) modifiers.push({ group: "caffeine", option: "decaf" });',
+    replace: "",
+  },
+  {
+    id: "CF12-preview-code-sent-uncanonicalised",
+    file: "staff/counterPreview/orderPayload.ts",
+    search: "coffeeCode: CANONICAL_COFFEE[order.coffee],",
+    replace: "coffeeCode: order.coffee,",
+  },
+  {
+    id: "CF13-fake-server-allows-second-coffee",
+    file: "staff/counterPreview/fakeServer.ts",
+    search: 'if (this.byDay.has(`${memberId}|${today}`)) return refused("benefit_already_redeemed", 409);',
+    replace: "",
+  },
+  {
+    id: "CF14-lookup-refusal-shows-a-member",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (found.value.kind !== \"found\") {\n      this.lookupNotice = found.value.kind;\n      this.emit();\n      return;\n    }\n",
+    replace: "    if (found.value.kind !== \"found\") {\n      this.lookupNotice = found.value.kind;\n    }\n",
+  },
 ];
 
 // ---- Driver ---------------------------------------------------------------
