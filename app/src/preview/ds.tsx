@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import type { PreviewMembershipState } from "./previewData";
+import type { ReactNode, Ref } from "react";
+import type { CustomerMembershipState } from "./customerView";
 import { cx, sampleQrModules } from "./screens";
 
 /*
@@ -37,10 +37,10 @@ const BTN: Record<BtnTone, string> = {
   "ghost-dark": "border border-[var(--brass-soft)] text-[var(--milk)] hover:border-[var(--brass)]",
 };
 
-export function Btn({ children, tone = "roast", onClick, className, disabled, title }: { children: ReactNode; tone?: BtnTone; onClick?: () => void; className?: string; disabled?: boolean; title?: string }) {
+export function Btn({ children, tone = "roast", onClick, className, disabled, title, type = "button" }: { children: ReactNode; tone?: BtnTone; onClick?: () => void; className?: string; disabled?: boolean; title?: string; type?: "button" | "submit" }) {
   return (
     <button
-      type="button"
+      type={type}
       onClick={onClick}
       disabled={disabled}
       title={title}
@@ -51,11 +51,12 @@ export function Btn({ children, tone = "roast", onClick, className, disabled, ti
   );
 }
 
-const STATE_TEXT: Record<PreviewMembershipState, string> = { active: "Ενεργή", pending: "Αναμονή πληρωμής", expired: "Έληξε" };
-const STATE_DOT: Record<PreviewMembershipState, string> = { active: "bg-[var(--ok)]", pending: "bg-[var(--wait)]", expired: "bg-[var(--stop)]" };
+// "cancelled" is used only by the CUSTOMER-01 customer journey preview.
+const STATE_TEXT: Record<CustomerMembershipState, string> = { active: "Ενεργή", pending: "Αναμονή πληρωμής", expired: "Έληξε", cancelled: "Ακυρώθηκε" };
+const STATE_DOT: Record<CustomerMembershipState, string> = { active: "bg-[var(--ok)]", pending: "bg-[var(--wait)]", expired: "bg-[var(--stop)]", cancelled: "bg-[var(--stop)]" };
 
 /** Status as a dot plus words (never colour alone). */
-export function StateMark({ state, className }: { state: PreviewMembershipState; className?: string }) {
+export function StateMark({ state, className }: { state: CustomerMembershipState; className?: string }) {
   return (
     <span className={cx("inline-flex items-center gap-2 whitespace-nowrap", className)}>
       <span className={cx("h-2 w-2 flex-none rounded-full", STATE_DOT[state])} aria-hidden="true" />
@@ -129,8 +130,55 @@ export function Glyph({ name, size = 20, className }: { name: "scan" | "phone" |
   );
 }
 
-/** Read-only sample text field (the preview never submits or stores anything). */
-export function Field({ label, value, type = "text", hint }: { label: string; value: string; type?: string; hint?: string }) {
+type EditableField = {
+  onChange: (value: string) => void;
+  id: string;
+  name: string;
+  error?: string;
+  required?: boolean;
+  autoComplete?: string;
+  inputMode?: "text" | "tel" | "email";
+};
+
+/**
+ * Read-only sample text field (the preview never submits or stores anything).
+ * CUSTOMER-01: with `edit` (customer journey preview only) it becomes a real,
+ * controlled input with an accessible error; without it the approved markup is unchanged.
+ */
+export function Field({ label, value, type = "text", hint, edit, inputRef }: { label: string; value: string; type?: string; hint?: string; edit?: EditableField; inputRef?: Ref<HTMLInputElement> }) {
+  if (edit) {
+    const hintId = `${edit.id}-hint`;
+    const errorId = `${edit.id}-error`;
+    const describedBy = [edit.error ? errorId : null, hint ? hintId : null].filter(Boolean).join(" ") || undefined;
+    return (
+      <div>
+        <label htmlFor={edit.id} className="t-label block text-[var(--ink)]">
+          {label} <span className="t-small font-normal text-[var(--ink-3)]">{edit.required ? "απαιτείται" : "προαιρετικό"}</span>
+        </label>
+        <input
+          ref={inputRef}
+          id={edit.id}
+          name={edit.name}
+          type={type}
+          value={value}
+          onChange={(e) => edit.onChange(e.target.value)}
+          required={edit.required}
+          aria-required={edit.required || undefined}
+          aria-invalid={edit.error ? true : undefined}
+          aria-describedby={describedBy}
+          autoComplete={edit.autoComplete}
+          inputMode={edit.inputMode}
+          className={cx("t-body mt-2 min-h-13 w-full rounded-[12px] border bg-[var(--paper)] px-4 text-[var(--ink)] outline-none focus:border-[var(--ink)]", edit.error ? "border-[var(--stop)]" : "border-[var(--rule-strong)]")}
+        />
+        {edit.error && (
+          <span id={errorId} className="t-small mt-1.5 block font-semibold text-[var(--stop)]">
+            {edit.error}
+          </span>
+        )}
+        {hint && <span id={hintId} className="t-small mt-1.5 block text-[var(--ink-3)]">{hint}</span>}
+      </div>
+    );
+  }
   return (
     <label className="block">
       <span className="t-label block text-[var(--ink)]">{label}</span>

@@ -4,11 +4,14 @@ on:
     paths:
       - 'app/src/club/**'
       - 'app/src/staff/**'
+      - 'app/src/preview/**'
+      - 'app/src/customerPreview/**'
       - 'app/tests/club/**'
       - 'app/tests/staff/**'
       - 'app/staff.html'
       - 'app/recovery-preview.html'
       - 'app/counter-preview.html'
+      - 'app/customer-preview.html'
       - 'app/vite.staff.config.ts'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/src/index.css'
@@ -27,11 +30,14 @@ on:
     paths:
       - 'app/src/club/**'
       - 'app/src/staff/**'
+      - 'app/src/preview/**'
+      - 'app/src/customerPreview/**'
       - 'app/tests/club/**'
       - 'app/tests/staff/**'
       - 'app/staff.html'
       - 'app/recovery-preview.html'
       - 'app/counter-preview.html'
+      - 'app/customer-preview.html'
       - 'app/vite.staff.config.ts'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/src/index.css'
@@ -80,10 +86,10 @@ jobs:
         run: npm run package:club-plugin
       - name: Club + staff tests (fake fetch/clock, no network, TZ=UTC+14)
         run: npm run test:club
-      - name: Mutation partition is exact (255 mutants, 2 shards of 128 + 127, nothing duplicated or missing)
+      - name: Mutation partition is exact (268 mutants, 2 shards of 134 + 134, nothing duplicated or missing)
         run: |
           node scripts/run-club-mutations.mjs --verify-partition 2
-          test "$(node scripts/run-club-mutations.mjs --list | wc -l)" = "255"
+          test "$(node scripts/run-club-mutations.mjs --list | wc -l)" = "268"
       - name: Isolated-build detector can fail (canary)
         run: node scripts/check-isolated-build.mjs --canary
       - name: Non-shipped files (tests, docs, scripts, unwired modules) do not change the shipped build
@@ -114,7 +120,7 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - name: Mutation shard 1/2 (123 mutants)
-        run: node scripts/run-club-mutations.mjs --shard 1/2 --expect-total 255 --out mutation-shard-1.json
+        run: node scripts/run-club-mutations.mjs --shard 1/2 --expect-total 268 --out mutation-shard-1.json
       - name: Upload the shard report
         if: always()
         uses: actions/upload-artifact@v4
@@ -143,7 +149,7 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - name: Mutation shard 2/2 (123 mutants)
-        run: node scripts/run-club-mutations.mjs --shard 2/2 --expect-total 255 --out mutation-shard-2.json
+        run: node scripts/run-club-mutations.mjs --shard 2/2 --expect-total 268 --out mutation-shard-2.json
       - name: Upload the shard report
         if: always()
         uses: actions/upload-artifact@v4
@@ -157,7 +163,7 @@ jobs:
         working-directory: .
         run: git diff --exit-code -- app/src app/tests app/scripts
 
-  # Proves the two shards TOGETHER covered all 255 mutants exactly once. It runs even
+  # Proves the two shards TOGETHER covered all 268 mutants exactly once. It runs even
   # when a shard failed or was cancelled (if: always()) and then fails on the missing
   # or incomplete report, so the workflow can never be green on a partial run.
   club-mutation-coverage:
@@ -187,6 +193,6 @@ jobs:
       - name: Shards together cover every mutant exactly once
         if: always()
         run: >
-          node scripts/check-mutation-coverage.mjs --expect-total 255 --shards 2
+          node scripts/check-mutation-coverage.mjs --expect-total 268 --shards 2
           mutation-reports/mutation-shard-1/mutation-shard-1.json
           mutation-reports/mutation-shard-2/mutation-shard-2.json

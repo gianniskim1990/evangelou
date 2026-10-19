@@ -350,8 +350,9 @@ const mutants = [
   {
     id: "U10-offer-payment-button-enabled",
     file: "preview/CustomerPreview.tsx",
-    search: '<Btn tone="brass" disabled title="Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"',
-    replace: '<Btn tone="brass" title="Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"',
+    // Re-aimed CUSTOMER-01: the Offer takes an optional journey pay action; without it (design preview) it must stay disabled.
+    search: '<Btn tone="brass" disabled={!onPay} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"}',
+    replace: '<Btn tone="brass" disabled={false} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"}',
   },
   {
     id: "U11-offer-says-30-days",
@@ -1562,6 +1563,85 @@ const mutants = [
     file: "staff/redemptionRecovery/machine.ts",
     search: "      s.phase === \"recorded_now\" ||\n",
     replace: "      s.phase === \"recorded_now\" || s.phase === \"redemption_unresolved\" ||\n",
+  },
+  // CUSTOMER-01 local-only customer journey: the rules it simulates and its gates (K1-K13).
+  {
+    id: "K1-membership-end-inclusive",
+    file: "customerPreview/customerServer.ts",
+    search: "    if (this.periods.some((p) => p.start <= now && now < p.end)) return \"active\";",
+    replace: "    if (this.periods.some((p) => p.start <= now && now <= p.end)) return \"active\";",
+  },
+  {
+    id: "K2-pending-payment-treated-as-active",
+    file: "customerPreview/customerServer.ts",
+    search: "    return this.periods.length === 0 ? \"pending\" : \"expired\";",
+    replace: "    return this.periods.length === 0 ? \"active\" : \"expired\";",
+  },
+  {
+    id: "K3-second-coffee-same-athens-day",
+    file: "customerPreview/customerServer.ts",
+    search: "    if (this.redemptions.some((r) => r.date === date)) return this.refuse(",
+    replace: "    if (false) return this.refuse(",
+  },
+  {
+    id: "K4-coffee-without-active-membership",
+    file: "customerPreview/customerServer.ts",
+    search: "    if (state !== \"active\") return this.refuse(",
+    replace: "    if (state === \"cancelled\") return this.refuse(",
+  },
+  {
+    id: "K5-cancellation-ignored",
+    file: "customerPreview/customerServer.ts",
+    search: "    if (this.cancelledAt !== null && this.cancelledAt <= now) return \"cancelled\";\n",
+    replace: "",
+  },
+  {
+    id: "K6-registration-without-terms",
+    file: "customerPreview/customerServer.ts",
+    search: "    if (!input.termsAccepted) return this.refuse(",
+    replace: "    if (false) return this.refuse(",
+  },
+  {
+    id: "K7-early-renewal-loses-remaining-days",
+    file: "customerPreview/membershipCalendar.ts",
+    search: "  const start = confirmedAt < currentPaidEnd ? currentPaidEnd : confirmedAt;",
+    replace: "  const start = confirmedAt;",
+  },
+  {
+    id: "K8-month-not-clamped",
+    file: "customerPreview/membershipCalendar.ts",
+    search: "  return athensInstant({ ...w, y, m, d: Math.min(w.d, daysInMonth(y, m)) });",
+    replace: "  return athensInstant({ ...w, y, m, d: Math.min(w.d, 30) });",
+  },
+  {
+    id: "K9-dst-repeated-time-latest",
+    file: "customerPreview/membershipCalendar.ts",
+    search: "  if (valid.length > 0) return Math.min(...valid);",
+    replace: "  if (valid.length > 0) return Math.max(...valid);",
+  },
+  {
+    id: "K10-form-submits-with-errors",
+    file: "customerPreview/CustomerJourney.tsx",
+    search: "    if (first) {\n      const count",
+    replace: "    if (false) {\n      const count",
+  },
+  {
+    id: "K11-consents-gate-open",
+    file: "customerPreview/CustomerJourney.tsx",
+    search: "          <Btn onClick={() => go(\"offer\")} disabled={!terms} className=\"px-8\">Συνέχεια</Btn>",
+    replace: "          <Btn onClick={() => go(\"offer\")} disabled={false} className=\"px-8\">Συνέχεια</Btn>",
+  },
+  {
+    id: "K12-active-member-not-on-card",
+    file: "customerPreview/journey.ts",
+    search: "  return s.state === \"active\" ? \"card\" : \"dashboard\";",
+    replace: "  return \"dashboard\";",
+  },
+  {
+    id: "K13-greek-mobile-not-required",
+    file: "customerPreview/registration.ts",
+    search: "  return /^69\\d{8}$/.test(national) ? `+30${national}` : null;",
+    replace: "  return /^\\d{10}$/.test(national) ? `+30${national}` : null;",
   },
 ];
 

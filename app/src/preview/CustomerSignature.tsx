@@ -1,15 +1,15 @@
-import { CLUB_RULES, CUSTOMER, COFFEES, addDays, greekDate, type PreviewMembershipState } from "./previewData";
+import { CLUB_RULES, COFFEES, greekDate, type PreviewMembershipState } from "./previewData";
 import type { CustomerScreen } from "./screens";
+import { paymentAction, sampleCustomerView, type CustomerActions, type CustomerMembershipState, type CustomerView } from "./customerView";
 import { Btn, Glyph, Logo, PassQr, PreviewNote, WingLines } from "./ds";
 
 /* UI-01.R1 signature screens, Customer Club: welcome and membership pass. */
 
-type Props = {
-  go: (screen: CustomerScreen) => void;
-  state: PreviewMembershipState;
-  coffeeUsedToday: boolean;
-  today: string;
-};
+/** Either the approved sample (state + switch) or a CustomerView from the customer journey preview (CUSTOMER-01). */
+type PassProps = { go: (screen: CustomerScreen) => void; actions?: CustomerActions } & (
+  | { view: CustomerView }
+  | { state: PreviewMembershipState; coffeeUsedToday: boolean; today: string }
+);
 
 export function ClubWelcome({ go }: { go: (screen: CustomerScreen) => void }) {
   const terms: { figure: string; title: string; body: string }[] = [
@@ -79,22 +79,32 @@ export function ClubWelcome({ go }: { go: (screen: CustomerScreen) => void }) {
   );
 }
 
-function paidUntil(state: PreviewMembershipState, today: string): string | null {
-  if (state === "pending") return null;
-  return addDays(today, state === "active" ? CUSTOMER.paidUntilOffsetDays : -3);
-}
-
-function todayLine(state: PreviewMembershipState, used: boolean): { headline: string; detail: string; tone: "ready" | "done" | "blocked" } {
+function todayLine(state: CustomerMembershipState, used: boolean): { headline: string; detail: string; tone: "ready" | "done" | "blocked" } {
   if (state === "pending") return { headline: "Σε αναμονή πληρωμής", detail: "Η κάρτα ενεργοποιείται μόλις επιβεβαιωθεί η πληρωμή.", tone: "blocked" };
   if (state === "expired") return { headline: "Η συνδρομή έληξε", detail: "Ανανεώστε για να ξαναβρείτε τον καφέ της ημέρας.", tone: "blocked" };
+  if (state === "cancelled") return { headline: "Η συνδρομή ακυρώθηκε", detail: "Η κάρτα δεν δίνει καφέ. Για ερωτήσεις, μιλήστε με το κατάστημα.", tone: "blocked" };
   if (used) return { headline: "Τον απολαύσατε σήμερα", detail: "Ο επόμενος καφές σας περιμένει από τα μεσάνυχτα.", tone: "done" };
   return { headline: "Ο σημερινός καφές σας περιμένει", detail: "Δείξτε αυτή την κάρτα στο ταμείο.", tone: "ready" };
 }
 
-export function MemberPass({ go, state, coffeeUsedToday, today }: Props) {
-  const until = paidUntil(state, today);
-  const line = todayLine(state, coffeeUsedToday);
-  const daysLeft = state === "active" ? CUSTOMER.paidUntilOffsetDays : 0;
+function untilLine(view: CustomerView): string {
+  const at = view.paidUntilTime ? `, ${view.paidUntilTime}` : "";
+  if (view.state === "cancelled") return "Ακυρώθηκε";
+  if (!view.paidUntil) return "Δεν έχει ενεργοποιηθεί";
+  return view.state === "active" ? `Ισχύει έως ${greekDate(view.paidUntil)}${at}` : `Έληξε ${greekDate(view.paidUntil)}${at}`;
+}
+
+function daysLeftWord(n: number): string {
+  if (n <= 0) return "Λήγει σήμερα";
+  return n === 1 ? "1 ημέρα" : `${n} ημέρες`;
+}
+
+export function MemberPass(props: PassProps) {
+  const { go, actions } = props;
+  const view = "view" in props ? props.view : sampleCustomerView(props.state, props.coffeeUsedToday, props.today);
+  const { state, today, member } = view;
+  const line = todayLine(state, view.coffeeUsedToday);
+  const pay = paymentAction(view, actions);
 
   return (
     <div className="on-dark min-h-[calc(100svh-52px)] bg-[var(--roast)] text-[var(--milk)]">
@@ -114,8 +124,8 @@ export function MemberPass({ go, state, coffeeUsedToday, today }: Props) {
                 <Logo className="h-9 brightness-[1.7] saturate-[0.9]" />
                 <span className="t-label border-l border-[var(--brass-soft)] pl-3 text-[var(--brass)]">Club</span>
               </div>
-              <p className="t-title mt-16 text-[var(--milk)]">{CUSTOMER.name}</p>
-              <p className="t-small mt-1 text-[var(--milk)]/55">Μέλος από τις {greekDate(CUSTOMER.memberSince)}</p>
+              <p className="t-title mt-16 text-[var(--milk)]">{member.name}</p>
+              <p className="t-small mt-1 text-[var(--milk)]/55">Μέλος από τις {greekDate(member.memberSince)}</p>
 
               <div className="mt-8 border-t border-[var(--brass-soft)] pt-5">
                 <p className="t-small text-[var(--milk)]/55">{greekDate(today, true)}</p>
@@ -132,8 +142,8 @@ export function MemberPass({ go, state, coffeeUsedToday, today }: Props) {
                 <PassQr seed={11} size={188} muted={state !== "active"} />
               </div>
               <div className="t-small t-num mt-5 flex items-baseline justify-between gap-4 text-[var(--ink-2)]">
-                <span>{until ? (state === "active" ? `Ισχύει έως ${greekDate(until)}` : `Έληξε ${greekDate(until)}`) : "Δεν έχει ενεργοποιηθεί"}</span>
-                {state === "active" && <span className="font-semibold text-[var(--ink)]">{daysLeft} ημέρες</span>}
+                <span>{untilLine(view)}</span>
+                {state === "active" && <span className="font-semibold text-[var(--ink)]">{daysLeftWord(view.daysLeft)}</span>}
               </div>
             </div>
           </article>
@@ -153,11 +163,11 @@ export function MemberPass({ go, state, coffeeUsedToday, today }: Props) {
             <dt>Ανανέωση</dt>
             <dd className="m-0 text-right text-[var(--milk)]">Χειροκίνητη, {CLUB_RULES.monthlyPriceEur} € / ημερολογιακό μήνα</dd>
             <dt>Καφέδες αυτόν τον μήνα</dt>
-            <dd className="t-num m-0 text-right text-[var(--milk)]">{CUSTOMER.visitsThisMonth}</dd>
+            <dd className="t-num m-0 text-right text-[var(--milk)]">{view.visitsThisMonth}</dd>
           </dl>
-          {state !== "active" && (
-            <Btn tone="brass" disabled title="Μη διαθέσιμο στην προεπισκόπηση" className="mt-8">
-              {state === "expired" ? `Ανανέωση ${CLUB_RULES.monthlyPriceEur} €` : "Ολοκλήρωση πληρωμής"}
+          {pay && (
+            <Btn tone="brass" disabled={!pay.run} title={pay.run ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={pay.run} className="mt-8">
+              {pay.label}
             </Btn>
           )}
           <PreviewNote dark className="mt-10">Ο κωδικός είναι δείγμα: δεν αντιστοιχεί σε μέλος, δεν σαρώνεται και δεν εξαργυρώνεται.</PreviewNote>
