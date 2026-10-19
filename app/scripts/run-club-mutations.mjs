@@ -404,8 +404,8 @@ const mutants = [
   {
     id: "U19-continue-enabled-for-incomplete-order",
     file: "preview/StaffOrder.tsx",
-    search: "disabled={!ready} onClick={onContinue}",
-    replace: "disabled={false} onClick={onContinue}",
+    search: "disabled={!ready || busy} aria-busy",
+    replace: "disabled={busy} aria-busy",
   },
   {
     id: "U21-cold-drinks-offered-hot-notes",
@@ -1420,6 +1420,148 @@ const mutants = [
     file: "staff/recoveryScreen/RecoveryScreen.tsx",
     search: "{contract.actions.length > 0 && (",
     replace: "{contract.actions.length >= 0 && (",
+  },
+  // ---- UI-04O integrated counter-flow preview (flow, DOM and payload tests)
+  {
+    id: "CF1-retry-starts-a-new-intent",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "result = await m.retryRedemption();",
+    replace: "result = await m.startRedemption(this.summary?.member.id ?? \"\", this.intentPayload!);",
+  },
+  {
+    id: "CF2-navigation-allowed-during-open-intent",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: 'return this.controller?.getState().phase === "ready" && this.machine.getState().phase === "idle" && !this.busy;',
+    replace: 'return this.controller?.getState().phase === "ready" && !this.busy;',
+  },
+  {
+    id: "CF3-member-data-kept-after-session-loss",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "      // Fail closed: member data goes, and the redemption machine stops accepting replies.\n      this.clearMemberContext();\n",
+    replace: "      // Fail closed: member data goes, and the redemption machine stops accepting replies.\n",
+  },
+  {
+    id: "CF4-machine-not-told-about-session-end",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: 'if (reason && machine.getState().phase !== "blocked_authorization") machine.sessionEnded(reason);',
+    replace: 'if (reason && machine.getState().phase === "never") machine.sessionEnded(reason);',
+  },
+  {
+    id: "CF5-coffee-selection-without-available-benefit",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: '    this.screen = summary.value.benefit.state === "available" ? "coffee" : "member";',
+    replace: '    this.screen = "coffee";',
+  },
+  {
+    id: "CF6-resend-without-the-original-order",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "if (!this.intentPayload) {",
+    replace: "if (false) {",
+  },
+  {
+    id: "CF7-member-data-survives-reload",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    this.generation++;\n    this.clearMemberContext();\n",
+    replace: "    this.generation++;\n",
+  },
+  {
+    id: "CF8-order-shown-for-every-recorded-state",
+    file: "staff/counterPreview/CounterApp.tsx",
+    search: "const prepare = shouldOfferPrepare(state.machine) && state.person !== null;",
+    replace: 'const prepare = state.machine.phase !== "idle" && state.person !== null;',
+  },
+  {
+    id: "CF9-401-not-routed-through-the-controller",
+    file: "staff/counterPreview/previewTransport.ts",
+    search: 'if (classified.failure === "unauthorized") throw new StaffApiError("unauthorized", 401);',
+    replace: 'if (classified.failure === "unauthorized") throw new StaffApiError("server", 401);',
+  },
+  {
+    id: "CF10-transport-body-trusted-without-classification",
+    file: "staff/counterPreview/previewTransport.ts",
+    search: 'if (classified.kind === "domain") return classified.body;',
+    replace: 'if (classified.kind === "domain" || reply.status === 401 || reply.status === 403) return reply.body;',
+  },
+  {
+    id: "CF11-decaf-dropped-from-payload",
+    file: "staff/counterPreview/orderPayload.ts",
+    search: 'if (order.extras.includes("decaf")) modifiers.push({ group: "caffeine", option: "decaf" });',
+    replace: "",
+  },
+  {
+    id: "CF12-preview-code-sent-uncanonicalised",
+    file: "staff/counterPreview/orderPayload.ts",
+    search: "coffeeCode: CANONICAL_COFFEE[order.coffee],",
+    replace: "coffeeCode: order.coffee,",
+  },
+  {
+    id: "CF13-fake-server-allows-second-coffee",
+    file: "staff/counterPreview/fakeServer.ts",
+    search: 'if (this.byDay.has(`${memberId}|${today}`)) return refused("benefit_already_redeemed", 409);',
+    replace: "",
+  },
+  {
+    id: "CF14-lookup-refusal-shows-a-member",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (found.value.kind !== \"found\") {\n      this.lookupNotice = found.value.kind;\n      this.emit();\n      return;\n    }\n",
+    replace: "    if (found.value.kind !== \"found\") {\n      this.lookupNotice = found.value.kind;\n    }\n",
+  },
+  // UI-04O fast counter (owner decision 2026-10-19): one tap, close only a FRESH commit (CF15, CF17, CF19, CF21-CF24, R29-R30).
+  // CF16/CF18/CF20 were dropped as EQUIVALENT: toPreparedPayload() itself rejects an incomplete order; a stale result
+  // never leaves the machine in recorded_now; finish() always succeeds from recorded_now.
+  {
+    id: "CF15-double-tap-sends-twice",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (this.submitting || !this.canNavigate() || !this.summary || this.screen !== \"coffee\") return \"rejected\";",
+    replace: "    if (!this.canNavigate() || !this.summary || this.screen !== \"coffee\") return \"rejected\";",
+  },
+  {
+    id: "CF17-replay-closed-as-fresh-success",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (result !== \"applied\" || machine !== this.machine || machine.getState().phase !== \"recorded_now\") return;",
+    replace: "    if (result !== \"applied\" || machine !== this.machine || machine.getState().phase === \"idle\") return;",
+  },
+  {
+    id: "CF19-fresh-commit-not-closed",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (result === \"rejected\") this.intentPayload = null;\n    this.closeIfFresh(machine, result);",
+    replace: "    if (result === \"rejected\") this.intentPayload = null;",
+  },
+  {
+    id: "CF21-recovery-fresh-commit-not-closed",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "        result = await m.retryPersistence();\n        this.closeIfFresh(m, result);",
+    replace: "        result = await m.retryPersistence();",
+  },
+  {
+    id: "CF22-success-notice-not-dismissable-by-seq",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (this.success?.seq !== seq) return;",
+    replace: "    if (!this.success) return;",
+  },
+  {
+    id: "CF23-configurator-hidden-while-sending",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    const sending = this.submitting && (machine.phase === \"submitting_redemption\" || machine.phase === \"recorded_now\");",
+    replace: "    const sending = false;",
+  },
+  {
+    id: "CF24-final-button-not-busy",
+    file: "staff/counterPreview/CounterApp.tsx",
+    search: "        busy={state.submitting}",
+    replace: "        busy={false}",
+  },
+  {
+    id: "R29-fresh-commit-not-closable",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      s.phase === \"recorded_now\" ||\n",
+    replace: "      (s.phase === \"recorded_now\" && s.prepareAcknowledged) ||\n",
+  },
+  {
+    id: "R30-any-recorded-state-closable-as-fresh",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      s.phase === \"recorded_now\" ||\n",
+    replace: "      s.phase === \"recorded_now\" || s.phase === \"redemption_unresolved\" ||\n",
   },
 ];
 

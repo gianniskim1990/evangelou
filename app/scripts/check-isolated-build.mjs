@@ -147,6 +147,10 @@ async function shippedGraph(tree) {
   for (const entry of ["src/main.tsx", "src/staff/main.tsx"]) {
     const result = await esbuild.build({
       entryPoints: [join(cwd, entry)],
+      // metafile inputs are relative to the working directory, and the result must be relative to
+      // the WORKTREE root (not the real checkout): otherwise no path matches a changed file and every
+      // source change, even to a shipped UI file, counts as non-shipped (UI-04O fix).
+      absWorkingDir: cwd,
       bundle: true,
       write: false,
       metafile: true,
@@ -159,7 +163,7 @@ async function shippedGraph(tree) {
       splitting: true,
     });
     for (const input of Object.keys(result.metafile.inputs)) {
-      shipped.add(relative(repoRoot, join(cwd, input)).split(sep).join("/"));
+      shipped.add(relative(tree, join(cwd, input)).split(sep).join("/"));
     }
   }
   return shipped;

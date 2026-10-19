@@ -40,7 +40,25 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   );
 }
 
-export function CoffeeConfigurator({ member, order, dispatch, onContinue }: { member: PreviewMember; order: CoffeeOrder; dispatch: Dispatch<OrderAction>; onContinue: () => void }) {
+/**
+ * Optional props (UI-04O fast counter): `continueLabel` names the final action and `busy` disables it
+ * while a request is in flight. The defaults render exactly the approved UI-02 markup ("Συνέχεια").
+ */
+export function CoffeeConfigurator({
+  member,
+  order,
+  dispatch,
+  onContinue,
+  continueLabel = "Συνέχεια",
+  busy = false,
+}: {
+  member: PreviewMember;
+  order: CoffeeOrder;
+  dispatch: Dispatch<OrderAction>;
+  onContinue: () => void;
+  continueLabel?: string;
+  busy?: boolean;
+}) {
   const usual = usualOrder(member);
   const groups = visibleGroups(order);
   const gaps = missing(order);
@@ -137,8 +155,8 @@ export function CoffeeConfigurator({ member, order, dispatch, onContinue }: { me
               <span className="text-[var(--ink-2)]">{`Λείπει: ${gaps.join(", ")}`}</span>
             )}
           </p>
-          <button type="button" disabled={!ready} onClick={onContinue} className="press min-h-14 flex-none rounded-[12px] bg-[var(--roast)] px-8 text-[17px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)] disabled:cursor-not-allowed disabled:opacity-40">
-            Συνέχεια
+          <button type="button" disabled={!ready || busy} aria-busy={busy || undefined} onClick={onContinue} className="press min-h-14 flex-none rounded-[12px] bg-[var(--roast)] px-8 text-[17px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)] disabled:cursor-not-allowed disabled:opacity-40">
+            {continueLabel}
           </button>
         </div>
       </div>

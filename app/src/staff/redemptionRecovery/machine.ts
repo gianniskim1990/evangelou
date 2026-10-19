@@ -766,8 +766,12 @@ export class StaffRedemptionMachine {
   /**
    * Close a settled state and clear the persisted context. A recorded but
    * unconfirmed redemption may be closed too (it stays "unconfirmed" on the
-   * server, visible to management review): making confirmation mandatory is
-   * an open owner decision. Never available while anything is unresolved.
+   * server, visible to management review). The owner decided (UI-04O) that
+   * the handoff statement is OPTIONAL and that a fresh commit may be closed
+   * without acknowledging the prepare prompt: finish() never pretends that a
+   * preparation or a handoff happened. `availableActions()` is unchanged, so
+   * the standalone recovery screen still shows the single prepare prompt.
+   * Never available while anything is unresolved.
    */
   finish(): Result {
     const s = this.state;
@@ -777,7 +781,10 @@ export class StaffRedemptionMachine {
       s.phase === "previously_recorded_unconfirmed" ||
       s.phase === "redemption_refused" ||
       s.phase === "previous_business_date" ||
-      (s.phase === "recorded_now" && s.prepareAcknowledged) ||
+      // A server-confirmed FRESH commit is settled (owner decision UI-04O, 2026-10-19): the fast
+      // counter may close it without a separate "prepare" acknowledgement or handoff statement.
+      // Closing records nothing: no preparation, no handoff, no second request.
+      s.phase === "recorded_now" ||
       // A handoff statement that was never sent; the redemption itself is committed.
       (s.phase === "persistence_blocked" && s.operation === "handoff" && !s.mayHaveBeenSent);
     if (!settled || this.busy) return "rejected";

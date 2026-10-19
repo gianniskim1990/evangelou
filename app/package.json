@@ -15,7 +15,8 @@
     "build:staff": "vite build --config vite.staff.config.ts",
     "package:club-plugin": "node scripts/package-club-plugin.mjs",
     "check:isolated-build": "node scripts/check-isolated-build.mjs",
-    "recovery:preview": "vite --host 127.0.0.1 --open /recovery-preview.html"
+    "recovery:preview": "vite --host 127.0.0.1 --open /recovery-preview.html",
+    "counter:preview": "vite --host 127.0.0.1 --open /counter-preview.html"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.4",

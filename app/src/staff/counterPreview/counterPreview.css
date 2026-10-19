@@ -1,0 +1,274 @@
+/*
+ * UI-04O LOCAL-ONLY counter-flow preview tooling (scenario picker, tools,
+ * server log). Plain CSS, every selector prefixed "evc-cf", imported only by
+ * the preview entry, so nothing here can enter the shipped stylesheets.
+ * The staff screens themselves use the approved UI-02 design tokens.
+ */
+.evc-cf {
+  min-height: 100vh;
+  background: #ece7df;
+}
+
+.evc-cf__bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: #2a211b;
+  color: #f8f6f1;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+  padding: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 14px;
+}
+
+@media (max-width: 719px) {
+  .evc-cf__bar {
+    position: static;
+  }
+}
+
+.evc-cf__tag {
+  flex: none;
+  background: #a3302c;
+  color: #fff;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.evc-cf__claim {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.evc-cf__control {
+  min-height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(200, 178, 124, 0.45);
+  background: #3a2e25;
+  color: #f8f6f1;
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.evc-cf__control:hover {
+  border-color: #c8b27c;
+}
+.evc-cf__control[aria-pressed="true"],
+.evc-cf__control[aria-expanded="true"] {
+  background: #f8f6f1;
+  color: #1e1713;
+}
+.evc-cf__control:focus-visible,
+.evc-cf__tool:focus-visible {
+  outline: 3px solid #c8b27c;
+  outline-offset: 2px;
+}
+
+.evc-cf__select {
+  max-width: min(100%, 420px);
+  flex: 1 1 220px;
+}
+
+.evc-cf__panel {
+  background: #fffdf9;
+  color: #221b16;
+  border-bottom: 1px solid #c9bfae;
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+@media (min-width: 960px) {
+  .evc-cf__panel {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+    padding: 16px 24px;
+  }
+}
+
+.evc-cf__panel h2 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5e544b;
+  margin: 0 0 8px;
+}
+
+.evc-cf__steps {
+  margin: 0;
+  padding-left: 20px;
+}
+.evc-cf__steps li + li {
+  margin-top: 4px;
+}
+
+.evc-cf__expect {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-left: 4px solid #1f6a47;
+  background: #e2efe6;
+  border-radius: 8px;
+}
+
+.evc-cf__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.evc-cf__tool {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid #c9bfae;
+  background: #f8f6f1;
+  color: #221b16;
+  padding: 0 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.evc-cf__tool:hover {
+  border-color: #221b16;
+}
+
+.evc-cf__fault {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.evc-cf__fault select {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid #c9bfae;
+  background: #fff;
+  padding: 0 8px;
+  font: inherit;
+  max-width: 100%;
+}
+
+.evc-cf__meta {
+  margin: 10px 0 0;
+  color: #5e544b;
+  font-size: 13px;
+}
+
+.evc-cf__log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  max-height: 260px;
+  overflow: auto;
+}
+.evc-cf__log li {
+  padding: 6px 0;
+  border-bottom: 1px solid #ddd5c8;
+  display: grid;
+  grid-template-columns: 2.4em minmax(0, 1fr);
+  gap: 2px 8px;
+}
+.evc-cf__log code,
+.evc-cf__store {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.evc-cf__lost {
+  color: #9a2f2b;
+  font-weight: 700;
+}
+.evc-cf__store {
+  display: block;
+  margin-top: 6px;
+  padding: 8px;
+  background: #f8f6f1;
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+
+/* ---- Fast counter (owner decision UI-04O, 2026-10-19) ----------------------------------------- */
+
+/* Customer identity and eligibility, kept visible above the configurator. */
+.evc-cf-who {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 20px 0;
+}
+.evc-cf-who__card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  border-radius: 14px;
+  padding: 12px 18px;
+}
+.evc-cf-who__name {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.evc-cf-who__meta {
+  font-size: 15px;
+  color: var(--ink-2);
+}
+.evc-cf-who__verdict {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ok);
+}
+@media (min-width: 768px) {
+  .evc-cf-who {
+    padding: 24px 32px 0;
+  }
+}
+
+/* Brief, non-blocking success notice after a server-confirmed FRESH commit. No button. */
+.evc-cf-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 16px 26px;
+  border-radius: 999px;
+  background: var(--ok, #2f6b3d);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(30, 24, 18, 0.25);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .evc-cf-toast {
+    animation: evc-cf-toast-in 160ms ease-out;
+  }
+}
+@keyframes evc-cf-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
