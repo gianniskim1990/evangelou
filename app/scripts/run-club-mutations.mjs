@@ -350,8 +350,9 @@ const mutants = [
   {
     id: "U10-offer-payment-button-enabled",
     file: "preview/CustomerPreview.tsx",
-    search: '<Btn tone="brass" disabled title="Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"',
-    replace: '<Btn tone="brass" title="Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"',
+    // Re-aimed CUSTOMER-01: the Offer takes an optional journey pay action; without it (design preview) it must stay disabled.
+    search: '<Btn tone="brass" disabled={!onPay} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"}',
+    replace: '<Btn tone="brass" disabled={false} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"}',
   },
   {
     id: "U11-offer-says-30-days",
