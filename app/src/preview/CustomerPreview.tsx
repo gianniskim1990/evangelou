@@ -1,14 +1,21 @@
 import { useState, type ReactNode } from "react";
-import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, CUSTOMER, addDays, coffeeName, greekDate, memberHistory, type PreviewMembershipState, type PreviewRedemption } from "./previewData";
+import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, CUSTOMER, addDays, coffeeName, greekDate, type PreviewMembershipState } from "./previewData";
 import { cx, type CustomerScreen } from "./screens";
 import { ClubWelcome, MemberPass } from "./CustomerSignature";
 import { historyPreparation, preparationLine } from "./coffeeConfig";
+import { membershipLine, paymentAction, renewalLine, sampleCustomerView, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
 import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote, StateMark, Steps } from "./ds";
+import { ONBOARDING_COPY, ONBOARDING_STEPS, consentsLine } from "./onboardingCopy";
 
 /*
  * UI-02 design preview, Customer Club (visual only, synthetic data). Uses the
  * approved "contemporary coffee club" system; welcome and card are the UI-01.R1
  * reference screens. Nothing here registers, pays, stores or redeems anything.
+ *
+ * CUSTOMER-01: the member screens render a CustomerView. This design preview
+ * passes the approved sample (sampleCustomerView, unchanged output); the
+ * LOCAL-ONLY customer journey preview (src/customerPreview/) passes one built
+ * from its simulated server, plus optional actions.
  */
 
 type Props = {
@@ -19,34 +26,31 @@ type Props = {
   today: string;
 };
 
-const ONBOARDING_STEPS = ["Στοιχεία", "Ενημερώσεις", "Συνδρομή"];
+/** What every member-area screen receives. */
+export type MemberScreenProps = { view: CustomerView; go: (screen: CustomerScreen) => void; actions?: CustomerActions };
 
 export function CustomerPreview(props: Props) {
   const { screen, go } = props;
+  const view = sampleCustomerView(props.state, props.coffeeUsedToday, props.today);
   if (screen === "welcome") return <ClubWelcome go={go} />;
-  if (screen === "card") return <MemberPass {...props} />;
+  if (screen === "card") return <MemberPass go={go} view={view} />;
   if (screen === "register") return <Register go={go} />;
   if (screen === "newsletter") return <Newsletter go={go} />;
   if (screen === "offer") return <Offer go={go} />;
   return (
     <MemberChrome screen={screen} go={go}>
-      {screen === "dashboard" && <Dashboard {...props} />}
+      {screen === "dashboard" && <Dashboard view={view} go={go} />}
       {screen === "states" && <States today={props.today} />}
-      {screen === "today" && <Today {...props} />}
-      {screen === "history" && <History today={props.today} state={props.state} />}
-      {screen === "profile" && <Profile {...props} />}
+      {screen === "today" && <Today view={view} go={go} />}
+      {screen === "history" && <History view={view} go={go} />}
+      {screen === "profile" && <Profile view={view} go={go} />}
     </MemberChrome>
   );
 }
 
 // ---- Shared chrome ------------------------------------------------------------------
 
-function paidUntil(state: PreviewMembershipState, today: string): string | null {
-  if (state === "pending") return null;
-  return addDays(today, state === "active" ? CUSTOMER.paidUntilOffsetDays : -3);
-}
-
-function Onboarding({ step, title, lede, aside, children, go }: { step: number; title: string; lede: string; aside?: ReactNode; children: ReactNode; go: (s: CustomerScreen) => void }) {
+export function Onboarding({ step, title, lede, aside, children, go }: { step: number; title: string; lede: string; aside?: ReactNode; children: ReactNode; go: (s: CustomerScreen) => void }) {
   return (
     <div className="min-h-[calc(100svh-52px)] bg-[var(--stone)]">
       <header className="mx-auto flex max-w-[1180px] items-center justify-between px-5 py-5 md:px-10 md:py-7">
@@ -76,7 +80,7 @@ const MEMBER_NAV: { id: CustomerScreen; label: string; short: string }[] = [
   { id: "profile", label: "Λογαριασμός", short: "Προφίλ" },
 ];
 
-function MemberChrome({ screen, go, children }: { screen: CustomerScreen; go: (s: CustomerScreen) => void; children: ReactNode }) {
+export function MemberChrome({ screen, go, children }: { screen: CustomerScreen; go: (s: CustomerScreen) => void; children: ReactNode }) {
   return (
     <div className="flex min-h-[calc(100svh-52px)] flex-col bg-[var(--milk)]">
       <header className="border-b border-[var(--rule)] bg-[var(--paper)]">
@@ -104,7 +108,7 @@ function MemberChrome({ screen, go, children }: { screen: CustomerScreen; go: (s
   );
 }
 
-function PageTitle({ title, lede }: { title: string; lede?: string }) {
+export function PageTitle({ title, lede }: { title: string; lede?: string }) {
   return (
     <header className="mb-8 md:mb-10">
       <h1 className="t-headline text-[var(--roast)]">{title}</h1>
@@ -117,11 +121,11 @@ function PageTitle({ title, lede }: { title: string; lede?: string }) {
 
 function Register({ go }: { go: (s: CustomerScreen) => void }) {
   return (
-    <Onboarding step={0} go={go} title="Τα στοιχεία σας" lede="Μόνο όσα χρειάζεται το ταμείο για να σας αναγνωρίζει. Το κινητό βοηθά όταν δεν έχετε την κάρτα μαζί σας.">
+    <Onboarding step={0} go={go} title={ONBOARDING_COPY.register.title} lede={ONBOARDING_COPY.register.lede}>
       <div className="grid gap-6">
-        <Field label="Ονοματεπώνυμο" value={CUSTOMER.name} />
-        <Field label="Κινητό τηλέφωνο" value={CUSTOMER.phoneMasked} type="tel" hint="Για αναζήτηση στο ταμείο. Δεν το χρησιμοποιούμε για διαφημίσεις." />
-        <Field label="E-mail" value={CUSTOMER.email} type="email" hint="Για την επιβεβαίωση της συνδρομής και την απόδειξη πληρωμής." />
+        <Field label={ONBOARDING_COPY.register.nameLabel} value={CUSTOMER.name} />
+        <Field label={ONBOARDING_COPY.register.phoneLabel} value={CUSTOMER.phoneMasked} type="tel" hint={ONBOARDING_COPY.register.phoneHint} />
+        <Field label={ONBOARDING_COPY.register.emailLabel} value={CUSTOMER.email} type="email" hint={ONBOARDING_COPY.register.emailHint} />
       </div>
       <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-4">
         <Btn onClick={() => go("newsletter")} className="px-8">Συνέχεια</Btn>
@@ -136,13 +140,13 @@ function Newsletter({ go }: { go: (s: CustomerScreen) => void }) {
   const [terms, setTerms] = useState(false);
   const [news, setNews] = useState(false);
   return (
-    <Onboarding step={1} go={go} title="Εσείς επιλέγετε" lede="Δύο ξεχωριστές επιλογές. Το newsletter δεν είναι συνδρομή στο Club και δεν δίνει δωρεάν καφέ.">
+    <Onboarding step={1} go={go} title={ONBOARDING_COPY.consents.title} lede={ONBOARDING_COPY.consents.lede}>
       <div className="border-t border-[var(--rule-strong)]">
-        <ConsentRow checked={terms} onChange={setTerms} required title="Όροι Club και απόρρητο" body="Αποδέχομαι τους όρους του Evangelou Club και την πολιτική απορρήτου." />
-        <ConsentRow checked={news} onChange={setNews} title="Newsletter" body="Θέλω να λαμβάνω νέα, προσφορές και εκδηλώσεις με e-mail. Μπορώ να διαγραφώ οποιαδήποτε στιγμή, χωρίς να επηρεαστεί η συνδρομή μου." />
+        <ConsentRow checked={terms} onChange={setTerms} required title={ONBOARDING_COPY.consents.termsTitle} body={ONBOARDING_COPY.consents.termsBody} />
+        <ConsentRow checked={news} onChange={setNews} title={ONBOARDING_COPY.consents.newsTitle} body={ONBOARDING_COPY.consents.newsBody} />
       </div>
       <p className="t-small mt-4 text-[var(--ink-2)]" aria-live="polite">
-        {terms ? (news ? "Όροι αποδεκτοί. Newsletter: ναι." : "Όροι αποδεκτοί. Newsletter: όχι.") : "Για να συνεχίσετε χρειάζεται η αποδοχή των όρων."}
+        {consentsLine(terms, news)}
       </p>
       <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
         <Btn onClick={() => go("offer")} disabled={!terms} className="px-8">Συνέχεια</Btn>
@@ -153,15 +157,15 @@ function Newsletter({ go }: { go: (s: CustomerScreen) => void }) {
   );
 }
 
-function Offer({ go }: { go: (s: CustomerScreen) => void }) {
-  const included = [
-    "Ένας δωρεάν καφές κάθε ημερολογιακή ημέρα, ώρα Ελλάδας.",
-    "Ψηφιακή κάρτα μέλους για το ταμείο.",
-    "Το ιστορικό των καφέδων σας στον λογαριασμό σας.",
-    "Χειροκίνητη ανανέωση, χωρίς αυτόματη χρέωση.",
-  ];
+/**
+ * The approved offer. CUSTOMER-01: the customer journey preview passes `onPay`
+ * (which only leads to its "payment is not connected" step, never to a payment)
+ * and its own secondary link; without them the approved, disabled button stays.
+ */
+export function Offer({ go, onPay, secondary }: { go: (s: CustomerScreen) => void; onPay?: () => void; secondary?: { label: string; onClick: () => void } }) {
+  const included = ONBOARDING_COPY.offer.included;
   return (
-    <Onboarding step={2} go={go} title="Η συνδρομή σας" lede="Μία τιμή, ένας μήνας, ένας καφές την ημέρα. Ανανεώνετε μόνο όταν το θέλετε.">
+    <Onboarding step={2} go={go} title={ONBOARDING_COPY.offer.title} lede={ONBOARDING_COPY.offer.lede}>
       <div className="on-dark rounded-[22px] bg-[var(--roast)] px-6 pt-7 pb-8 text-[var(--milk)] md:px-9 md:pt-9">
         <p className="t-label text-[var(--brass)]">Evangelou Club</p>
         <p className="mt-5 flex items-baseline gap-3">
@@ -173,48 +177,44 @@ function Offer({ go }: { go: (s: CustomerScreen) => void }) {
             <li key={t} className="t-body border-b border-[var(--brass-soft)] py-3.5 text-[var(--milk)]/85">{t}</li>
           ))}
         </ul>
-        <p className="t-small mt-5 max-w-[52ch] text-[var(--milk)]/60">Η συνδρομή διαρκεί έναν ημερολογιακό μήνα από την επιβεβαίωση της πληρωμής και λήγει με ώρα Ελλάδας. Στους πρώτους μήνες η ανανέωση γίνεται χειροκίνητα.</p>
+        <p className="t-small mt-5 max-w-[52ch] text-[var(--milk)]/60">{ONBOARDING_COPY.offer.terms}</p>
         <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
-          <Btn tone="brass" disabled title="Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση" className="px-8">Πληρωμή {CLUB_RULES.monthlyPriceEur} €</Btn>
-          <button type="button" onClick={() => go("dashboard")} className="t-label -my-1 py-3 text-[var(--milk)]/75 underline decoration-[var(--brass-soft)] underline-offset-[6px] hover:text-[var(--milk)]">Δείτε τον λογαριασμό μέλους</button>
+          <Btn tone="brass" disabled={!onPay} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"} onClick={onPay} className="px-8">Πληρωμή {CLUB_RULES.monthlyPriceEur} €</Btn>
+          <button type="button" onClick={secondary ? secondary.onClick : () => go("dashboard")} className="t-label -my-1 py-3 text-[var(--milk)]/75 underline decoration-[var(--brass-soft)] underline-offset-[6px] hover:text-[var(--milk)]">{secondary ? secondary.label : "Δείτε τον λογαριασμό μέλους"}</button>
         </div>
       </div>
-      <PreviewNote className="mt-6">Δεν υπάρχει πληρωμή στην προεπισκόπηση: το κουμπί είναι ανενεργό και καμία χρέωση δεν γίνεται.</PreviewNote>
+      <PreviewNote className="mt-6">{onPay ? "Δεν υπάρχει πληρωμή στην προεπισκόπηση: το κουμπί δεν χρεώνει τίποτα και η συνδρομή μένει σε αναμονή πληρωμής." : "Δεν υπάρχει πληρωμή στην προεπισκόπηση: το κουμπί είναι ανενεργό και καμία χρέωση δεν γίνεται."}</PreviewNote>
     </Onboarding>
   );
 }
 
 // ---- Member area --------------------------------------------------------------------------
 
-function entitlement(state: PreviewMembershipState, used: boolean): { headline: string; detail: string; ready: boolean } {
+function entitlement(state: CustomerMembershipState, used: boolean): { headline: string; detail: string; ready: boolean } {
   if (state === "pending") return { headline: "Σε αναμονή πληρωμής", detail: "Ο καφές της ημέρας ξεκινά μόλις επιβεβαιωθεί η πληρωμή.", ready: false };
   if (state === "expired") return { headline: "Η συνδρομή έληξε", detail: "Ανανεώστε για να ξαναβρείτε τον καφέ της ημέρας.", ready: false };
+  if (state === "cancelled") return { headline: "Η συνδρομή ακυρώθηκε", detail: "Ο καφές της ημέρας δεν είναι διαθέσιμος. Για ερωτήσεις, μιλήστε με το κατάστημα.", ready: false };
   if (used) return { headline: "Τον απολαύσατε σήμερα", detail: "Ο επόμενος καφές σας περιμένει από τα μεσάνυχτα, ώρα Ελλάδας.", ready: false };
   return { headline: "Ο σημερινός καφές σας περιμένει", detail: "Δείξτε την κάρτα σας στο ταμείο.", ready: true };
 }
 
-function membershipLine(state: PreviewMembershipState, today: string): string {
-  const until = paidUntil(state, today);
-  if (state === "active") return `Ενεργή έως ${greekDate(until!)}`;
-  if (state === "expired") return `Έληξε στις ${greekDate(until!)}`;
-  return "Αναμονή επιβεβαίωσης πληρωμής";
-}
-
-function Dashboard({ state, coffeeUsedToday, today, go }: Props) {
-  const e = entitlement(state, coffeeUsedToday);
-  const recent = memberHistory(CUSTOMER.id, today).slice(0, 3);
+export function Dashboard({ view, go, actions }: MemberScreenProps) {
+  const { state, today } = view;
+  const e = entitlement(state, view.coffeeUsedToday);
+  const recent = view.history.slice(0, 3);
+  const pay = paymentAction(view, actions);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
       <section>
         <p className="t-body text-[var(--ink-2)]">Καλημέρα,</p>
-        <h1 className="t-headline text-[var(--roast)]">{CUSTOMER.name.split(" ")[0]}</h1>
+        <h1 className="t-headline text-[var(--roast)]">{view.member.name.split(" ")[0]}</h1>
         <div className="on-dark mt-8 rounded-[22px] bg-[var(--roast)] px-6 py-7 text-[var(--milk)] md:px-8">
           <p className="t-small text-[var(--milk)]/60">{greekDate(today, true)}</p>
           <p className={cx("t-headline mt-2", e.ready ? "text-[var(--brass)]" : "text-[var(--milk)]")}>{e.headline}</p>
           <p className="t-body mt-2 text-[var(--milk)]/75">{e.detail}</p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Btn tone={state === "active" ? "brass" : "ghost-dark"} onClick={() => go("card")}>Άνοιγμα κάρτας</Btn>
-            {state !== "active" && <Btn tone="brass" disabled title="Μη διαθέσιμο στην προεπισκόπηση">{state === "expired" ? `Ανανέωση ${CLUB_RULES.monthlyPriceEur} €` : "Ολοκλήρωση πληρωμής"}</Btn>}
+            {pay && <Btn tone="brass" disabled={!pay.run} title={pay.run ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={pay.run}>{pay.label}</Btn>}
           </div>
         </div>
       </section>
@@ -223,15 +223,16 @@ function Dashboard({ state, coffeeUsedToday, today, go }: Props) {
         <DefRows
           rows={[
             ["Κατάσταση", <StateMark key="s" state={state} />],
-            ["Περίοδος", membershipLine(state, today)],
-            ["Ανανέωση", `Χειροκίνητη, ${CLUB_RULES.monthlyPriceEur} € για έναν ημερολογιακό μήνα`],
-            ["Αυτόν τον μήνα", `${CUSTOMER.visitsThisMonth} καφέδες`],
+            ["Περίοδος", membershipLine(view)],
+            ["Ανανέωση", renewalLine(view, `Χειροκίνητη, ${CLUB_RULES.monthlyPriceEur} € για έναν ημερολογιακό μήνα`)],
+            ["Αυτόν τον μήνα", `${view.visitsThisMonth} καφέδες`],
           ]}
         />
         <div className="mt-10 flex items-baseline justify-between border-b border-[var(--rule-strong)] pb-3">
           <h2 className="t-title text-[var(--ink)]">Τελευταίοι καφέδες</h2>
           <button type="button" onClick={() => go("history")} className="t-label -my-3 py-3 text-[var(--bronze-deep)] underline-offset-4 hover:underline">Όλο το ιστορικό</button>
         </div>
+        {recent.length === 0 && <p className="t-body py-3.5 text-[var(--ink-2)]">Δεν υπάρχουν ακόμη καφέδες.</p>}
         <ul className="m-0 list-none p-0">
           {recent.map((r) => (
             <li key={r.date} className="t-body grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-[var(--rule)] py-3.5">
@@ -267,7 +268,7 @@ function States({ today }: { today: string }) {
               </div>
               <figcaption className="t-small mt-3 text-[var(--ink-2)]">
                 <span className="block font-semibold text-[var(--ink)]">{s.caption}</span>
-                {membershipLine(s.state, today)}
+                {membershipLine(sampleCustomerView(s.state, s.used, today))}
               </figcaption>
             </figure>
           );
@@ -285,10 +286,12 @@ function minutesToAthensMidnight(): number {
   return 24 * 60 - (get("hour") * 60 + get("minute"));
 }
 
-function Today({ state, coffeeUsedToday, today, go }: Props) {
-  const [left] = useState(minutesToAthensMidnight);
+export function Today({ view, go }: MemberScreenProps) {
+  const { state, coffeeUsedToday, today } = view;
+  const [deviceLeft] = useState(minutesToAthensMidnight);
+  const left = view.minutesToMidnight ?? deviceLeft;
   const e = entitlement(state, coffeeUsedToday);
-  const taken = new Set(memberHistory(CUSTOMER.id, today).map((r) => r.date));
+  const taken = new Set(view.history.map((r) => r.date));
   if (coffeeUsedToday && state === "active") taken.add(today);
   const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
   return (
@@ -346,9 +349,10 @@ function Today({ state, coffeeUsedToday, today, go }: Props) {
   );
 }
 
-function History({ today, state }: { today: string; state: PreviewMembershipState }) {
-  const items = memberHistory(CUSTOMER.id, today);
-  const months = new Map<string, PreviewRedemption[]>();
+export function History({ view }: MemberScreenProps) {
+  const { state } = view;
+  const items = view.history;
+  const months = new Map<string, CustomerHistoryItem[]>();
   for (const r of items) months.set(r.date.slice(0, 7), [...(months.get(r.date.slice(0, 7)) ?? []), r]);
   const monthName = (ym: string) => new Date(`${ym}-15T12:00:00Z`).toLocaleDateString("el-GR", { timeZone: "UTC", month: "long", year: "numeric" });
   return (
@@ -376,7 +380,7 @@ function History({ today, state }: { today: string; state: PreviewMembershipStat
                   </span>
                   <span className="min-w-0">
                     <span className="t-body block font-medium text-[var(--ink)]">{coffeeName(r.coffee)}</span>
-                    <span className="t-small block text-[var(--ink-2)]">{preparationLine(historyPreparation(CUSTOMER, r.coffee, r.date))}</span>
+                    <span className="t-small block text-[var(--ink-2)]">{preparationLine(r.preparation ?? historyPreparation(view.member, r.coffee, r.date))}</span>
                     <span className="t-small block text-[var(--ink-3)] first-letter:uppercase">{day}</span>
                   </span>
                   <span className="t-small t-num text-[var(--ink-3)]">{r.time}</span>
@@ -391,12 +395,14 @@ function History({ today, state }: { today: string; state: PreviewMembershipStat
   );
 }
 
-function Profile({ state, today }: Props) {
+export function Profile({ view, actions }: MemberScreenProps) {
+  const { state, member } = view;
+  const renew = state === "active" && !view.pendingRenewal ? actions?.renew : undefined;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
       <section>
-        <h1 className="t-headline text-[var(--roast)]">{CUSTOMER.name}</h1>
-        <p className="t-body mt-2 text-[var(--ink-2)]">Μέλος από τις {greekDate(CUSTOMER.memberSince)}</p>
+        <h1 className="t-headline text-[var(--roast)]">{member.name}</h1>
+        <p className="t-body mt-2 text-[var(--ink-2)]">Μέλος από τις {greekDate(member.memberSince)}</p>
         <div className="mt-8 flex flex-wrap gap-3">
           <Btn tone="line" disabled title="Μη διαθέσιμο στην προεπισκόπηση">Επεξεργασία στοιχείων</Btn>
           <Btn tone="line" disabled title="Μη διαθέσιμο στην προεπισκόπηση">Αποσύνδεση</Btn>
@@ -406,21 +412,27 @@ function Profile({ state, today }: Props) {
         <h2 className="t-title border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Στοιχεία</h2>
         <DefRows
           rows={[
-            ["Κινητό", <span key="p" className="t-num">{CUSTOMER.phoneMasked}</span>],
-            ["E-mail", CUSTOMER.email],
-            ["Συνήθως πίνει", coffeeName(CUSTOMER.favourite)],
+            ["Κινητό", <span key="p" className="t-num">{member.phoneMasked}</span>],
+            ["E-mail", member.email || "Δεν δόθηκε"],
+            ["Συνήθως πίνει", view.usual ? coffeeName(view.usual) : "Δεν υπάρχει ακόμη αρκετό ιστορικό"],
           ]}
         />
         <h2 className="t-title mt-10 border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Συνδρομή</h2>
         <DefRows
           rows={[
             ["Κατάσταση", <StateMark key="s" state={state} />],
-            ["Περίοδος", membershipLine(state, today)],
-            ["Ανανέωση", "Χειροκίνητη, χωρίς αυτόματη χρέωση"],
+            ["Περίοδος", membershipLine(view)],
+            ["Ανανέωση", renewalLine(view, "Χειροκίνητη, χωρίς αυτόματη χρέωση")],
           ]}
         />
+        {renew && (
+          <div className="mt-6">
+            <Btn tone="line" onClick={renew}>Ανανέωση τώρα, {CLUB_RULES.monthlyPriceEur} €</Btn>
+            <p className="t-small mt-2 text-[var(--ink-3)]">Ο νέος μήνας ξεκινά από τη λήξη του τρέχοντος, χωρίς να χάνετε μέρες.</p>
+          </div>
+        )}
         <h2 className="t-title mt-10 border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Επικοινωνία</h2>
-        <DefRows rows={[["Newsletter", CUSTOMER.newsletter ? "Ναι, ξεχωριστή συναίνεση από τη συνδρομή" : "Όχι"]]} />
+        <DefRows rows={[["Newsletter", member.newsletter ? "Ναι, ξεχωριστή συναίνεση από τη συνδρομή" : "Όχι"]]} />
         <PreviewNote className="mt-8">Δείγμα προφίλ με φανταστικά στοιχεία· καμία αλλαγή δεν αποθηκεύεται.</PreviewNote>
       </section>
     </div>
