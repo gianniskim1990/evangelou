@@ -404,8 +404,8 @@ const mutants = [
   {
     id: "U19-continue-enabled-for-incomplete-order",
     file: "preview/StaffOrder.tsx",
-    search: "disabled={!ready} onClick={onContinue}",
-    replace: "disabled={false} onClick={onContinue}",
+    search: "disabled={!ready || busy} aria-busy",
+    replace: "disabled={busy} aria-busy",
   },
   {
     id: "U21-cold-drinks-offered-hot-notes",
@@ -1449,8 +1449,8 @@ const mutants = [
   {
     id: "CF5-coffee-selection-without-available-benefit",
     file: "staff/counterPreview/counterFlow.ts",
-    search: 'if (!this.canNavigate() || !this.summary || this.summary.benefit.state !== "available") return;',
-    replace: "if (!this.canNavigate() || !this.summary) return;",
+    search: '    this.screen = summary.value.benefit.state === "available" ? "coffee" : "member";',
+    replace: '    this.screen = "coffee";',
   },
   {
     id: "CF6-resend-without-the-original-order",
@@ -1505,6 +1505,63 @@ const mutants = [
     file: "staff/counterPreview/counterFlow.ts",
     search: "    if (found.value.kind !== \"found\") {\n      this.lookupNotice = found.value.kind;\n      this.emit();\n      return;\n    }\n",
     replace: "    if (found.value.kind !== \"found\") {\n      this.lookupNotice = found.value.kind;\n    }\n",
+  },
+  // UI-04O fast counter (owner decision 2026-10-19): one tap, close only a FRESH commit (CF15, CF17, CF19, CF21-CF24, R29-R30).
+  // CF16/CF18/CF20 were dropped as EQUIVALENT: toPreparedPayload() itself rejects an incomplete order; a stale result
+  // never leaves the machine in recorded_now; finish() always succeeds from recorded_now.
+  {
+    id: "CF15-double-tap-sends-twice",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (this.submitting || !this.canNavigate() || !this.summary || this.screen !== \"coffee\") return \"rejected\";",
+    replace: "    if (!this.canNavigate() || !this.summary || this.screen !== \"coffee\") return \"rejected\";",
+  },
+  {
+    id: "CF17-replay-closed-as-fresh-success",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (result !== \"applied\" || machine !== this.machine || machine.getState().phase !== \"recorded_now\") return;",
+    replace: "    if (result !== \"applied\" || machine !== this.machine || machine.getState().phase === \"idle\") return;",
+  },
+  {
+    id: "CF19-fresh-commit-not-closed",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (result === \"rejected\") this.intentPayload = null;\n    this.closeIfFresh(machine, result);",
+    replace: "    if (result === \"rejected\") this.intentPayload = null;",
+  },
+  {
+    id: "CF21-recovery-fresh-commit-not-closed",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "        result = await m.retryPersistence();\n        this.closeIfFresh(m, result);",
+    replace: "        result = await m.retryPersistence();",
+  },
+  {
+    id: "CF22-success-notice-not-dismissable-by-seq",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    if (this.success?.seq !== seq) return;",
+    replace: "    if (!this.success) return;",
+  },
+  {
+    id: "CF23-configurator-hidden-while-sending",
+    file: "staff/counterPreview/counterFlow.ts",
+    search: "    const sending = this.submitting && (machine.phase === \"submitting_redemption\" || machine.phase === \"recorded_now\");",
+    replace: "    const sending = false;",
+  },
+  {
+    id: "CF24-final-button-not-busy",
+    file: "staff/counterPreview/CounterApp.tsx",
+    search: "        busy={state.submitting}",
+    replace: "        busy={false}",
+  },
+  {
+    id: "R29-fresh-commit-not-closable",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      s.phase === \"recorded_now\" ||\n",
+    replace: "      (s.phase === \"recorded_now\" && s.prepareAcknowledged) ||\n",
+  },
+  {
+    id: "R30-any-recorded-state-closable-as-fresh",
+    file: "staff/redemptionRecovery/machine.ts",
+    search: "      s.phase === \"recorded_now\" ||\n",
+    replace: "      s.phase === \"recorded_now\" || s.phase === \"redemption_unresolved\" ||\n",
   },
 ];
 

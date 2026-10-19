@@ -170,6 +170,40 @@ describe("UI-03D.D wire parsers reject malformed and contradictory replies", () 
 
 // ---- redemption flow -------------------------------------------------------------------------
 
+describe("UI-04O owner decision: a fresh commit may be closed without a prepare acknowledgement", () => {
+  it("finish() closes ONLY a server-confirmed fresh commit and records nothing else", async () => {
+    const server = new FakeServer();
+    const t = tablet(server);
+    await t.machine.startRedemption(MEMBER_A, ESPRESSO);
+    const before = t.machine.getState();
+    assert.equal(before.phase === "recorded_now" && before.prepareAcknowledged, false);
+    // The offered actions are unchanged: the standalone recovery screen still shows the single prompt.
+    assert.deepEqual(availableActions(before), ["acknowledge_prepare"]);
+    const calls = server.calls.length;
+    assert.equal(t.machine.finish(), "applied");
+    assert.equal(phase(t.machine), "idle");
+    assert.equal(server.calls.length, calls, "closing sends nothing");
+    assert.equal(server.handoffCount(), 0, "no handoff is recorded or invented");
+    assert.equal(t.storage.value, null, "the settled context is cleared");
+    assert.equal(server.redemptions.size, 1, "exactly one redemption");
+    // The machine is ready for the next customer; the server still allows one coffee per day.
+    await t.machine.startRedemption(MEMBER_A, CAPPUCCINO);
+    assert.equal(phase(t.machine), "redemption_refused");
+  });
+
+  it("an unresolved, replayed or blocked intent can still never be closed as a success", async () => {
+    const server = new FakeServer();
+    const t = tablet(server);
+    server.hooks.redeem.push(commitThenLose);
+    await t.machine.startRedemption(MEMBER_A, ESPRESSO);
+    assert.equal(phase(t.machine), "redemption_unresolved");
+    assert.equal(t.machine.finish(), "rejected");
+    await t.machine.retryRedemption();
+    assert.equal(phase(t.machine), "previously_recorded_unconfirmed", "a replay is not a fresh commit");
+    assert.equal(shouldOfferPrepare(t.machine.getState()), false);
+  });
+});
+
 describe("UI-03D.D redemption: prepare only once, from a fresh commit", () => {
   it("a fresh commit offers prepare exactly once, and never again after a reload", async () => {
     const server = new FakeServer();
@@ -178,7 +212,6 @@ describe("UI-03D.D redemption: prepare only once, from a fresh commit", () => {
     assert.equal(phase(t.machine), "recorded_now");
     assert.equal(shouldOfferPrepare(t.machine.getState()), true);
     assert.deepEqual(availableActions(t.machine.getState()), ["acknowledge_prepare"]);
-    assert.equal(t.machine.finish(), "rejected", "the prepare prompt must be handled first");
     assert.equal(t.machine.acknowledgePrepare(), "applied");
     assert.equal(t.machine.acknowledgePrepare(), "rejected");
     assert.deepEqual(availableActions(t.machine.getState()), ["confirm_handed_now", "confirm_handed_earlier", "finish"], "confirmation is offered, not forced (open owner decision)");

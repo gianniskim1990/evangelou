@@ -8,7 +8,7 @@ import { MEMBERS } from "../../src/preview/previewData";
 import { EMPTY_ORDER, orderReducer, usualOrder, type CoffeeOrder, type OrderAction } from "../../src/preview/coffeeConfig";
 import { availableActions, shouldOfferPrepare, type MachineState } from "../../src/staff/redemptionRecovery/machine";
 import { CONTRACT_STATUS, classifyHttpReply, type ReplySurface } from "../../src/staff/redemptionRecovery/wire";
-import { CounterFlow, MANAGER_NOTIFIED, ORDER_NOT_IN_MEMORY } from "../../src/staff/counterPreview/counterFlow";
+import { CounterFlow, FRESH_SUCCESS, MANAGER_NOTIFIED, ORDER_NOT_IN_MEMORY } from "../../src/staff/counterPreview/counterFlow";
 import { FAKE_DIRECTORY, ROTATED_QR_TOKEN, SHARED_PHONE, canonicalGreekMobile, entryByPreviewId } from "../../src/staff/counterPreview/fakeDirectory";
 import { FakeClubServer, type HttpReply } from "../../src/staff/counterPreview/fakeServer";
 import { CANONICAL_COFFEE, toPreparedPayload } from "../../src/staff/counterPreview/orderPayload";
@@ -28,7 +28,7 @@ const MORNING = "2026-10-19T07:30:00Z";
 /** 23:59:30 in Athens on the same day. */
 const BEFORE_MIDNIGHT = "2026-10-19T20:59:30Z";
 
-function setup(opts: { at?: string } = {}) {
+function setup(opts: { at?: string; sleep?: (ms: number, signal: AbortSignal) => Promise<void> } = {}) {
   let now = new Date(opts.at ?? MORNING);
   const clock = { now: () => now, advance: (ms: number) => (now = new Date(now.getTime() + ms)) };
   const server = new FakeClubServer({ now: clock.now });
@@ -43,7 +43,7 @@ function setup(opts: { at?: string } = {}) {
     newSessionRef: () => (++sessions).toString(16).padStart(32, "5"),
     sha256Hex: async (text) => createHash("sha256").update(text, "utf8").digest("hex"),
     latencyMs: 0,
-    sleep: abortableSleep,
+    sleep: opts.sleep ?? abortableSleep,
     deviceRef: "d".repeat(32),
   });
   return { flow, server, storage, clock };
@@ -71,17 +71,26 @@ const ESPRESSO_ORDER: OrderAction[] = [
   { type: "quick-note", id: "takeaway" },
 ];
 
-/** Lookup by QR, open coffee, build a complete order, review and confirm. */
+/** Fast counter: lookup by QR → straight to the configurator → complete order → ONE "Καταχώρηση καφέ". */
 async function orderFor(flow: CounterFlow, previewId: string, actions: OrderAction[] = ESPRESSO_ORDER): Promise<void> {
   flow.open("scan");
   await flow.lookup({ qrToken: member(previewId).qrToken });
-  assert.equal(s(flow).screen, "member");
-  flow.chooseCoffee();
-  assert.equal(s(flow).screen, "coffee");
+  assert.equal(s(flow).screen, "coffee", "an eligible member goes straight to the configurator");
   for (const a of actions) flow.dispatchOrder(a);
-  flow.review();
-  assert.equal(s(flow).screen, "confirm");
-  await flow.confirm();
+  await flow.submit();
+}
+
+/** The fresh-commit close: dashboard, success notice, nothing open, no member data. */
+function closedAsFresh(flow: CounterFlow): void {
+  assert.equal(phase(flow), "idle", "the fresh commit was closed");
+  assert.equal(s(flow).screen, "dashboard");
+  assert.equal(s(flow).success?.message, FRESH_SUCCESS);
+  assert.equal(s(flow).summary, null, "member data is dropped after the visit");
+  assert.equal(s(flow).submitting, false);
+}
+
+function handoffCalls(server: FakeClubServer): number {
+  return server.log().filter((e) => e.operation === "handoff").length;
 }
 
 function redeemCalls(server: FakeClubServer): string[] {
@@ -89,40 +98,48 @@ function redeemCalls(server: FakeClubServer): string[] {
 }
 
 describe("UI-04O counter flow: the normal counter path", () => {
-  it("dashboard → QR → eligible member → coffee → confirm → prepare once → handed now → finish", async () => {
-    const { flow, server } = setup();
+  it("fast counter: dashboard → QR → straight to coffee → ONE 'Καταχώρηση καφέ' → success notice → dashboard", async () => {
+    const { flow, server, storage } = setup();
     await flow.start();
     assert.equal(s(flow).session.phase, "ready");
     assert.equal(s(flow).screen, "dashboard");
     await orderFor(flow, "m01");
-    assert.equal(phase(flow), "recorded_now");
-    assert.equal(s(flow).screen, "redemption");
-    assert.equal(shouldOfferPrepare(s(flow).machine), true, "a fresh commit offers prepare");
-    assert.equal(server.redemptionCount(member("m01").memberId, "2026-10-19"), 1);
+    closedAsFresh(flow);
+    assert.equal(server.redemptionCount(member("m01").memberId, "2026-10-19"), 1, "exactly one redemption");
+    assert.equal(redeemCalls(server).length, 1, "exactly one request");
+    assert.equal(handoffCalls(server), 0, "no handoff statement is sent or invented");
+    assert.equal(storage.recoveryValue(), null, "the settled context is cleared");
+    // The notice is non-blocking: the next customer can start at once, and it can only be dismissed by its own number.
+    const seq = s(flow).success!.seq;
+    flow.dismissSuccess(seq + 1);
+    assert.ok(s(flow).success);
+    flow.dismissSuccess(seq);
+    assert.equal(s(flow).success, null);
+    flow.open("scan");
+    assert.equal(s(flow).screen, "scan");
+  });
 
-    assert.equal(await flow.act("acknowledge_prepare"), "applied");
-    noPrepare(s(flow).machine);
-    assert.equal(await flow.act("acknowledge_prepare"), "rejected", "the prepare prompt is shown exactly once");
-    assert.equal(await flow.act("confirm_handed_now"), "applied");
-    assert.equal(phase(flow), "handoff_confirmed");
-    const confirmed = s(flow).machine as Extract<MachineState, { phase: "handoff_confirmed" }>;
-    assert.equal(confirmed.handoff.claim, "handed_now");
-    assert.equal(await flow.act("finish"), "applied");
-    assert.equal(s(flow).screen, "dashboard");
-    assert.equal(s(flow).summary, null, "member data is dropped after the visit");
+  it("the fast close never pretends a preparation or a handoff: nothing but the redemption reaches the server", async () => {
+    const { flow, server } = setup();
+    await flow.start();
+    await orderFor(flow, "m01");
+    closedAsFresh(flow);
+    assert.deepEqual(server.log().map((e) => e.operation), ["lookup", "summary", "redeem"]);
   });
 
   it("the same member cannot get a second coffee the same Athens day: the summary says used and coffee selection stays closed", async () => {
     const { flow, server } = setup();
     await flow.start();
     await orderFor(flow, "m01");
-    await flow.act("acknowledge_prepare");
-    await flow.act("finish");
+    closedAsFresh(flow);
     flow.open("scan");
     await flow.lookup({ qrToken: member("m01").qrToken });
     assert.equal(s(flow).summary?.benefit.state, "used");
-    flow.chooseCoffee();
-    assert.equal(s(flow).screen, "member", "no coffee selection for a used benefit");
+    assert.equal(s(flow).screen, "member", "the reason is shown, not the configurator");
+    flow.dispatchOrder({ type: "coffee", coffee: "espresso" });
+    assert.equal(await flow.submit(), "rejected", "no coffee can be submitted for a used benefit");
+    flow.nextCustomer();
+    assert.equal(s(flow).screen, "dashboard", "one tap to the next customer");
     assert.equal(server.redemptionCount(member("m01").memberId, "2026-10-19"), 1);
   });
 
@@ -133,7 +150,7 @@ describe("UI-04O counter flow: the normal counter path", () => {
     for (const typed of [phone, phone.replace("+30", "0030"), phone.slice(3).replace(/(\d{4})(\d{3})(\d{3})/, "$1 $2 $3")]) {
       flow.open("phone");
       await flow.lookup({ phone: typed });
-      assert.equal(s(flow).screen, "member", typed);
+      assert.equal(s(flow).screen, "coffee", typed);
       assert.equal(s(flow).summary?.member.id, member("m05").memberId);
       assert.equal(s(flow).summary?.member.phoneMasked, member("m05").person.phoneMasked, "only the masked phone reaches the screen");
     }
@@ -154,6 +171,7 @@ describe("UI-04O counter flow: the normal counter path", () => {
       assert.equal(s(flow).lookupNotice, notice);
       assert.equal(s(flow).summary, null);
       assert.notEqual(s(flow).screen, "member");
+      assert.notEqual(s(flow).screen, "coffee");
     }
   });
 
@@ -165,8 +183,9 @@ describe("UI-04O counter flow: the normal counter path", () => {
       await flow.lookup({ qrToken: member(id).qrToken });
       assert.equal(s(flow).summary?.benefit.state, "unavailable", id);
       assert.equal(s(flow).summary?.benefit.reason, "membership_inactive", id);
-      flow.chooseCoffee();
       assert.equal(s(flow).screen, "member", id);
+      flow.dispatchOrder({ type: "coffee", coffee: "espresso" });
+      assert.equal(await flow.submit(), "rejected", id);
     }
   });
 
@@ -180,16 +199,46 @@ describe("UI-04O counter flow: the normal counter path", () => {
     }
   });
 
-  it("an incomplete order cannot be reviewed or sent; nothing is filled in automatically", async () => {
+  it("a partially configured order is never sent; nothing is filled in automatically", async () => {
     const { flow, server } = setup();
     await flow.start();
     flow.open("scan");
     await flow.lookup({ qrToken: member("m01").qrToken });
-    flow.chooseCoffee();
+    assert.equal(await flow.submit(), "rejected", "no coffee chosen");
     flow.dispatchOrder({ type: "coffee", coffee: "cappuccino" });
-    flow.review();
+    assert.equal(await flow.submit(), "rejected", "preparation incomplete");
     assert.equal(s(flow).screen, "coffee");
-    assert.equal(await flow.confirm(), "rejected");
+    assert.equal(s(flow).submitting, false);
+    assert.deepEqual(redeemCalls(server), []);
+  });
+
+  it("a double tap sends exactly one request (the second tap is ignored while the first runs)", async () => {
+    const { flow, server } = setup();
+    await flow.start();
+    flow.open("scan");
+    await flow.lookup({ qrToken: member("m01").qrToken });
+    for (const a of ESPRESSO_ORDER) flow.dispatchOrder(a);
+    const first = flow.submit();
+    assert.equal(s(flow).submitting, true, "the button is busy at once");
+    assert.equal(s(flow).screen, "coffee", "the configurator stays visible while sending");
+    const second = flow.submit();
+    flow.dispatchOrder({ type: "coffee", coffee: "freddo-espresso" });
+    assert.equal(await second, "rejected");
+    assert.equal(s(flow).submitting, true, "the ignored tap never releases the busy state of the request in flight");
+    assert.equal(s(flow).order.coffee, "espresso", "the order cannot change while sending");
+    assert.equal(await first, "applied");
+    closedAsFresh(flow);
+    assert.equal(redeemCalls(server).length, 1);
+    assert.equal(server.redemptionCount(member("m01").memberId, "2026-10-19"), 1);
+    assert.equal(await flow.submit(), "rejected", "nothing can be resent after the close");
+  });
+
+  it("submit is only possible from the configurator of a looked-up member", async () => {
+    const { flow, server } = setup();
+    await flow.start();
+    assert.equal(await flow.submit(), "rejected", "dashboard");
+    flow.open("scan");
+    assert.equal(await flow.submit(), "rejected", "scan screen");
     assert.deepEqual(redeemCalls(server), []);
   });
 });
@@ -242,9 +291,9 @@ describe("UI-04O counter flow: uncertain outcomes keep the ORIGINAL id and never
     assert.equal((s(flow).machine as Extract<MachineState, { phase: "recovery_required" }>).reason, "not_recorded");
     noPrepare(s(flow).machine);
     assert.equal(await flow.act("resubmit_same_intent"), "applied");
-    assert.equal(phase(flow), "recorded_now");
-    assert.equal(requestId(flow), rid, "the original id is reused after an authoritative not-found");
-    assert.equal(shouldOfferPrepare(s(flow).machine), true);
+    assert.equal(redeemCalls(server).at(-1), rid, "the original id is reused after an authoritative not-found");
+    // The resent request is the first commit: a FRESH redemption, closed like the normal path.
+    closedAsFresh(flow);
     assert.equal(server.redemptionCount(member("m01").memberId, "2026-10-19"), 1);
   });
 
@@ -273,11 +322,15 @@ describe("UI-04O counter flow: uncertain outcomes keep the ORIGINAL id and never
     noPrepare(s(flow).machine);
   });
 
-  it("handoff reply lost: retry reuses the same handoff id; exactly one statement is stored", async () => {
+  it("handoff reply lost (optional statement on the recovery screen): retry reuses the same handoff id; exactly one statement", async () => {
     const { flow, server } = setup();
     await flow.start();
+    server.schedule("redeem", "lose_reply_after_commit");
     await orderFor(flow, "m01");
-    await flow.act("acknowledge_prepare");
+    await flow.act("retry_redemption");
+    assert.equal(phase(flow), "previously_recorded_unconfirmed", "a replay is never closed as a fresh success");
+    assert.equal(s(flow).success, null);
+    await flow.act("confirm_manual_verification");
     server.schedule("handoff", "lose_reply_after_commit");
     await flow.act("confirm_handed_now");
     assert.equal(phase(flow), "handoff_unresolved");
@@ -332,8 +385,9 @@ describe("UI-04O counter flow: uncertain outcomes keep the ORIGINAL id and never
     assert.equal(phase(flow), "previous_business_date");
     noPrepare(s(flow).machine);
     await flow.act("finish");
+    assert.equal(s(flow).success, null, "yesterday's record is not today's success");
     await orderFor(flow, "m01");
-    assert.equal(phase(flow), "recorded_now");
+    closedAsFresh(flow);
     assert.equal(server.redemptionCount(member("m01").memberId, "2026-10-19"), 1);
     assert.equal(server.redemptionCount(member("m01").memberId, "2026-10-20"), 1);
   });
@@ -417,10 +471,12 @@ describe("UI-04O counter flow: manager intervention and storage failures", () =>
     assert.equal(phase(flow), "persistence_blocked");
     assert.deepEqual(redeemCalls(server), [], "no request without a durable recovery context");
     const rid = requestId(flow);
+    assert.equal(s(flow).screen, "redemption", "a persistence block is a recovery screen, never a success");
+    assert.equal(s(flow).success, null);
     storage.failRecoveryWrites = false;
     await flow.act("retry_persistence");
-    assert.equal(phase(flow), "recorded_now");
     assert.deepEqual(redeemCalls(server), [rid]);
+    closedAsFresh(flow);
   });
 
   it("while an intent is open the counter cannot start another one", async () => {
@@ -433,8 +489,81 @@ describe("UI-04O counter flow: manager intervention and storage failures", () =>
     await flow.lookup({ qrToken: member("m05").qrToken });
     assert.equal(s(flow).screen, "redemption");
     assert.equal(s(flow).summary?.member.id, member("m01").memberId, "the open intent's member stays; no other member is looked up");
-    assert.equal(await flow.confirm(), "rejected");
+    assert.equal(await flow.submit(), "rejected");
     assert.equal(redeemCalls(server).length, 1);
+  });
+});
+
+describe("UI-04O fast counter: only a server-confirmed FRESH commit closes as success", () => {
+  it("unknown outcome, refusal, integrity failure or auth loss never closes and never shows the success notice", async () => {
+    const outcomes: [string, string][] = [
+      ["lose_reply_after_commit", "redemption_unresolved"],
+      ["lose_request", "redemption_unresolved"],
+      ["outcome_unknown_after_commit", "redemption_unresolved"],
+      ["server_error_before_commit", "redemption_unresolved"],
+      ["another_tablet_first", "redemption_refused"],
+      ["integrity_failure", "blocked_integrity"],
+      ["session_expired", "blocked_authorization"],
+      ["permission_revoked", "blocked_authorization"],
+    ];
+    for (const [fault, expected] of outcomes) {
+      const { flow, server } = setup();
+      await flow.start();
+      server.schedule("redeem", fault as never);
+      await orderFor(flow, "m01");
+      assert.equal(phase(flow), expected, fault);
+      assert.equal(s(flow).screen, "redemption", `${fault}: the recovery screen`);
+      assert.equal(s(flow).success, null, `${fault}: no success notice`);
+      assert.equal(s(flow).submitting, false, fault);
+      assert.equal(redeemCalls(server).length <= 1, true, `${fault}: no automatic second request`);
+    }
+  });
+
+  it("a stale reply after a lock never closes the transaction or shows success", async () => {
+    let hold: (() => void) | null = null;
+    let holding = false;
+    const sleep = (_ms: number, signal: AbortSignal) =>
+      holding
+        ? new Promise<void>((resolve, reject) => {
+            hold = resolve;
+            signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          })
+        : Promise.resolve();
+    const { flow, server } = setup({ sleep });
+    await flow.start();
+    flow.open("scan");
+    await flow.lookup({ qrToken: member("m01").qrToken });
+    for (const a of ESPRESSO_ORDER) flow.dispatchOrder(a);
+    holding = true;
+    const pending = flow.submit();
+    for (let i = 0; i < 20 && !hold; i++) await new Promise((r) => setImmediate(r));
+    assert.ok(hold, "the request is in flight");
+    assert.equal(phase(flow), "submitting_redemption");
+    assert.equal(s(flow).screen, "coffee", "the configurator stays visible (busy) while the single request runs");
+    assert.equal(s(flow).submitting, true);
+    holding = false;
+    await flow.lock();
+    (hold as unknown as () => void)();
+    const result = await pending;
+    assert.notEqual(result, "applied");
+    assert.equal(s(flow).session.phase, "locked");
+    assert.equal(phase(flow), "blocked_authorization");
+    assert.equal(s(flow).success, null);
+    assert.equal(s(flow).screen, "redemption");
+    assert.ok(redeemCalls(server).length <= 1);
+  });
+
+  it("a reload after the fast close starts clean: no recovery, no replay, no second request", async () => {
+    const { flow, server } = setup();
+    await flow.start();
+    await orderFor(flow, "m01");
+    closedAsFresh(flow);
+    await flow.reload();
+    assert.equal(phase(flow), "idle");
+    assert.equal(s(flow).screen, "dashboard");
+    assert.equal(s(flow).success, null, "the notice does not survive a reload");
+    assert.equal(redeemCalls(server).length, 1);
+    assert.ok(!server.log().slice(3).some((e) => e.operation === "redeem" || e.operation === "status"), "nothing is replayed or re-read");
   });
 });
 
@@ -461,13 +590,12 @@ describe("UI-04O fake server: replies are exact v2 contract bodies", () => {
     };
     for (const name of ["redeem", "handoff", "status", "lookup"] as const) wrap(name);
     await orderFor(flow, "m01");
-    await flow.act("acknowledge_prepare");
-    await flow.act("confirm_handed_now");
-    await flow.act("check_status");
-    await flow.act("finish");
     server.schedule("redeem", "outcome_unknown_after_commit");
     await orderFor(flow, "m05");
     await flow.act("retry_redemption");
+    await flow.act("check_status");
+    await flow.act("confirm_manual_verification");
+    await flow.act("confirm_handed_now");
     await flow.act("check_status");
     await flow.act("finish");
     server.schedule("redeem", "another_tablet_first");

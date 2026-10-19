@@ -19,6 +19,45 @@ esbuild module graphs). Fake members only; no request leaves the page (the DOM
 tests probe `fetch`, XHR, `sendBeacon` and WebSocket). The page loads the
 approved design preview's web font, like `/club-preview`.
 
+## Fast counter (owner decision, 2026-10-19)
+
+The standard successful visit has exactly these steps:
+
+1. Scan the QR or search by phone.
+2. Eligibility is checked automatically; an eligible member goes **straight to
+   the coffee configurator**, with name, masked phone and "Δικαιούται καφέ
+   σήμερα" kept visible above it.
+3. Choose the coffee and its structured preparation (approved configurator).
+4. Tap **one** final button: **«Καταχώρηση καφέ»** (enabled only for a
+   complete order; busy and ignored on a second tap while the request runs).
+5. Exactly one redemption intent is sent (original request id, persistence
+   before send — unchanged).
+6. Only when the server authoritatively confirms a **fresh** redemption
+   (machine phase `recorded_now`, i.e. a `redeemed` reply — never a replay,
+   a status read or a refusal): a short notice **«Ο καφές καταχωρήθηκε»**
+   (polite live region, no button, gone after 2.5 s) and the dashboard, ready
+   for the next customer.
+
+Removed from the normal path: the separate confirmation page, the «Ετοιμάζεται
+ο καφές» acknowledgement, the handoff declaration buttons and the manual
+«Ολοκλήρωση». A not-eligible member sees the reason and «Επόμενος πελάτης».
+
+**Machine contract change (the only one):** `StaffRedemptionMachine.finish()`
+now accepts a server-confirmed fresh commit (`recorded_now`) whether or not
+the prepare prompt was acknowledged. It records nothing: no preparation, no
+handoff statement, no request; it clears the settled tab context. The flow
+never calls `acknowledgePrepare()` and never creates a handoff claim; a
+redemption record is not evidence of physical delivery. `availableActions()`
+is unchanged, so the standalone RecoveryScreen still offers its single prepare
+prompt and every recovery scenario as before. Every other state (unknown
+outcome, replay, refusal, persistence block, storage, integrity or
+authorization failure) stays on the RecoveryScreen and can never be closed as
+a success. A fresh commit produced by a recovery action (resend after an
+authoritative "not recorded", a retry whose first attempt never committed, a
+retry after a persistence block) is closed the same way. The handoff
+statement remains available, optional, on the recovery screen (e.g. after a
+replay with manual verification).
+
 ## What is real and what is fake
 
 | Part | Source | Real or fake |
@@ -28,7 +67,7 @@ approved design preview's web font, like `/club-preview`.
 | Reply parsing and HTTP classification | `wire.ts` (`parseRedemptionReply`, `parseStatusReply`, `parseHandoffReply`, `parseLookupReply`, `classifyHttpReply`) | **real** |
 | Per-tab recovery store (ids only) | `createSessionRecoveryStorage` | **real** adapter over an in-memory tab store |
 | Redemption lifecycle screen | `RecoveryScreen` + `describeRecovery` (UI-04M/N, approved) | **real** |
-| Dashboard, scan, phone, member, coffee, confirmation | UI-02 approved components (`StaffFrame`, `CoffeeConfigurator`, `OrderSummary`, `DefRows`, `StateMark`) | real components, new composition |
+| Dashboard, scan, phone, not-eligible member, coffee with the final button | UI-02 approved components (`StaffFrame`, `CoffeeConfigurator`, `OrderSummary`, `DefRows`, `StateMark`) | real components, new composition |
 | Order → contract payload | `orderPayload.ts` (the UI-03C parity mapping) checked by the real `validatePreparation` | real contract |
 | Server | `fakeServer.ts`: one coffee per member per Athens business day, request-id replay, lookup proof, handoff idempotency, v2 bodies with contract statuses | **fake** |
 | Members | the approved UI-02 synthetic members, with fake ids, QR tokens and phones | **fake** |
@@ -45,15 +84,15 @@ memory only, dropped on session loss, reload and re-login).
    server-confirmed redemptions ("καταχώρηση", never "δόθηκε").
 2. **Scan** (simulated cards) and **phone keypad** (fake numbers; Greek
    mobiles only, +30 / 0030 accepted).
-3. **Member**: eligibility verdict with icon and text; coffee selection only
-   when the summary says the benefit is available today.
-4. **Coffee** (approved configurator, structured choices only) and
-   **confirmation** (full order, Athens day).
-5. **Redemption lifecycle**: the approved RecoveryScreen for every machine
-   state. The order to prepare appears beside it ONLY while a fresh commit's
-   single "prepare" prompt is due.
-6. **Recovery, handoff statement, finish**, session expiry, permission loss,
-   lock and manager escalation through the same screen.
+3. **Not eligible**: the reason with icon and text, and «Επόμενος πελάτης».
+4. **Coffee** (approved configurator, structured choices only) with the
+   customer's identity and eligibility above it and the single final button
+   «Καταχώρηση καφέ»; it stays visible while the request runs.
+5. **Success**: «Ο καφές καταχωρήθηκε» over the dashboard (fresh commit only).
+6. **Redemption lifecycle / recovery**: the approved RecoveryScreen for every
+   other machine state — unknown outcome, replay, refusal, persistence block,
+   session loss, integrity, manager escalation, the optional handoff
+   statement.
 
 The tooling bar (outside the staff chrome) selects 16 scenarios with steps
 and the guarantee each one shows, and offers: simulated page reload, lock,
@@ -63,8 +102,15 @@ so reuse of the ORIGINAL id can be seen) and the tab store's content (ids only).
 
 ## Guarantees demonstrated (and tested)
 
-`tests/staff/counterFlow.test.ts` (30) and `tests/staff/counterPreview.test.ts`
-(11, jsdom):
+`tests/staff/counterFlow.test.ts` and `tests/staff/counterPreview.test.ts` (jsdom),
+plus the machine decision tests in `redemptionRecovery.test.ts`:
+
+- fast counter: one tap, one request; a double tap sends nothing more; a
+  partial order is never sent; only a fresh commit closes with the success
+  notice; unknown outcome, refusal, integrity failure, 401/403 and a stale
+  reply after a lock never close and never show it; a reload after the close
+  starts clean (no replay, no status read, no second request); the close sends
+  nothing and records no handoff;
 
 - one entitlement per member per Athens business day (also across midnight:
   yesterday's lost commit replays as an earlier date; today needs a NEW intent);

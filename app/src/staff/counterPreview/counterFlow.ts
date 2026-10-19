@@ -22,6 +22,13 @@ import { createPreviewTransport, type MemberSummary, type PreviewTransport } fro
  *  - the REAL per-tab recovery storage adapter over an in-memory tab store;
  *  - the approved UI-02 order reducer (structured choices only).
  *
+ * Fast counter (owner decision UI-04O, 2026-10-19): an eligible lookup goes
+ * straight to the configurator; ONE button ("Καταχώρηση καφέ") sends ONE
+ * intent; a server-confirmed FRESH commit (machine phase recorded_now, never a
+ * replay) is closed with finish() — no prepare acknowledgement and no handoff
+ * statement are recorded or invented — followed by a short success notice
+ * and the dashboard. Every other outcome stays on the recovery screen.
+ *
  * Its own rules are navigation guards only:
  *  - while the machine has an open intent (any phase but idle), the counter
  *    shows the recovery screen and nothing else: no new member, no new order;
@@ -32,7 +39,7 @@ import { createPreviewTransport, type MemberSummary, type PreviewTransport } fro
  *    session too (sessionEnded), so late replies are discarded.
  */
 
-export type Screen = "dashboard" | "scan" | "phone" | "member" | "coffee" | "confirm" | "redemption";
+export type Screen = "dashboard" | "scan" | "phone" | "member" | "coffee" | "redemption";
 
 export type LookupNotice = Exclude<LookupReply["kind"], "found"> | "network" | "timeout";
 
@@ -50,6 +57,10 @@ export interface CounterFlowState {
   /** A local, non-business notice (e.g. the order is no longer in memory after a reload). */
   readonly notice: string | null;
   readonly managerNotified: boolean;
+  /** True from the "Καταχώρηση καφέ" tap until the request is settled (double-tap guard). */
+  readonly submitting: boolean;
+  /** Short, non-blocking notice after a server-confirmed FRESH commit only. */
+  readonly success: { readonly message: string; readonly seq: number } | null;
   /** Increases on every simulated reload / re-login (a fresh page). */
   readonly generation: number;
   readonly sessionRef: string;
@@ -71,6 +82,8 @@ export interface CounterFlowDeps {
 /** Copy shown when the order of an intent is no longer in memory (simulated reload). */
 export const ORDER_NOT_IN_MEMORY =
   "Η αρχική παραγγελία δεν υπάρχει πια στη μνήμη της οθόνης (ανανέωση σελίδας). Δεν στέλνεται τίποτα. Εγκαταλείψτε το αίτημα και ξεκινήστε από την αρχή με τον πελάτη.";
+/** Shown only after the server authoritatively confirmed a FRESH redemption. */
+export const FRESH_SUCCESS = "Ο καφές καταχωρήθηκε";
 export const MANAGER_NOTIFIED = "Η ειδοποίηση του υπευθύνου καταγράφηκε στην προεπισκόπηση. Δεν άλλαξε τίποτα στην καταχώρηση.";
 
 const BLOCK_OF: Partial<Record<StaffState["phase"], BlockReason>> = { locked: "locked", expired: "expired", forbidden: "forbidden" };
@@ -96,6 +109,9 @@ export class CounterFlow {
   private lookupNotice: LookupNotice | null = null;
   private notice: string | null = null;
   private managerNotified = false;
+  private submitting = false;
+  private success: { message: string; seq: number } | null = null;
+  private successSeq = 0;
   private snapshot: CounterFlowState;
 
   constructor(deps: CounterFlowDeps) {
@@ -148,6 +164,8 @@ export class CounterFlow {
     this.intentPayload = null;
     this.notice = null;
     this.managerNotified = false;
+    this.submitting = false;
+    this.success = null;
     this.screen = "dashboard";
 
     const sessionRef = this.sessionRef;
@@ -208,6 +226,7 @@ export class CounterFlow {
   open(screen: "scan" | "phone"): void {
     if (!this.canNavigate()) return;
     this.clearMemberContext();
+    this.success = null;
     this.screen = screen;
     this.emit();
   }
@@ -250,48 +269,69 @@ export class CounterFlow {
     this.summary = summary.value;
     this.lookupRef = lookupRef;
     this.orderState = orderReducer(this.orderState, { type: "open-member", memberId: memberPublicId });
-    this.screen = "member";
-    this.emit();
-  }
-
-  /** Coffee selection is offered only for a member the (stand-in) summary shows as available today. */
-  chooseCoffee(): void {
-    if (!this.canNavigate() || !this.summary || this.summary.benefit.state !== "available") return;
-    this.screen = "coffee";
-    this.emit();
-  }
-
-  backToMember(): void {
-    if (!this.canNavigate() || !this.summary) return;
-    this.screen = "member";
+    // Eligible (per the stand-in summary): straight to the configurator. Otherwise the explanation screen.
+    // The server still decides at the moment of redemption.
+    this.screen = summary.value.benefit.state === "available" ? "coffee" : "member";
     this.emit();
   }
 
   dispatchOrder(action: OrderAction): void {
-    if (!this.canNavigate() || !this.summary) return;
+    if (!this.canNavigate() || !this.summary || this.screen !== "coffee" || this.submitting) return;
     if (action.type === "open-member" || action.type === "reset") return;
     this.orderState = orderReducer(this.orderState, action);
     this.emit();
   }
 
-  review(): void {
-    if (!this.canNavigate() || !this.summary || !isComplete(this.orderState.order)) return;
-    this.screen = "confirm";
-    this.emit();
-  }
-
-  /** "Επιβεβαίωση": ONE new logical intent, sent through the real machine. */
-  async confirm(): Promise<Result> {
-    if (!this.canNavigate() || !this.summary || this.screen !== "confirm") return "rejected";
+  /**
+   * "Καταχώρηση καφέ": ONE new logical intent for a COMPLETE order, sent
+   * through the real machine. A second tap while it runs is ignored. Only a
+   * server-confirmed FRESH commit (recorded_now) is closed here; a replay, a
+   * refusal, an unknown outcome, a persistence block or a session loss stays
+   * on the recovery screen.
+   */
+  async submit(): Promise<Result> {
+    if (this.submitting || !this.canNavigate() || !this.summary || this.screen !== "coffee") return "rejected";
+    // Defense in depth: never offer a send for a member the summary shows as not eligible (the server decides anyway).
+    if (this.summary.benefit.state !== "available" || !isComplete(this.orderState.order)) return "rejected";
     const payload = toPreparedPayload(this.orderState.order);
     if (!payload) return "rejected";
+    const machine = this.machine;
+    this.submitting = true;
     this.intentPayload = payload;
     this.notice = null;
     this.managerNotified = false;
-    const result = await this.machine.startRedemption(this.summary.member.id, payload);
+    this.success = null;
+    this.emit();
+    let result: Result;
+    try {
+      result = await machine.startRedemption(this.summary.member.id, payload);
+    } finally {
+      this.submitting = false;
+    }
     if (result === "rejected") this.intentPayload = null;
+    this.closeIfFresh(machine, result);
     this.emit();
     return result;
+  }
+
+  /**
+   * Closes a server-confirmed FRESH commit (machine phase recorded_now: only a
+   * "redeemed" reply leads there, never a replay or a status read) and shows
+   * the success notice. A stale or any other result never closes anything.
+   * finish() records nothing: no preparation, no handoff, no request.
+   */
+  private closeIfFresh(machine: StaffRedemptionMachine, result: Result): void {
+    if (result !== "applied" || machine !== this.machine || machine.getState().phase !== "recorded_now") return;
+    if (machine.finish() !== "applied") return;
+    this.afterIntent();
+    this.success = { message: FRESH_SUCCESS, seq: ++this.successSeq };
+  }
+
+  /** The success notice is non-blocking; the UI dismisses it after a short delay. */
+  dismissSuccess(seq: number): void {
+    if (this.success?.seq !== seq) return;
+    this.success = null;
+    this.emit();
   }
 
   /** The recovery screen's buttons: each action NAME maps to exactly one machine method. */
@@ -312,6 +352,7 @@ export class CounterFlow {
         break;
       case "retry_redemption":
         result = await m.retryRedemption();
+        this.closeIfFresh(m, result);
         break;
       case "resubmit_same_intent":
         if (!this.intentPayload) {
@@ -319,6 +360,7 @@ export class CounterFlow {
           result = "rejected";
         } else {
           result = await m.resubmitSameIntent(this.intentPayload);
+          this.closeIfFresh(m, result);
         }
         break;
       case "check_status":
@@ -338,6 +380,7 @@ export class CounterFlow {
         break;
       case "retry_persistence":
         result = await m.retryPersistence();
+        this.closeIfFresh(m, result);
         break;
       case "retry_restore":
         result = await m.restore();
@@ -397,7 +440,10 @@ export class CounterFlow {
     const session: StaffState = this.controller ? this.controller.getState() : { phase: "loading" };
     const machine: MachineState = this.machine ? this.machine.getState() : { phase: "idle" };
     const lost = session.phase !== "ready" && session.phase !== "loading";
-    const screen: Screen = machine.phase !== "idle" || lost ? "redemption" : this.screen;
+    // While the single request is in flight the configurator stays visible (button busy); the recovery
+    // screen appears only if the outcome is not a fresh commit.
+    const sending = this.submitting && (machine.phase === "submitting_redemption" || machine.phase === "recorded_now");
+    const screen: Screen = lost ? "redemption" : sending ? "coffee" : machine.phase !== "idle" ? "redemption" : this.screen;
     const person = this.summary ? (entryById(this.summary.member.id)?.person ?? null) : null;
     return Object.freeze({
       screen,
@@ -410,6 +456,8 @@ export class CounterFlow {
       lookupNotice: this.lookupNotice,
       notice: this.notice,
       managerNotified: this.managerNotified,
+      submitting: this.submitting,
+      success: this.success,
       generation: this.generation,
       sessionRef: this.sessionRef,
     });

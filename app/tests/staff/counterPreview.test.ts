@@ -35,7 +35,7 @@ beforeEach(async () => {
   await dom.reset();
 });
 
-function world() {
+function world(opts: { sleep?: (ms: number, signal: AbortSignal) => Promise<void> } = {}) {
   const now = () => new Date(MORNING);
   const server = new FakeClubServer({ now });
   const storage = new PreviewTabStorage();
@@ -49,7 +49,7 @@ function world() {
     newSessionRef: () => (++sessions).toString(16).padStart(32, "7"),
     sha256Hex: async (text) => createHash("sha256").update(text, "utf8").digest("hex"),
     latencyMs: 0,
-    sleep: abortableSleep,
+    sleep: opts.sleep ?? abortableSleep,
     deviceRef: "d".repeat(32),
   });
   return { flow, server, storage };
@@ -66,8 +66,8 @@ const settle = () =>
     for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
   });
 
-async function mount() {
-  const w = world();
+async function mount(opts: { sleep?: (ms: number, signal: AbortSignal) => Promise<void> } = {}) {
+  const w = world(opts);
   await dom.render(createElement(Host, { flow: w.flow, server: w.server }));
   await act(async () => {
     await w.flow.start();
@@ -92,16 +92,17 @@ async function press(label: string | RegExp) {
   await settle();
 }
 
-/** Scan → member → coffee (usual sample) → continue → confirm. */
+/** Fast counter: scan → straight to the configurator (usual sample) → ONE "Καταχώρηση καφέ". */
 async function orderFor(previewId: string, hint: string) {
   await press("Σάρωση κάρτας");
   await press(hint);
-  assert.equal(entryByPreviewId(previewId).person.name, h1s()[0]?.textContent);
-  await press("Επιλογή καφέ");
+  assert.equal(h1s()[0]?.textContent, "Επιλογή καφέ");
+  assert.ok(qa('[data-evc-cf="who"]')[0]?.textContent?.includes(entryByPreviewId(previewId).person.name), "the customer stays visible");
   await press("Όπως συνήθως");
-  await press("Συνέχεια");
-  await press("Επιβεβαίωση");
+  await press("Καταχώρηση καφέ");
 }
+
+const successText = () => qa('[data-evc-cf="success"]')[0]?.textContent ?? "";
 
 describe("UI-04O counter screens: structure, headings, focus and names", () => {
   it("every screen of the normal flow has exactly one h1 and receives focus on it", async () => {
@@ -117,13 +118,11 @@ describe("UI-04O counter screens: structure, headings, focus and names", () => {
     await press("Σάρωση κάρτας");
     check("scan");
     await press("Αλεξάνδρα");
-    check("member");
-    await press("Επιλογή καφέ");
     check("coffee");
     await press("Όπως συνήθως");
-    await press("Συνέχεια");
-    check("confirm");
-    assert.deepEqual(visited, ["Ταμείο", "Προσομοίωση σάρωσης", "Αλεξάνδρα Κωνσταντίνου", "Επιλογή καφέ", "Επιβεβαιώστε τον καφέ"]);
+    await press("Καταχώρηση καφέ");
+    check("dashboard after the fresh commit");
+    assert.deepEqual(visited, ["Ταμείο", "Προσομοίωση σάρωσης", "Επιλογή καφέ", "Ταμείο"]);
   });
 
   it("every button has an accessible name and a touch-sized target class (48 px or larger)", async () => {
@@ -132,12 +131,12 @@ describe("UI-04O counter screens: structure, headings, focus and names", () => {
       async () => {},
       () => press("Σάρωση κάρτας"),
       () => press("Αλεξάνδρα"),
-      () => press("Επιλογή καφέ"),
+      () => press("Όπως συνήθως"),
       async () => {
-        await press("Όπως συνήθως");
-        await press("Συνέχεια");
+        await press("Ταμείο");
+        await press("Σάρωση κάρτας");
+        await press("Δήμητρα");
       },
-      () => press("Επιβεβαίωση"),
     ];
     for (const go of screens) {
       await go();
@@ -159,20 +158,67 @@ describe("UI-04O counter screens: structure, headings, focus and names", () => {
     for (const d of "6910000052") await press(new RegExp(`^${d}$`));
     assert.equal(search().disabled, false);
     await press(/^Αναζήτηση$/);
-    assert.equal(h1s()[0].textContent, "Σοφία Λαμπράκη");
+    assert.equal(h1s()[0].textContent, "Επιλογή καφέ", "an eligible member goes straight to the configurator");
+    assert.ok(qa('[data-evc-cf="who"]')[0]?.textContent?.includes("Σοφία Λαμπράκη"));
     assert.ok(text().includes("69•• ••• •52"), "masked phone only");
     assert.ok(!text().includes("6910000052"), "the full number is not shown once the member is open");
   });
 });
 
 describe("UI-04O counter screens: business guarantees visible on screen", () => {
-  it("the order to prepare is shown only for a fresh commit, once; after acknowledging it disappears", async () => {
-    await mount();
-    await orderFor("m01", "Αλεξάνδρα");
-    assert.equal(qa('[data-evc-cf="prepare-order"]').length, 1);
-    await press("Ετοιμάζεται ο καφές");
+  it("a fresh commit shows only a short success notice and returns to the dashboard: no extra steps", async () => {
+    const w = await mount();
+    await press("Σάρωση κάρτας");
+    await press("Αλεξάνδρα");
+    assert.ok(text().includes("Δικαιούται καφέ σήμερα"), "eligibility stays visible on the configurator");
+    const labels = qa("button").map((b) => b.textContent);
+    for (const gone of ["Συνέχεια", "Επιβεβαίωση", "Επιλογή καφέ"]) assert.ok(!labels.includes(gone), `no "${gone}" step`);
+    await press("Όπως συνήθως");
+    await press("Καταχώρηση καφέ");
+    assert.equal(h1s()[0].textContent, "Ταμείο");
+    assert.equal(successText(), "Ο καφές καταχωρήθηκε");
+    assert.equal(qa('[data-evc-cf="success"]')[0].getAttribute("role"), "status");
+    assert.equal(qa('[data-evc-cf="success"] button').length, 0, "the notice has no button");
+    for (const gone of ["Ετοιμάζεται ο καφές", "Δήλωση: παραδόθηκε τώρα", "Δήλωση: παραδόθηκε νωρίτερα", "Ολοκλήρωση"]) {
+      assert.ok(!qa("button").some((b) => b.textContent === gone), `no "${gone}" button`);
+    }
     assert.equal(qa('[data-evc-cf="prepare-order"]').length, 0);
-    assert.ok(!qa("button").some((b) => b.textContent === "Ετοιμάζεται ο καφές"));
+    assert.equal(w.flow.getState().machine.phase, "idle");
+    assert.equal(w.server.redemptionCount(entryByPreviewId("m01").memberId, w.server.businessDate()), 1);
+  });
+
+  it("while the single request runs the final button is busy and disabled; a second tap sends nothing", async () => {
+    let release: (() => void) | null = null;
+    let holding = false;
+    const sleep = () => (holding ? new Promise<void>((r) => (release = r)) : Promise.resolve());
+    const w = await mount({ sleep });
+    await press("Σάρωση κάρτας");
+    await press("Αλεξάνδρα");
+    await press("Όπως συνήθως");
+    holding = true;
+    await press("Καταχώρηση καφέ");
+    const busy = qa("button").find((b) => b.textContent === "Καταχώρηση…") as HTMLButtonElement;
+    assert.ok(busy, "the final button shows it is sending");
+    assert.equal(busy.disabled, true);
+    assert.equal(busy.getAttribute("aria-busy"), "true");
+    await dom.click(busy);
+    holding = false;
+    await act(async () => {
+      (release as unknown as () => void)();
+    });
+    await settle();
+    assert.equal(successText(), "Ο καφές καταχωρήθηκε");
+    assert.equal(w.server.log().filter((e) => e.operation === "redeem").length, 1, "exactly one request");
+  });
+
+  it("the final button is disabled until the order is complete", async () => {
+    await mount();
+    await press("Σάρωση κάρτας");
+    await press("Αλεξάνδρα");
+    const submit = () => qa("button").find((b) => b.textContent === "Καταχώρηση καφέ") as HTMLButtonElement;
+    assert.equal(submit().disabled, true);
+    await press("Όπως συνήθως");
+    assert.equal(submit().disabled, false);
   });
 
   it("a replay after a lost reply never shows the order to prepare and never reads as success", async () => {
@@ -182,10 +228,12 @@ describe("UI-04O counter screens: business guarantees visible on screen", () => 
     assert.equal(qa('[data-evc-cf="prepare-order"]').length, 0);
     assert.ok(text().includes("Δεν έχει επιβεβαιωθεί"), "the uncertain marker is shown");
     assert.ok(!/Η καταχώρηση έγινε/.test(text()));
+    assert.equal(successText(), "", "an unknown outcome never shows the success notice");
     await press("Δοκιμή ξανά");
     assert.equal(w.flow.getState().machine.phase, "previously_recorded_unconfirmed");
     assert.equal(qa('[data-evc-cf="prepare-order"]').length, 0);
     assert.ok(!qa("button").some((b) => b.textContent === "Ετοιμάζεται ο καφές"));
+    assert.equal(successText(), "", "a replay is never presented as a fresh success");
   });
 
   it("while an intent is open there is no way back to the counter or to another member", async () => {
@@ -201,7 +249,8 @@ describe("UI-04O counter screens: business guarantees visible on screen", () => 
     await press("Σάρωση κάρτας");
     await press("Δήμητρα");
     assert.ok(text().includes("Η συνδρομή δεν είναι ενεργή"));
-    assert.ok(!qa("button").some((b) => b.textContent === "Επιλογή καφέ"));
+    assert.ok(!qa("button").some((b) => b.textContent === "Καταχώρηση καφέ" || b.textContent === "Επιλογή καφέ"));
+    assert.ok(qa("button").some((b) => b.textContent === "Επόμενος πελάτης"), "an easy path to the next customer");
     assert.ok(qa('[role="status"] svg').length >= 1, "an icon accompanies the colour");
   });
 
@@ -229,9 +278,7 @@ describe("UI-04O counter preview: no network, local only", () => {
   it("a full counter visit and a recovery make zero fetch / XHR / beacon / WebSocket calls", async () => {
     const w = await mount();
     await orderFor("m01", "Αλεξάνδρα");
-    await press("Ετοιμάζεται ο καφές");
-    await press("Δήλωση: παραδόθηκε τώρα");
-    await press("Ολοκλήρωση");
+    assert.equal(successText(), "Ο καφές καταχωρήθηκε");
     w.server.schedule("redeem", "lose_reply_after_commit");
     await orderFor("m05", "Σοφία");
     await press("Δοκιμή ξανά");

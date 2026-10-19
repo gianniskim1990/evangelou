@@ -281,6 +281,7 @@ function verdictOf(state: CounterFlowState): { tone: Tone; title: string; body: 
   return { tone: "stop", title: "Η συνδρομή δεν είναι ενεργή", body: "Δεν δικαιούται δωρεάν καφέ. Το μέλος μπορεί να ανανεώσει από τον λογαριασμό του." };
 }
 
+/** Shown when the customer is NOT eligible: a clear reason and one tap to the next customer. */
 function Member({ flow, state, today }: { flow: CounterFlow; state: CounterFlowState; today: string }) {
   const heading = useScreenHeading(`member-${state.summary?.member.id}`);
   const v = verdictOf(state);
@@ -313,11 +314,7 @@ function Member({ flow, state, today }: { flow: CounterFlow; state: CounterFlowS
             />
           </section>
           <section className="flex flex-col gap-3 md:pt-2">
-            {available ? (
-              <button type="button" onClick={() => flow.chooseCoffee()} className="press min-h-18 rounded-[14px] bg-[var(--roast)] px-6 text-[19px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επιλογή καφέ</button>
-            ) : (
-              <button type="button" onClick={() => flow.nextCustomer()} className="press min-h-18 rounded-[14px] bg-[var(--roast)] px-6 text-[19px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επόμενος πελάτης</button>
-            )}
+            <button type="button" onClick={() => flow.nextCustomer()} className="press min-h-18 rounded-[14px] bg-[var(--roast)] px-6 text-[19px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)]">Επόμενος πελάτης</button>
             <PreviewNote>Η σύνοψη είναι ενδεικτική: δεν υπάρχει ακόμη αντίστοιχη διαδρομή v2. Την τελική απόφαση την παίρνει ο διακομιστής τη στιγμή της καταχώρησης.</PreviewNote>
           </section>
         </div>
@@ -326,47 +323,60 @@ function Member({ flow, state, today }: { flow: CounterFlow; state: CounterFlowS
   );
 }
 
-// ---- Coffee and confirmation -------------------------------------------------------------------
+// ---- Coffee (the final step) -----------------------------------------------------------------
+
+/** "Καταχώρηση καφέ" — the single, deliberate final submission (owner decision UI-04O). */
+export const SUBMIT_LABEL = "Καταχώρηση καφέ";
+export const SUBMITTING_LABEL = "Καταχώρηση…";
 
 function Coffee({ flow, state }: { flow: CounterFlow; state: CounterFlowState }) {
   const heading = useScreenHeading("coffee");
+  const { member } = state.summary!;
   return (
     <>
-      <FlowBar back="Μέλος" onBack={() => flow.backToMember()} title={`Καφές για: ${state.summary!.member.name}`} />
+      <FlowBar back="Ταμείο" onBack={() => flow.nextCustomer()} title={`Καφές για: ${member.name}`} />
       <h1 ref={heading} tabIndex={-1} className="sr-only">Επιλογή καφέ</h1>
-      <CoffeeConfigurator member={state.person!} order={state.order} dispatch={(a) => flow.dispatchOrder(a)} onContinue={() => flow.review()} />
+      <section aria-label="Πελάτης" className="evc-cf-who" data-evc-cf="who">
+        <div className={cx("evc-cf-who__card", TONE_BG.ok)}>
+          <span className="evc-cf-who__name">{member.name}</span>
+          <span className="evc-cf-who__meta t-num">{member.phoneMasked}</span>
+          <span className="evc-cf-who__verdict">
+            <Glyph name="check" size={22} />
+            Δικαιούται καφέ σήμερα
+          </span>
+        </div>
+      </section>
+      <CoffeeConfigurator
+        member={state.person!}
+        order={state.order}
+        dispatch={(a) => flow.dispatchOrder(a)}
+        onContinue={() => void flow.submit()}
+        continueLabel={state.submitting ? SUBMITTING_LABEL : SUBMIT_LABEL}
+        busy={state.submitting}
+      />
     </>
   );
 }
 
-function Confirm({ flow, state, today }: { flow: CounterFlow; state: CounterFlowState; today: string }) {
-  const heading = useScreenHeading("confirm");
-  const [sending, setSending] = useState(false);
+/** Brief, non-blocking notice after a server-confirmed FRESH commit; it dismisses itself. */
+export const SUCCESS_VISIBLE_MS = 2500;
+
+function SuccessToast({ flow, state }: { flow: CounterFlow; state: CounterFlowState }) {
+  const success = state.success;
+  useEffect(() => {
+    if (!success) return;
+    const t = setTimeout(() => flow.dismissSuccess(success.seq), SUCCESS_VISIBLE_MS);
+    return () => clearTimeout(t);
+  }, [flow, success]);
   return (
-    <>
-      <FlowBar back="Καφές" onBack={() => flow.chooseCoffee()} title="Επιβεβαίωση δωρεάν καφέ" />
-      <Page className="max-w-[760px]">
-        <h1 ref={heading} tabIndex={-1} className="t-headline text-[var(--ink)]">Επιβεβαιώστε τον καφέ</h1>
-        <div className="mt-6 rounded-[18px] border border-[var(--rule-strong)] bg-[var(--paper)] px-6 py-2">
-          <OrderSummary member={state.person!} order={state.order} today={today} />
-        </div>
-        <div className="mt-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3">
-          <button type="button" onClick={() => flow.chooseCoffee()} className={BTN_LINE}>Αλλαγή</button>
-          <button
-            type="button"
-            disabled={sending}
-            onClick={() => {
-              setSending(true);
-              void flow.confirm().finally(() => setSending(false));
-            }}
-            className="press min-h-16 rounded-[14px] bg-[var(--roast)] text-[18px] font-semibold text-[var(--milk)] hover:bg-[var(--roast-3)] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Επιβεβαίωση
-          </button>
-        </div>
-        <PreviewNote className="mt-6">Η επιβεβαίωση στέλνει ένα αίτημα καταχώρησης στον προσομοιωμένο διακομιστή. Ένας καφές ανά μέλος ανά ημέρα, ώρα Ελλάδας.</PreviewNote>
-      </Page>
-    </>
+    <div role="status" aria-live="polite" data-evc-cf="success">
+      {success ? (
+        <span className="evc-cf-toast">
+          <Glyph name="check" size={24} />
+          {success.message}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -411,8 +421,12 @@ export function CounterApp({ flow, state, server, today }: { flow: CounterFlow; 
   else if (state.screen === "phone") content = <Phone flow={flow} state={state} />;
   else if (state.screen === "member" && state.summary) content = <Member flow={flow} state={state} today={today} />;
   else if (state.screen === "coffee" && state.summary && state.person) content = <Coffee flow={flow} state={state} />;
-  else if (state.screen === "confirm" && state.summary && state.person) content = <Confirm flow={flow} state={state} today={today} />;
   else content = <Dashboard flow={flow} state={state} server={server} />;
-  return <StaffFrame today={today}>{content}</StaffFrame>;
+  return (
+    <StaffFrame today={today}>
+      {content}
+      <SuccessToast flow={flow} state={state} />
+    </StaffFrame>
+  );
 }
 

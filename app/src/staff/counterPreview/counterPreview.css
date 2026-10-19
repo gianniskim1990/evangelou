@@ -196,3 +196,79 @@
   border-radius: 8px;
   white-space: pre-wrap;
 }
+
+/* ---- Fast counter (owner decision UI-04O, 2026-10-19) ----------------------------------------- */
+
+/* Customer identity and eligibility, kept visible above the configurator. */
+.evc-cf-who {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 20px 0;
+}
+.evc-cf-who__card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  border-radius: 14px;
+  padding: 12px 18px;
+}
+.evc-cf-who__name {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.evc-cf-who__meta {
+  font-size: 15px;
+  color: var(--ink-2);
+}
+.evc-cf-who__verdict {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ok);
+}
+@media (min-width: 768px) {
+  .evc-cf-who {
+    padding: 24px 32px 0;
+  }
+}
+
+/* Brief, non-blocking success notice after a server-confirmed FRESH commit. No button. */
+.evc-cf-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 16px 26px;
+  border-radius: 999px;
+  background: var(--ok, #2f6b3d);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(30, 24, 18, 0.25);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .evc-cf-toast {
+    animation: evc-cf-toast-in 160ms ease-out;
+  }
+}
+@keyframes evc-cf-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
