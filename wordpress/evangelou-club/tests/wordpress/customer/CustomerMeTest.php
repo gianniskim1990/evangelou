@@ -67,6 +67,22 @@ final class CustomerMeTest extends EVC_WP_Test_Case {
         $this->assertEnvelope($this->rest('GET', self::ME, null, 'bad-nonce'), 401, 'unauthorized');
     }
 
+    public function test_own_nonce_check_is_independent_of_core(): void {
+        // Defence in depth: even if core's cookie/nonce check were skipped, the route refuses
+        // a signed-in customer whose request carries no valid wp_rest nonce.
+        $this->login_as($this->customer());
+        $request = new WP_REST_Request('GET', self::ME);
+        $this->assertInstanceOf(WP_Error::class, EVC_Customer_Auth::authorize($request), 'no nonce');
+        $request->set_header('X-WP-Nonce', 'bad-nonce');
+        $this->assertInstanceOf(WP_Error::class, EVC_Customer_Auth::authorize($request), 'invalid nonce');
+        $this->assertSame(401, EVC_Customer_Auth::authorize($request)->get_error_data()['status']);
+        $request->set_header('X-WP-Nonce', $this->nonce());
+        $this->assertTrue(EVC_Customer_Auth::authorize($request));
+
+        $unchecked = new WP_REST_Request('GET', self::ME);
+        $this->assertSame(401, rest_ensure_response(rest_get_server()->dispatch($unchecked))->get_status(), 'dispatch without core authentication');
+    }
+
     public function test_only_customer_accounts(): void {
         $this->use_source(EVC_Pmpro_Fixture::single_paid_month());
         foreach (array('administrator', 'editor', 'author', 'contributor', 'shop_manager') as $role) {
