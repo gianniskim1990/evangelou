@@ -108,3 +108,104 @@ or PMPro. It needs a **trusted write path** at confirmation time:
 Until then production uses `EVC_Unrecorded_Club_Payment_Provenance` and nobody
 is "active". A test with a TEST-ONLY provenance record shows the full chain
 reaches "active" only with an exact period match.
+
+# STAGE-03 — verified bank-transfer confirmation (code and isolated CI only)
+
+## The trusted boundary: `EVC_Bacs_Payment_Confirmation`
+
+A WooCommerce status is never the proof. The proof is an explicit **manager
+statement from the bank statement**: the bank's transfer reference, the amount
+(€20.00) and the value date. The boundary checks, in this order, and refuses
+(nothing written) on the first failure:
+
+1. the actor holds `evc_confirm_bank_payment`, is NOT the shared Club staff
+   account, and is not the order's own customer;
+2. the statement: reference of 6–64 letters/digits (spaces, dashes, dots,
+   slashes ignored), amount exactly 2000 cents, EUR, real value date between
+   the order date and today (Athens);
+3. the order: the customer's own account, `completed` (the shop has issued
+   the PMPro membership), bank transfer, EUR, total €20.00, exactly one Club
+   item of quantity 1;
+4. the customer has exactly ONE active PMPro row on the Club level.
+
+It then records ONE movement through the existing `EVC_Provenance_Recorder`
+into the existing `EVC_Sql_Provenance_Store` (migration 002, no schema
+change): movement id = keyed HMAC of the normalised **bank reference**; the
+only order anchor = the WooCommerce order; the PMPro row; the level; €20 EUR;
+authority `manual_admin`; evidence `manual_confirmation`; verification instant
+= now (whole second). The recorder computes the period with the approved
+Athens rules (D1 exact instant, D2 early/late renewal, D5 clamped month).
+
+| Situation | Outcome |
+|---|---|
+| first confirmation | newly_recorded + the Athens period |
+| the same confirmation again, any time later (any spacing / case of the reference) | already_recorded, same period (the recorded instant is reused) |
+| the same bank transfer for a second order | conflict, nothing written |
+| a second transfer for the same order | conflict (`alias_conflict`) |
+| two payments of one customer verified in the same second | indeterminate (`same_instant_payment`), nothing written |
+| store unreachable / commit outcome unknown | unavailable / unknown — safe to retry |
+
+Every attempt (including refusals) is written to the Club audit trail
+(`evc_audit_events`: actor id, outcome, reason, opaque movement/order refs —
+no reference, e-mail, name or raw order number).
+
+**Inaccessible by design**: the plugin grants the capability to NO role and
+no shipped code constructs the class (packager-enforced). Owner decision
+needed: who holds the capability, and where the action lives (e.g. a button
+on the WooCommerce order screen).
+
+## Reading it back: `EVC_Store_Club_Payment_Provenance`
+
+Each recorded movement of the customer on the Club level becomes a confirmed
+payment fact exactly as recorded (order anchor ref, movement id, PMPro row,
+period, verification instant); a recorded refund / partial refund / reversal
+/ void changes its status. Enabled ONLY by
+`define('EVC_CLUB_PAYMENT_PROVENANCE', 'club_db_v1')` + the `EVC_CLUB_DB_*`
+constants; otherwise nobody is active (STAGE-02 default). The store is opened
+lazily per read; any read error → 503 "unavailable".
+
+## Date conflict — OWNER DECISION REQUIRED (approved rules unchanged)
+
+The approved rules (Task 1D-B, unchanged) require the last recorded paid
+period to end EXACTLY where the active PMPro row ends, and the PMPro start not
+to precede the paid run. With the verified shop flow they can never both hold:
+
+- PMPro WooCommerce 1.11 starts the row when the order is **completed**
+  (before the manager's Club confirmation) and sets the end to
+  `date("Y-m-d H:i:00", strtotime("+ 1 Month", completion))`: minute-rounded,
+  PHP month arithmetic (31 Jan -> 3 Mar), counted from completion;
+- the Club period starts at the manager's confirmation, to the exact second,
+  and follows D1/D2/D5 (31 Jan -> 28 Feb).
+
+Behaviour now (fail closed, nothing invented): a VERIFIED paid period whose
+PMPro dates disagree is `indeterminate` with the internal flag
+`verified_paid_period_conflict` (plus `pmpro_period_mismatch` or
+`membership_start_before_paid_run`) — distinct from missing evidence
+(`no_payment_evidence`). The customer sees `unverified`. No paid time is
+shortened, no unpaid PMPro time is granted, PMPro data is never written.
+Tests prove `/me` becomes `active` with the exact approved Athens end as soon
+as PMPro's dates equal the recorded period.
+
+(An earlier STAGE-03 draft granted the intersection min(Club end, PMPro end).
+It was withdrawn before commit: it could silently remove legitimately paid
+time and was an unapproved policy.)
+
+Options for the owner (none implemented):
+
+1. **Align PMPro to the Club record at completion (recommended).** The
+   manager's Club confirmation completes the order itself, in the same action,
+   and the add-on's own extension point `pmprowoo_checkout_level` sets
+   `startdate`/`enddate` to the period the recorder computed. PMPro is written
+   only by PMPro, prospectively, never retroactively; existing rows untouched.
+   Needs: approval to let the Club confirmation complete orders and to use the
+   filter; a decision for orders already completed without confirmation.
+2. **Club record authoritative for the end, PMPro only for "still held".**
+   Requires an approved rule change (what happens if PMPro ends earlier).
+3. **Keep the approved exact rule** and manually edit PMPro dates per member
+   (operationally error-prone; not recommended).
+
+## Order lookup is bounded
+
+The reader now selects only the customer's own Club orders in SQL (HPOS
+`wc_orders.customer_id` or legacy `_customer_user`), never every Club order of
+the shop; a wrong-customer order would be a conflict, not skipped.

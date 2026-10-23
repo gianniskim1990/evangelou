@@ -55,8 +55,21 @@ $mutants = array(
     array(
         'id' => 'B3-old-payment-accepted-for-later-period',
         'file' => $mapper,
-        'search' => "if (\$last['end'] != \$row_end || \$last['payment']->membership_row_ref !== \$row->row_ref) {",
+        // STAGE-03: the combined check was split (to flag verified-period conflicts); same intent, two guards.
+        'search' => "if (\$last['end'] != \$row_end) {",
         'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'B3b-payment-bound-to-another-pmpro-row-accepted',
+        'file' => $mapper,
+        'search' => "if (\$last['payment']->membership_row_ref !== \$row->row_ref) {",
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'B3c-verified-period-conflict-not-distinguished',
+        'file' => $mapper,
+        'search' => "return EVC_Entitlement::indeterminate(self::SOURCE, array('pmpro_period_mismatch', 'verified_paid_period_conflict'));",
+        'replace' => "return EVC_Entitlement::indeterminate(self::SOURCE, array('pmpro_period_mismatch'));",
     ),
     array(
         'id' => 'B4-expiry-inclusive',

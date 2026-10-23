@@ -26,6 +26,14 @@ function evc_test_commerce_site(string $dir): void {
     define('EVC_CLUB_PMPRO_LEVEL_ID', EVC_TEST_CLUB_LEVEL);
     define('EVC_CLUB_WC_PRODUCT_ID', EVC_TEST_CLUB_PRODUCT);
     define('EVC_CLUB_EVIDENCE_KEY', 'evc-test-only-evidence-key-0123456789abcdef');
+    // STAGE-03: the Club's recorded payments live in a DISPOSABLE Club database on the loopback
+    // test server (migrations 001 + 002 applied here only; never on any real database).
+    define('EVC_CLUB_PAYMENT_PROVENANCE', 'club_db_v1');
+    define('EVC_CLUB_DB_HOST', (string) (getenv('EVC_TEST_DB_HOST') ?: '127.0.0.1'));
+    define('EVC_CLUB_DB_PORT', (int) (getenv('EVC_TEST_DB_PORT') ?: 3306));
+    define('EVC_CLUB_DB_NAME', 'evc_test_commerce_club');
+    define('EVC_CLUB_DB_USER', (string) (getenv('EVC_TEST_DB_USER') ?: 'root'));
+    define('EVC_CLUB_DB_PASSWORD', (string) getenv('EVC_TEST_DB_PASSWORD'));
 
     // Loaded like normal plugins, before the Club plugin (priority 10).
     tests_add_filter('muplugins_loaded', function () use ($dir) {
@@ -60,9 +68,24 @@ function evc_test_commerce_site(string $dir): void {
             }
         }
     });
+    // A fresh disposable Club database for this run (loopback test server only).
+    tests_add_filter('setup_theme', 'evc_test_commerce_club_db', 20);
     // Configure after WooCommerce registered its post types (init 5) and before PMPro
     // WooCommerce reads its product -> level option (pmprowoo_init, init 10).
     tests_add_filter('init', 'evc_test_commerce_configure', 6);
+}
+
+/** (Re)creates the disposable Club database and applies the plugin's own migrations (001, 002). */
+function evc_test_commerce_club_db(): void {
+    $config = EVC_Db_Config::from_constants();
+    if (!in_array(EVC_CLUB_DB_HOST, array('127.0.0.1', 'localhost', '::1'), true) || strpos($config->database(), 'evc_test_') !== 0) {
+        fwrite(STDERR, "Refusing a non-loopback or non-test Club database.\n");
+        exit(1);
+    }
+    $admin = new PDO(sprintf('mysql:host=%s;port=%d;charset=utf8mb4', EVC_CLUB_DB_HOST, EVC_CLUB_DB_PORT), EVC_CLUB_DB_USER, EVC_CLUB_DB_PASSWORD, array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
+    $admin->exec('DROP DATABASE IF EXISTS `' . $config->database() . '`');
+    $admin->exec('CREATE DATABASE `' . $config->database() . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+    (new EVC_Migrator(EVC_Club_Db::connect($config), dirname(__DIR__, 3) . '/database'))->migrate();
 }
 
 /** The staging configuration as verified on 2026-10-23 (fresh test database, fixed ids). */

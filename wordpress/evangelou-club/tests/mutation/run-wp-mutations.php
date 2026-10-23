@@ -109,8 +109,9 @@ $mutants = array(
         "            if (user_can(\$user, \$capability)) {", "            if (false) {"),
     // STAGE-02 real commerce source (mode "commerce": REAL WooCommerce 11.2.1 + PMPro 3.8.9 + PMPro
     // WooCommerce 1.11 from EVC_TEST_COMMERCE_PLUGINS; customer flag ON). Run with --mode=commerce.
+    // STAGE-03: the customer bound now lives in the (HPOS) SQL; a broken bound must surface as a conflict.
     array('C1-other-customers-orders-counted', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
-        "            if ((int) \$order->get_customer_id() !== \$wp_user_id) {\n                continue;\n            }\n", ""),
+        "' o ON o.id = oi.order_id AND o.customer_id = %d';", "' o ON o.id = oi.order_id AND %d > 0';"),
     array('C2-non-bank-transfer-order-accepted', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
         "            return 'club_order_not_bank_transfer';", "            return null;"),
     array('C3-unknown-order-status-guessed', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
@@ -134,6 +135,25 @@ $mutants = array(
         "        if ((int) \$level_id < 1 || (int) \$product_id < 1) {"),
     array('C12-configured-source-not-used', 'commerce', 'includes/customer/class-evc-customer-plugin.php',
         "        if (\$config === null) {", "        if (true) {"),
+    // STAGE-03 trusted BACS confirmation boundary and provenance read adapter.
+    array('BC1-capability-not-required', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
+        "!user_can(\$actor, self::CAPABILITY) || ", ""),
+    array('BC2-shared-staff-account-accepted', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
+        " || EVC_Staff_Role::has_staff_role(\$actor)) {", ") {"),
+    array('BC3-own-order-accepted', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
+        "        if (\$customer_id === \$actor_user_id) {", "        if (false) {"),
+    array('BC4-order-status-not-required', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
+        "        if ((string) \$order->get_status() !== 'completed') {", "        if (false) {"),
+    array('BC5-movement-identified-by-order-not-transfer', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
+        "\$movement_id = \$this->config->ref('bacs_transfer', \$reference);", "\$movement_id = \$this->config->ref('bacs_transfer', (string) \$order->get_id());"),
+    array('BC6-retry-uses-a-new-instant', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
+        "\$existing !== null ? \$existing->verified_at_utc() : \$this->whole_second_now(),", "\$this->whole_second_now(),"),
+    array('BC7-statement-amount-not-checked', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
+        "        if ((\$input['amount_minor'] ?? null) !== self::AMOUNT_MINOR || (\$input['currency'] ?? null) !== EVC_Commerce_Source_Config::CURRENCY) {", "        if (false) {"),
+    array('BC8-value-date-window-not-checked', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
+        "|| \$received_on < \$created->setTimezone(\$zone)->format('Y-m-d') || \$received_on > \$today) {", ") {"),
+    array('RA1-recorded-refund-ignored', 'commerce', 'includes/customer/class-evc-store-club-payment-provenance.php',
+        "        if (\$history === array()) {\n            return EVC_Pmpro_Payment_Fact::STATUS_CONFIRMED;", "        if (true) {\n            return EVC_Pmpro_Payment_Fact::STATUS_CONFIRMED;"),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */

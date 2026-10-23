@@ -39,7 +39,25 @@ final class EVC_Customer_Plugin {
         if ($config === null) {
             return new EVC_Unavailable_Membership_Adapter();
         }
-        return new EVC_Pmpro_Membership_Adapter(new EVC_Wp_Commerce_Pmpro_Reader($config, new EVC_Unrecorded_Club_Payment_Provenance()), $config->mapper());
+        return new EVC_Pmpro_Membership_Adapter(new EVC_Wp_Commerce_Pmpro_Reader($config, self::payment_provenance($config)), $config->mapper());
+    }
+
+    /**
+     * STAGE-03: the Club's recorded payments are read from the Club database ONLY when
+     * wp-config.php also defines EVC_CLUB_PAYMENT_PROVENANCE === 'club_db_v1' AND the Club
+     * database (EVC_CLUB_DB_*) — whose migration 002 needs separate owner approval. Otherwise
+     * no payment is recorded and nobody is active (the STAGE-02 default).
+     */
+    public static function payment_provenance(EVC_Commerce_Source_Config $config): EVC_Club_Payment_Provenance {
+        $db = EVC_Db_Config::from_constants();
+        if (!defined('EVC_CLUB_PAYMENT_PROVENANCE') || constant('EVC_CLUB_PAYMENT_PROVENANCE') !== 'club_db_v1' || $db === null) {
+            return new EVC_Unrecorded_Club_Payment_Provenance();
+        }
+        return new EVC_Store_Club_Payment_Provenance(function () use ($db) {
+            return new EVC_Sql_Provenance_Store(EVC_Club_Db::connect($db), function () use ($db) {
+                return EVC_Club_Db::connect($db);
+            }, EVC_Bacs_Payment_Confirmation::ENVIRONMENT);
+        }, $config);
     }
 
     public static function deactivate(): void {

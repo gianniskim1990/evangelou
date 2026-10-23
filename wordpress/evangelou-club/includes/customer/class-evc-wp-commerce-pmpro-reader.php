@@ -206,9 +206,17 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
         global $wpdb;
         $items = $wpdb->prefix . 'woocommerce_order_items';
         $meta = $wpdb->prefix . 'woocommerce_order_itemmeta';
+        // STAGE-03: bounded to THIS customer's orders in SQL (indexed customer column / meta),
+        // never a scan of every Club order of the shop. The customer check below stays.
+        if (\Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled()) {
+            $owner_join = 'INNER JOIN ' . \Automattic\WooCommerce\Utilities\OrderUtil::get_table_for_orders() . ' o ON o.id = oi.order_id AND o.customer_id = %d';
+        } else {
+            $owner_join = "INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = oi.order_id AND pm.meta_key = '_customer_user' AND pm.meta_value = %d";
+        }
         $wpdb->last_error = '';
         $ids = $wpdb->get_col($wpdb->prepare(
-            "SELECT DISTINCT oi.order_id FROM {$items} oi INNER JOIN {$meta} im ON im.order_item_id = oi.order_item_id AND im.meta_key = '_product_id' AND im.meta_value = %s WHERE oi.order_item_type = 'line_item' ORDER BY oi.order_id ASC",
+            "SELECT DISTINCT oi.order_id FROM {$items} oi {$owner_join} INNER JOIN {$meta} im ON im.order_item_id = oi.order_item_id AND im.meta_key = '_product_id' AND im.meta_value = %s WHERE oi.order_item_type = 'line_item' ORDER BY oi.order_id ASC",
+            $wp_user_id,
             (string) $this->config->product_id
         ));
         if (!is_array($ids) || $wpdb->last_error !== '') {
@@ -221,9 +229,7 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
             if (!$order instanceof WC_Order || $order instanceof WC_Order_Refund) {
                 continue;
             }
-            if ((int) $order->get_customer_id() !== $wp_user_id) {
-                continue;
-            }
+            // An order of another customer here would be a broken bound: order_problem() makes it a conflict.
             if (in_array((string) $order->get_status(), self::IGNORED_STATUSES, true)) {
                 continue;
             }

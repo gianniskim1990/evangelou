@@ -10,6 +10,8 @@ require_once $evc_customer . 'class-evc-unavailable-membership-adapter.php';
 require_once $evc_customer . 'class-evc-commerce-source-config.php';
 require_once $evc_customer . 'class-evc-club-payment-provenance.php';
 require_once $evc_customer . 'class-evc-wp-commerce-pmpro-reader.php';
+require_once $evc_customer . 'class-evc-store-club-payment-provenance.php';
+require_once $evc_customer . 'class-evc-bacs-payment-confirmation.php';
 require_once $evc_customer . 'class-evc-customer-rest-security.php';
 require_once $evc_customer . 'class-evc-rest-me-controller.php';
 require_once $evc_customer . 'class-evc-customer-shell.php';

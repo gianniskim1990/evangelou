@@ -32,6 +32,11 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *     before the paid run began;
  *  7. evaluation instant < end of the last paid period (exclusive).
  *
+ * When a VERIFIED paid chain exists but rule 4 or 6 fails (PMPro dates
+ * disagree with the recorded period), the result is indeterminate with the
+ * extra flag "verified_paid_period_conflict", distinct from missing evidence
+ * ("no_payment_evidence"). Nothing is shortened, extended or guessed.
+ *
  * Consequences: an old payment cannot justify a later unpaid period (the
  * replayed chain would end before the PMPro end date -> mismatch); a pending
  * renewal neither extends nor invalidates a paid period; a confirmed renewal
@@ -311,15 +316,23 @@ final class EVC_Pmpro_Entitlement_Mapper {
         }
 
         $last = $periods[count($periods) - 1];
-        if ($last['end'] != $row_end || $last['payment']->membership_row_ref !== $row->row_ref) {
+        if ($last['payment']->membership_row_ref !== $row->row_ref) {
             return $this->indeterminate('pmpro_period_mismatch');
+        }
+        // Approved rule (Task 1D-B): the last paid period ends EXACTLY where the active PMPro row
+        // ends. STAGE-03 does NOT relax it: a verified paid period whose PMPro dates disagree is
+        // never shortened, extended or guessed; it fails closed, but with a distinct flag so it is
+        // never confused with missing payment evidence (owner decision pending, see
+        // docs/commerce-membership-source.md "Date conflict").
+        if ($last['end'] != $row_end) {
+            return EVC_Entitlement::indeterminate(self::SOURCE, array('pmpro_period_mismatch', 'verified_paid_period_conflict'));
         }
         if ($pending) {
             $flags[] = 'renewal_pending';
         }
         $run_start = $current_run[0]['start'];
         if ($row_start < $run_start) {
-            return $this->indeterminate('membership_start_before_paid_run');
+            return EVC_Entitlement::indeterminate(self::SOURCE, array('membership_start_before_paid_run', 'verified_paid_period_conflict'));
         }
 
         if ($at >= $last['end']) {

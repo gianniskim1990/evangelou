@@ -175,6 +175,42 @@ final class PmproEntitlementMapperTest extends TestCase {
         }
     }
 
+    /**
+     * STAGE-03: a VERIFIED paid period whose PMPro dates disagree (as PMPro WooCommerce 1.11 always
+     * produces: minute-rounded PHP "+1 month" from its own completion time) is never shortened,
+     * extended or guessed under the approved rules. It fails closed, but is distinguishable from
+     * missing payment evidence for review.
+     */
+    public function test_verified_paid_period_conflict_is_distinct_from_missing_evidence(): void {
+        $at = self::when('2026-10-20 09:00');
+        $missing = self::map(EVC_Pmpro_Fixture::snapshot(array(EVC_Pmpro_Fixture::row()), array()), $at);
+        $this->assertIneligible($missing, 'indeterminate', 'no_payment_evidence', $at);
+        $this->assertNotContains('verified_paid_period_conflict', $missing->diagnostic_flags());
+
+        foreach (array('2026-11-15 11:59:00', '2026-11-15 12:01:00', '2026-12-15 12:00:00') as $row_end) {
+            $s = EVC_Pmpro_Fixture::single_paid_month();
+            $s->memberships = array(EVC_Pmpro_Fixture::row('row1', 'active', $row_end));
+            $e = self::map($s, $at);
+            $this->assertIneligible($e, 'indeterminate', 'verified_paid_period_conflict', $at);
+            $this->assertContains('pmpro_period_mismatch', $e->diagnostic_flags(), $row_end);
+            $this->assertNull($e->expires_at_utc(), "$row_end: no end date is invented");
+        }
+
+        $s = EVC_Pmpro_Fixture::single_paid_month();
+        $s->memberships = array(EVC_Pmpro_Fixture::row('row1', 'active', '2026-11-15 12:00:00', EVC_Pmpro_Fixture::CLUB_LEVEL, false, '2026-10-15 11:00:00'));
+        $e = self::map($s, $at);
+        $this->assertIneligible($e, 'indeterminate', 'verified_paid_period_conflict', $at);
+        $this->assertContains('membership_start_before_paid_run', $e->diagnostic_flags());
+
+        // A payment bound to another PMPro row is a binding problem, not a date conflict.
+        $s = EVC_Pmpro_Fixture::single_paid_month();
+        $s->payments[0]->membership_row_ref = EVC_Pmpro_Fixture::ref('row-other');
+        $s->memberships[] = EVC_Pmpro_Fixture::row('row-other', 'changed');
+        $e = self::map($s, $at);
+        $this->assertIneligible($e, 'indeterminate', 'pmpro_period_mismatch', $at);
+        $this->assertNotContains('verified_paid_period_conflict', $e->diagnostic_flags());
+    }
+
     public function test_failed_payment_only(): void {
         $at = self::when('2026-10-20 08:00');
         $failed = EVC_Pmpro_Fixture::payment('f', 'failed', null, null, null);
