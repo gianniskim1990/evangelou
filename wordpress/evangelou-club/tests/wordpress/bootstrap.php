@@ -31,6 +31,15 @@ define('WP_TESTS_PHPUNIT_POLYFILLS_PATH', $evc_root . '/vendor/yoast/phpunit-pol
 $evc_tests_dir = getenv('WP_PHPUNIT__DIR') ?: $evc_root . '/vendor/wp-phpunit/wp-phpunit';
 require_once $evc_tests_dir . '/includes/functions.php';
 
+// STAGE-02: REAL WooCommerce + Paid Memberships Pro + PMPro WooCommerce Add On, loaded only
+// when EVC_TEST_COMMERCE_PLUGINS points at a directory with the three pinned, checksum-verified
+// sources (tests/bin/fetch-commerce-plugins.sh). Disposable test site only.
+$evc_commerce_dir = getenv('EVC_TEST_COMMERCE_PLUGINS');
+if (is_string($evc_commerce_dir) && $evc_commerce_dir !== '') {
+    require_once __DIR__ . '/support/commerce-site.php';
+    evc_test_commerce_site($evc_commerce_dir);
+}
+
 tests_add_filter('muplugins_loaded', function () use ($evc_root) {
     require $evc_root . '/evangelou-club.php';
 });

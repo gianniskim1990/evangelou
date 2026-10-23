@@ -4,6 +4,7 @@
   Run twice: EVC_TEST_STAFF_FLAG=disabled (wp-common + wp-disabled) and
   EVC_TEST_STAFF_FLAG=enabled (wp-common + wp-enabled).
   STAGE-01: EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled (wp-customer).
+  STAGE-02: same flags + EVC_TEST_COMMERCE_PLUGINS=<dir of pinned WooCommerce/PMPro/add-on> (wp-commerce).
 -->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
@@ -25,6 +26,9 @@
         </testsuite>
         <testsuite name="wp-customer">
             <directory>tests/wordpress/customer</directory>
+        </testsuite>
+        <testsuite name="wp-commerce">
+            <directory>tests/wordpress/commerce</directory>
         </testsuite>
     </testsuites>
 </phpunit>

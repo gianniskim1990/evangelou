@@ -8,8 +8,13 @@ defined('ABSPATH') || exit;
  * the page itself exist only while the flag is on.
  *
  * Only when EVC_CLUB_CUSTOMER_ENABLED === true: the customer REST hardening
- * and GET /me, wired to the ALWAYS-unavailable production membership source
- * (fail closed: 503 "unavailable", never a guessed membership).
+ * and GET /me. Its membership source is, by default, the ALWAYS-unavailable
+ * adapter (fail closed: 503 "unavailable", never a guessed membership).
+ * STAGE-02: only when wp-config.php ALSO configures the commerce source
+ * (EVC_Commerce_Source_Config, off by default), /me reads the real
+ * WooCommerce + PMPro facts through the read-only reader and the existing
+ * mapper. Confirmed payments still come only from the Club's own provenance
+ * record, which does not exist yet, so nobody is reported as active.
  */
 final class EVC_Customer_Plugin {
     public static function boot(): void {
@@ -25,7 +30,16 @@ final class EVC_Customer_Plugin {
         if (!EVC_Customer_Feature::enabled()) {
             return;
         }
-        (new EVC_Rest_Me_Controller(new EVC_Unavailable_Membership_Adapter(), new EVC_System_Clock()))->register_routes();
+        (new EVC_Rest_Me_Controller(self::membership_adapter(), new EVC_System_Clock()))->register_routes();
+    }
+
+    /** The configured real source, or the always-unavailable one (the default). */
+    public static function membership_adapter(): EVC_Membership_Adapter {
+        $config = EVC_Commerce_Source_Config::from_constants();
+        if ($config === null) {
+            return new EVC_Unavailable_Membership_Adapter();
+        }
+        return new EVC_Pmpro_Membership_Adapter(new EVC_Wp_Commerce_Pmpro_Reader($config, new EVC_Unrecorded_Club_Payment_Provenance()), $config->mapper());
     }
 
     public static function deactivate(): void {

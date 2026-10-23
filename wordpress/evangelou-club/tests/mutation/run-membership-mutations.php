@@ -169,8 +169,9 @@ $mutants = array(
     array(
         'id' => 'B22-sandbox-payment-accepted',
         'file' => $mapper,
-        'search' => 'if ($p->environment !== EVC_Pmpro_Payment_Fact::ENV_LIVE) {',
-        'replace' => 'if (false) {',
+        // STAGE-02: same intent, anchored on the next line (awaiting_payment() has the same condition).
+        'search' => "if (\$p->environment !== EVC_Pmpro_Payment_Fact::ENV_LIVE) {\n                return \$this->indeterminate('non_live_payment');",
+        'replace' => "if (false) {\n                return \$this->indeterminate('non_live_payment');",
     ),
     array(
         'id' => 'B23-undeduplicable-payment-accepted',
@@ -1947,6 +1948,25 @@ $mutants = array(
         'file' => 'includes/class-evc-customer-membership.php',
         'search' => "                return array('state' => self::PENDING_PAYMENT, 'paid_until_utc' => null);",
         'replace' => "                return array('state' => self::PENDING_PAYMENT, 'paid_until_utc' => self::instant(\$until));",
+    ),
+    // STAGE-02: a Club purchase awaiting payment without an active PMPro row (bank transfer "on-hold").
+    array(
+        'id' => 'AP1-awaiting-payment-ignored',
+        'file' => 'includes/class-evc-pmpro-entitlement-mapper.php',
+        'search' => "            if (\$awaiting) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'AP2-non-live-awaiting-payment-accepted',
+        'file' => 'includes/class-evc-pmpro-entitlement-mapper.php',
+        'search' => "                return 'non_live_payment';",
+        'replace' => "                continue;",
+    ),
+    array(
+        'id' => 'AP3-awaiting-payment-with-confirmation-time-accepted',
+        'file' => 'includes/class-evc-pmpro-entitlement-mapper.php',
+        'search' => "                if (\$p->confirmed_at_utc !== null) {\n                    return 'invalid_payment_fact';",
+        'replace' => "                if (false) {\n                    return 'invalid_payment_fact';",
     ),
 );
 

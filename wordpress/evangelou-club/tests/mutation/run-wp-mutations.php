@@ -107,6 +107,33 @@ $mutants = array(
         "        if (!EVC_Customer_Feature::enabled()) {\n            return self::error_page(404", "        if (false) {\n            return self::error_page(404"),
     array('W43-privileged-capabilities-accepted', 'customer', 'includes/customer/class-evc-customer-auth.php',
         "            if (user_can(\$user, \$capability)) {", "            if (false) {"),
+    // STAGE-02 real commerce source (mode "commerce": REAL WooCommerce 11.2.1 + PMPro 3.8.9 + PMPro
+    // WooCommerce 1.11 from EVC_TEST_COMMERCE_PLUGINS; customer flag ON). Run with --mode=commerce.
+    array('C1-other-customers-orders-counted', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "            if ((int) \$order->get_customer_id() !== \$wp_user_id) {\n                continue;\n            }\n", ""),
+    array('C2-non-bank-transfer-order-accepted', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "            return 'club_order_not_bank_transfer';", "            return null;"),
+    array('C3-unknown-order-status-guessed', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "            return 'club_order_unknown_status';", "            return null;"),
+    array('C4-processing-not-awaiting', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "    const PENDING_STATUSES = array('pending', 'on-hold', 'processing');", "    const PENDING_STATUSES = array('pending', 'on-hold');"),
+    array('C5-on-hold-ignored-like-completed', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "    const NOT_EVIDENCE_STATUSES = array('completed');", "    const NOT_EVIDENCE_STATUSES = array('completed', 'on-hold');"),
+    array('C6-site-timezone-assumed', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "        \$timezone = (string) get_option('timezone_string', '');", "        \$timezone = 'Europe/Athens';"),
+    array('C7-second-product-granting-the-level-accepted', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "                    \$c[] = 'club_level_granted_by_another_product';", ""),
+    array('C8-not-sold-individually-accepted', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "            \$c[] = 'club_product_not_sold_individually';", ""),
+    array('C9-recurring-level-accepted', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "            \$c[] = 'club_level_has_recurring_billing';", ""),
+    array('C10-autocomplete-accepted', 'commerce', 'includes/customer/class-evc-wp-commerce-pmpro-reader.php',
+        "            \$c[] = 'club_product_autocompletes_orders';", ""),
+    array('C11-source-config-coerces-types', 'commerce', 'includes/customer/class-evc-commerce-source-config.php',
+        "        if (!is_int(\$level_id) || \$level_id < 1 || !is_int(\$product_id) || \$product_id < 1) {",
+        "        if ((int) \$level_id < 1 || (int) \$product_id < 1) {"),
+    array('C12-configured-source-not-used', 'commerce', 'includes/customer/class-evc-customer-plugin.php',
+        "        if (\$config === null) {", "        if (true) {"),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -116,6 +143,9 @@ function evc_wp_suite(string $root, string $mode): int {
     global $evc_last_output;
     if ($mode === 'customer') {
         $suite = 'wp-customer';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled'));
+    } elseif ($mode === 'commerce') {
+        $suite = 'wp-commerce';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled'));
     } else {
         $suite = $mode === 'enabled' ? 'wp-common,wp-enabled' : 'wp-common,wp-disabled';
@@ -137,12 +167,23 @@ function evc_wp_suite(string $root, string $mode): int {
     return proc_close($proc);
 }
 
+// Default: the staff and customer modes (unchanged CI step). --mode=commerce runs ONLY the STAGE-02
+// commerce mutants, which need the real plugins (EVC_TEST_COMMERCE_PLUGINS) and their own CI job.
+$evc_commerce_only = in_array('--mode=commerce', $argv, true);
+$mutants = array_values(array_filter($mutants, function ($m) use ($evc_commerce_only) {
+    return ($m[1] === 'commerce') === $evc_commerce_only;
+}));
+if ($evc_commerce_only && (string) getenv('EVC_TEST_COMMERCE_PLUGINS') === '') {
+    fwrite(STDERR, "ABORT: --mode=commerce needs EVC_TEST_COMMERCE_PLUGINS.\n");
+    exit(1);
+}
+
 $touched = array();
 foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach (array('disabled', 'enabled', 'customer') as $mode) {
+foreach ($evc_commerce_only ? array('commerce') : array('disabled', 'enabled', 'customer') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");
@@ -158,13 +199,15 @@ foreach ($mutants as $m) {
     list($id, $mode, $file, $search, $replace) = $m;
     $path = $root . '/' . $file;
     $original = file_get_contents($path);
-    $count = substr_count($original, $search);
+    // Working copies may use CRLF (Windows); patterns are written with LF.
+    $normalized = str_replace("\r\n", "\n", $original);
+    $count = substr_count($normalized, $search);
     if ($count !== 1) {
         fwrite(STDERR, sprintf("ABORT: %s pattern found %d times in %s (expected 1).\n", $id, $count, $file));
         exit(1);
     }
     try {
-        file_put_contents($path, str_replace($search, $replace, $original));
+        file_put_contents($path, str_replace($search, $replace, $normalized));
         $exit = evc_wp_suite($root, $mode);
     } finally {
         file_put_contents($path, $original);
@@ -184,7 +227,7 @@ foreach ($touched as $path => $hash) {
         fwrite(STDERR, 'NOT RESTORED: ' . $path . "\n");
     }
 }
-printf("[evidence] wp-auth-mutation: total=%d killed=%d survived=%d sources_restored=%s\n", count($mutants), $killed, count($survivors), $restored ? 'yes' : 'NO');
+printf("[evidence] wp-auth-mutation%s: total=%d killed=%d survived=%d sources_restored=%s\n", $evc_commerce_only ? ' (commerce)' : '', count($mutants), $killed, count($survivors), $restored ? 'yes' : 'NO');
 if ($survivors) {
     fwrite(STDERR, 'Surviving mutants: ' . implode(', ', $survivors) . "\n");
 }

@@ -124,6 +124,57 @@ final class PmproEntitlementMapperTest extends TestCase {
         $this->assertIneligible(self::map(EVC_Pmpro_Fixture::snapshot(array(EVC_Pmpro_Fixture::row()), array($odd)), $at), 'indeterminate', 'invalid_payment_fact', $at);
     }
 
+    /**
+     * STAGE-02: PMPro WooCommerce 1.11 creates the membership row only when the order becomes
+     * "completed", so a bank transfer awaiting payment ("on-hold") has NO row yet. Such a
+     * purchase is pending_payment, never eligible, never with an expiry.
+     */
+    public function test_purchase_awaiting_payment_without_any_membership_row_is_pending(): void {
+        $at = self::when('2026-10-20 08:00');
+        $awaiting = EVC_Pmpro_Fixture::payment('bacs', 'pending', null, null, null, 'row1', array('kind' => EVC_Payment_Evidence::KIND_WC_ORDER, 'membership_row_ref' => null, 'dedupe_key' => null));
+        $e = self::map(EVC_Pmpro_Fixture::snapshot(array(), array($awaiting)), $at);
+        $this->assertIneligible($e, 'pending_payment', 'payment_awaiting_confirmation', $at);
+        $this->assertNull($e->expires_at_utc());
+        $this->assertFalse($e->payment_verified());
+        $this->assertSame('pending_payment', $e->denial_reason($at));
+    }
+
+    public function test_renewal_awaiting_payment_after_expiry_or_cancellation_is_pending(): void {
+        $at = self::when('2026-12-01 08:00');
+        $awaiting = EVC_Pmpro_Fixture::payment('renew', 'pending', null, null, null, 'row1', array('membership_row_ref' => null));
+        foreach (array('expired', 'cancelled', 'admin_cancelled', 'changed', 'inactive') as $raw) {
+            $s = EVC_Pmpro_Fixture::snapshot(array(EVC_Pmpro_Fixture::row('row1', $raw)), array($awaiting));
+            $this->assertIneligible(self::map($s, $at), 'pending_payment', 'payment_awaiting_confirmation', $at);
+        }
+    }
+
+    public function test_without_an_awaiting_club_payment_the_negative_states_are_unchanged(): void {
+        $at = self::when('2026-10-20 08:00');
+        $failed = EVC_Pmpro_Fixture::payment('f', 'failed', null, null, null, 'row1', array('membership_row_ref' => null));
+        $other_level = EVC_Pmpro_Fixture::payment('o', 'pending', null, null, null, 'row1', array('level_id' => EVC_Pmpro_Fixture::OTHER_LEVEL, 'membership_row_ref' => null));
+        $this->assertIneligible(self::map(EVC_Pmpro_Fixture::snapshot(array(), array($failed)), $at), 'none', 'no_club_membership', $at);
+        $this->assertIneligible(self::map(EVC_Pmpro_Fixture::snapshot(array(), array($other_level)), $at), 'none', 'no_club_membership', $at);
+        $this->assertIneligible(self::map(EVC_Pmpro_Fixture::snapshot(array(EVC_Pmpro_Fixture::row('row1', 'expired')), array($failed)), $at), 'expired', 'membership_expired', $at);
+        $this->assertIneligible(self::map(EVC_Pmpro_Fixture::snapshot(array(EVC_Pmpro_Fixture::row('row1', 'cancelled')), array($other_level)), $at), 'cancelled', 'membership_cancelled', $at);
+    }
+
+    public function test_a_malformed_or_non_live_awaiting_payment_without_an_active_row_fails_closed(): void {
+        $at = self::when('2026-10-20 08:00');
+        $cases = array(
+            'sandbox' => array(array('environment' => 'sandbox'), 'non_live_payment'),
+            'claims a confirmation time' => array(array('confirmed_at_utc' => self::when('2026-10-19 12:00')), 'invalid_payment_fact'),
+            'bad reference' => array(array('payment_ref' => 'order-17'), 'invalid_payment_fact'),
+            'unknown status' => array(array('status' => 'on-hold'), 'invalid_payment_fact'),
+            'unknown kind' => array(array('kind' => 'bank_statement'), 'invalid_payment_fact'),
+        );
+        foreach ($cases as $label => list($override, $flag)) {
+            $fact = EVC_Pmpro_Fixture::payment('bad', 'pending', null, null, null, 'row1', array('membership_row_ref' => null) + $override);
+            foreach (array(array(), array(EVC_Pmpro_Fixture::row('row1', 'expired'))) as $rows) {
+                $this->assertIneligible(self::map(EVC_Pmpro_Fixture::snapshot($rows, array($fact)), $at), 'indeterminate', $flag, $at);
+            }
+        }
+    }
+
     public function test_failed_payment_only(): void {
         $at = self::when('2026-10-20 08:00');
         $failed = EVC_Pmpro_Fixture::payment('f', 'failed', null, null, null);
