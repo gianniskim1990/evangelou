@@ -16,6 +16,15 @@ if ($evc_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-01 customer flag, independent of the staff flag: EVC_TEST_CUSTOMER_FLAG=enabled|disabled (unset = disabled).
+$evc_customer_mode = getenv('EVC_TEST_CUSTOMER_FLAG');
+if ($evc_customer_mode === 'enabled') {
+    define('EVC_CLUB_CUSTOMER_ENABLED', true);
+} elseif ($evc_customer_mode !== false && $evc_customer_mode !== '' && $evc_customer_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_CUSTOMER_FLAG must be enabled or disabled.\n");
+    exit(1);
+}
+
 define('WP_TESTS_CONFIG_FILE_PATH', __DIR__ . '/wp-tests-config.php');
 define('WP_TESTS_PHPUNIT_POLYFILLS_PATH', $evc_root . '/vendor/yoast/phpunit-polyfills');
 
@@ -33,6 +42,8 @@ require $evc_tests_dir . '/includes/bootstrap.php';
 // Engine test support (real Club DB harness + TEST-ONLY mock adapter).
 require_once $evc_root . '/tests/support/class-evc-fixed-clock.php';
 require_once $evc_root . '/tests/support/class-evc-mock-membership-adapter.php';
+// STAGE-01: test-only PMPro reader + fixtures (real mapper behind GET /me in tests).
+require_once $evc_root . '/tests/support/class-evc-fake-pmpro-reader.php';
 require_once $evc_root . '/tests/support/class-evc-test-database.php';
 // UI-04H TEST-ONLY v2 harness (fakes + designated routes; installed per test, never shipped).
 require_once $evc_root . '/tests/support/class-evc-in-memory-prepared-redemption-store.php';

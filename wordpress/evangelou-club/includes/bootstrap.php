@@ -88,4 +88,6 @@ require_once $evc_includes . 'class-evc-response-contract.php';
 require_once $evc_includes . 'class-evc-rest-v2-boundary.php';
 // UI-04I versioned staff-role upgrade: PURE planner/dry-run validator (never applied, never hooked).
 require_once $evc_includes . 'class-evc-staff-role-upgrade.php';
+// STAGE-01 customer view of an entitlement (pure, contract customer-me-v1).
+require_once $evc_includes . 'class-evc-customer-membership.php';
 unset($evc_includes);

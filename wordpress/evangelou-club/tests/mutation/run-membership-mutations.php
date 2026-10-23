@@ -24,6 +24,7 @@
  * And UI-04G (C1-C26: pure REST response contracts and HTTP status map).
  * And UI-04H (V2-1..V2-15: route-aware v2 envelope policy).
  * And UI-04I (RU1-RU20: versioned staff-role upgrade planner).
+ * And STAGE-01 (CM1-CM3: what a customer is told about their membership).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1927,6 +1928,25 @@ $mutants = array(
         'file' => 'includes/class-evc-member-sync.php',
         'search' => '    /** @var string|null */' . "\n" . '    private $account_status;' . "\n" . '',
         'replace' => '    /** @var string|null */' . "\n" . '    private $account_status;' . "\n" . '    /** @var string */' . "\n" . '    private $email = \'member@example.org\';' . "\n" . '',
+    ),
+    // STAGE-01: the customer view never shows an unverified or ineligible membership as active.
+    array(
+        'id' => 'CM1-unverified-shown-as-active',
+        'file' => 'includes/class-evc-customer-membership.php',
+        'search' => "            default:\n                // indeterminate",
+        'replace' => "            case EVC_Entitlement::STATUS_INDETERMINATE:\n                return array('state' => self::ACTIVE, 'paid_until_utc' => null);\n            default:\n                // indeterminate",
+    ),
+    array(
+        'id' => 'CM2-active-without-eligibility',
+        'file' => 'includes/class-evc-customer-membership.php',
+        'search' => "        if (\$reason === null) {",
+        'replace' => "        if (\$reason === null || \$entitlement->status() === EVC_Entitlement::STATUS_ACTIVE) {",
+    ),
+    array(
+        'id' => 'CM3-end-leaked-for-pending',
+        'file' => 'includes/class-evc-customer-membership.php',
+        'search' => "                return array('state' => self::PENDING_PAYMENT, 'paid_until_utc' => null);",
+        'replace' => "                return array('state' => self::PENDING_PAYMENT, 'paid_until_utc' => self::instant(\$until));",
     ),
 );
 

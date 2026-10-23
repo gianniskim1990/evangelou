@@ -190,7 +190,10 @@ export function Offer({ go, onPay, secondary }: { go: (s: CustomerScreen) => voi
 
 // ---- Member area --------------------------------------------------------------------------
 
-function entitlement(state: CustomerMembershipState, used: boolean): { headline: string; detail: string; ready: boolean } {
+function entitlement(state: CustomerMembershipState, used: boolean, clubDataUnavailable = false): { headline: string; detail: string; ready: boolean } {
+  if (state === "none") return { headline: "Δεν έχετε συνδρομή", detail: "Σε αυτόν τον λογαριασμό δεν υπάρχει συνδρομή στο Club.", ready: false };
+  if (state === "unverified") return { headline: "Η συνδρομή δεν επιβεβαιώθηκε", detail: "Δεν μπορούμε να επιβεβαιώσουμε την πληρωμή σας αυτή τη στιγμή. Αν έχετε πληρώσει, μιλήστε με το κατάστημα.", ready: false };
+  if (state === "active" && clubDataUnavailable) return { headline: "Η συνδρομή σας είναι ενεργή", detail: "Δείξτε την κάρτα σας στο ταμείο· εκεί ελέγχεται ο σημερινός καφές.", ready: true };
   if (state === "pending") return { headline: "Σε αναμονή πληρωμής", detail: "Ο καφές της ημέρας ξεκινά μόλις επιβεβαιωθεί η πληρωμή.", ready: false };
   if (state === "expired") return { headline: "Η συνδρομή έληξε", detail: "Ανανεώστε για να ξαναβρείτε τον καφέ της ημέρας.", ready: false };
   if (state === "cancelled") return { headline: "Η συνδρομή ακυρώθηκε", detail: "Ο καφές της ημέρας δεν είναι διαθέσιμος. Για ερωτήσεις, μιλήστε με το κατάστημα.", ready: false };
@@ -200,7 +203,7 @@ function entitlement(state: CustomerMembershipState, used: boolean): { headline:
 
 export function Dashboard({ view, go, actions }: MemberScreenProps) {
   const { state, today } = view;
-  const e = entitlement(state, view.coffeeUsedToday);
+  const e = entitlement(state, view.coffeeUsedToday, view.clubData === "unavailable");
   const recent = view.history.slice(0, 3);
   const pay = paymentAction(view, actions);
   return (
@@ -225,14 +228,14 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
             ["Κατάσταση", <StateMark key="s" state={state} />],
             ["Περίοδος", membershipLine(view)],
             ["Ανανέωση", renewalLine(view, `Χειροκίνητη, ${CLUB_RULES.monthlyPriceEur} € για έναν ημερολογιακό μήνα`)],
-            ["Αυτόν τον μήνα", `${view.visitsThisMonth} καφέδες`],
+            ["Αυτόν τον μήνα", view.clubData === "unavailable" ? "Δεν είναι ακόμη διαθέσιμο" : `${view.visitsThisMonth} καφέδες`],
           ]}
         />
         <div className="mt-10 flex items-baseline justify-between border-b border-[var(--rule-strong)] pb-3">
           <h2 className="t-title text-[var(--ink)]">Τελευταίοι καφέδες</h2>
           <button type="button" onClick={() => go("history")} className="t-label -my-3 py-3 text-[var(--bronze-deep)] underline-offset-4 hover:underline">Όλο το ιστορικό</button>
         </div>
-        {recent.length === 0 && <p className="t-body py-3.5 text-[var(--ink-2)]">Δεν υπάρχουν ακόμη καφέδες.</p>}
+        {recent.length === 0 && <p className="t-body py-3.5 text-[var(--ink-2)]">{view.clubData === "unavailable" ? "Το ιστορικό καφέδων δεν είναι ακόμη διαθέσιμο." : "Δεν υπάρχουν ακόμη καφέδες."}</p>}
         <ul className="m-0 list-none p-0">
           {recent.map((r) => (
             <li key={r.date} className="t-body grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-[var(--rule)] py-3.5">
@@ -290,7 +293,8 @@ export function Today({ view, go }: MemberScreenProps) {
   const { state, coffeeUsedToday, today } = view;
   const [deviceLeft] = useState(minutesToAthensMidnight);
   const left = view.minutesToMidnight ?? deviceLeft;
-  const e = entitlement(state, coffeeUsedToday);
+  const clubDataUnavailable = view.clubData === "unavailable";
+  const e = entitlement(state, coffeeUsedToday, clubDataUnavailable);
   const taken = new Set(view.history.map((r) => r.date));
   if (coffeeUsedToday && state === "active") taken.add(today);
   const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
@@ -300,7 +304,7 @@ export function Today({ view, go }: MemberScreenProps) {
         <p className="t-label text-[var(--ink-2)]">{greekDate(today, true)}</p>
         <h1 className={cx("t-display mt-4 max-w-[12ch]", e.ready ? "text-[var(--roast)]" : "text-[var(--ink-2)]")}>{e.headline}</h1>
         <p className="t-lede mt-5 max-w-[40ch] text-[var(--ink-2)]">{e.detail}</p>
-        {state === "active" && (
+        {state === "active" && !clubDataUnavailable && (
           <p className="t-body t-num mt-6 text-[var(--ink)]">
             {coffeeUsedToday ? "Νέος καφές σε" : "Ισχύει για"} {Math.floor(left / 60)} ώρες και {left % 60} λεπτά, ως τα μεσάνυχτα ώρας Ελλάδας.
           </p>
@@ -309,6 +313,7 @@ export function Today({ view, go }: MemberScreenProps) {
           <Btn onClick={() => go("card")} className="px-8">Άνοιγμα κάρτας</Btn>
         </div>
 
+        {!clubDataUnavailable && (<>
         <h2 className="t-title mt-14 border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Οι τελευταίες 7 ημέρες</h2>
         <ol className="m-0 mt-5 grid list-none grid-cols-7 gap-2 p-0">
           {week.map((d) => {
@@ -326,6 +331,7 @@ export function Today({ view, go }: MemberScreenProps) {
           })}
         </ol>
         <p className="t-small mt-3 text-[var(--ink-3)]">Γεμάτος κύκλος: ημέρα με καφέ Club. Ο καφές μιας ημέρας δεν μεταφέρεται στην επόμενη.</p>
+        </>)}
       </section>
 
       <section className="lg:pt-10">
@@ -360,8 +366,8 @@ export function History({ view }: MemberScreenProps) {
       <PageTitle title="Οι καφέδες σας" lede={state === "active" ? "Κάθε καφές Club των τελευταίων τριών εβδομάδων." : "Το ιστορικό μένει διαθέσιμο ακόμη κι όταν η συνδρομή δεν είναι ενεργή."} />
       {items.length === 0 && (
         <div className="border-y border-[var(--rule)] py-12 text-center">
-          <p className="t-title text-[var(--ink)]">Δεν υπάρχουν ακόμη καφέδες</p>
-          <p className="t-body mt-2 text-[var(--ink-2)]">Ο πρώτος σας καφές θα εμφανιστεί εδώ μόλις τον πάρετε στο ταμείο.</p>
+          <p className="t-title text-[var(--ink)]">{view.clubData === "unavailable" ? "Το ιστορικό δεν είναι ακόμη διαθέσιμο" : "Δεν υπάρχουν ακόμη καφέδες"}</p>
+          <p className="t-body mt-2 text-[var(--ink-2)]">{view.clubData === "unavailable" ? "Οι καφέδες σας θα εμφανίζονται εδώ μόλις συνδεθεί το ταμείο." : "Ο πρώτος σας καφές θα εμφανιστεί εδώ μόλις τον πάρετε στο ταμείο."}</p>
         </div>
       )}
       {[...months.entries()].map(([ym, rows]) => (
@@ -390,7 +396,7 @@ export function History({ view }: MemberScreenProps) {
           </ol>
         </section>
       ))}
-      <PreviewNote>Δείγμα ιστορικού με φανταστικά δεδομένα· καμία εξαργύρωση δεν έχει καταχωρηθεί.</PreviewNote>
+      {!view.live && <PreviewNote>Δείγμα ιστορικού με φανταστικά δεδομένα· καμία εξαργύρωση δεν έχει καταχωρηθεί.</PreviewNote>}
     </div>
   );
 }
@@ -402,17 +408,17 @@ export function Profile({ view, actions }: MemberScreenProps) {
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
       <section>
         <h1 className="t-headline text-[var(--roast)]">{member.name}</h1>
-        <p className="t-body mt-2 text-[var(--ink-2)]">Μέλος από τις {greekDate(member.memberSince)}</p>
+        {member.memberSince && <p className="t-body mt-2 text-[var(--ink-2)]">Μέλος από τις {greekDate(member.memberSince)}</p>}
         <div className="mt-8 flex flex-wrap gap-3">
           <Btn tone="line" disabled title="Μη διαθέσιμο στην προεπισκόπηση">Επεξεργασία στοιχείων</Btn>
-          <Btn tone="line" disabled title="Μη διαθέσιμο στην προεπισκόπηση">Αποσύνδεση</Btn>
+          <Btn tone="line" disabled={!actions?.signOut} title={actions?.signOut ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={actions?.signOut}>Αποσύνδεση</Btn>
         </div>
       </section>
       <section>
         <h2 className="t-title border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Στοιχεία</h2>
         <DefRows
           rows={[
-            ["Κινητό", <span key="p" className="t-num">{member.phoneMasked}</span>],
+            ["Κινητό", <span key="p" className="t-num">{member.phoneMasked || "Δεν δόθηκε"}</span>],
             ["E-mail", member.email || "Δεν δόθηκε"],
             ["Συνήθως πίνει", view.usual ? coffeeName(view.usual) : "Δεν υπάρχει ακόμη αρκετό ιστορικό"],
           ]}
@@ -431,9 +437,11 @@ export function Profile({ view, actions }: MemberScreenProps) {
             <p className="t-small mt-2 text-[var(--ink-3)]">Ο νέος μήνας ξεκινά από τη λήξη του τρέχοντος, χωρίς να χάνετε μέρες.</p>
           </div>
         )}
+        {!view.live && (<>
         <h2 className="t-title mt-10 border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Επικοινωνία</h2>
         <DefRows rows={[["Newsletter", member.newsletter ? "Ναι, ξεχωριστή συναίνεση από τη συνδρομή" : "Όχι"]]} />
         <PreviewNote className="mt-8">Δείγμα προφίλ με φανταστικά στοιχεία· καμία αλλαγή δεν αποθηκεύεται.</PreviewNote>
+        </>)}
       </section>
     </div>
   );

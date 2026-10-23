@@ -79,7 +79,10 @@ export function ClubWelcome({ go }: { go: (screen: CustomerScreen) => void }) {
   );
 }
 
-function todayLine(state: CustomerMembershipState, used: boolean): { headline: string; detail: string; tone: "ready" | "done" | "blocked" } {
+function todayLine(state: CustomerMembershipState, used: boolean, clubDataUnavailable = false): { headline: string; detail: string; tone: "ready" | "done" | "blocked" } {
+  if (state === "none") return { headline: "Δεν έχετε συνδρομή", detail: "Η κάρτα δεν δίνει καφέ χωρίς ενεργή συνδρομή.", tone: "blocked" };
+  if (state === "unverified") return { headline: "Η συνδρομή δεν επιβεβαιώθηκε", detail: "Αν έχετε πληρώσει, μιλήστε με το κατάστημα.", tone: "blocked" };
+  if (state === "active" && clubDataUnavailable) return { headline: "Η συνδρομή σας είναι ενεργή", detail: "Δείξτε αυτή την κάρτα στο ταμείο· εκεί ελέγχεται ο σημερινός καφές.", tone: "ready" };
   if (state === "pending") return { headline: "Σε αναμονή πληρωμής", detail: "Η κάρτα ενεργοποιείται μόλις επιβεβαιωθεί η πληρωμή.", tone: "blocked" };
   if (state === "expired") return { headline: "Η συνδρομή έληξε", detail: "Ανανεώστε για να ξαναβρείτε τον καφέ της ημέρας.", tone: "blocked" };
   if (state === "cancelled") return { headline: "Η συνδρομή ακυρώθηκε", detail: "Η κάρτα δεν δίνει καφέ. Για ερωτήσεις, μιλήστε με το κατάστημα.", tone: "blocked" };
@@ -100,10 +103,14 @@ function daysLeftWord(n: number): string {
 }
 
 export function MemberPass(props: PassProps) {
-  const { go, actions } = props;
   const view = "view" in props ? props.view : sampleCustomerView(props.state, props.coffeeUsedToday, props.today);
+  return <MemberPassView go={props.go} view={view} actions={props.actions} />;
+}
+
+/** The approved pass for a given view; imports no sample data (used directly by the STAGE-01 live app). */
+export function MemberPassView({ go, view, actions }: { go: (screen: CustomerScreen) => void; view: CustomerView; actions?: CustomerActions }) {
   const { state, today, member } = view;
-  const line = todayLine(state, view.coffeeUsedToday);
+  const line = todayLine(state, view.coffeeUsedToday, view.clubData === "unavailable");
   const pay = paymentAction(view, actions);
 
   return (
@@ -125,7 +132,7 @@ export function MemberPass(props: PassProps) {
                 <span className="t-label border-l border-[var(--brass-soft)] pl-3 text-[var(--brass)]">Club</span>
               </div>
               <p className="t-title mt-16 text-[var(--milk)]">{member.name}</p>
-              <p className="t-small mt-1 text-[var(--milk)]/55">Μέλος από τις {greekDate(member.memberSince)}</p>
+              {member.memberSince && <p className="t-small mt-1 text-[var(--milk)]/55">Μέλος από τις {greekDate(member.memberSince)}</p>}
 
               <div className="mt-8 border-t border-[var(--brass-soft)] pt-5">
                 <p className="t-small text-[var(--milk)]/55">{greekDate(today, true)}</p>
@@ -163,14 +170,14 @@ export function MemberPass(props: PassProps) {
             <dt>Ανανέωση</dt>
             <dd className="m-0 text-right text-[var(--milk)]">Χειροκίνητη, {CLUB_RULES.monthlyPriceEur} € / ημερολογιακό μήνα</dd>
             <dt>Καφέδες αυτόν τον μήνα</dt>
-            <dd className="t-num m-0 text-right text-[var(--milk)]">{view.visitsThisMonth}</dd>
+            <dd className="t-num m-0 text-right text-[var(--milk)]">{view.clubData === "unavailable" ? "—" : view.visitsThisMonth}</dd>
           </dl>
           {pay && (
             <Btn tone="brass" disabled={!pay.run} title={pay.run ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={pay.run} className="mt-8">
               {pay.label}
             </Btn>
           )}
-          <PreviewNote dark className="mt-10">Ο κωδικός είναι δείγμα: δεν αντιστοιχεί σε μέλος, δεν σαρώνεται και δεν εξαργυρώνεται.</PreviewNote>
+          <PreviewNote dark className="mt-10">{view.live ? "Ο κωδικός QR δεν είναι ακόμη ενεργός: δεν σαρώνεται και δεν εξαργυρώνεται." : "Ο κωδικός είναι δείγμα: δεν αντιστοιχεί σε μέλος, δεν σαρώνεται και δεν εξαργυρώνεται."}</PreviewNote>
         </section>
       </main>
     </div>

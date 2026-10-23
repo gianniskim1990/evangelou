@@ -90,6 +90,23 @@ $mutants = array(
     array('W35-domain-response-accepts-any-body', 'enabled', 'includes/staff/class-evc-rest-v2-security.php',
         "        if (\$route === null || !EVC_Contract_Envelope_Rule::is_domain_body_for(\$route['surface'], \$body)) {",
         "        if (\$route === null) {"),
+    // STAGE-01 customer surface (mode "customer": customer flag ON, staff flag OFF).
+    array('W36-customer-account-check-skipped', 'customer', 'includes/customer/class-evc-customer-auth.php',
+        "        \$error = self::check_customer(\$user);", "        \$error = null;"),
+    array('W37-customer-nonce-check-removed', 'customer', 'includes/customer/class-evc-customer-auth.php',
+        "if (!is_string(\$nonce) || \$nonce === '' || !wp_verify_nonce(\$nonce, 'wp_rest')) {", "if (false) {"),
+    array('W38-me-user-taken-from-request', 'customer', 'includes/customer/class-evc-rest-me-controller.php',
+        "\$entitlement = \$this->adapter->entitlement_for((int) \$user->ID, \$at);", "\$entitlement = \$this->adapter->entitlement_for((int) (\$request->get_param('user_id') ?: \$user->ID), \$at);"),
+    array('W39-unavailable-source-grants-membership', 'customer', 'includes/customer/class-evc-unavailable-membership-adapter.php',
+        "        throw new EVC_Membership_Source_Exception('Membership source not configured.');", "        return new EVC_Entitlement(EVC_Entitlement::STATUS_ACTIVE, true, \$at_utc->modify('+1 month'), null, 'pmpro');"),
+    array('W40-customer-flag-accepts-truthy-values', 'customer', 'includes/customer/class-evc-customer-feature.php',
+        "        return \$value === true;", "        return (bool) \$value;"),
+    array('W41-member-page-account-check-skipped', 'customer', 'includes/customer/class-evc-customer-shell.php',
+        "        if (EVC_Customer_Auth::check_customer(\$user) instanceof WP_Error) {", "        if (false) {"),
+    array('W42-member-page-flag-gate-removed', 'disabled', 'includes/customer/class-evc-customer-shell.php',
+        "        if (!EVC_Customer_Feature::enabled()) {\n            return self::error_page(404", "        if (false) {\n            return self::error_page(404"),
+    array('W43-privileged-capabilities-accepted', 'customer', 'includes/customer/class-evc-customer-auth.php',
+        "            if (user_can(\$user, \$capability)) {", "            if (false) {"),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -97,8 +114,13 @@ $evc_last_output = '';
 
 function evc_wp_suite(string $root, string $mode): int {
     global $evc_last_output;
-    $suite = $mode === 'enabled' ? 'wp-common,wp-enabled' : 'wp-common,wp-disabled';
-    $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => $mode));
+    if ($mode === 'customer') {
+        $suite = 'wp-customer';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled'));
+    } else {
+        $suite = $mode === 'enabled' ? 'wp-common,wp-enabled' : 'wp-common,wp-disabled';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => $mode, 'EVC_TEST_CUSTOMER_FLAG' => 'disabled'));
+    }
     $proc = proc_open(
         array(PHP_BINARY, $root . '/vendor/bin/phpunit', '-c', $root . '/phpunit-wp.xml.dist', '--testsuite', $suite),
         array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')),
@@ -120,7 +142,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach (array('disabled', 'enabled') as $mode) {
+foreach (array('disabled', 'enabled', 'customer') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

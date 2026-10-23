@@ -1643,6 +1643,49 @@ const mutants = [
     search: "  return /^69\\d{8}$/.test(national) ? `+30${national}` : null;",
     replace: "  return /^\\d{10}$/.test(national) ? `+30${national}` : null;",
   },
+  // STAGE-01 real customer app: fail-closed /me parsing, nonce, unavailable Club data, no preview fiction (S1-S7).
+  {
+    id: "S1-active-without-end-accepted",
+    file: "customer/customerApi.ts",
+    search: "  if (state === \"active\" && until === null) return null;\n",
+    replace: "",
+  },
+  {
+    id: "S2-club-data-claims-not-checked",
+    file: "customer/customerApi.ts",
+    search: "  if (club.coffee_today !== \"not_connected\" || club.card !== \"sample_only\") return null;",
+    replace: "  if (false) return null;",
+  },
+  {
+    id: "S3-any-503-is-unavailable",
+    file: "customer/customerApi.ts",
+    search: "        if (reply.status === 503 && isRecord(reply.body) && reply.body.result === \"unavailable\" && Object.keys(reply.body).length === 1) return { kind: \"unavailable\" };",
+    replace: "        if (reply.status === 503) return { kind: \"unavailable\" };",
+  },
+  {
+    id: "S4-nonce-header-missing",
+    file: "customer/customerApi.ts",
+    search: "              headers: { Accept: \"application/json\", \"X-WP-Nonce\": nonce },",
+    replace: "              headers: { Accept: \"application/json\" },",
+  },
+  {
+    id: "S5-live-view-claims-club-data",
+    file: "customer/liveView.ts",
+    search: "    clubData: \"unavailable\",",
+    replace: "    clubData: undefined,",
+  },
+  {
+    id: "S6-config-accepts-other-origin",
+    file: "customer/config.ts",
+    search: "    if (url.origin !== origin || (url.protocol",
+    replace: "    if (((url.protocol",
+  },
+  {
+    id: "S7-history-fiction-note-in-live-app",
+    file: "preview/CustomerPreview.tsx",
+    search: "      {!view.live && <PreviewNote>Δείγμα ιστορικού",
+    replace: "      {<PreviewNote>Δείγμα ιστορικού",
+  },
 ];
 
 // ---- Driver ---------------------------------------------------------------

@@ -9,6 +9,10 @@ on:
       - 'app/src/index.css'
       - 'app/staff.html'
       - 'app/vite.staff.config.ts'
+      - 'app/customer.html'
+      - 'app/vite.customer.config.ts'
+      - 'app/src/customer/**'
+      - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/package.json'
       - 'app/package-lock.json'
@@ -21,6 +25,10 @@ on:
       - 'app/src/index.css'
       - 'app/staff.html'
       - 'app/vite.staff.config.ts'
+      - 'app/customer.html'
+      - 'app/vite.customer.config.ts'
+      - 'app/src/customer/**'
+      - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/package.json'
       - 'app/package-lock.json'
@@ -174,6 +182,9 @@ jobs:
 
       - name: WordPress suite - staff feature flag ENABLED (test environment only)
         run: EVC_TEST_STAFF_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-common,wp-enabled
+
+      - name: WordPress suite - CUSTOMER flag ENABLED, staff flag DISABLED (STAGE-01, test environment only)
+        run: EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-customer
 
       - name: Authorization mutation tests (real WordPress)
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'

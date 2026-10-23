@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ClubWelcome, MemberPass } from "../preview/CustomerSignature";
 import { Dashboard, History, MemberChrome, Offer, Onboarding, PageTitle, Profile, Today } from "../preview/CustomerPreview";
-import type { CustomerActions, CustomerMembershipState } from "../preview/customerView";
+import type { CustomerActions } from "../preview/customerView";
 import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote } from "../preview/ds";
 import { ONBOARDING_COPY, consentsLine } from "../preview/onboardingCopy";
 import { CLUB_RULES, type PreviewMember } from "../preview/previewData";
 import type { CustomerScreen } from "../preview/screens";
-import type { FakeCustomerServer } from "./customerServer";
+import type { FakeCustomerServer, JourneyState } from "./customerServer";
 import { athensDate } from "./membershipCalendar";
 import { EMPTY_FORM, canonicalGreekMobile, firstInvalid, maskMobile, normaliseName, validateRegistration, type RegistrationField, type RegistrationForm } from "./registration";
 import { ACCOUNT_SCREENS, ALL_SCREENS, SCREEN_TITLES, startScreen, type JourneyScreen } from "./journey";
@@ -25,7 +25,7 @@ import { toCustomerView } from "./scenarios";
  * approved preview notes.
  */
 
-const STATE_SENTENCE: Record<CustomerMembershipState, string> = {
+const STATE_SENTENCE: Record<JourneyState, string> = {
   active: "Η συνδρομή σας είναι ενεργή.",
   pending: "Η συνδρομή σας περιμένει επιβεβαίωση πληρωμής.",
   expired: "Η συνδρομή σας έληξε.",
