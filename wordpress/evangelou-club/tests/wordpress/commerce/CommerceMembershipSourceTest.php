@@ -107,6 +107,20 @@ final class CommerceMembershipSourceTest extends EVC_WP_Test_Case {
         $this->assertFalse(EVC_Staff_Feature::enabled());
     }
 
+    /**
+     * STAGE-03B.1 (mutant C12): the configured source is not only constructed but is the one GET /me
+     * reads. An awaiting bank transfer is something only the real WooCommerce source can know; the
+     * always-unavailable default would answer 503 instead.
+     */
+    public function test_configured_source_is_the_one_answering_me(): void {
+        $user = $this->customer();
+        $this->order($user, 'on-hold');
+        $this->login_as($user);
+        $r = $this->rest('GET', self::ME, null, $this->nonce());
+        $this->assertSame(200, $r->get_status(), 'GET /me must be answered by the configured real source, not the unavailable default');
+        $this->assertSame('pending_payment', $r->get_data()['membership']['state']);
+    }
+
     // ---- states ------------------------------------------------------------------------------
 
     public function test_no_club_order_is_none(): void {

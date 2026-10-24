@@ -21,7 +21,7 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *    so an adapter can report them without them ever being recorded.
  * No names, e-mails, phones, card data or raw gateway/order ids.
  */
-final class EVC_Verified_Movement {
+final class EVC_Verified_Movement implements EVC_Payment_Candidate {
     const STATE_CONFIRMED = 'confirmed';
     const STATE_PENDING = 'pending';
     const STATE_FAILED = 'failed';
@@ -77,6 +77,45 @@ final class EVC_Verified_Movement {
         string $evidence_kind,
         string $state
     ) {
+        self::assert_payment_fields($movement_id, $environment, $wp_user_id, $level_id, $verified_at_utc, $amount_minor, $currency, $authority, $evidence_kind);
+        if (!preg_match(self::ID_PATTERN, $pmpro_row_ref)) {
+            throw new InvalidArgumentException('PMPro row reference must be an opaque 64-hex value.');
+        }
+        if (!in_array($state, array(self::STATE_CONFIRMED, self::STATE_PENDING, self::STATE_FAILED, self::STATE_UNKNOWN), true)) {
+            throw new InvalidArgumentException('Unknown movement state.');
+        }
+        $by_key = self::alias_map($aliases);
+        $this->movement_id = $movement_id;
+        $this->environment = $environment;
+        $this->wp_user_id = $wp_user_id;
+        $this->level_id = $level_id;
+        $this->pmpro_row_ref = $pmpro_row_ref;
+        $this->verified_at_utc = $verified_at_utc;
+        $this->amount_minor = $amount_minor;
+        $this->currency = $currency;
+        $this->aliases = $by_key;
+        $this->authority = $authority;
+        $this->evidence_kind = $evidence_kind;
+        $this->state = $state;
+    }
+
+    /**
+     * Shape rules shared with EVC_Prospective_Payment (STAGE-03B.1): the same
+     * payment facts are validated identically before and after PMPro issues
+     * its row, so a plan and the later recorded movement cannot disagree on
+     * what a valid payment is.
+     */
+    public static function assert_payment_fields(
+        string $movement_id,
+        string $environment,
+        int $wp_user_id,
+        int $level_id,
+        DateTimeImmutable $verified_at_utc,
+        int $amount_minor,
+        string $currency,
+        string $authority,
+        string $evidence_kind
+    ): void {
         if (!preg_match(self::ID_PATTERN, $movement_id)) {
             throw new InvalidArgumentException('Movement id must be an opaque 64-hex value.');
         }
@@ -85,9 +124,6 @@ final class EVC_Verified_Movement {
         }
         if ($wp_user_id < 1 || $level_id < 1) {
             throw new InvalidArgumentException('User and level ids must be positive.');
-        }
-        if (!preg_match(self::ID_PATTERN, $pmpro_row_ref)) {
-            throw new InvalidArgumentException('PMPro row reference must be an opaque 64-hex value.');
         }
         if ($verified_at_utc->getTimezone()->getName() !== 'UTC') {
             throw new InvalidArgumentException('Verification instant must be expressed in UTC.');
@@ -104,9 +140,13 @@ final class EVC_Verified_Movement {
         if (!in_array($evidence_kind, EVC_Payment_Evidence::kinds(), true)) {
             throw new InvalidArgumentException('Unknown evidence kind.');
         }
-        if (!in_array($state, array(self::STATE_CONFIRMED, self::STATE_PENDING, self::STATE_FAILED, self::STATE_UNKNOWN), true)) {
-            throw new InvalidArgumentException('Unknown movement state.');
-        }
+    }
+
+    /**
+     * @param mixed[] $aliases
+     * @return EVC_Movement_Alias[] keyed and sorted by alias key
+     */
+    public static function alias_map(array $aliases): array {
         $by_key = array();
         foreach ($aliases as $alias) {
             if (!$alias instanceof EVC_Movement_Alias) {
@@ -115,18 +155,7 @@ final class EVC_Verified_Movement {
             $by_key[$alias->key()] = $alias;
         }
         ksort($by_key);
-        $this->movement_id = $movement_id;
-        $this->environment = $environment;
-        $this->wp_user_id = $wp_user_id;
-        $this->level_id = $level_id;
-        $this->pmpro_row_ref = $pmpro_row_ref;
-        $this->verified_at_utc = $verified_at_utc;
-        $this->amount_minor = $amount_minor;
-        $this->currency = $currency;
-        $this->aliases = $by_key;
-        $this->authority = $authority;
-        $this->evidence_kind = $evidence_kind;
-        $this->state = $state;
+        return $by_key;
     }
 
     public function movement_id(): string {

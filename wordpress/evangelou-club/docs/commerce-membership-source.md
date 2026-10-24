@@ -204,6 +204,98 @@ Options for the owner (none implemented):
 3. **Keep the approved exact rule** and manually edit PMPro dates per member
    (operationally error-prone; not recommended).
 
+## STAGE-03B.1: advisory pre-issuance planning (Option 1 groundwork, NOT wired)
+
+The owner approved Option 1 as the direction. Before PMPro can be given the
+Club's dates, the Club must know the period BEFORE PMPro creates its row.
+`EVC_Provenance_Recorder::plan(EVC_Prospective_Payment)` computes it:
+
+- `EVC_Prospective_Payment` carries the same payment facts as
+  `EVC_Verified_Movement` and is validated by the SAME shape rules
+  (`EVC_Verified_Movement::assert_payment_fields` / `alias_map`), but has NO
+  PMPro row reference (the row does not exist yet; no placeholder is ever
+  invented) and NO confirmation state. It cannot be recorded: `record()` and
+  `reconcile()` only accept a row-bound `EVC_Verified_Movement`.
+- `plan()` runs the SAME rule code as `record()` (shared private methods
+  `candidate_refusal()` and `chain_position()`): environment / level / amount
+  / exactly one order anchor; already recorded (same facts → its recorded
+  period; other facts or another order → conflict); unresolved correction;
+  alias owned elsewhere (same order funded twice); same-instant and
+  out-of-order payments; D1/D2/D5 via `EVC_Membership_Calendar::next_period`
+  (initial / early / late, predecessor). DST and month-end behaviour are the
+  existing calendar's, unchanged.
+- It only READS: it never calls `commit()`, never adds the new aliases that
+  `record()` would add on a repeat, and works with a SELECT-only database
+  account (integration test). A store failure → `unavailable`; contradictory
+  store data (a recorded movement without its period, a latest period of
+  another member or without its movement) → `unavailable / store_inconsistent`.
+- The result `EVC_Period_Plan` is ADVISORY and may be stale. It is not a
+  payment record, has no eligibility or confirmation API, and `record()` never
+  consumes it: `record()` re-reads the store and re-applies every rule, and the
+  store re-checks I1-I8 at commit time. A future orchestrator must compare the
+  period `record()` returns with `matches_recorded()` and stop on any
+  difference.
+
+Nothing calls `plan()` in production code yet (no route, hook, UI or role).
+
+## Early-renewal failure risk — MUST be solved before any orchestrator (STAGE-03B.2/3)
+
+Option 1 completes the order and lets PMPro issue the row BEFORE the Club
+records the movement (the movement must be bound to the new row id). For an
+EARLY renewal this replaces the member's current, already paid row first.
+Exact path in the pinned sources:
+
+1. `WC_Order::update_status('completed')` → `save()` persists the status, THEN
+   `status_transition()` fires `woocommerce_order_status_completed`
+   (WooCommerce 11.2.1 `includes/class-wc-order.php` 283-286, 433-457).
+   Exceptions from hooks are caught and only logged as an order note
+   (~501-514), so the caller is not told.
+2. PMPro WooCommerce 1.11 `pmprowoo_add_membership_from_order`
+   (`pmpro-woocommerce.php` 207, hooked at 325) → with PMPro 3.x the
+   deprecated shim `pmprommpu_addMembershipLevel` (PMPro
+   `includes/deprecated.php` 460, no return value) → `pmpro_changeMembershipLevel`
+   (`includes/functions.php` 1284). The add-on ignores the result (312-318).
+3. `pmpro_changeMembershipLevel`, with `pmpro_deactivate_old_levels` true by
+   default (1383), FIRST cancels the current row for the same level with status
+   `changed` (1400-1403 → `pmpro_cancelMembershipLevel`, 1200: `status` and
+   `enddate = current_time('mysql')`, 1234-1237), THEN inserts the new row
+   (1421/1441); an insert failure only returns `false` (1460-1463).
+
+Consequence with the approved, unchanged mapper: from step 3 until the Club
+records the new movement bound to the NEW row, the member's last recorded
+payment is bound to a row that is no longer active →
+`pmpro_period_mismatch` → `unverified`. The already paid time "disappears" for
+that window. If the Club write fails (database down, commit outcome unknown,
+crash, timeout) it stays lost until recovered; if the PMPro insert fails after
+the cancel, the member has no active row at all. Fail closed (no unpaid
+coffee) but it harms a paying member, and PMPro has already rewritten the old
+row's end date (its history is not evidence; the Club record is).
+
+Requirements / proposed mitigations (owner review; none implemented):
+
+- **R1 durable intent before step 1 (STAGE-03B.2):** the plan, the bank
+  statement facts, the verification instant and the previous row id are made
+  durable (signed order meta or a migration-003 table — owner decision) so a
+  retry resumes with the SAME instant and period instead of planning anew.
+- **R2 resume / reconcile:** an idempotent resume that, for a durable intent,
+  re-reads PMPro, binds the movement to the new row and records it
+  (`already_recorded` on repeat); and a read-only report of "intent issued,
+  Club movement missing" and "active row ≠ row of the latest Club movement".
+- **R3 pre-flight just before step 1:** fresh `plan()` equal to the durable
+  plan, Club store ready with write grants, order still awaiting payment,
+  existing active row equal to the Club chain; otherwise do not complete.
+- **R4 post-issuance verification:** re-read the PMPro row (exactly one active
+  row, new id, dates == plan) instead of trusting return values (they are
+  discarded upstream), then record immediately.
+- **R5 window policy (owner decision):** either accept that an early renewal
+  is shown `unverified` for the seconds between steps 3 and the Club commit
+  (and for longer only on failure, until R2 runs), or approve a schema change
+  that records the payment before issuance and binds the row as a separate
+  append-only fact. A mapper "grace" that trusts a `changed` row would be a
+  rule change and is NOT proposed silently.
+
+Until R1-R5 are designed, tested and approved, Option 1 is NOT production-safe.
+
 ## Order lookup is bounded
 
 The reader now selects only the customer's own Club orders in SQL (HPOS

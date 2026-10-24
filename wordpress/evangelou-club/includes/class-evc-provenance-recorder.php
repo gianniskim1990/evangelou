@@ -100,11 +100,76 @@ final class EVC_Provenance_Recorder {
         }
     }
 
+    /**
+     * STAGE-03B.1: ADVISORY, READ-ONLY planning of the period a payment would
+     * fund BEFORE PMPro has issued its membership row. Same rules, in the same
+     * order, as record() (shared code: candidate_refusal(), chain_position()),
+     * but it never calls commit(), never adds aliases and never confirms a
+     * payment. The plan may be stale by the time it is used: record() and the
+     * store re-check everything again at commit time.
+     */
+    public function plan(EVC_Prospective_Payment $payment): EVC_Period_Plan {
+        try {
+            return $this->plan_or_throw($payment);
+        } catch (Throwable $e) {
+            return EVC_Period_Plan::unavailable('store_unavailable');
+        }
+    }
+
+    private function plan_or_throw(EVC_Prospective_Payment $p): EVC_Period_Plan {
+        $refusal = $this->candidate_refusal($p);
+        if ($refusal !== null) {
+            return EVC_Period_Plan::refused($refusal);
+        }
+        $existing = $this->store->movement($p->movement_id());
+        if ($existing !== null) {
+            return $this->planned_repeat($existing, $p);
+        }
+        if ($this->store->corrections_for($p->movement_id()) !== array()) {
+            return EVC_Period_Plan::refused(EVC_Record_Outcome::indeterminate('unresolved_correction'));
+        }
+        $position = $this->chain_position($p);
+        if ($position instanceof EVC_Record_Outcome) {
+            return EVC_Period_Plan::refused($position);
+        }
+        $latest = $position['latest'];
+        if ($latest !== null && ($latest->wp_user_id() !== $p->wp_user_id() || $this->store->movement($latest->movement_id()) === null)) {
+            return EVC_Period_Plan::unavailable('store_inconsistent');
+        }
+        return EVC_Period_Plan::planned($p->movement_id(), $position['next']['start'], $position['next']['end'], $position['kind'], $position['predecessor']);
+    }
+
+    /** The prospective payment is already recorded: same facts -> its recorded period; otherwise a conflict. Writes nothing. */
+    private function planned_repeat(EVC_Verified_Movement $existing, EVC_Prospective_Payment $p): EVC_Period_Plan {
+        if ($existing->order_anchors()[0]->key() !== $p->order_anchors()[0]->key()) {
+            return EVC_Period_Plan::refused(EVC_Record_Outcome::conflict('order_anchor_conflict'));
+        }
+        if (!$p->matches($existing)) {
+            return EVC_Period_Plan::refused(EVC_Record_Outcome::conflict('movement_fact_conflict'));
+        }
+        foreach ($p->aliases() as $alias) {
+            $owner = $this->store->movement_for_alias($alias->key());
+            if ($owner !== null && $owner !== $p->movement_id()) {
+                return EVC_Period_Plan::refused(EVC_Record_Outcome::conflict('alias_conflict'));
+            }
+        }
+        $period = $this->store->period_for_movement($p->movement_id());
+        if ($period === null || $period->pmpro_row_ref() !== $existing->pmpro_row_ref() || $period->wp_user_id() !== $existing->wp_user_id()) {
+            return EVC_Period_Plan::unavailable('store_inconsistent');
+        }
+        return EVC_Period_Plan::already($period);
+    }
+
     /** Checks that do not depend on the store; null when the movement may be recorded. */
     private function refusal(EVC_Verified_Movement $m): ?EVC_Record_Outcome {
         if ($m->state() !== EVC_Verified_Movement::STATE_CONFIRMED) {
             return EVC_Record_Outcome::indeterminate('movement_not_confirmed');
         }
+        return $this->candidate_refusal($m);
+    }
+
+    /** The store-independent rules shared by record() and plan(). */
+    private function candidate_refusal(EVC_Payment_Candidate $m): ?EVC_Record_Outcome {
         if ($m->environment() !== $this->environment) {
             return EVC_Record_Outcome::indeterminate('environment_mismatch');
         }
@@ -166,6 +231,33 @@ final class EVC_Provenance_Recorder {
 
     /** @param string[] $expected_unresolved */
     private function append(EVC_Verified_Movement $m, array $expected_unresolved): EVC_Record_Outcome {
+        $position = $this->chain_position($m);
+        if ($position instanceof EVC_Record_Outcome) {
+            return $position;
+        }
+        $next = $position['next'];
+        $period = new EVC_Funded_Period(
+            $m->movement_id(),
+            $m->wp_user_id(),
+            $m->level_id(),
+            $m->pmpro_row_ref(),
+            $next['start'],
+            $next['end'],
+            $position['kind'],
+            $position['predecessor']
+        );
+        $this->store->commit(EVC_Provenance_Write::new_movement($m, $period, $expected_unresolved));
+        return EVC_Record_Outcome::recorded($period);
+    }
+
+    /**
+     * Where a not-yet-recorded payment would join the member's chain (shared
+     * by record() and plan()): a refusal, or the latest period, the D1/D2/D5
+     * next period, its kind and its predecessor. Reads only.
+     *
+     * @return EVC_Record_Outcome|array{latest:?EVC_Funded_Period,next:array{start:DateTimeImmutable,end:DateTimeImmutable,renewal:string},kind:string,predecessor:?string}
+     */
+    private function chain_position(EVC_Payment_Candidate $m) {
         foreach ($m->aliases() as $alias) {
             if ($this->store->movement_for_alias($alias->key()) !== null) {
                 return EVC_Record_Outcome::conflict('alias_conflict');
@@ -183,18 +275,12 @@ final class EVC_Provenance_Recorder {
 
         $latest = $this->store->latest_period($m->wp_user_id());
         $next = EVC_Membership_Calendar::next_period($latest === null ? null : $latest->end_utc(), $m->verified_at_utc());
-        $period = new EVC_Funded_Period(
-            $m->movement_id(),
-            $m->wp_user_id(),
-            $m->level_id(),
-            $m->pmpro_row_ref(),
-            $next['start'],
-            $next['end'],
-            $latest === null ? EVC_Funded_Period::KIND_INITIAL : $next['renewal'],
-            $latest === null ? null : $latest->movement_id()
+        return array(
+            'latest' => $latest,
+            'next' => $next,
+            'kind' => $latest === null ? EVC_Funded_Period::KIND_INITIAL : $next['renewal'],
+            'predecessor' => $latest === null ? null : $latest->movement_id(),
         );
-        $this->store->commit(EVC_Provenance_Write::new_movement($m, $period, $expected_unresolved));
-        return EVC_Record_Outcome::recorded($period);
     }
 
     /** Same canonical movement seen again (retry or another source path). */

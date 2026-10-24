@@ -5,9 +5,15 @@
  * runs the suite in the flag mode whose tests must catch it; the suite must
  * FAIL. Sources are restored in `finally` and verified by SHA-256.
  *
+ * A mutant may name KILLER tests (6th element, "Class::method"; STAGE-03B.1): it
+ * then counts as killed only if each of them FAILED AN ASSERTION in the JUnit
+ * log, so a broken setup or an unrelated exception is reported as INVALID
+ * instead of being counted as a kill (tests/mutation/lib-mutation-evidence.php).
+ *
  * Usage (plugin dir, WordPress test DB env set): php tests/mutation/run-wp-mutations.php
  */
 $root = dirname(__DIR__, 2);
+require_once __DIR__ . '/lib-mutation-evidence.php';
 $staff = 'includes/staff/';
 
 $mutants = array(
@@ -133,8 +139,10 @@ $mutants = array(
     array('C11-source-config-coerces-types', 'commerce', 'includes/customer/class-evc-commerce-source-config.php',
         "        if (!is_int(\$level_id) || \$level_id < 1 || !is_int(\$product_id) || \$product_id < 1) {",
         "        if ((int) \$level_id < 1 || (int) \$product_id < 1) {"),
+    // STAGE-03B.1: must be caught by the wiring ASSERTIONS, not by an "unavailable" exception elsewhere.
     array('C12-configured-source-not-used', 'commerce', 'includes/customer/class-evc-customer-plugin.php',
-        "        if (\$config === null) {", "        if (true) {"),
+        "        if (\$config === null) {", "        if (true) {",
+        array('CommerceMembershipSourceTest::test_configured_constants_select_the_real_source', 'CommerceMembershipSourceTest::test_configured_source_is_the_one_answering_me')),
     // STAGE-03 trusted BACS confirmation boundary and provenance read adapter.
     array('BC1-capability-not-required', 'commerce', 'includes/customer/class-evc-bacs-payment-confirmation.php',
         "!user_can(\$actor, self::CAPABILITY) || ", ""),
@@ -159,7 +167,7 @@ $mutants = array(
 /** Output of the most recent suite run (printed only when the baseline fails). */
 $evc_last_output = '';
 
-function evc_wp_suite(string $root, string $mode): int {
+function evc_wp_suite(string $root, string $mode, ?string $junit = null): int {
     global $evc_last_output;
     if ($mode === 'customer') {
         $suite = 'wp-customer';
@@ -172,7 +180,7 @@ function evc_wp_suite(string $root, string $mode): int {
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => $mode, 'EVC_TEST_CUSTOMER_FLAG' => 'disabled'));
     }
     $proc = proc_open(
-        array(PHP_BINARY, $root . '/vendor/bin/phpunit', '-c', $root . '/phpunit-wp.xml.dist', '--testsuite', $suite),
+        array_merge(array(PHP_BINARY, $root . '/vendor/bin/phpunit', '-c', $root . '/phpunit-wp.xml.dist', '--testsuite', $suite), $junit === null ? array() : array('--log-junit', $junit)),
         array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')),
         $pipes,
         $root,
@@ -214,9 +222,12 @@ foreach ($evc_commerce_only ? array('commerce') : array('disabled', 'enabled', '
 echo "Baseline: PASS\n";
 
 $survivors = array();
+$invalid = array();
 $killed = 0;
 foreach ($mutants as $m) {
     list($id, $mode, $file, $search, $replace) = $m;
+    $killers = $m[5] ?? array();
+    $junit = $killers === array() ? null : tempnam(sys_get_temp_dir(), 'evc-junit-');
     $path = $root . '/' . $file;
     $original = file_get_contents($path);
     // Working copies may use CRLF (Windows); patterns are written with LF.
@@ -228,16 +239,35 @@ foreach ($mutants as $m) {
     }
     try {
         file_put_contents($path, str_replace($search, $replace, $normalized));
-        $exit = evc_wp_suite($root, $mode);
+        if ($junit !== null) {
+            file_put_contents($junit, '');
+        }
+        $exit = evc_wp_suite($root, $mode, $junit);
     } finally {
         file_put_contents($path, $original);
     }
-    if ($exit !== 0) {
-        $killed++;
-    } else {
+    $evidence = '';
+    if ($exit === 0) {
         $survivors[] = $id;
+        $status = 'SURVIVED';
+    } elseif ($killers === array()) {
+        $killed++;
+        $status = 'KILLED';
+    } else {
+        $verdict = evc_mutation_killer_verdict((string) file_get_contents($junit), $killers);
+        $evidence = '; ' . $verdict['detail'];
+        if ($verdict['verdict'] === 'assertion') {
+            $killed++;
+            $status = 'KILLED';
+        } else {
+            $invalid[] = $id;
+            $status = 'INVALID (' . $verdict['verdict'] . ')';
+        }
     }
-    printf("%-42s [%s] %s (exit %d)\n", $id, $mode, $exit !== 0 ? 'KILLED' : 'SURVIVED', $exit);
+    if ($junit !== null) {
+        @unlink($junit);
+    }
+    printf("%-42s [%s] %s (exit %d%s)\n", $id, $mode, $status, $exit, $evidence);
 }
 
 $restored = true;
@@ -247,8 +277,11 @@ foreach ($touched as $path => $hash) {
         fwrite(STDERR, 'NOT RESTORED: ' . $path . "\n");
     }
 }
-printf("[evidence] wp-auth-mutation%s: total=%d killed=%d survived=%d sources_restored=%s\n", $evc_commerce_only ? ' (commerce)' : '', count($mutants), $killed, count($survivors), $restored ? 'yes' : 'NO');
+printf("[evidence] wp-auth-mutation%s: total=%d killed=%d survived=%d invalid=%d sources_restored=%s\n", $evc_commerce_only ? ' (commerce)' : '', count($mutants), $killed, count($survivors), count($invalid), $restored ? 'yes' : 'NO');
 if ($survivors) {
     fwrite(STDERR, 'Surviving mutants: ' . implode(', ', $survivors) . "\n");
 }
-exit($survivors || !$restored ? 1 : 0);
+if ($invalid) {
+    fwrite(STDERR, 'Not killed by their named assertions (broken setup or wrong reason): ' . implode(', ', $invalid) . "\n");
+}
+exit($survivors || $invalid || !$restored ? 1 : 0);

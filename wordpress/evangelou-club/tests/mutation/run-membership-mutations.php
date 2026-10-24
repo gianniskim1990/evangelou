@@ -25,6 +25,7 @@
  * And UI-04H (V2-1..V2-15: route-aware v2 envelope policy).
  * And UI-04I (RU1-RU20: versioned staff-role upgrade planner).
  * And STAGE-01 (CM1-CM3: what a customer is told about their membership).
+ * And STAGE-03B.1 (PL1-PL15: advisory pre-issuance period planning).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -1980,6 +1981,98 @@ $mutants = array(
         'file' => 'includes/class-evc-pmpro-entitlement-mapper.php',
         'search' => "                if (\$p->confirmed_at_utc !== null) {\n                    return 'invalid_payment_fact';",
         'replace' => "                if (false) {\n                    return 'invalid_payment_fact';",
+    ),
+    // STAGE-03B.1: advisory pre-issuance period planning (EVC_Provenance_Recorder::plan).
+    array(
+        'id' => 'PL1-plan-ignores-recorded-transfer',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$existing !== null) {\n            return \$this->planned_repeat(\$existing, \$p);\n        }\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'PL2-plan-ignores-unresolved-refund',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$this->store->corrections_for(\$p->movement_id()) !== array()) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'PL3-plan-skips-store-independent-rules',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        \$refusal = \$this->candidate_refusal(\$p);\n",
+        'replace' => "        \$refusal = null;\n",
+    ),
+    array(
+        'id' => 'PL4-plan-repeat-with-changed-facts-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (!\$p->matches(\$existing)) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'PL5-plan-repeat-alias-owned-elsewhere-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            if (\$owner !== null && \$owner !== \$p->movement_id()) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'PL6-plan-repeat-other-order-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$existing->order_anchors()[0]->key() !== \$p->order_anchors()[0]->key()) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'PL7-plan-trusts-inconsistent-chain',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$latest !== null && (\$latest->wp_user_id() !== \$p->wp_user_id() || \$this->store->movement(\$latest->movement_id()) === null)) {",
+        'replace' => "        if (false) {",
+    ),
+    array(
+        'id' => 'PL8-plan-trusts-movement-without-period',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "        if (\$period === null || \$period->pmpro_row_ref() !== \$existing->pmpro_row_ref() || \$period->wp_user_id() !== \$existing->wp_user_id()) {\n            return EVC_Period_Plan::unavailable('store_inconsistent');",
+        'replace' => "        if (\$period === null) {\n            return EVC_Period_Plan::refused(EVC_Record_Outcome::conflict('missing'));\n        }\n        if (false) {\n            return EVC_Period_Plan::unavailable('store_inconsistent');",
+    ),
+    array(
+        'id' => 'PL9-plan-store-failure-reported-as-planned',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            return EVC_Period_Plan::unavailable('store_unavailable');",
+        'replace' => "            return EVC_Period_Plan::planned(\$payment->movement_id(), \$payment->verified_at_utc(), EVC_Membership_Calendar::add_calendar_month(\$payment->verified_at_utc()), EVC_Funded_Period::KIND_INITIAL, null);",
+    ),
+    array(
+        'id' => 'PL10-prospective-shape-unchecked',
+        'file' => 'includes/class-evc-prospective-payment.php',
+        'search' => "        EVC_Verified_Movement::assert_payment_fields(\$movement_id, \$environment, \$wp_user_id, \$level_id, \$verified_at_utc, \$amount_minor, \$currency, \$authority, \$evidence_kind);\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'PL11-prospective-matches-pending-movement',
+        'file' => 'includes/class-evc-prospective-payment.php',
+        'search' => "        return \$movement->state() === EVC_Verified_Movement::STATE_CONFIRMED\n            && ",
+        'replace' => "        return ",
+    ),
+    array(
+        'id' => 'PL12-prospective-matches-other-instant',
+        'file' => 'includes/class-evc-prospective-payment.php',
+        'search' => "            && \$movement->verified_at_utc() == \$this->verified_at_utc\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'PL13-stale-plan-end-not-compared',
+        'file' => 'includes/class-evc-period-plan.php',
+        'search' => "            && \$this->end_utc == \$recorded->end_utc()\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'PL14-stale-plan-predecessor-not-compared',
+        // Re-aimed before commit: the outcome guard is an equivalent mutant (a refused plan has no ids/dates).
+        'file' => 'includes/class-evc-period-plan.php',
+        'search' => "\n            && \$this->predecessor_movement_id === \$recorded->predecessor_movement_id();",
+        'replace' => ";",
+    ),
+    array(
+        'id' => 'PL15-shared-movement-shape-weakened',
+        'file' => 'includes/class-evc-verified-movement.php',
+        'search' => "        if (!in_array(\$authority, array(self::AUTHORITY_GATEWAY_API, self::AUTHORITY_ORDER_STATE, self::AUTHORITY_MANUAL_ADMIN), true)) {",
+        'replace' => "        if (false) {",
     ),
 );
 

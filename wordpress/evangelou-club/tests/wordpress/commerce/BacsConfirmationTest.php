@@ -88,10 +88,20 @@ final class BacsConfirmationTest extends EVC_WP_Test_Case {
         return $r->get_data()['membership'];
     }
 
+    /**
+     * The configured REAL source. Asserted (not assumed) so that losing the wiring fails an
+     * assertion here instead of surfacing as an unrelated "unavailable" exception (mutant C12).
+     */
+    private function real_source(): EVC_Membership_Adapter {
+        $adapter = EVC_Customer_Plugin::membership_adapter();
+        $this->assertInstanceOf(EVC_Pmpro_Membership_Adapter::class, $adapter, 'the configured commerce source must be the one in use');
+        return $adapter;
+    }
+
     /** The same real source evaluated at an arbitrary instant (expiry, renewal). */
     private function state_at(int $user_id, DateTimeImmutable $at): array {
         $at = $at->setTimezone(new DateTimeZone('UTC'));
-        return EVC_Customer_Membership::describe(EVC_Customer_Plugin::membership_adapter()->entitlement_for($user_id, $at), $at);
+        return EVC_Customer_Membership::describe($this->real_source()->entitlement_for($user_id, $at), $at);
     }
 
     private function pmpro_row(int $user_id): array {
@@ -121,7 +131,7 @@ final class BacsConfirmationTest extends EVC_WP_Test_Case {
     /** Internal diagnostic flags of the real source (never part of the public /me response). */
     private function flags_now(int $user_id): array {
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        return EVC_Customer_Plugin::membership_adapter()->entitlement_for($user_id, $now)->diagnostic_flags();
+        return $this->real_source()->entitlement_for($user_id, $now)->diagnostic_flags();
     }
 
     // ---- the funded path ------------------------------------------------------------------------
@@ -389,5 +399,65 @@ final class BacsConfirmationTest extends EVC_WP_Test_Case {
         $this->assertCount(1, $sql);
         global $wpdb;
         $this->assertSame(array((string) $own->get_id()), $wpdb->get_col($sql[0]), 'only the customer\'s own Club orders are loaded');
+    }
+
+    // ---- STAGE-03B.1: advisory pre-issuance planning --------------------------------------------
+
+    private function pmpro_row_count(int $user_id): int {
+        global $wpdb;
+        return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->pmpro_memberships_users} WHERE user_id = %d", $user_id));
+    }
+
+    private function club_tables(): array {
+        $out = array();
+        foreach (array('evc_pay_movements', 'evc_pay_aliases', 'evc_pay_periods', 'evc_pay_member_heads', 'evc_pay_correction_heads', 'evc_pay_corrections') as $table) {
+            $out[$table] = $this->club->fetch_all('SELECT * FROM ' . $table);
+        }
+        return $out;
+    }
+
+    /**
+     * An awaiting BACS order has NO PMPro row yet. Planning computes the exact Athens period from
+     * the Club record alone, and changes nothing: no Club row, no PMPro row, no order status, and
+     * the customer stays "awaiting payment".
+     */
+    public function test_planning_before_any_pmpro_row_exists_is_advisory_and_writes_nothing(): void {
+        $user = $this->customer();
+        $order = $this->order($user, 'on-hold');
+        $this->assertSame(0, $this->pmpro_row_count($user));
+        $before = $this->club_tables();
+        $at = new DateTimeImmutable('@' . time());
+        $prospective = new EVC_Prospective_Payment(
+            $this->config->ref('bacs_transfer', self::reference()),
+            EVC_Bacs_Payment_Confirmation::ENVIRONMENT,
+            $user,
+            $this->config->level_id,
+            $at->setTimezone(new DateTimeZone('UTC')),
+            EVC_Bacs_Payment_Confirmation::AMOUNT_MINOR,
+            EVC_Commerce_Source_Config::CURRENCY,
+            array(new EVC_Movement_Alias(EVC_Movement_Alias::NS_WC_ORDER, $this->config->ref('wc_order', (string) $order->get_id()))),
+            EVC_Verified_Movement::AUTHORITY_MANUAL_ADMIN,
+            EVC_Payment_Evidence::KIND_MANUAL_CONFIRMATION
+        );
+        $recorder = new EVC_Provenance_Recorder(
+            $this->store(),
+            new EVC_Pmpro_Mapper_Config(array($this->config->level_id), EVC_Commerce_Source_Config::PMPRO_VERSION, EVC_Commerce_Source_Config::PMPRO_VERSION_EXCLUSIVE_MAX),
+            EVC_Bacs_Payment_Confirmation::ENVIRONMENT,
+            EVC_Bacs_Payment_Confirmation::AMOUNT_MINOR,
+            EVC_Commerce_Source_Config::CURRENCY
+        );
+
+        for ($i = 0; $i < 2; $i++) {
+            $plan = $recorder->plan($prospective);
+            $this->assertSame(EVC_Period_Plan::PLANNED, $plan->outcome(), (string) $plan->reason());
+            $this->assertSame(EVC_Funded_Period::KIND_INITIAL, $plan->kind());
+            $this->assertEquals($prospective->verified_at_utc(), $plan->start_utc());
+            $this->assertEquals(EVC_Membership_Calendar::add_calendar_month($prospective->verified_at_utc()), $plan->end_utc());
+        }
+
+        $this->assertSame($before, $this->club_tables(), 'planning wrote to the Club database');
+        $this->assertSame(0, $this->pmpro_row_count($user), 'planning issued a PMPro membership');
+        $this->assertSame('on-hold', wc_get_order($order->get_id())->get_status());
+        $this->assertSame(array('state' => 'pending_payment', 'paid_until_utc' => null), $this->me($user));
     }
 }

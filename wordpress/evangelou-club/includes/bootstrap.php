@@ -33,13 +33,17 @@ require_once $evc_includes . 'class-evc-pmpro-membership-adapter.php';
 // Task 1D-E: pure payment-provenance recorder core. Definitions only; no
 // store, hook or gateway is wired anywhere.
 require_once $evc_includes . 'class-evc-movement-alias.php';
+// STAGE-03B.1: shared payment facts + advisory pre-issuance period planning.
+require_once $evc_includes . 'interface-evc-payment-candidate.php';
 require_once $evc_includes . 'class-evc-verified-movement.php';
+require_once $evc_includes . 'class-evc-prospective-payment.php';
 require_once $evc_includes . 'class-evc-funded-period.php';
 require_once $evc_includes . 'class-evc-movement-correction.php';
 require_once $evc_includes . 'class-evc-movement-reconciliation.php';
 require_once $evc_includes . 'class-evc-provenance-write.php';
 require_once $evc_includes . 'interface-evc-provenance-store.php';
 require_once $evc_includes . 'class-evc-record-outcome.php';
+require_once $evc_includes . 'class-evc-period-plan.php';
 require_once $evc_includes . 'class-evc-provenance-recorder.php';
 // Task 1D-G: SQL store definition only; nothing constructs it outside tests.
 require_once $evc_includes . 'class-evc-sql-provenance-store.php';
