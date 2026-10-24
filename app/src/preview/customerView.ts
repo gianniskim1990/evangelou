@@ -10,8 +10,12 @@ import { CLUB_RULES, CUSTOMER, addDays, greekDate, memberHistory, type CoffeeCod
  * instead, so both render through the same approved components.
  */
 
-/** Membership as the customer sees it. "cancelled" exists only in the customer journey preview. */
-export type CustomerMembershipState = PreviewMembershipState | "cancelled";
+/**
+ * Membership as the customer sees it. "cancelled" exists only outside the UI-02
+ * sample; "none" (no Club membership) and "unverified" (the server cannot
+ * confirm a paid period, never shown as paid) only in the STAGE-01 live app.
+ */
+export type CustomerMembershipState = PreviewMembershipState | "cancelled" | "none" | "unverified";
 
 export type CustomerHistoryItem = PreviewRedemption & { preparation?: CoffeeOrder };
 
@@ -35,10 +39,17 @@ export type CustomerView = {
   minutesToMidnight: number | null;
   /** A renewal was requested and its payment is not confirmed yet (grants nothing). */
   pendingRenewal: boolean;
+  /** STAGE-01 live app: real customer data, so the preview notes about fictional data are not shown. */
+  live?: boolean;
+  /**
+   * STAGE-01 live app: the Club database (today's coffee, coffee history, visits)
+   * is not connected. Nothing about today's coffee or past coffees is claimed.
+   */
+  clubData?: "unavailable";
 };
 
-/** Journey-only actions; without them the approved buttons stay disabled. */
-export type CustomerActions = { pay?: () => void; renew?: () => void };
+/** Journey/live actions; without them the approved buttons stay disabled. */
+export type CustomerActions = { pay?: () => void; renew?: () => void; signOut?: () => void };
 
 function samplePaidUntil(state: PreviewMembershipState, today: string): string | null {
   if (state === "pending") return null;
@@ -80,5 +91,7 @@ export function membershipLine(view: CustomerView): string {
   if (view.state === "active") return `Ενεργή έως ${greekDate(view.paidUntil!)}${at}`;
   if (view.state === "expired") return `Έληξε στις ${greekDate(view.paidUntil!)}${at}`;
   if (view.state === "cancelled") return "Ακυρώθηκε";
+  if (view.state === "none") return "Δεν υπάρχει συνδρομή";
+  if (view.state === "unverified") return "Η πληρωμή δεν έχει επιβεβαιωθεί";
   return "Αναμονή επιβεβαίωσης πληρωμής";
 }

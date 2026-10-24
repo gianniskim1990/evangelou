@@ -14,6 +14,17 @@
  * Usage (from the plugin directory): php tests/mutation/run-mutations.php
  */
 $root = dirname(__DIR__, 2);
+// STAGE-03B.2: undo a mutant left behind by a KILLED earlier run before anything else.
+require_once __DIR__ . '/lib-mutation-journal.php';
+$evc_journal = evc_mutation_journal_path($root);
+try {
+    if (evc_mutation_journal_recover($evc_journal) === 'restored') {
+        fwrite(STDERR, "Restored a source file left mutated by an interrupted run.\n");
+    }
+} catch (RuntimeException $e) {
+    fwrite(STDERR, 'ABORT: ' . $e->getMessage() . "\n");
+    exit(1);
+}
 $phpunit = array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist', '--exclude-group', 'concurrency');
 
 $mutants = array(
@@ -134,10 +145,13 @@ foreach ($mutants as $m) {
         exit(1);
     }
     try {
-        file_put_contents($path, str_replace($m['search'], $m['replace'], $original));
+        $mutated = str_replace($m['search'], $m['replace'], $original);
+        evc_mutation_journal_begin($evc_journal, $path, $original, $mutated);
+        file_put_contents($path, $mutated);
         $exit = evc_run_suite($phpunit);
     } finally {
         file_put_contents($path, $original);
+        evc_mutation_journal_end($evc_journal, $path);
     }
     $status = $exit !== 0 ? 'KILLED' : 'SURVIVED';
     if ($exit !== 0) {

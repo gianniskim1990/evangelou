@@ -51,9 +51,9 @@ export function Btn({ children, tone = "roast", onClick, className, disabled, ti
   );
 }
 
-// "cancelled" is used only by the CUSTOMER-01 customer journey preview.
-const STATE_TEXT: Record<CustomerMembershipState, string> = { active: "Ενεργή", pending: "Αναμονή πληρωμής", expired: "Έληξε", cancelled: "Ακυρώθηκε" };
-const STATE_DOT: Record<CustomerMembershipState, string> = { active: "bg-[var(--ok)]", pending: "bg-[var(--wait)]", expired: "bg-[var(--stop)]", cancelled: "bg-[var(--stop)]" };
+// "cancelled" is used by the CUSTOMER-01 journey and STAGE-01 live app; "none" and "unverified" only by the live app.
+const STATE_TEXT: Record<CustomerMembershipState, string> = { active: "Ενεργή", pending: "Αναμονή πληρωμής", expired: "Έληξε", cancelled: "Ακυρώθηκε", none: "Χωρίς συνδρομή", unverified: "Μη επιβεβαιωμένη" };
+const STATE_DOT: Record<CustomerMembershipState, string> = { active: "bg-[var(--ok)]", pending: "bg-[var(--wait)]", expired: "bg-[var(--stop)]", cancelled: "bg-[var(--stop)]", none: "bg-[var(--wait)]", unverified: "bg-[var(--wait)]" };
 
 /** Status as a dot plus words (never colour alone). */
 export function StateMark({ state, className }: { state: CustomerMembershipState; className?: string }) {

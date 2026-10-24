@@ -1,0 +1,17 @@
+<!doctype html>
+<!--
+  Build entry for the REAL customer app (vite.customer.config.ts, STAGE-01).
+  Only an input for Vite: in production WordPress renders its own protected
+  /club-member/ page and loads the hashed assets from the manifest.
+-->
+<html lang="el">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Evangelou Club</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/customer/main.tsx"></script>
+  </body>
+</html>

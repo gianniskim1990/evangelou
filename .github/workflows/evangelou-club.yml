@@ -9,6 +9,10 @@ on:
       - 'app/src/index.css'
       - 'app/staff.html'
       - 'app/vite.staff.config.ts'
+      - 'app/customer.html'
+      - 'app/vite.customer.config.ts'
+      - 'app/src/customer/**'
+      - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/package.json'
       - 'app/package-lock.json'
@@ -21,6 +25,10 @@ on:
       - 'app/src/index.css'
       - 'app/staff.html'
       - 'app/vite.staff.config.ts'
+      - 'app/customer.html'
+      - 'app/vite.customer.config.ts'
+      - 'app/src/customer/**'
+      - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/package.json'
       - 'app/package-lock.json'
@@ -175,9 +183,83 @@ jobs:
       - name: WordPress suite - staff feature flag ENABLED (test environment only)
         run: EVC_TEST_STAFF_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-common,wp-enabled
 
+      - name: WordPress suite - CUSTOMER flag ENABLED, staff flag DISABLED (STAGE-01, test environment only)
+        run: EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-customer
+
       - name: Authorization mutation tests (real WordPress)
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-wp-mutations.php
+
+      - name: Confirm sources unchanged by test runs
+        working-directory: .
+        run: git diff --exit-code -- wordpress/evangelou-club
+
+  # STAGE-02: GET /me over the REAL WooCommerce 11.2.1 + Paid Memberships Pro 3.8.9 + PMPro
+  # WooCommerce Add On 1.11 (the versions verified on staging), fetched with pinned SHA-256 into a
+  # disposable test site. Both WooCommerce order storages, because staging's is not confirmed.
+  wordpress-commerce:
+    name: wordpress commerce php ${{ matrix.php }} / ${{ matrix.db }} / orders ${{ matrix.storage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { php: '8.2', db: 'mysql:8.0', storage: 'hpos', mutations: true }
+          - { php: '8.2', db: 'mysql:8.0', storage: 'posts', mutations: false }
+          - { php: '7.4', db: 'mariadb:10.11', storage: 'posts', mutations: false }
+          - { php: '8.4', db: 'mysql:8.0', storage: 'hpos', mutations: false }
+    defaults:
+      run:
+        working-directory: wordpress/evangelou-club
+    env:
+      EVC_WP_TEST_DB_NAME: evc_wp_tests
+      EVC_TEST_WC_ORDER_STORAGE: ${{ matrix.storage }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start isolated ${{ matrix.db }} container
+        working-directory: .
+        run: |
+          extra=""
+          case "${{ matrix.db }}" in
+            mysql:*) extra="--default-authentication-plugin=mysql_native_password" ;;
+          esac
+          docker run -d --name evc-test-db -p 127.0.0.1:13306:3306 \
+            -e MYSQL_ROOT_PASSWORD="$EVC_TEST_DB_PASSWORD" \
+            -e MARIADB_ROOT_PASSWORD="$EVC_TEST_DB_PASSWORD" \
+            "${{ matrix.db }}" $extra
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql, mysqli, intl, zip
+          coverage: none
+          tools: composer:v2
+          ini-values: error_reporting=E_ALL, display_errors=On
+
+      - name: Install locked dev-only test tooling (WordPress core + test library)
+        run: |
+          test -f composer.lock || { echo "::error::composer.lock missing"; exit 1; }
+          composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Fetch the exact plugin versions (checksum-pinned, test site only)
+        run: |
+          bash tests/bin/fetch-commerce-plugins.sh "$RUNNER_TEMP/commerce-plugins"
+          echo "EVC_TEST_COMMERCE_PLUGINS=$RUNNER_TEMP/commerce-plugins" >> "$GITHUB_ENV"
+
+      - name: Wait for test database
+        run: php tests/bin/wait-for-db.php
+
+      - name: Create disposable WordPress test database
+        run: php tests/bin/create-wp-test-db.php
+
+      - name: Commerce suite - customer flag ON, staff flag OFF, real plugins (test environment only)
+        run: EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-commerce
+
+      - name: Commerce source mutation tests (real plugins)
+        if: matrix.mutations
+        run: php tests/mutation/run-wp-mutations.php --mode=commerce
 
       - name: Confirm sources unchanged by test runs
         working-directory: .

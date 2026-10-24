@@ -252,8 +252,13 @@ WooCommerce is not installed yet and payment methods are unconfirmed.
 - Production blockers: technician-confirmed DB version/host, separate Club
   DB and runtime/migration users, backups and restore drill, staging,
   trusted source adapters and canonical identity, HMAC key lifecycle, O1/
-  O3/O4, D3/D4/D6–D10. Nothing constructs this store in the plugin (the
-  packager rejects shipped code containing `new EVC_Sql_Provenance_Store`).
+  O3/O4, D3/D4/D6–D10. STAGE-03: the plugin constructs this store ONLY
+  for reading the Club's recorded payments behind GET /me, and only when
+  wp-config.php opts in (`EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` plus
+  `EVC_CLUB_DB_*`; off by default). The manager confirmation that WRITES it
+  (`EVC_Bacs_Payment_Confirmation`) is constructed by no shipped code (the
+  packager rejects `new EVC_Bacs_Payment_Confirmation`). See
+  `docs/commerce-membership-source.md`.
 
 **Canonical payment identity core (Task 1D-I — pure PHP, synthetic facts only, NOT wired):**
 

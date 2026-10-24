@@ -19,10 +19,14 @@ final class EVC_Staff_Assets {
     private $dir;
     /** @var string */
     private $url;
+    /** @var string */
+    private $entry;
 
-    public function __construct(string $dir, string $url) {
+    /** $entry: the Vite manifest entry (default: the staff app; the STAGE-01 customer app passes customer.html). */
+    public function __construct(string $dir, string $url, string $entry = self::ENTRY) {
         $this->dir = rtrim($dir, '/\\');
         $this->url = rtrim($url, '/');
+        $this->entry = $entry;
     }
 
     public static function production(): self {
@@ -36,10 +40,10 @@ final class EVC_Staff_Assets {
             return null;
         }
         $manifest = json_decode((string) file_get_contents($manifest_file), true);
-        if (!is_array($manifest) || !isset($manifest[self::ENTRY]) || !is_array($manifest[self::ENTRY])) {
+        if (!is_array($manifest) || !isset($manifest[$this->entry]) || !is_array($manifest[$this->entry])) {
             return null;
         }
-        $entry = $manifest[self::ENTRY];
+        $entry = $manifest[$this->entry];
         if (empty($entry['isEntry']) || !isset($entry['file'])) {
             return null;
         }
@@ -48,7 +52,7 @@ final class EVC_Staff_Assets {
         $preloads = array();
         $styles = array();
         $seen = array();
-        $ok = $this->collect($manifest, self::ENTRY, $scripts, $preloads, $styles, $seen, true);
+        $ok = $this->collect($manifest, $this->entry,$scripts, $preloads, $styles, $seen, true);
         if (!$ok || count($scripts) !== 1) {
             return null;
         }

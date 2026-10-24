@@ -13,6 +13,7 @@
     "test:club": "node scripts/run-club-tests.mjs",
     "test:club:mutation": "node scripts/run-club-mutations.mjs",
     "build:staff": "vite build --config vite.staff.config.ts",
+    "build:customer": "vite build --config vite.customer.config.ts",
     "package:club-plugin": "node scripts/package-club-plugin.mjs",
     "check:isolated-build": "node scripts/check-isolated-build.mjs",
     "recovery:preview": "vite --host 127.0.0.1 --open /recovery-preview.html",

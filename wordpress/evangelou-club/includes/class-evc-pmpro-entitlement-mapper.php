@@ -32,11 +32,21 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *     before the paid run began;
  *  7. evaluation instant < end of the last paid period (exclusive).
  *
+ * When a VERIFIED paid chain exists but rule 4 or 6 fails (PMPro dates
+ * disagree with the recorded period), the result is indeterminate with the
+ * extra flag "verified_paid_period_conflict", distinct from missing evidence
+ * ("no_payment_evidence"). Nothing is shortened, extended or guessed.
+ *
  * Consequences: an old payment cannot justify a later unpaid period (the
  * replayed chain would end before the PMPro end date -> mismatch); a pending
  * renewal neither extends nor invalidates a paid period; a confirmed renewal
  * only counts with its own recorded provenance. PMPro's "active" status and
  * its expiry cron are never trusted on their own.
+ *
+ * Without an active Club row, a well-formed live PENDING Club payment makes
+ * the result pending_payment (STAGE-02: PMPro WooCommerce creates the row
+ * only when the order is completed, so a bank transfer awaiting payment has
+ * no row yet); a malformed or non-live Club payment there fails closed.
  *
  * Everything else returns a NON-eligible entitlement (indeterminate, none,
  * pending_payment, payment_failed, refunded, cancelled or expired). Any
@@ -135,14 +145,26 @@ final class EVC_Pmpro_Entitlement_Mapper {
                 $club_rows[] = $row;
             }
         }
-        if ($club_rows === array()) {
-            return EVC_Entitlement::none(self::SOURCE, array($s->memberships === array() ? 'no_club_membership' : 'non_club_level_only'));
-        }
         $active = array_values(array_filter($club_rows, function (EVC_Pmpro_Membership_Row $r) {
             return $r->status === 'active';
         }));
         if (count($active) > 1) {
             return $this->indeterminate('multiple_active_club_levels');
+        }
+        if ($active === array()) {
+            // STAGE-02: without an active Club row, a Club purchase still awaiting payment (e.g. a
+            // bank transfer "on-hold" order; PMPro WooCommerce grants the level only on "completed")
+            // is reported as pending_payment. It is never eligible and never carries an expiry.
+            $awaiting = $this->awaiting_payment($s->payments);
+            if (is_string($awaiting)) {
+                return $this->indeterminate($awaiting);
+            }
+            if ($awaiting) {
+                return new EVC_Entitlement(EVC_Entitlement::STATUS_PENDING_PAYMENT, false, null, null, self::SOURCE, null, null, array('payment_awaiting_confirmation'));
+            }
+        }
+        if ($club_rows === array()) {
+            return EVC_Entitlement::none(self::SOURCE, array($s->memberships === array() ? 'no_club_membership' : 'non_club_level_only'));
         }
         if ($active === array()) {
             $statuses = array_map(function (EVC_Pmpro_Membership_Row $r) {
@@ -294,15 +316,23 @@ final class EVC_Pmpro_Entitlement_Mapper {
         }
 
         $last = $periods[count($periods) - 1];
-        if ($last['end'] != $row_end || $last['payment']->membership_row_ref !== $row->row_ref) {
+        if ($last['payment']->membership_row_ref !== $row->row_ref) {
             return $this->indeterminate('pmpro_period_mismatch');
+        }
+        // Approved rule (Task 1D-B): the last paid period ends EXACTLY where the active PMPro row
+        // ends. STAGE-03 does NOT relax it: a verified paid period whose PMPro dates disagree is
+        // never shortened, extended or guessed; it fails closed, but with a distinct flag so it is
+        // never confused with missing payment evidence (owner decision pending, see
+        // docs/commerce-membership-source.md "Date conflict").
+        if ($last['end'] != $row_end) {
+            return EVC_Entitlement::indeterminate(self::SOURCE, array('pmpro_period_mismatch', 'verified_paid_period_conflict'));
         }
         if ($pending) {
             $flags[] = 'renewal_pending';
         }
         $run_start = $current_run[0]['start'];
         if ($row_start < $run_start) {
-            return $this->indeterminate('membership_start_before_paid_run');
+            return EVC_Entitlement::indeterminate(self::SOURCE, array('membership_start_before_paid_run', 'verified_paid_period_conflict'));
         }
 
         if ($at >= $last['end']) {
@@ -345,6 +375,37 @@ final class EVC_Pmpro_Entitlement_Mapper {
             return 'invalid_membership_dates';
         }
         return $resolved['instant'];
+    }
+
+    /**
+     * Is a Club payment awaiting confirmation? Only well-formed, live, pending facts of an
+     * approved Club level count; a malformed or non-live Club fact fails closed (flag).
+     *
+     * @param EVC_Pmpro_Payment_Fact[] $payments
+     * @return bool|string
+     */
+    private function awaiting_payment(array $payments) {
+        $awaiting = false;
+        foreach ($payments as $p) {
+            if (!$this->config->is_club_level($p->level_id)) {
+                continue;
+            }
+            if (!preg_match(self::REF_PATTERN, $p->payment_ref)
+                || !in_array($p->kind, EVC_Payment_Evidence::kinds(), true)
+                || !in_array($p->status, EVC_Pmpro_Payment_Fact::statuses(), true)) {
+                return 'invalid_payment_fact';
+            }
+            if ($p->environment !== EVC_Pmpro_Payment_Fact::ENV_LIVE) {
+                return 'non_live_payment';
+            }
+            if ($p->status === EVC_Pmpro_Payment_Fact::STATUS_PENDING) {
+                if ($p->confirmed_at_utc !== null) {
+                    return 'invalid_payment_fact';
+                }
+                $awaiting = true;
+            }
+        }
+        return $awaiting;
     }
 
     private function same_payment(EVC_Pmpro_Payment_Fact $a, EVC_Pmpro_Payment_Fact $b): bool {

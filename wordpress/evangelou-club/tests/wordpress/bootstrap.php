@@ -16,11 +16,29 @@ if ($evc_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-01 customer flag, independent of the staff flag: EVC_TEST_CUSTOMER_FLAG=enabled|disabled (unset = disabled).
+$evc_customer_mode = getenv('EVC_TEST_CUSTOMER_FLAG');
+if ($evc_customer_mode === 'enabled') {
+    define('EVC_CLUB_CUSTOMER_ENABLED', true);
+} elseif ($evc_customer_mode !== false && $evc_customer_mode !== '' && $evc_customer_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_CUSTOMER_FLAG must be enabled or disabled.\n");
+    exit(1);
+}
+
 define('WP_TESTS_CONFIG_FILE_PATH', __DIR__ . '/wp-tests-config.php');
 define('WP_TESTS_PHPUNIT_POLYFILLS_PATH', $evc_root . '/vendor/yoast/phpunit-polyfills');
 
 $evc_tests_dir = getenv('WP_PHPUNIT__DIR') ?: $evc_root . '/vendor/wp-phpunit/wp-phpunit';
 require_once $evc_tests_dir . '/includes/functions.php';
+
+// STAGE-02: REAL WooCommerce + Paid Memberships Pro + PMPro WooCommerce Add On, loaded only
+// when EVC_TEST_COMMERCE_PLUGINS points at a directory with the three pinned, checksum-verified
+// sources (tests/bin/fetch-commerce-plugins.sh). Disposable test site only.
+$evc_commerce_dir = getenv('EVC_TEST_COMMERCE_PLUGINS');
+if (is_string($evc_commerce_dir) && $evc_commerce_dir !== '') {
+    require_once __DIR__ . '/support/commerce-site.php';
+    evc_test_commerce_site($evc_commerce_dir);
+}
 
 tests_add_filter('muplugins_loaded', function () use ($evc_root) {
     require $evc_root . '/evangelou-club.php';
@@ -33,7 +51,11 @@ require $evc_tests_dir . '/includes/bootstrap.php';
 // Engine test support (real Club DB harness + TEST-ONLY mock adapter).
 require_once $evc_root . '/tests/support/class-evc-fixed-clock.php';
 require_once $evc_root . '/tests/support/class-evc-mock-membership-adapter.php';
+// STAGE-01: test-only PMPro reader + fixtures (real mapper behind GET /me in tests).
+require_once $evc_root . '/tests/support/class-evc-fake-pmpro-reader.php';
 require_once $evc_root . '/tests/support/class-evc-test-database.php';
+// STAGE-03B.3a TEST-ONLY fault/race injection around a real provenance store.
+require_once $evc_root . '/tests/support/class-evc-hooked-provenance-store.php';
 // UI-04H TEST-ONLY v2 harness (fakes + designated routes; installed per test, never shipped).
 require_once $evc_root . '/tests/support/class-evc-in-memory-prepared-redemption-store.php';
 require_once $evc_root . '/tests/support/class-evc-fake-member-lookup.php';
