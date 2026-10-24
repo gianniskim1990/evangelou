@@ -13,6 +13,7 @@ define('EVC_CLUB_FILE', __FILE__);
 define('EVC_CLUB_PATH', plugin_dir_path(__FILE__));
 require_once EVC_CLUB_PATH . 'includes/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/staff/bootstrap.php';
+require_once EVC_CLUB_PATH . 'includes/customer/bootstrap.php';
 
 // Staff authentication foundation (Task 1C-C). Role-scoped session policy,
 // admin guard and login throttling are active for users holding the
@@ -23,3 +24,10 @@ require_once EVC_CLUB_PATH . 'includes/staff/bootstrap.php';
 register_activation_hook(__FILE__, array('EVC_Staff_Plugin', 'activate'));
 register_deactivation_hook(__FILE__, array('EVC_Staff_Plugin', 'deactivate'));
 add_action('plugins_loaded', array('EVC_Staff_Plugin', 'boot'));
+
+// Customer surface (STAGE-01): the /club-member/ page and GET /me exist ONLY
+// when wp-config.php defines EVC_CLUB_CUSTOMER_ENABLED as boolean true
+// (default: disabled). Native WordPress login; read-only; the membership
+// source stays unavailable until a verified PMPro/WooCommerce reader exists.
+register_deactivation_hook(__FILE__, array('EVC_Customer_Plugin', 'deactivate'));
+add_action('plugins_loaded', array('EVC_Customer_Plugin', 'boot'));

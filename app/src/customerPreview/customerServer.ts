@@ -17,6 +17,9 @@ import { athensDate, athensTime, nextPeriod, type PaidPeriod } from "./membershi
  *    by the customer's own screen.
  */
 
+/** The states the simulated journey can reach (the live-only "none"/"unverified" never occur here). */
+export type JourneyState = Exclude<CustomerMembershipState, "none" | "unverified">;
+
 export type ClubRedemption = { date: string; time: string; coffee: CoffeeCode; memberId: string; preparation: CoffeeOrder };
 
 export type Account = {
@@ -34,7 +37,7 @@ export type ServerEvent = { seq: number; at: number; text: string; tone: "ok" | 
 
 export type MemberSnapshot = {
   account: Account;
-  state: CustomerMembershipState;
+  state: JourneyState;
   today: string;
   coffeeUsedToday: boolean;
   canTakeCoffeeToday: boolean;
@@ -120,7 +123,7 @@ export class FakeCustomerServer {
     };
   }
 
-  private stateAt(now: number): CustomerMembershipState {
+  private stateAt(now: number): JourneyState {
     if (this.cancelledAt !== null && this.cancelledAt <= now) return "cancelled";
     // The end instant is exclusive (D1).
     if (this.periods.some((p) => p.start <= now && now < p.end)) return "active";
@@ -214,4 +217,4 @@ export class FakeCustomerServer {
   }
 }
 
-const STATE_WORD: Record<CustomerMembershipState, string> = { active: "ενεργή", pending: "σε αναμονή πληρωμής", expired: "ληγμένη", cancelled: "ακυρωμένη" };
+const STATE_WORD: Record<JourneyState, string> = { active: "ενεργή", pending: "σε αναμονή πληρωμής", expired: "ληγμένη", cancelled: "ακυρωμένη" };
