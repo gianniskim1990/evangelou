@@ -26,6 +26,7 @@
  * And UI-04I (RU1-RU20: versioned staff-role upgrade planner).
  * And STAGE-01 (CM1-CM3: what a customer is told about their membership).
  * And STAGE-03B.1 (PL1-PL15: advisory pre-issuance period planning).
+ * And STAGE-03B.2 (IN1-IN15, RP1-RP18, PR1-PR3: signed BACS intent, recovery policy, paid run).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -35,6 +36,17 @@
  * Usage (from the plugin directory): php tests/mutation/run-membership-mutations.php
  */
 $root = dirname(__DIR__, 2);
+// STAGE-03B.2: undo a mutant left behind by a KILLED earlier run before anything else.
+require_once __DIR__ . '/lib-mutation-journal.php';
+$evc_journal = evc_mutation_journal_path($root);
+try {
+    if (evc_mutation_journal_recover($evc_journal) === 'restored') {
+        fwrite(STDERR, "Restored a source file left mutated by an interrupted run.\n");
+    }
+} catch (RuntimeException $e) {
+    fwrite(STDERR, 'ABORT: ' . $e->getMessage() . "\n");
+    exit(1);
+}
 $phpunit = array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist', '--testsuite', 'unit');
 
 $mapper = 'includes/class-evc-pmpro-entitlement-mapper.php';
@@ -2074,6 +2086,223 @@ $mutants = array(
         'search' => "        if (!in_array(\$authority, array(self::AUTHORITY_GATEWAY_API, self::AUTHORITY_ORDER_STATE, self::AUTHORITY_MANUAL_ADMIN), true)) {",
         'replace' => "        if (false) {",
     ),
+    // STAGE-03B.2: signed BACS intent (schema, codec, lifecycle), recovery policy, paid run.
+    array(
+        'id' => 'IN1-intent-signature-not-verified',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if (!hash_equals($this->mac(self::json($intent->to_wire())), $sig)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN2-intent-from-another-order-accepted',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if ($intent->order_id() !== $order_id) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN3-intent-of-another-customer-accepted',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if ($intent->customer_id() !== $customer_id) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN4-intent-from-another-environment-accepted',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if ($intent->environment() !== $environment) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN5-non-canonical-intent-accepted',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if ($this->encode($intent) !== $raw) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN6-intent-key-not-domain-separated',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        $this->key = hash_hmac(\'sha256\', self::KEY_LABEL, $evidence_key, true);',
+        'replace' => '        $this->key = $evidence_key;',
+    ),
+    array(
+        'id' => 'IN7-unknown-intent-version-not-reported',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if ($data[\'v\'] !== EVC_Bacs_Intent::SCHEMA_VERSION) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN8-customer-may-confirm-own-payment',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if ($f[\'actor_id\'] === $f[\'customer_id\']) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN9-planned-end-not-one-calendar-month',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if ($f[\'period_end\'] != EVC_Membership_Calendar::add_calendar_month($f[\'period_start\'])) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN10-early-renewal-without-paid-row',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '                    || $f[\'predecessor_movement_id\'] === null || $f[\'previous_row_ref\'] === null) {',
+        'replace' => '                    || $f[\'predecessor_movement_id\'] === null) {',
+    ),
+    array(
+        'id' => 'IN11-issued-without-a-new-row',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if ($bound && ($f[\'new_row_ref\'] === null || $f[\'new_row_ref\'] === $f[\'previous_row_ref\'])) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN12-lifecycle-step-skipped',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '        if (!in_array($state, self::TRANSITIONS[$this->f[\'state\']], true)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'IN13-successor-revision-unchecked',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '$next->f[\'revision\'] !== $this->f[\'revision\'] + 1 || ',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'IN14-successor-facts-unchecked',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '            if ($this->f[$k] != $next->f[$k] || gettype($this->f[$k]) !== gettype($next->f[$k])) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'IN15-initial-or-late-start-not-confirmation',
+        'file' => 'includes/class-evc-bacs-intent.php',
+        'search' => '                if ($f[\'period_start\'] != $f[\'verified_at\'] || $f[\'run_start\'] != $f[\'period_start\']) {',
+        'replace' => '                if (false) {',
+    ),
+    array(
+        'id' => 'RP1-unauthorised-actor-recovers',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if (!$f->actor_authorized) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP2-customer-recovers-own-order',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($f->actor_id === $o->customer_id) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP3-changed-order-resumed',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($o->payment_method !== self::PAYMENT_METHOD || $o->currency !== self::CURRENCY || $o->total !== self::PRICE || !$o->single_club_item) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP4-order-funded-by-other-transfer-resumed',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($f->order_anchor_owner !== null && $f->order_anchor_owner !== $i->movement_id()) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP5-stale-plan-resumed',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if (!self::same_period($plan, $i)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP6-manager-states-auto-resumed',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if (in_array($i->state(), array(EVC_Bacs_Intent::STATE_ISSUANCE_MISMATCH, EVC_Bacs_Intent::STATE_RECOVERY_REQUIRED), true)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP7-stored-recorded-state-trusted',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($i->state() === EVC_Bacs_Intent::STATE_RECORDED) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP8-issued-row-dates-unchecked',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if (!$this->row_matches($row, $i->run_start_utc(), $i->period_end_utc())) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP9-old-paid-row-taken-as-new',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($ref === $i->previous_row_ref()) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RP10-early-renewal-risk-not-flagged',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        $at_risk = $i->period_kind() === EVC_Funded_Period::KIND_EARLY && !$previous_active;',
+        'replace' => '        $at_risk = false;',
+    ),
+    array(
+        'id' => 'RP11-recorded-instant-unchecked',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => ' || $m->verified_at_utc() != $i->verified_at_utc()',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'RP12-recorded-period-unchecked',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($p === null || $p->pmpro_row_ref() !== $m->pmpro_row_ref() || !$i->as_plan()->matches_recorded($p)) {',
+        'replace' => '        if ($p === null) {',
+    ),
+    array(
+        'id' => 'RP13-refunded-recorded-payment-complete',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => "        if (\$f->corrections !== array()) {\n            return EVC_Bacs_Recovery_Decision::manager('recorded_payment_corrected');",
+        'replace' => "        if (false) {\n            return EVC_Bacs_Recovery_Decision::manager('recorded_payment_corrected');",
+    ),
+    array(
+        'id' => 'RP14-completed-order-without-intent-resumed',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '            return EVC_Bacs_Recovery_Decision::manager($f->order->status === \'completed\' ? \'completed_order_without_intent\' : \'no_intent\');',
+        'replace' => '            return EVC_Bacs_Recovery_Decision::resume(EVC_Bacs_Recovery_Decision::STEP_RECORD_MOVEMENT, null);',
+    ),
+    array(
+        'id' => 'RP15-unexpected-row-before-completion-ignored',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '            if (array_keys($active) !== $expected) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'RP16-issued-row-replacement-ignored',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '            if ($i->new_row_ref() !== $ref) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'RP17-inactive-rows-counted-as-membership',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '            if ($r->level_id === $level_id && $r->status === \'active\') {',
+        'replace' => '            if ($r->level_id === $level_id) {',
+    ),
+    array(
+        'id' => 'RP18-unrecorded-correction-ignored',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => "        if (\$f->corrections !== array()) {\n            return EVC_Bacs_Recovery_Decision::manager('correction_recorded_for_transfer', \$at_risk);",
+        'replace' => "        if (false) {\n            return EVC_Bacs_Recovery_Decision::manager('correction_recorded_for_transfer', \$at_risk);",
+    ),
+    array(
+        'id' => 'PR1-early-renewal-run-restarts',
+        'file' => 'includes/class-evc-paid-run.php',
+        'search' => '        if ($plan->kind() !== EVC_Funded_Period::KIND_EARLY) {',
+        'replace' => '        if (true) {',
+    ),
+    array(
+        'id' => 'PR2-gap-in-paid-chain-bridged',
+        'file' => 'includes/class-evc-paid-run.php',
+        'search' => '            if ($p === null || $p->end_utc() != $expected_end) {',
+        'replace' => '            if ($p === null) {',
+    ),
+    array(
+        'id' => 'PR3-late-renewal-continues-old-run',
+        'file' => 'includes/class-evc-paid-run.php',
+        'search' => '            if ($p->kind() !== EVC_Funded_Period::KIND_EARLY) {',
+        'replace' => '            if ($p->kind() === EVC_Funded_Period::KIND_INITIAL) {',
+    ),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -2121,10 +2350,13 @@ foreach ($mutants as $m) {
         exit(1);
     }
     try {
-        file_put_contents($path, str_replace($m['search'], $m['replace'], $normalized));
+        $mutated = str_replace($m['search'], $m['replace'], $normalized);
+        evc_mutation_journal_begin($evc_journal, $path, $original, $mutated);
+        file_put_contents($path, $mutated);
         $exit = evc_run_suite($phpunit);
     } finally {
         file_put_contents($path, $original);
+        evc_mutation_journal_end($evc_journal, $path);
     }
     if ($exit !== 0) {
         $killed++;

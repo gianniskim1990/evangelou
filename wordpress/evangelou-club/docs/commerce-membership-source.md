@@ -296,6 +296,126 @@ Requirements / proposed mitigations (owner review; none implemented):
 
 Until R1-R5 are designed, tested and approved, Option 1 is NOT production-safe.
 
+## STAGE-03B.2: durable signed BACS intent + recovery contract (NOT wired)
+
+Owner decision O1: the attempt is made durable in **signed private
+WooCommerce order metadata** (no migration 003, no Club DB intent table).
+An intent is never payment evidence and never grants anything.
+
+### Schema (`EVC_Bacs_Intent`, meta key `_evc_club_bacs_intent`)
+
+Compact JSON, fields in this exact order, then `sig`:
+
+| field | meaning |
+|---|---|
+| `v` | schema version (1) |
+| `environment` | `live` |
+| `order_id`, `customer_id`, `level_id`, `actor_id` | numeric WordPress ids (actor ≠ customer) |
+| `movement_id` | HMAC of the bank transfer reference (never the reference itself) |
+| `order_anchor` | HMAC of the WooCommerce order |
+| `verified_at` | the manager's confirmation instant, UTC, whole second |
+| `period_start`, `period_end`, `period_kind`, `predecessor_movement_id` | the plan fixed at that instant (D1/D2/D5; end = one approved calendar month) |
+| `run_start` | start of the contiguous paid run (`EVC_Paid_Run`) = the start PMPro must show |
+| `previous_row_ref` | HMAC of the active PMPro row being renewed (early renewal), else null |
+| `new_row_ref` | HMAC of the NEW PMPro row, only once verified (`issued`, `recorded`) |
+| `state`, `revision` | lifecycle hint (+1 per step) |
+
+Lifecycle, forward only: `planned → issued → recorded`;
+`planned → issuance_mismatch → recovery_required`;
+`planned|issued → recovery_required`. The constructor enforces the
+invariants (initial/late periods start at the confirmation instant; an
+early renewal continues a running paid row; issued/recorded name a new row).
+Never stored: bank reference, IBAN, names, e-mail addresses, keys.
+
+### Signature
+
+`sig = HMAC-SHA256(K, "EVC-BACS-INTENT\0" . v . "\0" . canonical JSON)`,
+`K = HMAC-SHA256(EVC_CLUB_EVIDENCE_KEY, "evangelou-club/bacs-intent-signing-key\0v1")`:
+its own key and message domain, so it can never equal an `EVC_Evidence_Ref`.
+Decoding is strict, in this order: string ≤ 4 KiB, JSON object with exactly
+the schema keys + `sig` (64 hex), known version, schema invariants,
+signature (constant-time), byte-identical canonical re-encoding, then the
+binding to the order it is read from (`order_id`, its customer,
+environment). A valid intent copied to another order is `cross_order`.
+**Key lifecycle limitation:** one key (the wp-config evidence key), no
+rotation; changing it turns every stored intent into `signature_mismatch`
+and recovery stops for a manager (never accepts, never deletes).
+
+### Persistence (`EVC_Wc_Bacs_Intent_Store`) — HPOS and legacy alike
+
+WooCommerce CRUD only (`update_meta_data` + `save`), so HPOS writes
+`wc_orders_meta` and legacy storage `postmeta` (both verified in CI).
+Verified WooCommerce 11.2.1 behaviour it defends against:
+- `WC_Data::save_meta_data()` ignores the data store's result → every write
+  is read back (`read_meta_data(true)`, bypassing the meta cache) and
+  compared byte for byte: `written`, `write_failed` (provably not stored) or
+  `outcome_unknown` (could not be proven either way — read again later);
+- a failed meta query is returned by WooCommerce as "no metadata" → a
+  database error during a read is `unavailable`, never `missing`;
+- meta keys are not unique → two rows are `invalid` (never guessed);
+- `get_meta(..., false)` keeps the meta list's indices (a real bug found by
+  the tests and fixed).
+A different intent already stored (e.g. a second bank reference) is a
+`conflict`; an unverifiable stored value is never overwritten or cleaned up.
+Exposure: the Store API and `/me` never return it; customers cannot read
+`/wc/v3/orders`; shop managers/admins can (opaque values only).
+
+### Concurrency (`EVC_Member_Lock`) — what is and is not guaranteed
+
+Order metadata is not compare-and-set. Writes therefore require the
+member's MySQL named lock (`GET_LOCK`, name scoped to database + table
+prefix + member, bounded wait ≤ 10 s), owned by THIS session
+(`IS_USED_LOCK = CONNECTION_ID()`, same connection id as at acquisition),
+re-checked before and after each write, plus compare-and-set on the exact
+stored bytes. Verified against the real server: a second manager is
+excluded; the bounded wait is honoured; a killed process releases its lock
+with its connection; a silently reconnected wpdb no longer owns it.
+NOT guaranteed: it is advisory (an admin or another plugin writing the meta
+is detected — signature, duplicates, CAS — not prevented), per database
+server (re-verify behind a proxy/replicas), and not durable (durability is
+the meta itself). No schema change is needed for this guarantee.
+
+### Recovery decision (`EVC_Bacs_Recovery_Policy`, read by `EVC_Bacs_Recovery_Inspector`)
+
+Pure decision over FRESH facts: the signed intent, the order (BACS, EUR,
+20.00, one Club item, status), all PMPro rows of the customer, the Club
+record (movement, period, corrections, owner of the order anchor) or a
+fresh plan. Outcomes: `resume` (`complete_order` / `confirm_issuance` /
+`record_movement`), `already_complete`, `manager_required`, `conflict`,
+`unavailable`, `refused` (actor lacks the capability, is the shared staff
+account, or is the customer). The stored state is never trusted alone
+(e.g. "recorded" without a Club movement is a conflict); a completed order
+without an intent is never paid; a replay of a recorded payment is
+`already_complete` and the recorder answers `already_recorded`; a stale
+plan, the add-on's own dates, a missing/extra/old row, a correction or an
+ended order stop for a manager. **Nothing executes a step in STAGE-03B.2.**
+
+### Early renewal (Task D) — reproduced, NOT solved, owner decision needed
+
+The real-plugin test reproduces the STAGE-03B.1 finding: completing the
+renewal order makes PMPro mark the paid row `changed` and insert the new
+row; until the Club records the renewal bound to the new row `/me` shows
+`unverified` (fail closed — no free coffee, but a paying member is told
+"unverified"). Recovery flags this as `paid_time_at_risk`; once recorded,
+the old paid time is preserved and exactly one month is added. Options for
+the owner (none implemented; mapper and PMPro rows unchanged):
+
+1. **Accept the window**, with STAGE-03B.3 issuing and recording in ONE
+   request under the member lock (seconds), recovery prioritising
+   `paid_time_at_risk`, and staff told to retry rather than refuse. No rule
+   change.
+2. **Keep the old row active until after the insert** with PMPro's own
+   filters (`pmpro_deactivate_old_levels`, then
+   `pmpro_remove_duplicate_membership_entries` moves the older row to
+   `changed` only after the new row exists, functions.php 1383/1473). This
+   removes the "no active row at all" failure if the insert fails, but NOT
+   the `unverified` window (the active row is still not the recorded one).
+3. **A new entitlement rule** (e.g. trust a `changed` paid row while a
+   signed `issued` intent exists and the old Club period still runs) — a
+   business-policy change; not proposed silently, not recommended.
+4. **Record before issuance** — impossible with the approved schema (a
+   movement must name its PMPro row); would need a schema change.
+
 ## Order lookup is bounded
 
 The reader now selects only the customer's own Club orders in SQL (HPOS

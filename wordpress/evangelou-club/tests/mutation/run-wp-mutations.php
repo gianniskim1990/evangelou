@@ -13,6 +13,17 @@
  * Usage (plugin dir, WordPress test DB env set): php tests/mutation/run-wp-mutations.php
  */
 $root = dirname(__DIR__, 2);
+// STAGE-03B.2: undo a mutant left behind by a KILLED earlier run before anything else.
+require_once __DIR__ . '/lib-mutation-journal.php';
+$evc_journal = evc_mutation_journal_path($root);
+try {
+    if (evc_mutation_journal_recover($evc_journal) === 'restored') {
+        fwrite(STDERR, "Restored a source file left mutated by an interrupted run.\n");
+    }
+} catch (RuntimeException $e) {
+    fwrite(STDERR, 'ABORT: ' . $e->getMessage() . "\n");
+    exit(1);
+}
 require_once __DIR__ . '/lib-mutation-evidence.php';
 $staff = 'includes/staff/';
 
@@ -162,6 +173,37 @@ $mutants = array(
         "|| \$received_on < \$created->setTimezone(\$zone)->format('Y-m-d') || \$received_on > \$today) {", ") {"),
     array('RA1-recorded-refund-ignored', 'commerce', 'includes/customer/class-evc-store-club-payment-provenance.php',
         "        if (\$history === array()) {\n            return EVC_Pmpro_Payment_Fact::STATUS_CONFIRMED;", "        if (true) {\n            return EVC_Pmpro_Payment_Fact::STATUS_CONFIRMED;"),
+    // STAGE-03B.2: order-meta intent store, member lock, read-only recovery inspector.
+    array('IS1-duplicate-intent-rows-accepted', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        '            if (count($rows) > 1) {', '            if (false) {'),
+    array('IS2-second-reference-replaces-first-intent', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        ": new EVC_Bacs_Intent_Write(EVC_Bacs_Intent_Write::CONFLICT, 'different_intent_stored');", ': $this->write($lock, $intent->order_id(), $intent, $current->raw);'),
+    array('IS3-unverifiable-intent-overwritten', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        "            return new EVC_Bacs_Intent_Write(EVC_Bacs_Intent_Write::CONFLICT, 'stored_intent_invalid:' . \$current->reason);", '            return $this->write($lock, $intent->order_id(), $intent, null);'),
+    array('IS4-create-without-member-lock', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        '        if ($lock->wp_user_id() !== $intent->customer_id() || !$lock->is_held()) {', '        if (false) {'),
+    array('IS5-transition-without-member-lock', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        '        if ($lock->wp_user_id() !== $expected->customer_id() || !$lock->is_held()) {', '        if (false) {'),
+    array('IS6-transition-without-compare-and-set', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        '        if ($current->outcome !== EVC_Bacs_Intent_Read::VALID || $current->raw !== $this->codec->encode($expected)) {', '        if ($current->outcome !== EVC_Bacs_Intent_Read::VALID) {'),
+    array('IS7-write-reported-without-read-back', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        '        if ($after->outcome === EVC_Bacs_Intent_Read::VALID && $after->raw === $value) {', '        if (true) {'),
+    array('IS8-failed-meta-read-taken-as-missing', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        "        if (\$wpdb->last_error !== '') {\n            throw new RuntimeException('Order metadata could not be read.');", "        if (false) {\n            throw new RuntimeException('Order metadata could not be read.');"),
+    array('IS9-cached-meta-trusted', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        '        $order->read_meta_data(true);', '        $order->read_meta_data(false);'),
+    array('IS10-unknown-write-reported-as-failed', 'commerce', 'includes/customer/class-evc-wc-bacs-intent-store.php',
+        "        return new EVC_Bacs_Intent_Write(EVC_Bacs_Intent_Write::OUTCOME_UNKNOWN, \$after->outcome === EVC_Bacs_Intent_Read::UNAVAILABLE ? 'read_back_failed' : 'unexpected_value_after_write');", "        return new EVC_Bacs_Intent_Write(EVC_Bacs_Intent_Write::WRITE_FAILED, 'not_persisted');"),
+    array('IL1-busy-lock-reported-as-acquired', 'commerce', 'includes/customer/class-evc-member-lock.php',
+        "        if (\$db->last_error !== '' || (string) \$got !== '1') {", "        if (\$db->last_error !== '') {"),
+    array('IL2-lock-ownership-assumed', 'commerce', 'includes/customer/class-evc-member-lock.php',
+        "            && \$row['owner'] !== null && (string) \$row['owner'] === (string) \$row['me'] && (string) \$row['me'] === \$this->connection_id;", '            && true;'),
+    array('IL3-release-does-not-release', 'commerce', 'includes/customer/class-evc-member-lock.php',
+        "        \$result = \$this->db->get_var(\$this->db->prepare('SELECT RELEASE_LOCK(%s)', \$this->name));", "        \$result = '1';"),
+    array('II1-shared-staff-account-may-recover', 'commerce', 'includes/customer/class-evc-bacs-recovery-inspector.php',
+        '            && !EVC_Staff_Role::has_staff_role($actor);', '            ;'),
+    array('II2-recovery-ignores-recorded-movement', 'commerce', 'includes/customer/class-evc-bacs-recovery-inspector.php',
+        '                $movement = $this->store->movement($i->movement_id());', '                $movement = null;'),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -238,13 +280,16 @@ foreach ($mutants as $m) {
         exit(1);
     }
     try {
-        file_put_contents($path, str_replace($search, $replace, $normalized));
+        $mutated = str_replace($search, $replace, $normalized);
+        evc_mutation_journal_begin($evc_journal, $path, $original, $mutated);
+        file_put_contents($path, $mutated);
         if ($junit !== null) {
             file_put_contents($junit, '');
         }
         $exit = evc_wp_suite($root, $mode, $junit);
     } finally {
         file_put_contents($path, $original);
+        evc_mutation_journal_end($evc_journal, $path);
     }
     $evidence = '';
     if ($exit === 0) {

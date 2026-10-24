@@ -12,6 +12,10 @@ require_once $evc_customer . 'class-evc-club-payment-provenance.php';
 require_once $evc_customer . 'class-evc-wp-commerce-pmpro-reader.php';
 require_once $evc_customer . 'class-evc-store-club-payment-provenance.php';
 require_once $evc_customer . 'class-evc-bacs-payment-confirmation.php';
+// STAGE-03B.2: intent persistence, member lock and read-only recovery inspection. Nothing constructs them.
+require_once $evc_customer . 'class-evc-member-lock.php';
+require_once $evc_customer . 'class-evc-wc-bacs-intent-store.php';
+require_once $evc_customer . 'class-evc-bacs-recovery-inspector.php';
 require_once $evc_customer . 'class-evc-customer-rest-security.php';
 require_once $evc_customer . 'class-evc-rest-me-controller.php';
 require_once $evc_customer . 'class-evc-customer-shell.php';

@@ -81,6 +81,11 @@ final class EVC_Commerce_Source_Config {
         return EVC_Evidence_Ref::hmac($this->evidence_key, $namespace, $raw_identifier);
     }
 
+    /** STAGE-03B.2: signer for durable BACS intents (own derived key; the evidence key never leaves this object). */
+    public function intent_codec(): EVC_Bacs_Intent_Codec {
+        return new EVC_Bacs_Intent_Codec($this->evidence_key);
+    }
+
     public function mapper(): EVC_Pmpro_Entitlement_Mapper {
         return new EVC_Pmpro_Entitlement_Mapper(new EVC_Pmpro_Mapper_Config(array($this->level_id), self::PMPRO_VERSION, self::PMPRO_VERSION_EXCLUSIVE_MAX));
     }
