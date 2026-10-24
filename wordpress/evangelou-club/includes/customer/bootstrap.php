@@ -16,6 +16,8 @@ require_once $evc_customer . 'class-evc-bacs-payment-confirmation.php';
 require_once $evc_customer . 'class-evc-member-lock.php';
 require_once $evc_customer . 'class-evc-wc-bacs-intent-store.php';
 require_once $evc_customer . 'class-evc-bacs-recovery-inspector.php';
+// STAGE-03B.3a: internal issued -> recorded finalization. Nothing constructs it.
+require_once $evc_customer . 'class-evc-bacs-payment-finalizer.php';
 require_once $evc_customer . 'class-evc-customer-rest-security.php';
 require_once $evc_customer . 'class-evc-rest-me-controller.php';
 require_once $evc_customer . 'class-evc-customer-shell.php';

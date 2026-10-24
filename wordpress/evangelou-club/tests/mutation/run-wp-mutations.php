@@ -204,6 +204,32 @@ $mutants = array(
         '            && !EVC_Staff_Role::has_staff_role($actor);', '            ;'),
     array('II2-recovery-ignores-recorded-movement', 'commerce', 'includes/customer/class-evc-bacs-recovery-inspector.php',
         '                $movement = $this->store->movement($i->movement_id());', '                $movement = null;'),
+    // STAGE-03B.3a: internal issued -> recorded finalization.
+    array('BF1-attestation-not-bound-to-intent', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        '        if (!hash_equals($intent->movement_id(), $attested_movement)) {', '        if (false) {'),
+    array('BF2-money-after-confirmation-accepted', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        ' || $received_on > $today || $received_on > $confirmed) {', ' || $received_on > $today) {'),
+    array('BF3-finalizer-actor-check-removed', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        '        if (!$actor instanceof WP_User || !user_can($actor, EVC_Bacs_Payment_Confirmation::CAPABILITY) || EVC_Staff_Role::has_staff_role($actor)) {', '        if (!$actor instanceof WP_User) {'),
+    array('BF4-attested-amount-not-checked', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        "        if ((\$attestation['amount_minor'] ?? null) !== EVC_Bacs_Payment_Confirmation::AMOUNT_MINOR || (\$attestation['currency'] ?? null) !== EVC_Commerce_Source_Config::CURRENCY) {", '        if (false) {'),
+    array('BF5-recorded-without-expected-period', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        '        $outcome = $this->recorder->record_expecting($movement, $intent->as_plan());', '        $outcome = $this->recorder->record($movement);'),
+    array('BF6-unknown-commit-not-read-back', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        '        $period = $this->recorded_exactly($movement, $intent);', '        $period = $outcome->period();'),
+    array('BF7-lock-not-rechecked-before-recording', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        "        if (!\$lock->is_held()) {\n            return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::UNAVAILABLE, 'lock_lost');\n        }\n        \$movement = \$this->movement_for(\$intent);", '        $movement = $this->movement_for($intent);'),
+    // BF8 (issued-only guard removed) dropped as EQUIVALENT: a record_movement decision already implies an
+    // issued intent whose row equals the decision's row (EVC_Bacs_Recovery_Policy, RP16), and the remaining
+    // row-ref clause still refuses every other step. The guard stays as defense in depth.
+    array('BF9-recorded-payment-intent-left-behind', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        '            return $this->finish_intent($lock, $intent, $facts->recorded_period, EVC_Bacs_Finalization_Result::ALREADY_RECORDED);', '            return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::ALREADY_RECORDED, null, $facts->recorded_period, true);'),
+    array('BF10-failed-intent-transition-reported-done', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        '        $done = in_array($write->outcome, array(EVC_Bacs_Intent_Write::WRITTEN, EVC_Bacs_Intent_Write::ALREADY), true);', '        $done = true;'),
+    array('BF11-blocking-decision-ignored', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        "        if (\$decision->outcome !== EVC_Bacs_Recovery_Decision::RESUME) {\n            return self::from_decision(\$decision);\n        }\n", ''),
+    array('BF12-read-back-ignores-signed-period', 'commerce', 'includes/customer/class-evc-bacs-payment-finalizer.php',
+        ' || !$intent->as_plan()->matches_recorded($period)', ''),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */

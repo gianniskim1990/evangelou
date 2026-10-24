@@ -75,6 +75,33 @@ final class EVC_Provenance_Recorder {
         }
     }
 
+    /**
+     * STAGE-03B.3a: record() that commits ONLY the expected period (a fixed, signed plan).
+     * The period record() computes from the current chain is compared with $expected
+     * BEFORE commit(); any difference is a conflict and nothing is written. The store then
+     * re-checks under its member-head lock that the chain head is still the expected
+     * predecessor (I4 compare-and-set) and recomputes the calendar period itself, so a
+     * period different from $expected can never be committed. A repeat of an already
+     * recorded movement must carry exactly the expected period too.
+     */
+    public function record_expecting(EVC_Verified_Movement $movement, EVC_Period_Plan $expected): EVC_Record_Outcome {
+        if ($expected->outcome() !== EVC_Period_Plan::PLANNED || $expected->movement_id() !== $movement->movement_id()) {
+            return EVC_Record_Outcome::conflict('expected_period_invalid');
+        }
+        try {
+            $outcome = $this->record_or_throw($movement, $expected);
+        } catch (EVC_Provenance_Conflict_Exception $e) {
+            return EVC_Record_Outcome::conflict('concurrent_update');
+        } catch (Throwable $e) {
+            return EVC_Record_Outcome::unavailable($e instanceof EVC_Provenance_Commit_Unknown_Exception ? 'commit_outcome_unknown' : 'store_unavailable');
+        }
+        if ($outcome->outcome() === EVC_Record_Outcome::ALREADY_RECORDED
+            && ($outcome->period() === null || !$expected->matches_recorded($outcome->period()))) {
+            return EVC_Record_Outcome::conflict('recorded_period_differs');
+        }
+        return $outcome;
+    }
+
     public function correct(EVC_Movement_Correction $correction): EVC_Record_Outcome {
         try {
             return $this->correct_or_throw($correction);
@@ -189,7 +216,7 @@ final class EVC_Provenance_Recorder {
         return null;
     }
 
-    private function record_or_throw(EVC_Verified_Movement $m): EVC_Record_Outcome {
+    private function record_or_throw(EVC_Verified_Movement $m, ?EVC_Period_Plan $expected = null): EVC_Record_Outcome {
         $refusal = $this->refusal($m);
         if ($refusal !== null) {
             return $refusal;
@@ -202,7 +229,7 @@ final class EVC_Provenance_Recorder {
             // A verified refund/reversal arrived first: these facts may be stale.
             return EVC_Record_Outcome::indeterminate('unresolved_correction');
         }
-        return $this->append($m, array());
+        return $this->append($m, array(), $expected);
     }
 
     private function reconcile_or_throw(EVC_Movement_Reconciliation $r): EVC_Record_Outcome {
@@ -230,7 +257,7 @@ final class EVC_Provenance_Recorder {
     }
 
     /** @param string[] $expected_unresolved */
-    private function append(EVC_Verified_Movement $m, array $expected_unresolved): EVC_Record_Outcome {
+    private function append(EVC_Verified_Movement $m, array $expected_unresolved, ?EVC_Period_Plan $expected = null): EVC_Record_Outcome {
         $position = $this->chain_position($m);
         if ($position instanceof EVC_Record_Outcome) {
             return $position;
@@ -246,6 +273,10 @@ final class EVC_Provenance_Recorder {
             $position['kind'],
             $position['predecessor']
         );
+        if ($expected !== null && !$expected->matches_recorded($period)) {
+            // The chain moved since the plan was fixed: never commit a different paid period.
+            return EVC_Record_Outcome::conflict('expected_period_changed');
+        }
         $this->store->commit(EVC_Provenance_Write::new_movement($m, $period, $expected_unresolved));
         return EVC_Record_Outcome::recorded($period);
     }

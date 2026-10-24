@@ -54,6 +54,8 @@ require_once $evc_root . '/tests/support/class-evc-mock-membership-adapter.php';
 // STAGE-01: test-only PMPro reader + fixtures (real mapper behind GET /me in tests).
 require_once $evc_root . '/tests/support/class-evc-fake-pmpro-reader.php';
 require_once $evc_root . '/tests/support/class-evc-test-database.php';
+// STAGE-03B.3a TEST-ONLY fault/race injection around a real provenance store.
+require_once $evc_root . '/tests/support/class-evc-hooked-provenance-store.php';
 // UI-04H TEST-ONLY v2 harness (fakes + designated routes; installed per test, never shipped).
 require_once $evc_root . '/tests/support/class-evc-in-memory-prepared-redemption-store.php';
 require_once $evc_root . '/tests/support/class-evc-fake-member-lookup.php';

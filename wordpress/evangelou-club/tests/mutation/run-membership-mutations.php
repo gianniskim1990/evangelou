@@ -27,6 +27,7 @@
  * And STAGE-01 (CM1-CM3: what a customer is told about their membership).
  * And STAGE-03B.1 (PL1-PL15: advisory pre-issuance period planning).
  * And STAGE-03B.2 (IN1-IN15, RP1-RP18, PR1-PR3: signed BACS intent, recovery policy, paid run).
+ * And STAGE-03B.3a (RE1-RE4: record_expecting commits only the signed period).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2302,6 +2303,31 @@ $mutants = array(
         'file' => 'includes/class-evc-paid-run.php',
         'search' => '            if ($p->kind() !== EVC_Funded_Period::KIND_EARLY) {',
         'replace' => '            if ($p->kind() === EVC_Funded_Period::KIND_INITIAL) {',
+    ),
+    // STAGE-03B.3a: record_expecting() — only the signed period can be committed.
+    array(
+        'id' => 'RE1-changed-period-committed',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => '        if ($expected !== null && !$expected->matches_recorded($period)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RE2-repeat-with-other-period-accepted',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => '            && ($outcome->period() === null || !$expected->matches_recorded($outcome->period()))) {',
+        'replace' => '            && false) {',
+    ),
+    array(
+        'id' => 'RE3-expected-plan-not-validated',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => '        if ($expected->outcome() !== EVC_Period_Plan::PLANNED || $expected->movement_id() !== $movement->movement_id()) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'RE4-unknown-commit-reported-as-not-written',
+        'file' => 'includes/class-evc-provenance-recorder.php',
+        'search' => "            \$outcome = \$this->record_or_throw(\$movement, \$expected);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::unavailable(\$e instanceof EVC_Provenance_Commit_Unknown_Exception ? 'commit_outcome_unknown' : 'store_unavailable');",
+        'replace' => "            \$outcome = \$this->record_or_throw(\$movement, \$expected);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::unavailable('store_unavailable');",
     ),
 );
 

@@ -37,6 +37,11 @@ final class EVC_Bacs_Recovery_Inspector {
         $this->policy = new EVC_Bacs_Recovery_Policy();
     }
 
+    /** True when this inspector reads exactly these stores (same instances). */
+    public function reads(EVC_Provenance_Store $store, EVC_Wc_Bacs_Intent_Store $intents): bool {
+        return $this->store === $store && $this->intents === $intents;
+    }
+
     public function inspect(int $actor_user_id, int $order_id): EVC_Bacs_Recovery_Decision {
         return $this->policy->decide($this->facts($actor_user_id, $order_id));
     }

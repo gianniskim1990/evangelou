@@ -416,6 +416,64 @@ the owner (none implemented; mapper and PMPro rows unchanged):
 4. **Record before issuance** — impossible with the approved schema (a
    movement must name its PMPro row); would need a schema change.
 
+## STAGE-03B.3a: internal issued → recorded finalization (NOT wired)
+
+`EVC_Bacs_Payment_Finalizer::finalize(actor, order, attestation)` turns an
+**issued** signed intent into a recorded Club payment. Nothing constructs it
+(packager forbids it); no route, button, hook, cron or role. It never
+completes orders and never issues, cancels or edits PMPro memberships.
+
+**Payment evidence = a TRUSTED MANUAL bank-statement attestation**, given
+anew by an authorised manager for this finalization (transfer reference as
+printed on the statement, amount, currency, value date). It is **not** a
+verification against the bank's API. A signed intent or a completed order is
+never evidence of money. Binding: the reference is normalised exactly like
+the existing rule, its HMAC (`bacs_transfer`) must equal the signed intent's
+movement id (constant-time compare); 2000 cents EUR exactly; value date
+between the order date and Athens today AND not after the confirmation
+instant fixed in the intent. The raw reference is only hashed — never
+stored, logged or returned (reason codes only).
+
+Under the member lock (ownership checked before reading and again before
+recording) every fact is re-read: signed intent from order meta, actor
+(capability, never the shared staff account, never the customer), order
+(completed, BACS, EUR 20.00, one Club item), PMPro rows (exactly one active
+Club row = the intent's new row, start = paid-run start and end = planned
+end, exact Athens resolution), Club record (movement, period, corrections,
+order-anchor owner, fresh plan) → `EVC_Bacs_Recovery_Policy`. Only
+`resume: record_movement` on an `issued` intent proceeds; an already
+recorded payment whose intent is still `issued` only finishes the intent.
+
+**A stale or changed period can never be committed:**
+`EVC_Provenance_Recorder::record_expecting(movement, signed plan)` compares
+the period computed from the current chain with the signed one BEFORE
+`commit()` (`expected_period_changed`, nothing written), and the SQL store
+re-checks inside the commit transaction, under the member-head row lock, that
+the chain head is still the expected predecessor (I4 compare-and-set) and
+recomputes the D1/D2/D5 period from the stored predecessor end and the
+confirmation instant — a writer that wins the race in between makes the
+commit fail (`concurrent_update`). No schema change was needed. Tests inject
+both races against the real SQL store.
+
+Idempotency / recovery (all with the real plugins, HPOS and legacy):
+identical retries and other managers get `already_recorded` (one period);
+a concurrent manager gets `busy`; a failed commit → `unavailable`, nothing
+stored; an unknown commit outcome is resolved by reading the Club record back
+(written → `recorded`; not found → `unavailable`; unreadable → stays
+unknown, intent untouched); a crash after the Club commit, a failed intent
+write or a lost lock during the commit leave the payment recorded and the
+intent `issued` — the next attempt answers `already_recorded` and finishes
+the intent without a second month. Every attempt is audited with opaque
+references only.
+
+**Remaining risk (NOT solved here):** the early-renewal window during PMPro
+issuance (see above) still exists: between PMPro replacing the paid row and
+this finalization the member is shown "unverified"; if finalization keeps
+failing the window stays open (detected, `paid_time_at_risk`). Finalizing an
+issued early renewal preserves the whole previous period and appends exactly
+one approved calendar month. Not production-safe until the owner decides the
+window policy and STAGE-03B.3b (completion + issuance) is reviewed.
+
 ## Order lookup is bounded
 
 The reader now selects only the customer's own Club orders in SQL (HPOS
