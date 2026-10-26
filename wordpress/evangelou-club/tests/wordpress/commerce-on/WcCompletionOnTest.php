@@ -55,10 +55,14 @@ final class WcCompletionOnTest extends EVC_WP_Test_Case {
         }
         wp_set_current_user($staff);
         $GLOBALS['current_screen'] = WP_Screen::get('dashboard');
+        // The order edit screen verifies its nonce first (HPOS: update-order_<id>; posts storage: update-post_<id>).
+        $action = (\Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled() ? 'update-order_' : 'update-post_') . $order_id;
+        $_REQUEST['_wpnonce'] = wp_create_nonce($action);
         try {
+            $this->assertSame(1, check_admin_referer($action));
             wc_get_order($order_id)->update_status('completed', '', true);
         } finally {
-            unset($GLOBALS['current_screen']);
+            unset($GLOBALS['current_screen'], $_REQUEST['_wpnonce']);
             wp_set_current_user(0);
         }
     }
