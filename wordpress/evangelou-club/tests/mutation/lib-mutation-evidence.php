@@ -54,6 +54,28 @@ function evc_mutation_killer_verdict(string $junit_xml, array $killers): array {
     return array('verdict' => 'assertion', 'detail' => implode(', ', $killers) . ' failed an assertion');
 }
 
+/**
+ * STAGE-03D: a PHPUnit --filter that runs EXACTLY the named killer tests (and nothing else), so a
+ * mutant with killers no longer pays for the whole suite. The verdict is unchanged: every named killer
+ * must still have failed an assertion (evc_mutation_killer_verdict), else the mutant is SURVIVED
+ * (all killers passed) or INVALID.
+ *
+ * @param string[] $killers "Class::method"
+ */
+function evc_mutation_killer_filter(array $killers): string {
+    if ($killers === array()) {
+        throw new InvalidArgumentException('No killer tests named.');
+    }
+    $names = array();
+    foreach ($killers as $killer) {
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*$/D', $killer)) {
+            throw new InvalidArgumentException('Killer must be "Class::method": ' . $killer);
+        }
+        $names[] = $killer; // validated above: letters, digits, _ and one ::
+    }
+    return '/^(?:' . implode('|', array_values(array_unique($names))) . ')(?: with data set .*)?$/';
+}
+
 function evc_xpath_literal(string $value): string {
     if (strpos($value, "'") === false) {
         return "'" . $value . "'";
