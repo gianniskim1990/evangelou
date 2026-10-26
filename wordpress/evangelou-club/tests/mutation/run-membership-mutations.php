@@ -28,6 +28,7 @@
  * And STAGE-03B.1 (PL1-PL15: advisory pre-issuance period planning).
  * And STAGE-03B.2 (IN1-IN15, RP1-RP18, PR1-PR3: signed BACS intent, recovery policy, paid run).
  * And STAGE-03B.3a (RE1-RE4: record_expecting commits only the signed period).
+ * And STAGE-03D (RP19-RP23: recovery policy after a WooCommerce completion; MK1-MK3: signed completion marker).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2285,6 +2286,55 @@ $mutants = array(
         'file' => 'includes/class-evc-bacs-recovery-policy.php',
         'search' => "        if (\$f->corrections !== array()) {\n            return EVC_Bacs_Recovery_Decision::manager('correction_recorded_for_transfer', \$at_risk);",
         'replace' => "        if (false) {\n            return EVC_Bacs_Recovery_Decision::manager('correction_recorded_for_transfer', \$at_risk);",
+    ),
+    // STAGE-03D: completion by shop staff (policy branches used only with a signed completion marker / the completion hook).
+    array(
+        'id' => 'RP19-missing-row-reissued-without-completion-context',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '            if ($f->reissue_if_missing && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+        'replace' => '            if ($i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+    ),
+    array(
+        'id' => 'RP20-missing-row-reissued-for-early-renewal',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '            if ($f->reissue_if_missing && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+        'replace' => '            if ($f->reissue_if_missing && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+    ),
+    array(
+        'id' => 'RP21-any-row-replaceable',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($f->replaceable_row_ref !== null && $ref === $f->replaceable_row_ref && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+        'replace' => '        if ($i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+    ),
+    array(
+        'id' => 'RP22-add-on-row-replaced-for-early-renewal',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($f->replaceable_row_ref !== null && $ref === $f->replaceable_row_ref && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+        'replace' => '        if ($f->replaceable_row_ref !== null && $ref === $f->replaceable_row_ref && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+    ),
+    array(
+        'id' => 'RP23-processing-not-awaiting',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => "    const AWAITING = array('pending', 'on-hold', 'processing');",
+        'replace' => "    const AWAITING = array('pending', 'on-hold');",
+    ),
+    array(
+        'id' => 'MK1-marker-signature-not-checked',
+        'file' => 'includes/class-evc-wc-completion-marker.php',
+        'search' => '        if (!hash_equals($this->mac(self::json($marker->to_wire())), $sig)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'MK2-marker-not-bound-to-its-order',
+        'file' => 'includes/class-evc-wc-completion-marker.php',
+        'search' => '        if ($marker->order_id() !== $order_id) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'MK3-customer-may-mark-own-completion',
+        'file' => 'includes/class-evc-wc-completion-marker.php',
+        'search' => "        if (\$f['actor_id'] === \$f['customer_id']) {\n            throw new InvalidArgumentException('A customer can never confirm their own payment.');",
+        'replace' => "        if (false) {\n            throw new InvalidArgumentException('A customer can never confirm their own payment.');",
     ),
     array(
         'id' => 'PR1-early-renewal-run-restarts',
