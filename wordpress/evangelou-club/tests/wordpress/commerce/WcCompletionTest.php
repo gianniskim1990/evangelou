@@ -644,7 +644,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             $this->assertSame(EVC_Wc_Completion_Marker_Read::MISSING, $this->marker($order->get_id())->outcome);
             $this->assertNull($this->followup($order->get_id()), 'nothing to recover: it was never a confirmation');
             $this->assertSame(array(), $this->club()->member_movements($customer));
-            $this->assertSame('unverified', $this->me($customer)['state'], $reason);
+            $this->assertSame('none', $this->me($customer)['state'], $reason);
             $events = $this->audit_events(EVC_Wc_Completion_Confirmer::EVENT, $this->config->ref('wc_order', (string) $order->get_id()));
             $this->assertCount(1, $events);
             $this->assertSame('not_attested', $events[0]['outcome']);
@@ -679,7 +679,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             $this->assertSame('completed', wc_get_order($order->get_id())->get_status(), $name);
             $this->assertResult($r, EVC_Wc_Completion_Result::NOT_ATTESTED, $reason);
             $this->assertSame(array(), $this->rows($customer), $name . ': not a confirmation and no membership from the add-on either');
-            $this->assertSame('unverified', $this->me($customer)['state'], $name);
+            $this->assertSame('none', $this->me($customer)['state'], $name);
             $this->assertSame(array(), $this->club()->member_movements($customer));
             $events = $this->audit_events(EVC_Wc_Completion_Confirmer::EVENT, $this->config->ref('wc_order', (string) $order->get_id()));
             $this->assertCount(1, $events, $name);
@@ -700,6 +700,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
 
     /** What this path relies on, checked against the REAL WooCommerce: `manual` in the third hook argument. */
     public function test_woocommerce_marks_manual_status_changes_and_not_rest_ones(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $staff = $this->staff();
         $this->wire(self::whole_second(self::at7('-5 minutes')));
         $seen = array();
@@ -767,7 +768,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         $this->assertSame('claimed', $marker->marker->reason(), 'written BEFORE the pipeline ran');
         $this->assertSame($staff, $marker->marker->actor_id());
         $this->assertSame('open:0', $this->followup($order->get_id()));
-        $this->assertSame('unverified', $this->me($customer)['state'], 'fail closed until confirmed');
+        $this->assertSame('none', $this->me($customer)['state'], 'fail closed until confirmed');
 
         // Still busy: ticks during the outage are not attempts.
         for ($i = 1; $i <= 3; $i++) {
@@ -1011,7 +1012,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         $this->assertResult($flagged, EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'completed_after_cancellation_or_refund');
         $this->assertSame(array(), $this->club()->member_movements($other));
         $this->assertSame(array(), $this->rows($other), 'no row from the add-on for a completion the Club refused');
-        $this->assertSame('unverified', $this->me($other)['state']);
+        $this->assertSame('none', $this->me($other)['state']);
         $events = $this->audit_events(EVC_Wc_Completion_Confirmer::EVENT, $this->config->ref('wc_order', (string) $o->get_id()));
         $this->assertSame(array('manager_required'), array_column($events, 'outcome'));
         $this->assertCount(1, array_filter($this->notes($o->get_id()), function ($n) {
@@ -1207,7 +1208,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             wc_get_order($order->get_id())->update_status('on-hold', '', true);
         });
         $again = $this->complete($order->get_id(), $staff);
-        $this->assertResult($again, EVC_Wc_Completion_Result::ALREADY_RECORDED);
+        $this->assertResult($again, EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'recorded_but_membership_differs');
         $this->assertCount(1, $this->rows($customer), 'no new row');
         $this->assertSame(array(), $this->active_rows($customer), 'nothing stray is active that would block the next confirmation');
         $this->assertSame('expired', $this->me($customer)['state']);
@@ -1263,7 +1264,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             $this->assertSame(array(), $this->rows($customer), $name . ': no row from the add-on');
             $this->assertSame(EVC_Wc_Completion_Marker_Read::MISSING, $this->marker($order->get_id())->outcome, $name);
             $this->assertSame(EVC_Bacs_Intent_Read::MISSING, $this->intent($order->get_id())->outcome, $name);
-            $this->assertSame('unverified', $this->me($customer)['state'], $name);
+            $this->assertSame('none', $this->me($customer)['state'], $name);
             $this->assertCount(1, $this->notes($order->get_id()), $name);
         }
 
@@ -1307,7 +1308,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         $this->assertSame(EVC_Wc_Completion_Marker_Read::MISSING, $this->marker($order->get_id())->outcome);
         $this->assertSame(EVC_Bacs_Intent_Read::MISSING, $this->intent($order->get_id())->outcome);
         $this->assertSame(array(), $this->club()->member_movements($customer));
-        $this->assertSame('unverified', $this->me($customer)['state']);
+        $this->assertSame('none', $this->me($customer)['state']);
         $this->assertCount(1, $this->notes($order->get_id()));
     }
 
@@ -1365,7 +1366,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             $this->assertSame(EVC_Wc_Completion_Marker_Read::VALID, $this->marker($order->get_id())->outcome, $name);
             $this->assertSame('open:0', $this->followup($order->get_id()), $name . ': found by the recovery');
             $this->assertSame(array(), $this->club()->member_movements($customer), $name);
-            $this->assertSame('unverified', $this->me($customer)['state'], $name);
+            $this->assertSame('none', $this->me($customer)['state'], $name);
 
             $done = $this->recover_at($at->modify('+1 minute'));
             $this->assertResult($done[$order->get_id()], EVC_Wc_Completion_Result::RECORDED);
@@ -1376,34 +1377,31 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         }
     }
 
-    public function test_a_member_lock_lost_during_the_pipeline_stops_it_and_the_recovery_finishes_it(): void {
+    public function test_a_member_lock_lost_after_the_issuance_stops_the_pipeline_and_the_recovery_finishes_it(): void {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $staff = $this->staff();
         $at = self::whole_second(self::at7('-20 minutes'));
-        $hooked = new EVC_Hooked_Provenance_Store($this->club());
+        $this->wire($at);
+        $order = $this->order($customer);
         $release = function () use ($customer) {
             $db = $GLOBALS['wpdb'];
             $db->get_var($db->prepare('SELECT RELEASE_LOCK(%s)', EVC_Member_Lock::name_for($db, $customer))); // e.g. a reconnect
         };
-        foreach (array('movement', 'movement_for_alias', 'member_movements', 'latest_period') as $method) {
-            $hooked->before_call($method, 1, $release);
-        }
-        $this->wire($at, function () use ($hooked) {
-            return $hooked;
-        });
-        $order = $this->order($customer);
+        add_action('pmpro_after_change_membership_level', $release, 10, 0); // right after the Club's own armed issuance
         $r = $this->complete($order->get_id(), $staff);
+        remove_action('pmpro_after_change_membership_level', $release, 10);
         $this->assertSame(EVC_Wc_Completion_Result::DEFERRED, $r->outcome, (string) $r->reason);
         $this->assertSame('lock_lost', $r->reason);
-        $this->assertSame(array(), $this->rows($customer), 'nothing issued without the lock');
+        $this->assertCount(1, $this->rows($customer), 'the issuance happened before the lock was lost');
         $this->assertCount(0, $this->periods($customer), 'nothing recorded without the lock');
         $this->assertGuardInert();
         $this->assertSame('open:0', $this->followup($order->get_id()), 'an outage, not an attempt');
         $done = $this->recover_at($at->modify('+1 minute'));
         $this->assertResult($done[$order->get_id()], EVC_Wc_Completion_Result::RECORDED);
-        $this->assertCount(1, $this->rows($customer));
+        $this->assertCount(1, $this->rows($customer), 'no second month');
         $this->assertCount(1, $this->periods($customer));
+        $this->assertSame('active', $this->me($customer)['state']);
     }
 
     public function test_a_second_application_of_the_guard_is_never_confirmed(): void {
@@ -1428,7 +1426,6 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
     }
 
     public function test_an_intent_of_the_bank_statement_path_is_never_mixed_with_this_one(): void {
-        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $staff = $this->staff();
         $at = self::whole_second(self::at7('-5 minutes'));

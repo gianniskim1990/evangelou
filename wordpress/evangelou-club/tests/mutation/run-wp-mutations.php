@@ -364,7 +364,7 @@ $mutants = array(
         '',
         array('WcCompletionTest::test_the_add_on_is_put_back_at_shutdown_even_when_nothing_after_it_ran')),
     array('WC9-withheld-counter-not-counted', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
-        '        $this->withheld++;',
+        '            $this->withheld++; // counted for Club-product orders only',
         '',
         array('WcCompletionTest::test_the_add_on_is_withheld_for_a_club_order_and_put_back_for_the_next_one')),
     array('WC10-runs-without-the-members-lock', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',

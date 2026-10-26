@@ -308,7 +308,6 @@ final class EVC_Wc_Completion_Confirmer {
         }
         remove_action(self::ADDON_HOOK, self::ADDON_FUNCTION, self::ADDON_PRIORITY);
         $this->held[$order_id] = true;
-        $this->withheld++;
     }
 
     /** Puts the add-on's callback back (priority 10) when this completion removed it. */
@@ -411,6 +410,9 @@ final class EVC_Wc_Completion_Confirmer {
         }
         $customer = (int) $order->get_customer_id();
         $this->club[$order_id] = $customer;
+        if (isset($this->held[$order_id])) {
+            $this->withheld++; // counted for Club-product orders only
+        }
         $not_attested = self::actor_problem($actor, $customer) ?? $channel_problem;
         if ($not_attested !== null) {
             // No membership is issued for it (the add-on is withheld); the Club stays unverified for this order.
@@ -455,6 +457,7 @@ final class EVC_Wc_Completion_Confirmer {
         if ($opened !== null) {
             $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::MANAGER_REQUIRED, $opened);
             $r->addon = EVC_Wc_Completion_Marker::ADDON_SUPPRESSED;
+            $this->close_or_flag($r, $order_id); // nothing is issued: a manager is flagged
             $this->audit_completion($r, $actor, $order_id, 'completion', $completed_at, $channel);
             $this->note($order_id, $r);
             return $r;
