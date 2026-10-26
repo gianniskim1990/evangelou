@@ -492,7 +492,12 @@ route, button, hook at load, cron, role grant, migration or flag change.
    `finalize_holding()`, which never takes or releases the lock and re-checks
    ownership.
 3. **Pre-flight (nothing written yet):** site timezone `Europe/Athens`; the
-   Club level does not share a single-selection PMPro level group with another
+   pinned commerce environment exactly as the reader verifies it
+   (`EVC_Wp_Commerce_Pmpro_Reader::environment_conflicts()`: exact plugin
+   versions, product → Club level mapping with no other product granting the
+   level, 1 Month level without recurring billing, no autocomplete, …; any
+   difference → `commerce_environment_conflict`, re-checked immediately before
+   arming); the Club level does not share a single-selection PMPro level group with another
    level (read with plain SELECTs, because PMPro's own group getters may create
    a default group); order awaiting payment (pending / on-hold), BACS, EUR
    20.00, one Club item, not the actor's own; value date within the window;
@@ -505,16 +510,27 @@ route, button, hook at load, cron, role grant, migration or flag change.
    (`EVC_Pmpro_Local_Time::exact()`; a confirmation inside the first repeated
    autumn hour is refused: `period_not_representable_in_pmpro`). Then the
    signed `planned` intent is created (read back).
-4. **Armed completion.** `EVC_Bacs_Issuance_Guard` is armed for the intent's
-   customer, level and exact local dates, then `$order->update_status('completed')`
-   runs, and the guard is disarmed in `finally`. While armed:
+4. **Armed completion.** Only while the request still holds the lock of the
+   intent's customer, `EVC_Bacs_Issuance_Guard` is armed for the intent's
+   ORDER, customer, level and exact local dates, then
+   `$order->update_status('completed')` runs, and the guard is disarmed in
+   `finally` (and by a `shutdown` callback at priority 0 if a fatal error ends
+   the request while armed). While armed: `woocommerce_order_status_completed`
+   at priority 1 (before the add-on's priority-10 issuance) records which
+   order is being processed (the re-issue path names it itself), because
+   `pmprowoo_checkout_level` carries no order; the dates are replaced only
+   while that is the armed order, so a second Club order of the same customer
+   completed in the same request keeps the add-on's own dates;
    `pmprowoo_checkout_level` at priority 1000 (after the add-on's own
    priority-10 extension) sets `startdate` = `'<run start>'` (single-quoted, as
    the add-on passes it; PMPro strips single quotes) and `enddate` = `<planned
    end>`, only for that customer and level; `pmpro_deactivate_old_levels`
    returns false only for the level change that follows that replacement for
    that customer and level (tracked via `pmpro_before_change_membership_level`),
-   once. No callback writes to the database (`$wpdb->insert_id` hazard). So the
+   once. No callback writes to the database (`$wpdb->insert_id` hazard). If
+   the dates were not replaced exactly once (`applied() !== 1`), the fresh
+   re-read still runs but nothing is confirmed or recorded
+   (`issuance_not_guarded_once`, manager). So the
    paid row stays `active` until PMPro's INSERT; PMPro's own duplicate removal
    then sets it `changed`. Unarmed completions (e.g. a manual "Completed") see
    no callback at all.
@@ -544,6 +560,29 @@ two active rows → policy conflict, `/me` unverified; crashes between steps
 resume via `complete_order` / `confirm_issuance` / `record_movement`; the
 guard is disarmed after an exception; DST-crossing and 31-January plans are
 exact.
+
+**Mutation note (corrected in the review):** `PRIORITY = 10` for the guard's
+`pmprowoo_checkout_level` callback is NOT an equivalent mutant. At 10 it
+still runs after the add-on's own extension only because it is registered
+later (registration order, not priority), and it would run BEFORE any
+third-party callback at 11–999 instead of after it. With only the shipped
+callbacks no test can tell the difference; a later third-party date change
+would still be caught by the fresh re-read (`issuance_mismatch`, fail-closed),
+but the two are not equivalent. Dropping the start's single quotes stays
+equivalent (PMPro strips them).
+
+**Late renewal right after the old end (manager usability, fail-closed):** a
+renewal confirmed minutes after the previous paid end is a LATE plan, which
+requires no active Club row. PMPro only moves the old row to `expired` when
+its own expiry cron runs, so until then the old row is still `active` and the
+issuer refuses with `unexpected_membership_row` (conflict) before anything is
+written. Nothing is lost: the manager retries after PMPro's expiry cron has
+run. Not changed (no business-rule change).
+
+**Unexpected errors:** any Throwable inside `issue()` fails closed as
+`unavailable` / `unexpected_error`, the lock is released, the guard disarmed,
+and the attempt is still audited with opaque references only (never the
+exception or its message).
 
 **Not changed:** the reader treats WooCommerce `processing` as pending, the
 recovery policy as unknown. BACS orders are never `processing` in this flow
