@@ -31,3 +31,9 @@ add_action('plugins_loaded', array('EVC_Staff_Plugin', 'boot'));
 // source stays unavailable until a verified PMPro/WooCommerce reader exists.
 register_deactivation_hook(__FILE__, array('EVC_Customer_Plugin', 'deactivate'));
 add_action('plugins_loaded', array('EVC_Customer_Plugin', 'boot'));
+
+// STAGE-03D: WooCommerce «Completed» by shop staff = Club payment confirmation, cancellation /
+// refund freezes the card, recovery on WP-Cron. ONLY when wp-config.php defines
+// EVC_CLUB_WC_COMPLETION_ENABLED as boolean true (default: OFF = nothing hooked or scheduled).
+register_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));
+add_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));
