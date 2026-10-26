@@ -1063,4 +1063,5 @@ The existing website developer replied explicitly:
 ## OWNER ANSWERS 2026-10-26 (STAGE-03B.3b open questions)
 - **Who confirms bank transfers:** the client (Ευαγγέλου) approves them, not the owner (Giannis); the technician may also. Not stated: whether a second person (four-eyes) is required — still open, do not assume.
 - **WooCommerce "completed" e-mail:** not an owner decision; the technician sets it in WooCommerce settings. Code must not depend on it either way.
-- Still open: manual/legacy completed orders, BACS refund recording, key rotation, separate staging Club DB. Nothing is merged, deployed or activated.
+- **Owner scope (2026-10-26):** the owner does not touch WooCommerce or site operations; he only decides what the plugin does. Answers to the five open items, in his numbering: (1) second approver: not his to decide; (2) manual/legacy completed orders: they are recorded in WooCommerce, the plugin reads that information; (3) BACS refund recording: not our concern; (4) key rotation: not our concern; (5) separate staging Club DB: waiting for the technician, who mentioned something about the DB and has not answered yet.
+- Nothing is merged, deployed or activated.
