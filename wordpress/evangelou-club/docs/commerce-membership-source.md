@@ -590,6 +590,170 @@ recovery policy as unknown. BACS orders are never `processing` in this flow
 An initial purchase whose PMPro INSERT failed (`membership_row_missing`) is
 NOT re-issued automatically (ambiguous: a manager must look).
 
+## STAGE-03D: WooCommerce «Ολοκληρωμένη» by shop staff = Club payment confirmation (OFF by default)
+
+Owner decision 2026-10-26 (STAGE-03C Option A): (1) a Club order set to
+«Ολοκληρωμένη» (Completed) in WooCommerce by a shop user with their own account
+IS the Club payment confirmation (only Completed; never Processing / On hold /
+Pending); (2) cancellation or refund of such an order freezes the Club card
+(no free coffee) until the customer pays again.
+
+### Enabling (server configuration only)
+
+```php
+define('EVC_CLUB_WC_COMPLETION_ENABLED', true);   // boolean true only; default OFF
+```
+
+plus the STAGE-02 commerce constants and the STAGE-03 Club database
+(`EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`, `EVC_CLUB_DB_*`). OFF (or any
+of them missing): `EVC_Wc_Completion_Plugin::boot()` returns before anything is
+hooked, scheduled, constructed or connected, and PMPro WooCommerce behaves
+exactly as shipped (a test proves no STAGE-03D callback exists at load). The
+packager allows `new EVC_Wc_Completion_Confirmer / _Recovery / _Markers`,
+`new EVC_Wc_Bacs_Intent_Store`, `new EVC_Bacs_Recovery_Inspector` and
+`new EVC_Bacs_Issuance_Guard` ONLY in `class-evc-wc-completion-plugin.php`, which
+must keep the constant gate; `new EVC_Bacs_Payment_Issuer / _Finalizer /
+_Confirmation` stay forbidden everywhere; the member lock may be taken only in
+the finalizer and the confirmer.
+
+### Who confirms
+
+`woocommerce_order_status_completed` at priority 5 (before the add-on's own
+`pmprowoo_add_membership_from_order` at 10), one callback that catches every
+Throwable (WooCommerce 11.2.1 `status_transition()` catches only `Exception`).
+A completion is a confirmation only when ALL hold; otherwise the add-on runs as
+shipped, the Club stays **unverified** and the attempt is audited:
+
+| completed by | result |
+|---|---|
+| logged-in user with `edit_shop_orders`, not the order's customer, not the shared Club staff account | confirmation |
+| nobody (REST API key, cron, automation: user 0) | `not_attested` / `no_user` |
+| the order's customer (even with the capability) | `not_attested` / `customer` |
+| the shared Club staff account (even with the capability) | `not_attested` / `club_staff_account` |
+| a user without `edit_shop_orders` | `not_attested` / `no_capability` |
+
+The order must be a Club bank-transfer order exactly as the reader accepts it
+(BACS, EUR, total 20.00, one Club item, quantity 1, a customer account), and it
+must never have been cancelled / refunded / failed (the transition's `from`
+status, a private `_evc_club_wc_ended` flag written while the feature is on,
+or any refund) — otherwise `completed_after_cancellation_or_refund`, flagged
+for a manager, nothing recorded.
+
+### What happens (one request, one member lock)
+
+pre-flight shared verbatim with the BACS issuer (`site_problem()`: site time
+zone `Europe/Athens`, the pinned commerce environment, the Club level alone in
+its level group; `membership_problem()`: PMPro shows exactly what the plan
+continues) → fresh plan with confirmation instant = now (whole second) → signed
+`planned` intent (movement id = keyed HMAC of the ORDER in its own namespace
+`wc_order_completion`; authority `manual_admin`, evidence `wc_order`; order
+anchor as before) → armed `EVC_Bacs_Issuance_Guard` + a DIRECT
+`pmprowoo_add_membership_from_order($order_id)` with `guard->completing($order_id)`
+(the re-issue path of STAGE-03B.3b; no callback is added to the running hook)
+→ fresh re-read → recovery policy → `issued` → `record_expecting` → `recorded`.
+Early renewals keep the paid row `active` until PMPro's INSERT (Option 2) and
+continue at the previous paid end (31 January + 1 month = 28 February). No bank
+reference / value-date attestation is used on this path (those classes remain,
+unused here). The audit (`wc_completion_confirmation`) records the staff user
+(`staff_wp_user_id`), opaque order / movement refs, steps and outcome; never
+names, e-mail addresses, notes or exception texts.
+
+### The add-on's own run is suppressed (only with an active Club row)
+
+After a claimed completion, if the customer holds an active Club row, the
+add-on's own priority-10 run for THAT order is suppressed through
+`pmpro_change_level` returning the integer level id: PMPro 3.8.9
+`pmpro_changeMembershipLevel()` applies the filter at functions.php:1303 and
+returns early at 1326-1329 because the user already has the level (no
+deactivation, no insert). It applies only inside
+`pmprowoo_add_membership_from_order(<that order id>)` (read from the call
+stack), for that customer and the Club level, once, and only while an active
+Club row exists at that moment (re-read, PMPro's level cache cleared first).
+Never without one: an integer level without an active row makes PMPro insert a
+row with `enddate = '0000-00-00 00:00:00'` (functions.php:1438-1457), i.e. a
+membership without end. Residual (documented): PMPro re-reads the row a few
+microseconds after our check; a row removed by another process in between
+could still produce that endless row.
+
+### Idempotency
+
+Completed → processing / on-hold / pending → completed again, a second staff
+user, or a double submit of two stale order screens: `already_recorded`, the
+add-on suppressed, no second month, nothing recorded twice.
+
+### Deferred completions and the recovery step
+
+Fail closed now, finished later (signed marker `_evc_club_wc_completion` =
+"completed by user X at T", what the add-on did, the highest PMPro row id at
+that moment; unsigned follow-up index `_evc_club_wc_followup` = `open:<n>` /
+`manager:<reason>`): member lock busy, Club database down / unreadable, a
+confirmation inside the repeated autumn hour (`period_not_representable_in_pmpro`),
+a late renewal before PMPro's own (quarter-hourly) expiry marked the old row
+`expired`, the same customer twice in one second (bulk action), lock lost,
+intent write not proven, unexpected errors. The add-on is suppressed when an
+active Club row exists (the paid time stays visible); without one it runs as
+shipped (its row is later replaced). `EVC_Wc_Completion_Recovery::run()`
+(WP-Cron `evc_club_wc_completion_recovery` every 15 minutes, registered only
+under the constant) re-reads marker, order, PMPro and Club record under the lock
+and confirms with the recovery instant as the confirmation instant; at most 96
+attempts, then `manager:attempts_exhausted`. Two new, default-off policy facts
+make this possible without loosening anything else: `reissue_if_missing` (the
+add-on issued nothing for this completion) and `replaceable_row_ref` (the ONE
+active Club row newer than the marker's row floor and bound to no recorded
+payment = the add-on's own row). A deferred completion whose add-on row vanished
+stops for a manager (`membership_row_missing`). Configuration problems
+(time zone, environment, level group) and contradictions stop for a manager.
+
+### Cancellation / refund (owner decision 2)
+
+`woocommerce_order_status_cancelled` / `_failed` → correction `voided`;
+`_refunded` and a FULL refund (`woocommerce_order_refunded` with nothing left)
+→ correction `refunded`, through `EVC_Provenance_Recorder::correct()` (authority
+`order_state`, correction id = HMAC of order + kind; repeats are
+`already_corrected`). The mapper (unchanged) then shows the card as not eligible
+(`payment_reversed` → unverified, `refunded`). A correction that cannot be
+recorded now is retried by the recovery step; meanwhile the reader reports a
+cancelled / refunded / failed order whose recorded payment has no correction as
+a conflict (`club_order_ended_after_recorded_payment`) → unverified. Partial
+refunds: audited `manager_required` / `partial_refund`, no automatic change.
+
+**Not solved — owner decision needed (no rule invented):** with the approved D2
+rule, a new paid order confirmed WHILE a frozen (voided/refunded) period is
+still running is an EARLY renewal of that same paid run, and the approved
+mapper rule 5 ("no payment in the current run refunded / reversed") keeps the
+card frozen for the whole run, although the customer paid again. Only a renewal
+after the frozen period ended (late renewal = new run) unfreezes the card.
+Making "a new paid order" end the freeze earlier needs a rule change (D2 / mapper
+rule 5) that the owner has to approve.
+
+### Reader / policy changes
+
+- Reader: a Club order whose total is not 20.00 is a source conflict
+  (`club_order_total_not_20_eur`); valid orders unchanged.
+- Recovery policy: `processing` is awaiting payment (as in the reader); the
+  BACS issuer still never confirms `processing` (`order_status_unknown`), and
+  this path confirms only `completed`.
+
+### What the shop and the technician must do
+
+- Site time zone **Europe/Athens** (named zone, not "UTC+3").
+- Confirm a bank transfer by setting the order to **«Ολοκληρωμένη»** with your
+  **own** shop account (never the shared Club account, never an API key or
+  automation).
+- **Never re-complete a cancelled / refunded Club order**: create a new order.
+- WP-Cron must run (real cron hitting `wp-cron.php` recommended).
+- Keep the product / add-on settings as verified (no autocomplete, product
+  mapped only to the Club level); separate Club database + constants on staging.
+
+### Tests and mutants
+
+`tests/wordpress/commerce/WcCompletionTest.php` (real plugins, HPOS and legacy
+storage in CI), `CommerceMembershipSourceTest` (total), `BacsIssuerTest`
+(issuer refuses `processing`), unit `BacsRecoveryPolicyTest`,
+`WcCompletionMarkerTest`, `MutationEvidenceTest`. Mutants: RP19-RP23, MK1-MK3
+(membership runner); WC1-WC31 (commerce runner, named killers). A commerce
+mutant with named killers now runs exactly those tests (same verdict rule).
+
 ## Order lookup is bounded
 
 The reader now selects only the customer's own Club orders in SQL (HPOS
