@@ -133,6 +133,29 @@ if (guardSelfTest.length > 0) fail(`PHP construction guard self-test failed: ${g
 // Only these may take the member lock: the (never constructed) internal finalizer, which the issuer uses through
 // with_member_lock(), and the STAGE-03D confirmer (constructed only by the bootstrap above).
 const MEMBER_LOCK_FILES = ["includes/customer/class-evc-bacs-payment-finalizer.php", "includes/customer/class-evc-wc-completion-confirmer.php"];
+// The only shipped files that may name a guarded class or EVC_Wc_Completion_Plugin at all (identifier or string).
+const GUARDED_NAME_FILES = [
+  "evangelou-club.php",
+  WC_COMPLETION_BOOTSTRAP,
+  "includes/customer/class-evc-wc-completion-confirmer.php",
+  "includes/customer/class-evc-wc-completion-recovery.php",
+  "includes/customer/class-evc-wc-completion-markers.php",
+  "includes/customer/class-evc-wc-bacs-intent-store.php",
+  "includes/customer/class-evc-bacs-recovery-inspector.php",
+  "includes/customer/class-evc-bacs-issuance-guard.php",
+  "includes/customer/class-evc-bacs-payment-issuer.php",
+  "includes/customer/class-evc-bacs-payment-finalizer.php",
+];
+// Files that define a guarded class (or the bootstrap): no `new self|static|parent` inside them.
+const GUARDED_CLASS_FILES = [
+  WC_COMPLETION_BOOTSTRAP,
+  "includes/customer/class-evc-wc-completion-confirmer.php",
+  "includes/customer/class-evc-wc-completion-recovery.php",
+  "includes/customer/class-evc-wc-completion-markers.php",
+  "includes/customer/class-evc-wc-bacs-intent-store.php",
+  "includes/customer/class-evc-bacs-recovery-inspector.php",
+  "includes/customer/class-evc-bacs-issuance-guard.php",
+];
 let sawBootstrap = false;
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
@@ -141,11 +164,8 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
     if (text.includes(needle)) fail(`test-only PHP "${needle}" in ${f}`);
   }
   if (path === WC_COMPLETION_BOOTSTRAP) sawBootstrap = true;
-  for (const problem of problemsFor(path, text, { bootstrap: WC_COMPLETION_BOOTSTRAP, guarded: GUARDED_CLASSES, forbidden: FORBIDDEN_CLASSES })) {
+  for (const problem of problemsFor(path, text, { bootstrap: WC_COMPLETION_BOOTSTRAP, guarded: GUARDED_CLASSES, forbidden: FORBIDDEN_CLASSES, allowlist: GUARDED_NAME_FILES, guardedFiles: GUARDED_CLASS_FILES, memberLockFiles: MEMBER_LOCK_FILES })) {
     fail(problem);
-  }
-  if (text.includes("EVC_Member_Lock::acquire(") && !MEMBER_LOCK_FILES.includes(path)) {
-    fail(`member lock taken outside the internal finalizer / STAGE-03D confirmer in ${f}`);
   }
 }
 if (!sawBootstrap) fail("the STAGE-03D bootstrap file is missing from the package");

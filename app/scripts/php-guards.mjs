@@ -8,6 +8,13 @@
 //  2. wire() may be called only from build(); build() only from boot(), and only after boot()'s first
 //     statement, which must be the real gate `if (!EVC_Wc_Completion_Feature::enabled()) { return; }`.
 //  3. No other shipped file may call EVC_Wc_Completion_Plugin::build()/wire().
+//  4. (review L-A) The guarded class names and EVC_Wc_Completion_Plugin may appear (as identifiers or inside
+//     strings) only in an allowlist of files; class_alias / Reflection* / newInstance* / unserialize, dynamic
+//     `new $x` / `new (...)`, `$x::` calls, and `new self|static|parent` inside a guarded class are forbidden;
+//     boot() / build() / wire() are defined exactly once in the bootstrap; EVC_Member_Lock::acquire( only in the
+//     allowed files; the TEST-ONLY construction constant is never define()d.
+// Not covered statically (documented): a class name assembled from string pieces at run time. The guarded
+// constructors refuse to run while the feature is off (EVC_Wc_Completion_Feature::assert_constructible).
 
 export function tokenize(src) {
   const out = [];
@@ -34,7 +41,7 @@ export function tokenize(src) {
     if (c === "'" || c === '"') {
       let j = i + 1;
       while (j < n && src[j] !== c) { if (src[j] === "\\") j++; j++; }
-      i = j + 1; push("str", ""); continue;
+      push("str", src.slice(i + 1, j)); i = j + 1; continue;
     }
     if (c === "<" && src.startsWith("<<<", i)) {
       const m = /^<<<[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1\r?\n/.exec(src.slice(i, i + 200));
@@ -42,8 +49,9 @@ export function tokenize(src) {
         const re = new RegExp("\\n[ \\t]*" + m[2] + "\\b");
         const rest = src.slice(i + m[0].length - 1);
         const hit = re.exec(rest);
+        push("str", hit ? rest.slice(0, hit.index) : rest);
         i = hit ? i + m[0].length - 1 + hit.index + hit[0].length : n;
-        push("str", ""); continue;
+        continue;
       }
     }
     if (c === "$" && /[A-Za-z_]/.test(src[i + 1] ?? "")) { let j = i + 1; while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++; push("var", src.slice(i, j)); i = j; continue; }
@@ -72,6 +80,7 @@ export function constructions(tokens) {
 /** {name -> {start, end}} token ranges of every function / method body (brace matched). */
 export function functionBodies(tokens) {
   const bodies = {};
+  Object.defineProperty(bodies, "__count", { value: {}, enumerable: false });
   tokens.forEach((tk, k) => {
     if (tk.t !== "id" || tk.v.toLowerCase() !== "function" || tokens[k + 1]?.t !== "id") return;
     const name = tokens[k + 1].v;
@@ -90,6 +99,7 @@ export function functionBodies(tokens) {
       if (tokens[j].v === "{") depth++;
       else if (tokens[j].v === "}" && --depth === 0) break;
     }
+    bodies.__count[name.toLowerCase()] = (bodies.__count[name.toLowerCase()] ?? 0) + 1;
     bodies[name] = { start, end: j };
   });
   return bodies;
@@ -124,10 +134,44 @@ const inside = (bodies, fn, at) => bodies[fn] && at > bodies[fn].start && at < b
  * Problems for ONE shipped PHP file. $path is relative to the plugin ("includes/...").
  * $guarded: classes only the bootstrap may construct. $forbidden: classes nobody may construct.
  */
-export function problemsFor(path, src, { bootstrap, guarded, forbidden }) {
+const DANGEROUS = ["class_alias", "reflectionclass", "reflectionobject", "reflectionmethod", "newinstance", "newinstanceargs", "newinstancewithoutconstructor", "unserialize"];
+const TEST_CONSTANT = "EVC_TEST_WC_COMPLETION_CONSTRUCTION";
+
+export function problemsFor(path, src, { bootstrap, guarded, forbidden, allowlist = null, guardedFiles = [], memberLockFiles = null }) {
   const tokens = tokenize(src);
   const bodies = functionBodies(tokens);
   const problems = [];
+  const restricted = [...guarded, "EVC_Wc_Completion_Plugin"].map((n) => n.toLowerCase());
+  const allowed = allowlist === null || allowlist.includes(path);
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id") {
+      const v = bare(tk.v).toLowerCase();
+      if (!allowed && restricted.some((r) => v === r || v.endsWith("\\" + r))) problems.push(`${path}: mentions ${bare(tk.v)} (not in the allowlist)`);
+      if (DANGEROUS.includes(v)) problems.push(`${path}: uses ${tk.v}`);
+      if (v === "new") {
+        const nx = tokens[k + 1];
+        if (!nx || nx.t === "var" || nx.v === "(" || nx.t === "str") problems.push(`${path}: dynamic construction (new ${nx ? nx.v : ""})`);
+        else if (guardedFiles.includes(path) && nx.t === "id" && ["self", "static", "parent", "class"].includes(nx.v.toLowerCase())) problems.push(`${path}: new ${nx.v} inside a guarded class`);
+      }
+      if (v === "define" && tokens[k + 1]?.v === "(" && tokens[k + 2]?.t === "str" && tokens[k + 2].v.replace(/^\\+/, "") === TEST_CONSTANT) problems.push(`${path}: defines the TEST-ONLY ${TEST_CONSTANT}`);
+    }
+    if (tk.t === "str") {
+      const v = tk.v.toLowerCase();
+      if (!allowed && restricted.some((r) => v.includes(r))) problems.push(`${path}: a string names a guarded class (not in the allowlist)`);
+      if (memberLockFiles !== null && !memberLockFiles.includes(path) && v.includes("evc_member_lock")) problems.push(`${path}: a string names EVC_Member_Lock`);
+    }
+    if (tk.t === "var" && tokens[k + 1]?.v === "::") problems.push(`${path}: dynamic static call ${tk.v}::`);
+  });
+  if (memberLockFiles !== null && !memberLockFiles.includes(path)) {
+    for (const call of staticCalls(tokens, ["acquire"])) {
+      if (call.cls.toLowerCase() === "evc_member_lock") problems.push(`${path}: EVC_Member_Lock::acquire() outside the allowed files`);
+    }
+  }
+  if (path === bootstrap) {
+    for (const fn of ["boot", "build", "wire"]) {
+      if ((bodies.__count[fn] ?? 0) !== 1) problems.push(`${path}: ${fn}() must be defined exactly once`);
+    }
+  }
   for (const c of constructions(tokens)) {
     if (forbidden.some((f) => same(f, c.name))) problems.push(`${path}: forbidden construction of ${c.name}`);
     if (guarded.some((g) => same(g, c.name)) && !(path === bootstrap && inside(bodies, "wire", c.at))) {
@@ -147,7 +191,14 @@ export function problemsFor(path, src, { bootstrap, guarded, forbidden }) {
 }
 
 // ---- self test: negative fixtures, run on every package --------------------------------------------
-const OPTS = { bootstrap: "includes/customer/class-evc-wc-completion-plugin.php", guarded: ["EVC_Wc_Completion_Confirmer", "EVC_Bacs_Issuance_Guard"], forbidden: ["EVC_Bacs_Payment_Issuer"] };
+const OPTS = {
+  bootstrap: "includes/customer/class-evc-wc-completion-plugin.php",
+  guarded: ["EVC_Wc_Completion_Confirmer", "EVC_Bacs_Issuance_Guard"],
+  forbidden: ["EVC_Bacs_Payment_Issuer"],
+  allowlist: ["includes/customer/class-evc-wc-completion-plugin.php", "includes/customer/class-evc-wc-completion-confirmer.php", "includes/allowed.php"],
+  guardedFiles: ["includes/customer/class-evc-wc-completion-confirmer.php"],
+  memberLockFiles: ["includes/customer/class-evc-wc-completion-confirmer.php"],
+};
 const GOOD = `<?php
 final class EVC_Wc_Completion_Plugin {
     public static function boot(): void {
@@ -173,7 +224,8 @@ export function selfTest() {
   expect("newline between new and class", "includes/x.php", "<?php\n$a = new\n   EVC_Bacs_Issuance_Guard ();", true);
   expect("upper-case NEW", "includes/x.php", "<?php\n$a = NEW EVC_Bacs_Issuance_Guard();", true);
   expect("forbidden everywhere", boot, GOOD.replace("new EVC_Wc_Completion_Confirmer()", "new EVC_Bacs_Payment_Issuer()"), true);
-  expect("mention in a comment or string only", "includes/x.php", "<?php\n// new EVC_Wc_Completion_Confirmer()\n$s = 'new EVC_Wc_Completion_Confirmer()'; /* new EVC_Bacs_Issuance_Guard */", false);
+  expect("mention in a comment only", "includes/x.php", "<?php\n// new EVC_Wc_Completion_Confirmer()\n$s = 'x'; /* new EVC_Bacs_Issuance_Guard */", false);
+  expect("construction text inside a string in an allowed file is not a construction", "includes/allowed.php", "<?php\n$s = 'new EVC_Wc_Completion_Confirmer()';", false);
   expect("construction outside wire() in the bootstrap", boot, GOOD.replace("public static function build($x) { return self::wire($x); }", "public static function build($x) { new EVC_Wc_Completion_Confirmer(); return self::wire($x); }"), true);
   expect("gate only in a comment", boot, GOOD.replace("if (!EVC_Wc_Completion_Feature::enabled()) {\n            return;\n        }", "// if (!EVC_Wc_Completion_Feature::enabled()) { return; }"), true);
   expect("gate not first", boot, GOOD.replace("public static function boot(): void {", "public static function boot(): void {\n        $p = self::build(1);"), true);
@@ -182,5 +234,26 @@ export function selfTest() {
   expect("build() called from another file", "includes/x.php", "<?php\n$p = EVC_Wc_Completion_Plugin::build(1);", true);
   expect("build() called from the bootstrap outside boot()", boot, GOOD.replace("private static function wire", "public static function other() { return self::build(2); }\n    private static function wire"), true);
   expect("wire() called outside build()", boot, GOOD.replace("public static function build($x) { return self::wire($x); }", "public static function build($x) { return 1; } public static function other() { return self::wire(1); }"), true);
+  const other = "includes/x.php";
+  expect("allowed file may name a guarded class", "includes/allowed.php", "<?php\nfunction f(EVC_Wc_Completion_Confirmer $c) { return $c; }", false);
+  expect("type hint outside the allowlist", other, "<?php\nfunction f(EVC_Wc_Completion_Confirmer $c) { return $c; }", true);
+  expect("new $cls with the name in a string", other, "<?php\n$cls = 'EVC_Wc_Completion_Confirmer';\n$a = new $cls();", true);
+  expect("new $cls with the name elsewhere", "includes/allowed.php", "<?php\n$a = new $cls();", true);
+  expect("use ... as alias", other, "<?php\nuse EVC_Wc_Completion_Confirmer as G;\n$a = new G();", true);
+  expect("class_alias", "includes/allowed.php", "<?php\nclass_alias('EVC_Wc_Completion_Confirmer', 'G');", true);
+  expect("ReflectionClass::newInstance", "includes/allowed.php", "<?php\n$r = new ReflectionClass($n); $r->newInstance();", true);
+  expect("unserialize", "includes/allowed.php", "<?php\n$o = unserialize($s);", true);
+  expect("call_user_func with the plugin name", other, "<?php\ncall_user_func(array('EVC_Wc_Completion_Plugin', 'build'), 1);", true);
+  expect("dynamic static call", "includes/allowed.php", "<?php\n$k::build(1);", true);
+  expect("name inside an interpolated string", other, '<?php\n$a = "x {$y} EVC_Bacs_Issuance_Guard";', true);
+  expect("new (expression)", "includes/allowed.php", "<?php\n$a = new ($x . 'Y')();", true);
+  expect("new self inside a guarded class", "includes/customer/class-evc-wc-completion-confirmer.php", "<?php\nfinal class EVC_Wc_Completion_Confirmer { public static function make() { return new self(); } }", true);
+  expect("new self elsewhere is fine", "includes/allowed.php", "<?php\nfinal class R { public static function make() { return new self(); } }", false);
+  expect("duplicate wire()", boot, GOOD.replace("private static function wire($x)", "private static function wire2($x) { return 1; }\n    private static function wire($x)").replace("wire2", "wire"), true);
+  expect("member lock elsewhere", other, "<?php\n$l = EVC_Member_Lock::acquire($db, 1, 0);", true);
+  expect("member lock with a leading backslash", other, "<?php\n$l = \\EVC_Member_Lock :: acquire($db, 1, 0);", true);
+  expect("member lock where allowed", "includes/customer/class-evc-wc-completion-confirmer.php", "<?php\n$l = EVC_Member_Lock::acquire($db, 1, 0);", false);
+  expect("member lock through a string", other, "<?php\ncall_user_func(array('EVC_Member_Lock', 'acquire'), $db, 1, 0);", true);
+  expect("defines the test constant", other, "<?php\ndefine('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);", true);
   return bad;
 }
