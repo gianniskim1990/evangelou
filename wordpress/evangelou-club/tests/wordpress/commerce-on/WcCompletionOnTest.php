@@ -89,10 +89,9 @@ final class WcCompletionOnTest extends EVC_WP_Test_Case {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $this->assertTrue(defined(EVC_Wc_Completion_Feature::CONSTANT));
         $this->assertTrue(EVC_Wc_Completion_Feature::enabled());
-        if ($this->hooked_on_completed() === 0) {
-            EVC_Wc_Completion_Plugin::boot(); // the site constants were not there at plugins_loaded: boot as it would
-        }
-        $this->assertSame(1, $this->hooked_on_completed(), 'exactly one confirmer, hooked by the real boot()');
+        // Never boot() here: the confirmer must have been hooked by the REAL plugins_loaded boot of this process.
+        $this->assertSame(1, $this->hooked_on_completed(), 'exactly one confirmer, hooked by the real plugins_loaded boot()');
+        $this->assertNotFalse(has_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot')));
         $this->assertSame(10, has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order'));
         $this->assertNotFalse(has_filter('cron_schedules', array('EVC_Wc_Completion_Plugin', 'schedules')));
         $this->assertNotFalse(has_action(EVC_Wc_Completion_Plugin::CRON_HOOK, array('EVC_Wc_Completion_Plugin', 'run_recovery')));

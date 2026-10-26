@@ -42,6 +42,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             $db->close();
         }
         remove_all_filters('query');
+        unset($_REQUEST['_wpnonce'], $_REQUEST['action'], $_REQUEST['order_id'], $_REQUEST['id'], $_REQUEST['post']);
         remove_all_filters('wp_doing_ajax');
         remove_all_filters('wp_doing_cron');
         unset($GLOBALS['current_screen']);
@@ -131,16 +132,18 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         return wc_get_order($order->get_id());
     }
 
-    /** The shop user sets the order to «Ολοκληρωμένη» in the WooCommerce admin (a manual status change). */
+    /** The shop user sets the order to «Ολοκληρωμένη» on the WooCommerce order edit screen (a manual status change). */
     private function complete(int $order_id, int $actor, bool $manual = true): ?EVC_Wc_Completion_Result {
         return $this->complete_via('admin', $order_id, $actor, $manual);
     }
 
     /**
-     * The same status change from another channel: admin, admin_ajax (the list button), ajax (storefront),
-     * cron, other (front end). REST has its own helper (complete_by_rest).
+     * The same status change from another channel: admin (the order edit screen: its nonce verified),
+     * admin_ajax (the order-list button: action woocommerce_mark_order_status + its nonce), ajax
+     * (storefront), cron, other (front end). $entry false: the same channel WITHOUT the WooCommerce
+     * entry point (no verified nonce; for admin_ajax another action). REST: complete_by_rest().
      */
-    private function complete_via(string $channel, int $order_id, int $actor, bool $manual = true): ?EVC_Wc_Completion_Result {
+    private function complete_via(string $channel, int $order_id, int $actor, bool $manual = true, bool $entry = true): ?EVC_Wc_Completion_Result {
         wp_set_current_user($actor);
         $this->screen(in_array($channel, array('admin', 'admin_ajax'), true));
         if (in_array($channel, array('admin_ajax', 'ajax'), true)) {
@@ -150,25 +153,63 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             add_filter('wp_doing_cron', '__return_true');
         }
         try {
+            if ($channel === 'admin' && $entry) {
+                $this->verify_referer(self::edit_screen_nonce($order_id));
+            }
+            if ($channel === 'admin_ajax') {
+                // Without the entry point: another admin-ajax action (even carrying the list button's nonce).
+                $_REQUEST['action'] = $entry ? 'woocommerce_mark_order_status' : 'some_plugin_action';
+                $_REQUEST['order_id'] = (string) $order_id;
+                $this->verify_referer('woocommerce-mark-order-status');
+            }
             wc_get_order($order_id)->update_status('completed', '', $manual);
         } finally {
-            remove_all_filters('wp_doing_ajax');
-            remove_all_filters('wp_doing_cron');
-            $this->screen(false);
-            wp_set_current_user(0);
+            $this->end_request();
         }
         return $this->parts['confirmer']->last_result();
     }
 
-    /** Runs $work as a user in the WooCommerce admin (is_admin() true) and restores the front end. */
-    private function in_admin(int $actor, callable $work) {
+    /**
+     * Runs $work as a user in the WooCommerce admin (is_admin() true) and restores the front end.
+     * $bulk: the order ids of a bulk action of the order list (its nonce verified, as WordPress does).
+     *
+     * @param int[] $bulk
+     */
+    private function in_admin(int $actor, callable $work, array $bulk = array()) {
         wp_set_current_user($actor);
         $this->screen(true);
         try {
+            if ($bulk !== array()) {
+                $hpos = \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+                $_REQUEST[$hpos ? 'id' : 'post'] = array_map('strval', $bulk);
+                $this->verify_referer($hpos ? 'bulk-orders' : 'bulk-posts');
+            }
             return $work();
         } finally {
-            $this->screen(false);
-            wp_set_current_user(0);
+            $this->end_request();
+        }
+    }
+
+    /** The order edit screen's nonce action: HPOS (wc-orders) or posts storage (post.php). */
+    private static function edit_screen_nonce(int $order_id): string {
+        return (\Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled() ? 'update-order_' : 'update-post_') . $order_id;
+    }
+
+    /** check_admin_referer() exactly as WooCommerce / WordPress call it before changing an order (fires `check_admin_referer`). */
+    private function verify_referer(string $action): void {
+        $_REQUEST['_wpnonce'] = wp_create_nonce($action);
+        $this->assertSame(1, check_admin_referer($action));
+    }
+
+    /** The request is over: request parameters, filters, screen, user and the confirmer's per-request state. */
+    private function end_request(): void {
+        unset($_REQUEST['_wpnonce'], $_REQUEST['action'], $_REQUEST['order_id'], $_REQUEST['id'], $_REQUEST['post']);
+        remove_all_filters('wp_doing_ajax');
+        remove_all_filters('wp_doing_cron');
+        $this->screen(false);
+        wp_set_current_user(0);
+        if ($this->parts !== null) {
+            $this->parts['confirmer']->forget();
         }
     }
 
@@ -547,11 +588,11 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         $b = wc_get_order($second->get_id());
         $this->in_admin($staff, function () use ($a) {
             $a->update_status('completed', '', true);
-        });
+        }, array($second->get_id()));
         $first = $this->parts['confirmer']->last_result();
         $this->in_admin($staff, function () use ($b) {
             $b->update_status('completed', '', true);
-        });
+        }, array($second->get_id()));
         $double = $this->parts['confirmer']->last_result();
         remove_all_filters('query');
         $this->assertResult($first, EVC_Wc_Completion_Result::RECORDED);
@@ -582,7 +623,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         foreach (array($o1, $o2) as $o) {
             $this->in_admin($staff, function () use ($o) {
                 wc_get_order($o->get_id())->update_status('completed', '', true); // the bulk action: manual
-            });
+            }, array($o1->get_id(), $o2->get_id()));
             $results[] = $this->parts['confirmer']->last_result();
         }
         $this->assertResult($results[0], EVC_Wc_Completion_Result::RECORDED);
@@ -597,7 +638,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         foreach (array($x, $y) as $o) {
             $this->in_admin($staff, function () use ($o) {
                 wc_get_order($o->get_id())->update_status('completed', '', true);
-            });
+            }, array($x->get_id(), $y->get_id()));
             $results[] = $this->parts['confirmer']->last_result();
         }
         $this->assertResult($results[2], EVC_Wc_Completion_Result::RECORDED);
@@ -665,15 +706,20 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             'ajax' => array('ajax', true, 'channel_ajax', 'ajax'),
             'other' => array('other', true, 'channel_other', 'other'),
             'admin_not_manual' => array('admin', false, 'not_a_manual_status_change', 'admin'),
+            // review M-C: the channel alone is not enough, the WooCommerce entry point must be identified.
+            'admin_page_plugin_call' => array('admin', true, 'not_a_woocommerce_admin_action', 'admin', false),
+            'admin_ajax_other_action' => array('admin_ajax', true, 'not_a_woocommerce_admin_action', 'admin_ajax', false),
         );
-        foreach ($cases as $name => list($channel, $manual, $reason, $logged)) {
+        foreach ($cases as $name => $case) {
+            list($channel, $manual, $reason, $logged) = $case;
+            $entry = $case[4] ?? true;
             $customer = $this->customer();
             $order = $this->order($customer);
             if ($channel === 'rest') {
                 list($response, $r) = $this->complete_by_rest($order->get_id(), $staff);
                 $this->assertSame(200, $response->get_status(), wp_json_encode($response->get_data()));
             } else {
-                $r = $this->complete_via($channel, $order->get_id(), $staff, $manual);
+                $r = $this->complete_via($channel, $order->get_id(), $staff, $manual, $entry);
             }
             $this->assertSame('completed', wc_get_order($order->get_id())->get_status(), $name);
             $this->assertResult($r, EVC_Wc_Completion_Result::NOT_ATTESTED, $reason);
@@ -685,7 +731,25 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             $this->assertSame($staff, (int) $events[0]['staff_wp_user_id'], 'the attempting user is audited');
             $this->assertStringContainsString('"channel":"' . $logged . '"', $events[0]['details_json'], $name);
         }
-        // The two admin entry points that ARE a confirmation: the order screen / bulk action and the list button.
+        // A verified nonce of ANOTHER order's edit screen / list button is not this order's entry point.
+        $customer = $this->customer();
+        $order = $this->order($customer);
+        $other = $this->order($this->customer());
+        $r = $this->in_admin($staff, function () use ($order, $other) {
+            $this->verify_referer(self::edit_screen_nonce($other->get_id()));
+            wc_get_order($order->get_id())->update_status('completed', '', true);
+            return $this->parts['confirmer']->last_result();
+        });
+        $this->assertResult($r, EVC_Wc_Completion_Result::NOT_ATTESTED, 'not_a_woocommerce_admin_action');
+        $this->assertSame(array(), $this->rows($customer));
+        // The bulk action naming other orders only.
+        $r = $this->in_admin($staff, function () use ($other) {
+            wc_get_order($other->get_id())->update_status('completed', '', true);
+            return $this->parts['confirmer']->last_result();
+        }, array($order->get_id()));
+        $this->assertResult($r, EVC_Wc_Completion_Result::NOT_ATTESTED, 'not_a_woocommerce_admin_action');
+
+        // The entry points that ARE a confirmation: the order edit screen, the list button, the bulk action (HPOS or posts storage per run).
         foreach (array('admin', 'admin_ajax') as $channel) {
             $customer = $this->customer();
             $order = $this->order($customer);
@@ -724,6 +788,11 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             'mark_order_status (list button, admin-ajax)' => array('/function\s+mark_order_status\b.{0,2500}?update_status\(\s*\$\w+\s*,\s*[\'"]{2}\s*,\s*true\s*\)/s', 'mark_order_status'),
             'bulk action' => array('/Order status changed by bulk edit.{0,120}?true\s*\)/s', 'Order status changed by bulk edit'),
             'order edit screen (meta box)' => array('/class\s+WC_Meta_Box_Order_Data\b.*?set_status\([^;]{0,300}?,\s*[\'"]{2}\s*,\s*true\s*\)/s', 'class WC_Meta_Box_Order_Data'),
+            // review M-C: the nonces the Club recognises each entry point by.
+            'list button nonce (admin-ajax)' => array('/function\s+mark_order_status\b.{0,600}?check_admin_referer\(\s*\'woocommerce-mark-order-status\'\s*\)/s', 'function mark_order_status'),
+            'HPOS edit screen nonce' => array('/function\s+get_order_edit_nonce_action\b.{0,200}?\'update-order_\'\s*\.\s*\$this->order->get_id\(\)/s', 'function get_order_edit_nonce_action'),
+            'HPOS edit screen verifies it' => array('/function\s+handle_order_update\b.{0,600}?check_admin_referer\(\s*\$this->get_order_edit_nonce_action\(\)\s*\)/s', 'function handle_order_update'),
+            'HPOS bulk nonce and ids' => array('/check_admin_referer\(\s*\'bulk-orders\'\s*\).{0,900}?\$_REQUEST\[\s*\'id\'\s*\]/s', "check_admin_referer( 'bulk-orders' )"),
         );
         $found = array_fill_keys(array_keys($checks), false);
         $diagnostics = array();
@@ -748,6 +817,13 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             }
         }
         $this->assertSame(array_fill_keys(array_keys($checks), true), $found, wp_json_encode($diagnostics));
+        // WordPress core (posts storage): post.php verifies update-post_<id> before the order meta box saves,
+        // edit.php verifies bulk-posts and reads post[] before handle_bulk_actions-edit-shop_order.
+        $post = (string) file_get_contents(ABSPATH . 'wp-admin/post.php');
+        $edit = (string) file_get_contents(ABSPATH . 'wp-admin/edit.php');
+        $this->assertMatchesRegularExpression("/case 'editpost':.{0,400}?check_admin_referer\\(\\s*'update-post_'\\s*\\.\\s*\\\$post_id\\s*\\)/s", $post);
+        $this->assertMatchesRegularExpression("/check_admin_referer\\(\\s*'bulk-posts'\\s*\\)/", $edit);
+        $this->assertMatchesRegularExpression("/\\\$_REQUEST\\['post'\\]/", $edit);
     }
 
     public function test_a_busy_member_lock_defers_and_the_recovery_finishes_it(): void {
@@ -1528,5 +1604,324 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         $this->assertResult($r, EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'completed_after_cancellation_or_refund');
         $this->assertSame(array(), $this->rows($customer));
         $this->assertSame(array(), $this->club()->member_movements($customer));
+    }
+
+    // ---- re-review M-A: an order that ended or was refunded is never confirmed later ----------------------
+
+    public function test_a_deferred_completion_cancelled_then_completed_again_is_never_confirmed(): void {
+        $customer = $this->customer();
+        $staff = $this->staff();
+        $at = self::whole_second(self::at7('-10 minutes'));
+        $this->wire($at, null, 0);
+        $order = $this->order($customer);
+        $this->held[] = EVC_Member_Lock::acquire($this->second_connection(), $customer, 0);
+        $this->assertResult($this->complete($order->get_id(), $staff), EVC_Wc_Completion_Result::DEFERRED, 'member_locked');
+        $this->assertSame('open:0', $this->followup($order->get_id()));
+        array_pop($this->held)->release();
+        $this->in_admin($staff, function () use ($order) {
+            wc_get_order($order->get_id())->update_status('cancelled', '', true);
+        });
+        $this->assertSame('manager:ended_before_confirmation', $this->followup($order->get_id()), 'the open claim is closed for a manager, never finished');
+        $this->in_admin($staff, function () use ($order) {
+            wc_get_order($order->get_id())->update_status('on-hold', '', true);
+        });
+        $again = $this->complete($order->get_id(), $staff);
+        $this->assertResult($again, EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'completed_after_cancellation_or_refund');
+        $this->assertSame('manager:completed_after_cancellation_or_refund', $this->followup($order->get_id()));
+        $this->assertSame(array(), $this->recover_at($at->modify('+30 minutes')), 'nothing left for the recovery');
+        $this->assertSame(array(), $this->rows($customer));
+        $this->assertSame(array(), $this->club()->member_movements($customer), 'no month issued or recorded');
+    }
+
+    public function test_a_claim_whose_order_ended_while_the_club_database_was_down_is_never_confirmed(): void {
+        $customer = $this->customer();
+        $staff = $this->staff();
+        $at = self::whole_second(self::at7('-10 minutes'));
+        $this->wire($at, self::club_down());
+        $order = $this->order($customer);
+        $this->assertResult($this->complete($order->get_id(), $staff), EVC_Wc_Completion_Result::DEFERRED, 'club_unavailable');
+        $this->in_admin($staff, function () use ($order) {
+            wc_get_order($order->get_id())->update_status('cancelled', '', true); // correction deferred: the claim stays open
+        });
+        $this->assertSame('open:0', $this->followup($order->get_id()));
+        $this->assertTrue($this->parts['markers']->was_ended($order->get_id()));
+
+        // (a) still cancelled when the database is back: closed for a manager, nothing recorded.
+        $done = $this->recover_at($at->modify('+5 minutes'));
+        $this->assertResult($done[$order->get_id()], EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'ended_before_confirmation');
+        $this->assertSame('manager:ended_before_confirmation', $this->followup($order->get_id()));
+
+        // (b) set back to completed without the Club seeing it (e.g. the constant was off for a moment): the recovery refuses it.
+        $this->assertTrue($this->parts['markers']->set_followup($order->get_id(), 'open:0'));
+        $this->parts['confirmer']->unregister();
+        remove_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order', 10);
+        $o = wc_get_order($order->get_id());
+        $o->set_status('completed');
+        $o->save();
+        add_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order', 10, 1);
+        $done = $this->recover_at($at->modify('+10 minutes'));
+        $this->assertResult($done[$order->get_id()], EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'completed_after_cancellation_or_refund');
+        $this->assertSame('manager:completed_after_cancellation_or_refund', $this->followup($order->get_id()));
+        $this->assertSame(array(), $this->rows($customer));
+        $this->assertSame(array(), $this->club()->member_movements($customer));
+    }
+
+    public function test_a_partial_refund_of_a_deferred_completion_is_never_recorded_as_20_eur(): void {
+        $customer = $this->customer();
+        $staff = $this->staff();
+        $at = self::whole_second(self::at7('-10 minutes'));
+        $this->wire($at, null, 0);
+        $order = $this->order($customer);
+        $this->held[] = EVC_Member_Lock::acquire($this->second_connection(), $customer, 0);
+        $this->assertResult($this->complete($order->get_id(), $staff), EVC_Wc_Completion_Result::DEFERRED, 'member_locked');
+        $this->assertInstanceOf(WC_Order_Refund::class, wc_create_refund(array('order_id' => $order->get_id(), 'amount' => '5.00', 'reason' => 'synthetic')));
+        $this->assertSame('completed', wc_get_order($order->get_id())->get_status());
+        array_pop($this->held)->release();
+        $done = $this->recover_at($at->modify('+5 minutes'));
+        $this->assertResult($done[$order->get_id()], EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'refunded_before_confirmation');
+        $this->assertSame('manager:refunded_before_confirmation', $this->followup($order->get_id()));
+        $this->assertSame(array(), $this->rows($customer));
+        $this->assertSame(array(), $this->club()->member_movements($customer));
+        $this->assertNotEmpty(array_filter($this->notes($order->get_id()), function ($n) {
+            return strpos($n, 'refunded_before_confirmation') !== false;
+        }));
+    }
+
+    // ---- re-review M-B: the add-on is put back on every path ---------------------------------------------
+
+    public function test_a_later_callback_that_throws_never_leaves_the_add_on_removed_for_the_next_orders(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $staff = $this->staff();
+        $this->wire(self::whole_second(self::at7('-5 minutes')));
+        $first = $this->order($c1 = $this->customer());
+        $second = $this->order($c2 = $this->customer());
+        $product = new WC_Product_Simple();
+        $product->set_regular_price('3');
+        $product->set_virtual(true);
+        $product->save();
+        $ordinary = wc_create_order(array('customer_id' => $this->customer()));
+        $ordinary->add_product($product, 1);
+        $ordinary->calculate_totals();
+        $ordinary->save();
+        $boom = $first->get_id();
+        add_action('woocommerce_order_status_completed', function ($id) use ($boom) {
+            if ((int) $id === $boom) {
+                throw new Exception('simulated failure of another plugin at priority 7');
+            }
+        }, 7);
+        $seen = array();
+        add_action('woocommerce_order_status_completed', function ($id) use (&$seen) {
+            $seen[(int) $id] = has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order');
+        }, 9);
+        $results = $this->in_admin($staff, function () use ($first, $second, $ordinary) {
+            $out = array();
+            wc_get_order($first->get_id())->update_status('completed', '', true); // WooCommerce catches the Exception: priority 11 never runs
+            $out['first'] = $this->parts['confirmer']->last_result();
+            $out['left_removed'] = has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order');
+            wc_get_order($ordinary->get_id())->update_status('completed', '', true);
+            wc_get_order($second->get_id())->update_status('completed', '', true);
+            $out['second'] = $this->parts['confirmer']->last_result();
+            return $out;
+        }, array($first->get_id(), $second->get_id(), $ordinary->get_id()));
+        $this->assertResult($results['first'], EVC_Wc_Completion_Result::RECORDED);
+        $this->assertFalse($results['left_removed'], 'the hold of the first order is left behind by the aborted hook run');
+        $this->assertSame(10, $seen[$ordinary->get_id()], 'the next (non-Club) order gets the add-on as shipped');
+        $this->assertResult($results['second'], EVC_Wc_Completion_Result::RECORDED);
+        $this->assertSame(EVC_Wc_Completion_Marker::ADDON_SUPPRESSED, $results['second']->addon);
+        $this->assertFalse($seen[$second->get_id()], 'withheld for the next Club order');
+        $this->assertCount(1, $this->rows($c1));
+        $this->assertCount(1, $this->rows($c2), 'one month, the Club\'s own');
+        $this->assertSame(10, has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order'));
+    }
+
+    public function test_a_completion_nested_inside_another_shares_the_withheld_add_on(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $staff = $this->staff();
+        $this->wire(self::whole_second(self::at7('-5 minutes')));
+        $a = $this->order($ca = $this->customer());
+        $b = $this->order($cb = $this->customer());
+        $first = null;
+        $seen = array();
+        add_action('woocommerce_order_status_completed', function ($id) use ($a, $b, &$first) {
+            if ((int) $id === $a->get_id()) {
+                $first = $this->parts['confirmer']->last_result();
+                wc_get_order($b->get_id())->update_status('completed', '', true); // e.g. a plugin completing a linked order
+            }
+        }, 7);
+        add_action('woocommerce_order_status_completed', function ($id) use (&$seen) {
+            $seen[(int) $id] = has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order');
+        }, 9);
+        $this->in_admin($staff, function () use ($a) {
+            wc_get_order($a->get_id())->update_status('completed', '', true);
+        }, array($a->get_id(), $b->get_id()));
+        $this->assertResult($first, EVC_Wc_Completion_Result::RECORDED);
+        $this->assertResult($this->parts['confirmer']->last_result(), EVC_Wc_Completion_Result::RECORDED);
+        $this->assertSame(array($b->get_id() => false, $a->get_id() => false), $seen, 'withheld for both, also after the nested one ended');
+        $this->assertCount(1, $this->rows($ca));
+        $this->assertCount(1, $this->rows($cb));
+        $this->assertSame(2, $this->parts['confirmer']->withheld_runs());
+        $this->assertSame(10, has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order'));
+    }
+
+    public function test_an_error_before_the_club_check_of_an_ordinary_order_gives_it_the_add_on_as_shipped(): void {
+        $staff = $this->staff();
+        $this->wire(self::whole_second(self::at7('-5 minutes')));
+        $product = new WC_Product_Simple();
+        $product->set_regular_price('3');
+        $product->set_virtual(true);
+        $product->save();
+        $ordinary = wc_create_order(array('customer_id' => $this->customer()));
+        $ordinary->add_product($product, 1);
+        $ordinary->calculate_totals();
+        $ordinary->save();
+        $armed = false;
+        add_action('woocommerce_order_status_completed', function () use (&$armed) {
+            $armed = true;
+        }, 4);
+        add_filter('woocommerce_order_get_items', function ($items) use (&$armed) {
+            if ($armed) {
+                $armed = false;
+                throw new Error('simulated fatal error while the Club reads the order');
+            }
+            return $items;
+        });
+        $seen = null;
+        add_action('woocommerce_order_status_completed', function () use (&$seen) {
+            $seen = has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order');
+        }, 9);
+        $r = $this->complete($ordinary->get_id(), $staff);
+        $this->assertResult($r, EVC_Wc_Completion_Result::UNAVAILABLE, 'unexpected_error');
+        $this->assertSame(10, $seen, 'not a Club order: put back before the add-on\'s priority');
+    }
+
+    // ---- re-review L-B / L-D ------------------------------------------------------------------------------
+
+    public function test_a_claim_that_loses_a_race_with_the_recorded_confirmation_is_not_a_false_alarm(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $customer = $this->customer();
+        $staff = $this->staff();
+        list($order, $r) = $this->purchase($customer, $staff, self::at7('-30 seconds'));
+        $this->assertResult($r, EVC_Wc_Completion_Result::RECORDED);
+        // What a double submit racing the marker write leaves behind: a second marker row.
+        $o = wc_get_order($order->get_id());
+        $o->add_meta_data(EVC_Wc_Completion_Markers::META_KEY, 'second-row-of-a-racing-request', false);
+        $o->save();
+        $this->in_admin($staff, function () use ($order) {
+            wc_get_order($order->get_id())->update_status('on-hold', '', true);
+        });
+        $again = $this->complete($order->get_id(), $staff);
+        $this->assertResult($again, EVC_Wc_Completion_Result::ALREADY_RECORDED);
+        $this->assertNull($this->followup($order->get_id()), 'no manager flag for an order that is paid and recorded');
+        $this->assertSame(array(), $this->notes($order->get_id()), 'no «not confirmed» note on it either');
+        $this->assertCount(1, $this->periods($customer));
+    }
+
+    public function test_a_tripwire_that_cannot_read_the_rows_flags_a_manager(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $customer = $this->customer();
+        $staff = $this->staff();
+        $this->wire(self::whole_second(self::at7('-5 minutes')));
+        $order = $this->order($customer);
+        $GLOBALS['wpdb']->suppress_errors(true);
+        add_filter('query', function ($sql) {
+            return strpos($sql, "(enddate IS NULL OR enddate = '0000-00-00 00:00:00')") !== false ? 'SELECT COUNT(*) FROM evc_no_such_table_for_the_tripwire' : $sql;
+        });
+        $r = $this->complete($order->get_id(), $staff);
+        remove_all_filters('query');
+        $this->assertResult($r, EVC_Wc_Completion_Result::RECORDED);
+        $this->assertSame('manager:membership_rows_unreadable', $this->followup($order->get_id()), 'a read error is not "no endless row"');
+    }
+
+    // ---- re-review test gaps: each lock check on its own, cancellation priority, REST depth --------------
+
+    public function test_a_member_lock_lost_before_the_issuance_or_before_the_record_stops_there(): void {
+        $staff = $this->staff();
+        foreach (array('before_the_issuance' => 1, 'before_the_record' => 3) as $name => $call) {
+            $customer = $this->customer();
+            $at = self::whole_second(self::at7('-20 minutes'));
+            $hooked = new EVC_Hooked_Provenance_Store($this->club());
+            $hooked->before_call('corrections_for', $call, function () use ($customer) {
+                $db = $GLOBALS['wpdb'];
+                $db->get_var($db->prepare('SELECT RELEASE_LOCK(%s)', EVC_Member_Lock::name_for($db, $customer)));
+            });
+            $this->wire($at, function () use ($hooked) {
+                return $hooked;
+            });
+            $order = $this->order($customer);
+            $r = $this->complete($order->get_id(), $staff);
+            $this->assertSame(EVC_Wc_Completion_Result::DEFERRED, $r->outcome, $name . ' ' . (string) $r->reason . ' ' . implode(',', $r->steps));
+            $this->assertSame('lock_lost', $r->reason, $name);
+            $this->assertCount($name === 'before_the_issuance' ? 0 : 1, $this->rows($customer), $name . ': nothing issued without the lock');
+            $this->assertCount(0, $this->periods($customer), $name . ': nothing recorded without the lock');
+            $this->assertGuardInert();
+            $done = $this->recover_at($at->modify('+1 minute'));
+            $this->assertResult($done[$order->get_id()], EVC_Wc_Completion_Result::RECORDED);
+            $this->assertCount(1, $this->rows($customer), $name);
+            $this->assertCount(1, $this->periods($customer), $name);
+        }
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+    }
+
+    public function test_a_cancellation_is_recorded_even_when_a_later_cancellation_handler_fails(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $customer = $this->customer();
+        $staff = $this->staff();
+        list($order, $r) = $this->purchase($customer, $staff, self::at7('-30 seconds'));
+        $this->assertResult($r, EVC_Wc_Completion_Result::RECORDED);
+        add_action('woocommerce_order_status_cancelled', function () {
+            throw new Exception('simulated failure of another cancellation handler');
+        }, 10);
+        $this->in_admin($staff, function () use ($order) {
+            wc_get_order($order->get_id())->update_status('cancelled', '', true); // WooCommerce catches it
+        });
+        $corrections = $this->club()->corrections_for($this->intent($order->get_id())->intent->movement_id());
+        $this->assertCount(1, $corrections, 'the Club runs before the other handlers of the cancellation');
+        $this->assertSame(EVC_Movement_Correction::KIND_VOIDED, $corrections[0]->kind());
+        $this->assertNotSame('active', $this->me($customer)['state']);
+    }
+
+    public function test_the_rest_depth_survives_nested_requests_and_an_exception_fails_closed_until_the_request_ends(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $staff = $this->staff();
+        $this->wire(self::whole_second(self::at7('-5 minutes')));
+        rest_get_server();
+        register_rest_route('evc-test/v1', '/nested/(?P<id>\d+)', array('methods' => 'POST', 'permission_callback' => '__return_true', 'callback' => function ($request) {
+            $inner = new WP_REST_Request('PUT', '/wc/v3/orders/' . (int) $request['id']);
+            $inner->set_param('status', 'completed');
+            return rest_do_request($inner);
+        }));
+        register_rest_route('evc-test/v1', '/boom', array('methods' => 'POST', 'permission_callback' => '__return_true', 'callback' => function () {
+            throw new RuntimeException('simulated exception inside a REST callback');
+        }));
+        // Nested: the inner completion is REST; after both ended the depth is back to zero.
+        $inner = $this->order($ci = $this->customer());
+        wp_set_current_user($staff);
+        $response = rest_do_request(new WP_REST_Request('POST', '/evc-test/v1/nested/' . $inner->get_id()));
+        wp_set_current_user(0);
+        $this->assertSame(200, $response->get_status(), wp_json_encode($response->get_data()));
+        $this->assertResult($this->parts['confirmer']->last_result(), EVC_Wc_Completion_Result::NOT_ATTESTED, 'channel_rest');
+        $this->assertSame(array(), $this->rows($ci));
+        $after = $this->order($ca = $this->customer());
+        $this->assertResult($this->complete($after->get_id(), $staff), EVC_Wc_Completion_Result::RECORDED, null);
+        // An exception escapes a REST callback: the rest of THAT request stays REST (fail closed) ...
+        wp_set_current_user($staff);
+        try {
+            rest_do_request(new WP_REST_Request('POST', '/evc-test/v1/boom'));
+            $this->fail('the exception was expected to escape rest_do_request()');
+        } catch (RuntimeException $e) {
+            $this->assertSame('simulated exception inside a REST callback', $e->getMessage());
+        }
+        $leaked = $this->order($cl = $this->customer());
+        $r = $this->in_admin($staff, function () use ($leaked) {
+            $this->verify_referer(self::edit_screen_nonce($leaked->get_id()));
+            wc_get_order($leaked->get_id())->update_status('completed', '', true);
+            return $this->parts['confirmer']->last_result();
+        }); // in_admin ends the request (the confirmer's `shutdown` handler)
+        $this->assertResult($r, EVC_Wc_Completion_Result::NOT_ATTESTED, 'channel_rest');
+        $this->assertSame(array(), $this->rows($cl));
+        // ... and the next request is attested again.
+        $next = $this->order($cn = $this->customer());
+        $this->assertResult($this->complete($next->get_id(), $staff), EVC_Wc_Completion_Result::RECORDED);
+        $this->assertCount(1, $this->rows($cn));
     }
 }

@@ -404,29 +404,29 @@ $mutants = array(
         ' || (float)',
         array('WcCompletionTest::test_completing_again_after_a_cancellation_or_refund_is_never_a_confirmation')),
     array('WC18-error-escapes-the-claimed-confirmation', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
-        '        } catch (Throwable $e) {
-            $this->guard->disarm();
-            $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, \'unexpected_error\');
-        }',
-        '        } catch (Throwable $e) {
-            throw $e;
-        }',
+        '            $this->guard->disarm();
+            if (!$claimed) {
+                $this->claim($order_id, $customer, $actor, $completed_at); // best effort: the recovery re-reads everything
+            }
+            $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, \'unexpected_error\');',
+        '            throw $e;',
         array('WcCompletionTest::test_an_exception_inside_the_confirmation_never_aborts_woocommerce', 'WcCompletionTest::test_an_exception_during_an_early_renewal_never_lets_the_add_on_add_a_month')),
     array('WC19-error-escapes-the-callback', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
         '            $this->last = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, \'unexpected_error\');
-            $this->flag_after_error($order_id, $transition);',
-        '            throw $e;',
+            if ($this->is_club_order($order_id) === false) {',
+        '            throw $e;
+            if ($this->is_club_order($order_id) === false) {',
         array('WcCompletionTest::test_an_error_before_the_completion_is_claimed_never_escapes_into_woocommerce')),
     array('WC20-error-before-the-claim-leaves-no-marker', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
         '            $this->flag_after_error($order_id, $transition);',
         '',
         array('WcCompletionTest::test_an_error_before_the_completion_is_claimed_never_escapes_into_woocommerce')),
     array('WC21-claim-not-written-before-the-pipeline', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
-        '        $opened = $this->open_claim($order_id, $customer, $actor, $completed_at, $floor);
-        if ($opened !== null) {',
-        '        $opened = null;
-        if ($opened !== null) {',
-        array('WcCompletionTest::test_a_busy_member_lock_defers_and_the_recovery_finishes_it', 'WcCompletionTest::test_a_crash_after_the_issuance_is_finished_by_the_recovery_without_a_second_month')),
+        '                $claimed = true;
+                $claim = $this->claim($order_id, $customer, $actor, $completed_at);',
+        '                $claimed = true;
+                $claim = null;',
+        array('WcCompletionTest::test_a_crash_after_the_issuance_is_finished_by_the_recovery_without_a_second_month')),
     array('WC22-add-on-withheld-only-when-environment-unknown', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
         '        } catch (Throwable $e) {
             // Unknown: fail closed, the add-on stays withheld (the recovery re-checks the environment).',
@@ -478,11 +478,13 @@ $mutants = array(
         '    const AWAITING = array(\'pending\', \'on-hold\', \'processing\');',
         array('BacsIssuerTest::test_orders_not_awaiting_payment_are_not_issued')),
     array('WC32-channel-not-required', 'commerce', 'includes/class-evc-wc-completion-context.php',
-        '        if (!in_array($channel, self::ATTESTING, true)) {
+        '    public static function problem(string $channel, $transition): ?string {
+        if (!in_array($channel, self::ATTESTING, true)) {
             return \'channel_\' . $channel;
         }
 ',
-        '',
+        '    public static function problem(string $channel, $transition): ?string {
+',
         array('WcCompletionTest::test_only_a_manual_completion_in_the_woocommerce_admin_is_a_confirmation')),
     array('WC33-manual-flag-ignored', 'commerce', 'includes/class-evc-wc-completion-context.php',
         '($transition[\'manual\'] ?? null) !== true',
@@ -515,13 +517,17 @@ $mutants = array(
         '',
         array('WcCompletionTest::test_an_endless_active_club_row_after_the_add_on_is_flagged_for_a_manager')),
     array('WC39-tripwire-always-flags', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
-        '        if ($customer < 1 || $this->endless_rows($customer) < 1) {',
-        '        if ($customer < 1) {',
+        '        if ($endless === 0) {
+            return;
+        }',
+        '        if (false) {
+            return;
+        }',
         array('WcCompletionTest::test_initial_purchase_completed_by_shop_staff_is_recorded_with_the_exact_athens_period')),
     array('WC40-cancellation-hook-after-the-add-on', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
         '    const ENDED_PRIORITY = 5;',
         '    const ENDED_PRIORITY = 15;',
-        array('WcCompletionTest::test_the_bootstrap_builds_and_hooks_only_when_configured')),
+        array('WcCompletionTest::test_a_cancellation_is_recorded_even_when_a_later_cancellation_handler_fails')),
     array('WC41-refund-arithmetic', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
         '        $remaining = (float) $order->get_total() - (float) $order->get_total_refunded();',
         '        $remaining = (float) $order->get_total() + (float) $order->get_total_refunded();',
@@ -555,6 +561,127 @@ $mutants = array(
         ' || (float) $order->get_total_refunded() > 0) {',
         ') {',
         array('WcCompletionTest::test_a_partial_refund_followed_by_a_second_completion_is_flagged_and_adds_nothing')),
+    array('WC53-recovery-confirms-an-ended-order', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '        } elseif ($this->markers->was_ended($order_id)) {',
+        '        } elseif (false) {',
+        array('WcCompletionTest::test_a_claim_whose_order_ended_while_the_club_database_was_down_is_never_confirmed')),
+    array('WC54-recovery-confirms-a-refunded-order', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '        } elseif ((float) $order->get_total_refunded() > 0) {',
+        '        } elseif (false) {',
+        array('WcCompletionTest::test_a_partial_refund_of_a_deferred_completion_is_never_recorded_as_20_eur')),
+    array('WC55-cancelled-claim-stays-open', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '        if ($r->outcome === EVC_Wc_Completion_Result::NOT_RECORDED && EVC_Wc_Completion_Markers::open_attempts(',
+        '        if (false && EVC_Wc_Completion_Markers::open_attempts(',
+        array('WcCompletionTest::test_a_deferred_completion_cancelled_then_completed_again_is_never_confirmed')),
+    array('WC56-ended-refusal-leaves-the-claim-open', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '            $this->close_or_flag($r, $order_id); // an open claim of this order is never finished by the recovery
+',
+        '',
+        array('WcCompletionTest::test_a_deferred_completion_cancelled_then_completed_again_is_never_confirmed')),
+    array('WC57-recovery-closes-an-ended-claim-silently', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '            if ($r->outcome === EVC_Wc_Completion_Result::NOT_RECORDED && $this->markers->read($order_id)->outcome !== EVC_Wc_Completion_Marker_Read::MISSING) {',
+        '            if (false) {',
+        array('WcCompletionTest::test_a_claim_whose_order_ended_while_the_club_database_was_down_is_never_confirmed')),
+    array('WC58-stale-hold-not-released', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '                $this->release_stale();
+',
+        '',
+        array('WcCompletionTest::test_a_later_callback_that_throws_never_leaves_the_add_on_removed_for_the_next_orders')),
+    array('WC59-nested-completion-not-withheld', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '        $shared = $registered === false && $this->held !== array();',
+        '        $shared = false;',
+        array('WcCompletionTest::test_a_completion_nested_inside_another_shares_the_withheld_add_on')),
+    array('WC60-add-on-back-while-another-completion-holds-it', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '        if ($this->held === array() && has_action(',
+        '        if (has_action(',
+        array('WcCompletionTest::test_a_completion_nested_inside_another_shares_the_withheld_add_on')),
+    array('WC61-error-keeps-the-add-on-from-an-ordinary-order', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '            if ($this->is_club_order($order_id) === false) {
+                $this->release_add_on($order_id); // not a Club order: the add-on as shipped
+            }
+',
+        '',
+        array('WcCompletionTest::test_an_error_before_the_club_check_of_an_ordinary_order_gives_it_the_add_on_as_shipped')),
+    array('WC62-every-completion-taken-as-outermost', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '        return $running <= 1;',
+        '        return true;',
+        array('WcCompletionTest::test_a_completion_nested_inside_another_shares_the_withheld_add_on')),
+    array('WC63-admin-entry-point-not-required', 'commerce', 'includes/class-evc-wc-completion-context.php',
+        '        return \'not_a_woocommerce_admin_action\';
+    }
+
+    /** @return int[] */',
+        '        return null;
+    }
+
+    /** @return int[] */',
+        array('WcCompletionTest::test_only_a_manual_completion_in_the_woocommerce_admin_is_a_confirmation')),
+    array('WC64-ajax-action-not-checked', 'commerce', 'includes/class-evc-wc-completion-context.php',
+        '            $ok = ($request[\'action\'] ?? null) === self::AJAX_ACTION
+',
+        '            $ok = true
+',
+        array('WcCompletionTest::test_only_a_manual_completion_in_the_woocommerce_admin_is_a_confirmation')),
+    array('WC65-another-orders-edit-screen-accepted', 'commerce', 'includes/class-evc-wc-completion-context.php',
+        '        if (in_array(\'update-order_\' . $order_id, $verified, true) ||',
+        '        if (preg_grep(\'/^update-order_/\', $verified) ||',
+        array('WcCompletionTest::test_only_a_manual_completion_in_the_woocommerce_admin_is_a_confirmation')),
+    array('WC66-bulk-order-ids-not-checked', 'commerce', 'includes/class-evc-wc-completion-context.php',
+        '        if (in_array(\'bulk-orders\', $verified, true) && in_array($order_id, self::ids($request[\'id\'] ?? null), true)) {',
+        '        if (in_array(\'bulk-orders\', $verified, true)) {',
+        array('WcCompletionTest::test_only_a_manual_completion_in_the_woocommerce_admin_is_a_confirmation')),
+    array('WC67-busy-lock-leaves-no-claim', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '                $r = $this->claim($order_id, $customer, $actor, $completed_at) ?? new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, \'member_locked\');',
+        '                $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, \'member_locked\');',
+        array('WcCompletionTest::test_a_busy_member_lock_defers_and_the_recovery_finishes_it')),
+    array('WC68-claim-race-flagged-although-recorded', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '            if ($read->outcome === EVC_Bacs_Intent_Read::VALID && $read->intent !== null && $read->intent->state() === EVC_Bacs_Intent::STATE_RECORDED',
+        '            if (false && $read->intent !== null && $read->intent->state() === EVC_Bacs_Intent::STATE_RECORDED',
+        array('WcCompletionTest::test_a_claim_that_loses_a_race_with_the_recorded_confirmation_is_not_a_false_alarm')),
+    array('WC69-tripwire-read-error-fails-open', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '            return $this->db->last_error === \'\' && $n !== null ? (int) $n : -1;',
+        '            return $this->db->last_error === \'\' && $n !== null ? (int) $n : 0;',
+        array('WcCompletionTest::test_a_tripwire_that_cannot_read_the_rows_flags_a_manager')),
+    array('WC70-lock-not-rechecked-each-step', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '            if (!$lock->is_held()) {
+                return new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, \'lock_lost\');
+            }
+            $facts = $inspector->facts',
+        '            $facts = $inspector->facts',
+        array('WcCompletionTest::test_a_member_lock_lost_after_the_issuance_stops_the_pipeline_and_the_recovery_finishes_it')),
+    array('WC71-issued-without-the-lock', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '\'lock_not_for_intent_customer\');
+        }
+        if (!$lock->is_held()) {
+            return new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, \'lock_lost\');
+        }',
+        '\'lock_not_for_intent_customer\');
+        }',
+        array('WcCompletionTest::test_a_member_lock_lost_before_the_issuance_or_before_the_record_stops_there')),
+    array('WC72-recorded-without-the-lock', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '\'intent_not_issued\');
+        }
+        if (!$lock->is_held()) {
+            return new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, \'lock_lost\');
+        }',
+        '\'intent_not_issued\');
+        }',
+        array('WcCompletionTest::test_a_member_lock_lost_before_the_issuance_or_before_the_record_stops_there')),
+    array('WC73-rest-depth-not-reset-at-the-end-of-the-request', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '    public function forget(): void {
+        $this->rest_depth = 0;
+',
+        '    public function forget(): void {
+',
+        array('WcCompletionTest::test_the_rest_depth_survives_nested_requests_and_an_exception_fails_closed_until_the_request_ends')),
+    array('WC74-rest-depth-not-decremented', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '        $this->rest_depth = max(0, $this->rest_depth - 1);',
+        '        $this->rest_depth = max(0, $this->rest_depth);',
+        array('WcCompletionTest::test_the_rest_depth_survives_nested_requests_and_an_exception_fails_closed_until_the_request_ends')),
+    array('WC75-referer-not-recorded', 'commerce', 'includes/customer/class-evc-wc-completion-confirmer.php',
+        '            $this->referers[] = $action;',
+        '            $action = \'\';',
+        array('WcCompletionTest::test_only_a_manual_completion_in_the_woocommerce_admin_is_a_confirmation')),
     array('WC49-cron-not-scheduled', 'commerce_on', 'includes/customer/class-evc-wc-completion-plugin.php',
         '            add_action(\'init\', array(__CLASS__, \'schedule\'));',
         '',
