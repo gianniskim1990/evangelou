@@ -244,7 +244,8 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $store = $this->club();
         $intents = $this->intents();
         $inspector = new EVC_Bacs_Recovery_Inspector($this->config, $store, $intents);
-        $finalizer = new EVC_Bacs_Payment_Finalizer($this->config, $this->club(), $intents, new EVC_Bacs_Recovery_Inspector($this->config, $this->club(), $intents), $GLOBALS['wpdb'], self::clock(self::utc('now')));
+        $other = $this->club(); // a second, different Club store instance
+        $finalizer = new EVC_Bacs_Payment_Finalizer($this->config, $other, $intents, new EVC_Bacs_Recovery_Inspector($this->config, $other, $intents), $GLOBALS['wpdb'], self::clock(self::utc('now')));
         $this->expectException(InvalidArgumentException::class);
         new EVC_Bacs_Payment_Issuer($this->config, $store, $intents, $inspector, $finalizer, new EVC_Bacs_Issuance_Guard(), self::clock(self::utc('now')));
     }
