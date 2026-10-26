@@ -21,6 +21,7 @@ final class EVC_Wc_Completion_Recovery {
     private $markers;
 
     public function __construct(EVC_Wc_Completion_Confirmer $confirmer, EVC_Wc_Completion_Markers $markers) {
+        EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
         $this->confirmer = $confirmer;
         $this->markers = $markers;
     }

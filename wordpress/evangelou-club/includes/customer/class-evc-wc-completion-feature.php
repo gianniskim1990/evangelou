@@ -17,6 +17,24 @@ final class EVC_Wc_Completion_Feature {
         return defined(self::CONSTANT) && self::is_enabled_value(constant(self::CONSTANT));
     }
 
+    /**
+     * TEST-ONLY hook: the PHPUnit bootstraps define this constant (boolean true) so the suites can
+     * construct the guarded classes with the feature constant OFF. The packager refuses any shipped
+     * file that defines it; a site that defines it deliberately could equally edit the plugin.
+     */
+    const TEST_CONSTRUCTION = 'EVC_TEST_WC_COMPLETION_CONSTRUCTION';
+
+    /**
+     * Second layer behind the packager's construction guard: the classes of this path refuse to be
+     * constructed while the feature is off (whatever code path reaches their constructor).
+     */
+    public static function assert_constructible(string $class): void {
+        if (self::enabled() || (defined(self::TEST_CONSTRUCTION) && constant(self::TEST_CONSTRUCTION) === true)) {
+            return;
+        }
+        throw new LogicException($class . ' exists only behind ' . self::CONSTANT . '.');
+    }
+
     /** Pure parser: only the boolean true enables it. */
     public static function is_enabled_value($value): bool {
         return $value === true;

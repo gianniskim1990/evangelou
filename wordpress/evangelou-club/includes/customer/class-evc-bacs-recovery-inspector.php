@@ -32,6 +32,7 @@ final class EVC_Bacs_Recovery_Inspector {
      *        rule (shop staff completing in WooCommerce); default = the bank-confirmation rule (unchanged)
      */
     public function __construct(EVC_Commerce_Source_Config $config, EVC_Provenance_Store $store, EVC_Wc_Bacs_Intent_Store $intents, ?callable $actor_rule = null, string $evidence_kind = EVC_Payment_Evidence::KIND_MANUAL_CONFIRMATION) {
+        EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
         $this->config = $config;
         $this->store = $store;
         $this->intents = $intents;

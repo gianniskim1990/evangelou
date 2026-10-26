@@ -14,10 +14,11 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  * Immutable once written (the follow-up index next to it is not signed and is
  * only a hint for the recovery scan). Only opaque values: numeric WordPress ids
  * (order, customer, actor), the completion instant, a reason code, what the
- * add-on did with its own run (`suppressed`: an active Club row existed and the
- * add-on's run was suppressed; `shipped`: it ran as shipped) and the highest
- * PMPro membership row id of the customer at that moment (`row_floor`, so the
- * add-on's own row for THIS completion can be told apart later). Never names,
+ * add-on did with its own run (`suppressed`: its callback was withheld for this
+ * completion — the only value written since the review fixes; `shipped`: kept
+ * readable for markers of the first version) and the highest PMPro membership
+ * row id of the customer at that moment (`row_floor`; informational since the
+ * add-on never issues for a claimed completion). Never names,
  * e-mail addresses, bank data or keys.
  */
 final class EVC_Wc_Completion_Marker {

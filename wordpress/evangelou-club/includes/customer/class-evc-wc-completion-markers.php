@@ -32,6 +32,7 @@ final class EVC_Wc_Completion_Markers {
     private $environment;
 
     public function __construct(EVC_Wc_Completion_Marker_Codec $codec, string $environment) {
+        EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
         $this->codec = $codec;
         $this->environment = $environment;
     }
