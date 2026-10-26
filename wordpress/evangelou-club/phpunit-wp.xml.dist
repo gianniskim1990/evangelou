@@ -4,6 +4,7 @@
   Run twice: EVC_TEST_STAFF_FLAG=disabled (wp-common + wp-disabled) and
   EVC_TEST_STAFF_FLAG=enabled (wp-common + wp-enabled).
   STAGE-01: EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled (wp-customer).
+  STAGE-03D: the wp-commerce-on suite also sets EVC_TEST_WC_COMPLETION_FLAG=enabled.
   STAGE-02: same flags + EVC_TEST_COMMERCE_PLUGINS=<dir of pinned WooCommerce/PMPro/add-on> (wp-commerce).
 -->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -29,6 +30,10 @@
         </testsuite>
         <testsuite name="wp-commerce">
             <directory>tests/wordpress/commerce</directory>
+        </testsuite>
+        <!-- STAGE-03D: the same site with EVC_CLUB_WC_COMPLETION_ENABLED=true (EVC_TEST_WC_COMPLETION_FLAG=enabled). -->
+        <testsuite name="wp-commerce-on">
+            <directory>tests/wordpress/commerce-on</directory>
         </testsuite>
     </testsuites>
 </phpunit>
