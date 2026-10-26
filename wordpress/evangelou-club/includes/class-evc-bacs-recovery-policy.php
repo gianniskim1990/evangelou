@@ -63,6 +63,22 @@ final class EVC_Bacs_Recovery_Facts {
     public $order_anchor_owner;
     /** @var EVC_Period_Plan|null a FRESH plan for the intent's payment (only when not recorded) */
     public $fresh_plan;
+    /**
+     * STAGE-03D (WooCommerce completion by shop staff): the order is ALREADY completed by the shop
+     * and PMPro WooCommerce has NOT issued a row for it (the hook runs before the add-on, or the
+     * add-on's own run was suppressed and a signed completion marker says so). Only then may a
+     * completed order without any active Club row be (re-)issued. Default false = unchanged rules.
+     * @var bool
+     */
+    public $reissue_if_missing = false;
+    /**
+     * STAGE-03D: the ONE active Club row PMPro WooCommerce issued with its OWN dates for this
+     * completion while the Club confirmation was deferred (identified by the caller from a signed
+     * completion marker; never bound to a recorded payment). Only an initial / late intent may
+     * replace it. Default null = unchanged rules.
+     * @var string|null
+     */
+    public $replaceable_row_ref = null;
 
     /**
      * @param EVC_Pmpro_Membership_Row[]|null $pmpro_rows
@@ -189,7 +205,12 @@ final class EVC_Bacs_Recovery_Policy {
     const PAYMENT_METHOD = 'bacs';
     const AMOUNT_MINOR = 2000;
 
-    const AWAITING = array('pending', 'on-hold');
+    /**
+     * STAGE-03D: `processing` is awaiting payment here too (same as EVC_Wp_Commerce_Pmpro_Reader).
+     * Awaiting is not a confirmation: EVC_Bacs_Payment_Issuer still completes only pending /
+     * on-hold orders, and a completion by shop staff counts only as `completed`.
+     */
+    const AWAITING = array('pending', 'on-hold', 'processing');
     const ENDED = array('cancelled', 'refunded', 'failed');
 
     public function decide(EVC_Bacs_Recovery_Facts $f): EVC_Bacs_Recovery_Decision {
@@ -287,6 +308,10 @@ final class EVC_Bacs_Recovery_Policy {
 
         // Completed order, nothing recorded: PMPro must show exactly the plan on a NEW row.
         if (count($active) === 0) {
+            if ($f->reissue_if_missing && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {
+                // STAGE-03D: completed by the shop, nothing issued for it yet: issue it (armed).
+                return EVC_Bacs_Recovery_Decision::manager('membership_not_reissued', $at_risk);
+            }
             return EVC_Bacs_Recovery_Decision::manager('membership_row_missing', $at_risk);
         }
         if (count($active) > 1) {
@@ -295,6 +320,10 @@ final class EVC_Bacs_Recovery_Policy {
         $ref = array_keys($active)[0];
         $row = $active[$ref];
         if ($ref === $i->previous_row_ref()) {
+            return EVC_Bacs_Recovery_Decision::manager('membership_not_reissued', $at_risk);
+        }
+        if ($f->replaceable_row_ref !== null && $ref === $f->replaceable_row_ref && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {
+            // STAGE-03D: the add-on's own (unverified) row of a deferred completion: re-issue it, armed.
             return EVC_Bacs_Recovery_Decision::manager('membership_not_reissued', $at_risk);
         }
         if (!$this->row_matches($row, $i->run_start_utc(), $i->period_end_utc())) {
