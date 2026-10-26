@@ -100,6 +100,7 @@ final class WcCompletionOnTest extends EVC_WP_Test_Case {
         $this->assertSame(900, wp_get_schedules()[EVC_Wc_Completion_Plugin::CRON_SCHEDULE]['interval']);
 
         // The schedule: once, on the 15-minute interval; a second call adds nothing.
+        wp_clear_scheduled_hook(EVC_Wc_Completion_Plugin::CRON_HOOK); // `init` of the real boot may already have scheduled it
         $this->assertFalse(wp_next_scheduled(EVC_Wc_Completion_Plugin::CRON_HOOK));
         EVC_Wc_Completion_Plugin::schedule();
         $first = wp_next_scheduled(EVC_Wc_Completion_Plugin::CRON_HOOK);
