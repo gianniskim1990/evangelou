@@ -1487,7 +1487,6 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
     }
 
     public function test_a_staff_user_who_lost_the_right_before_the_recovery_stops_it_visibly(): void {
-        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $staff = $this->staff();
         $at = self::whole_second(self::at7('-10 minutes'));
