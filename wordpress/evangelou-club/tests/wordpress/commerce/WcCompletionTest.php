@@ -625,7 +625,6 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
     }
 
     public function test_completion_by_nobody_the_customer_the_club_account_or_without_capability_is_not_a_confirmation(): void {
-        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $this->wire(self::whole_second(new DateTimeImmutable('-30 seconds')));
         $club_account = $this->create_staff_user();
         get_userdata($club_account)->add_cap('edit_shop_orders'); // TEST-ONLY: even WITH the capability
@@ -1151,7 +1150,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         $this->assertResult($r, EVC_Wc_Completion_Result::UNAVAILABLE, 'unexpected_error');
         $this->assertSame('completed', wc_get_order($order->get_id())->get_status());
         $this->assertSame(array(), $this->rows($customer), 'the add-on was withheld before anything could fail');
-        $this->assertSame(1, $this->parts['confirmer']->withheld_runs());
+        $this->assertSame(10, has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order'), 'put back after the run');
         $this->assertGuardInert();
         // The catch wrote the signed marker and the open index (an attested manual completion of a Club order):
         $this->assertSame(EVC_Wc_Completion_Marker_Read::VALID, $this->marker($order->get_id())->outcome);
@@ -1264,7 +1263,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             $this->assertSame(array(), $this->rows($customer), $name . ': no row from the add-on');
             $this->assertSame(EVC_Wc_Completion_Marker_Read::MISSING, $this->marker($order->get_id())->outcome, $name);
             $this->assertSame(EVC_Bacs_Intent_Read::MISSING, $this->intent($order->get_id())->outcome, $name);
-            $this->assertSame('none', $this->me($customer)['state'], $name);
+            $this->assertSame('unverified', $this->me($customer)['state'], $name);
             $this->assertCount(1, $this->notes($order->get_id()), $name);
         }
 
@@ -1308,7 +1307,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         $this->assertSame(EVC_Wc_Completion_Marker_Read::MISSING, $this->marker($order->get_id())->outcome);
         $this->assertSame(EVC_Bacs_Intent_Read::MISSING, $this->intent($order->get_id())->outcome);
         $this->assertSame(array(), $this->club()->member_movements($customer));
-        $this->assertSame('none', $this->me($customer)['state']);
+        $this->assertSame('unverified', $this->me($customer)['state']);
         $this->assertCount(1, $this->notes($order->get_id()));
     }
 
@@ -1366,7 +1365,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
             $this->assertSame(EVC_Wc_Completion_Marker_Read::VALID, $this->marker($order->get_id())->outcome, $name);
             $this->assertSame('open:0', $this->followup($order->get_id()), $name . ': found by the recovery');
             $this->assertSame(array(), $this->club()->member_movements($customer), $name);
-            $this->assertSame('none', $this->me($customer)['state'], $name);
+            $this->assertSame('unverified', $this->me($customer)['state'], $name);
 
             $done = $this->recover_at($at->modify('+1 minute'));
             $this->assertResult($done[$order->get_id()], EVC_Wc_Completion_Result::RECORDED);
@@ -1452,7 +1451,6 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
     }
 
     public function test_a_tampered_marker_stops_the_confirmation_before_anything_is_issued(): void {
-        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $staff = $this->staff();
         $this->wire(self::whole_second(self::at7('-5 minutes')));
@@ -1504,7 +1502,7 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         $this->assertStringStartsWith('manager:', (string) $this->followup($order->get_id()));
         $this->assertSame(array(), $this->rows($customer));
         $this->assertSame(array(), $this->club()->member_movements($customer));
-        $this->assertCount(1, $this->notes($order->get_id()), 'visible on the order for the shop manager');
+        $this->assertCount(2, $this->notes($order->get_id()), 'visible on the order for the shop manager: the deferral, then the refusal');
     }
 
     public function test_the_add_on_is_put_back_at_shutdown_even_when_nothing_after_it_ran(): void {
@@ -1521,7 +1519,6 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
     }
 
     public function test_a_completion_right_after_a_cancellation_the_club_did_not_see_is_not_a_confirmation(): void {
-        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $staff = $this->staff();
         $order = $this->order($customer);
