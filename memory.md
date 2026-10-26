@@ -2,12 +2,13 @@
 
 ## CURRENT STATE (keep this section current; update it at every task transition)
 
-- **As of 2026-10-26.** Stack tip `feat/evc-customer-me` @ `5af707a` (STAGE-03B.3a), Draft PR #31 (base `feat/evc-customer-club-preview`). 31 stacked PRs #1–#31, all Draft/Open/Unmerged (verified via GitHub API 2026-10-26). CI green on `5af707a` (foundation push #140 / PR #141, frontend push #133 / PR #134).
-- `main` @ `9024989` has DIVERGED from the stack: 25 memory-only commits on main not in the stack, 117 stack commits not on main, no `wordpress/` folder on main. Any future merge needs a deliberate `memory.md` reconciliation.
-- Nothing of the Club is merged, deployed or active. Flags `EVC_CLUB_STAFF_ENABLED` / `EVC_CLUB_CUSTOMER_ENABLED` OFF; production redeem = 503. The only Club code on `main`/Vercel is the original mock `/club` staff demo.
-- **Last approved step:** STAGE-03B.3a (internal issued → recorded BACS finalization). **Not approved:** 03B.3b (order completion + PMPro issuance with the plan's dates), full BACS workflow, activation, migrations on any real DB, merge, deploy.
-- **Next decision (owner):** early-renewal window policy (see STAGE-03B.2/03B.3a entries). Next planned work: a READ-ONLY decision study of the four documented options against the pinned PMPro 3.8.9 / add-on 1.11 source, then the owner chooses; only then 03B.3b.
-- Full read-only project audit (2026-10-25/26) is in the Claude Doc «Evangelou — Πλήρης αναφορά κατάστασης έργου»; its corrections are recorded in the 2026-10-26 transition entry at the end of this file.
+- **As of 2026-10-26 (afternoon).** Stack tip `feat/evc-bacs-issuance` (STAGE-03B.3b, code SHA `7971ff5`, CI run 40301136960 18/18 green), Draft PR #33 (base `docs/evc-claude-workflow`, PR #32, base `feat/evc-customer-me`, PR #31). 33 stacked Draft PRs, none merged.
+- `main` @ `9024989` has DIVERGED from the stack (memory-only commits on main; no `wordpress/` folder on main). Any future merge needs a deliberate `memory.md` reconciliation.
+- Nothing of the Club is merged, deployed or active. Flags `EVC_CLUB_STAFF_ENABLED` / `EVC_CLUB_CUSTOMER_ENABLED` OFF; production redeem = 503.
+- **Last owner step:** after reviewing STAGE-03B.3b and answering its questions, the owner said «συνέχισε» (2026-10-26 12:45) → 03B.3b accepted for DEVELOPMENT only (not merge/deploy/activation).
+- **Owner scope:** the owner does not operate WooCommerce or the site; the shop (and the technician) confirm bank transfers in WooCommerce. The plugin must read what WooCommerce records.
+- **Active task:** STAGE-03C — READ-ONLY study: how the Club correctly reflects a BACS payment the shop confirms by completing the order in WooCommerce (vs. our in-plugin manager attestation), keeping D1/D2/D5 and strict provenance. Output: options + recommendation + at most 2 simple owner questions. No code until the owner chooses.
+- **Waiting on technician:** separate staging Club DB.
 
 ## STANDING WORKFLOW — Claude only (owner decision, 2026-10-26; supersedes the 2026-10-09 ChatGPT/Claude Code protocol below)
 
