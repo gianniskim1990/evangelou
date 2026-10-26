@@ -1836,18 +1836,27 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
 
     public function test_a_member_lock_lost_before_the_issuance_or_before_the_record_stops_there(): void {
         $staff = $this->staff();
-        foreach (array('before_the_issuance' => 1, 'before_the_record' => 3) as $name => $call) {
+        $states = array('before_the_issuance' => EVC_Bacs_Intent::STATE_PLANNED, 'before_the_record' => EVC_Bacs_Intent::STATE_ISSUED);
+        foreach ($states as $name => $state) {
             $customer = $this->customer();
             $at = self::whole_second(self::at7('-20 minutes'));
+            $order = $this->order($customer);
             $hooked = new EVC_Hooked_Provenance_Store($this->club());
-            $hooked->before_call('corrections_for', $call, function () use ($customer) {
-                $db = $GLOBALS['wpdb'];
-                $db->get_var($db->prepare('SELECT RELEASE_LOCK(%s)', EVC_Member_Lock::name_for($db, $customer)));
-            });
+            // The lock is lost at the first Club read once the signed intent is in $state (the pipeline's
+            // next step re-reads the facts, then checks the lock right before issuing / recording).
+            $lose = function () use (&$lose, $hooked, $order, $customer, $state) {
+                $read = $this->parts['intents']->read($order->get_id());
+                if ($read->outcome === EVC_Bacs_Intent_Read::VALID && $read->intent->state() === $state) {
+                    $db = $GLOBALS['wpdb'];
+                    $db->get_var($db->prepare('SELECT RELEASE_LOCK(%s)', EVC_Member_Lock::name_for($db, $customer)));
+                    return;
+                }
+                $hooked->before_call('corrections_for', ($hooked->calls['corrections_for'] ?? 0) + 1, $lose);
+            };
+            $hooked->before_call('corrections_for', 1, $lose);
             $this->wire($at, function () use ($hooked) {
                 return $hooked;
             });
-            $order = $this->order($customer);
             $r = $this->complete($order->get_id(), $staff);
             $this->assertSame(EVC_Wc_Completion_Result::DEFERRED, $r->outcome, $name . ' ' . (string) $r->reason . ' ' . implode(',', $r->steps));
             $this->assertSame('lock_lost', $r->reason, $name);
