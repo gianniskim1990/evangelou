@@ -77,4 +77,35 @@ final class WcCompletionContextTest extends TestCase {
         $GLOBALS['evc_ctx']['cron'] = true;
         $this->assertSame('cron', EVC_Wc_Completion_Context::detect(0, true));
     }
+
+    public function test_only_the_three_woocommerce_admin_entry_points_for_this_order_attest(): void {
+        $ok = function ($channel, $verified, $request, $order = 42) {
+            return EVC_Wc_Completion_Context::entry_problem($channel, $order, $verified, $request);
+        };
+        // The order edit screen, HPOS and posts storage.
+        $this->assertNull($ok('admin', array('update-order_42'), array()));
+        $this->assertNull($ok('admin', array('update-post_42'), array()));
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin', array('update-order_43'), array()), 'another order\'s edit screen');
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin', array('update-order_420'), array()));
+        // Bulk actions, HPOS and posts storage, the order in the request.
+        $this->assertNull($ok('admin', array('bulk-orders'), array('id' => array('7', '42'))));
+        $this->assertNull($ok('admin', array('bulk-posts'), array('post' => array(42))));
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin', array('bulk-orders'), array('id' => array('7'))));
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin', array('bulk-posts'), array('id' => array('42'))), 'posts bulk reads post[]');
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin', array('bulk-orders'), array('id' => array('42abc'))));
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin', array(), array('id' => array('42'), 'post' => array('42'))), 'no verified nonce: a plugin\'s update_status(..., true) during an admin page');
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin', array('woocommerce-mark-order-status'), array('order_id' => '42')), 'the list-button nonce outside admin-ajax');
+        // The order-list button (admin-ajax).
+        $this->assertNull($ok('admin_ajax', array('woocommerce-mark-order-status'), array('action' => 'woocommerce_mark_order_status', 'order_id' => '42')));
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin_ajax', array('woocommerce-mark-order-status'), array('action' => 'some_plugin_action', 'order_id' => '42')), 'another admin-ajax action');
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin_ajax', array(), array('action' => 'woocommerce_mark_order_status', 'order_id' => '42')), 'nonce not verified');
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin_ajax', array('woocommerce-mark-order-status'), array('action' => 'woocommerce_mark_order_status', 'order_id' => '43')), 'another order');
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin_ajax', array('woocommerce-mark-order-status'), array('action' => 'woocommerce_mark_order_status', 'order_id' => array('42'))));
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin_ajax', array('update-order_42', 'bulk-orders'), array('action' => 'x', 'id' => array('42'))), 'admin-ajax never uses the screen nonces');
+        // Other channels are refused by problem(), always checked first; a missing order never attests.
+        foreach (array('rest', 'cli', 'cron', 'ajax', 'other') as $channel) {
+            $this->assertSame('channel_' . $channel, EVC_Wc_Completion_Context::problem($channel, array('manual' => true)));
+        }
+        $this->assertSame('not_a_woocommerce_admin_action', $ok('admin', array('update-order_0'), array(), 0));
+    }
 }
