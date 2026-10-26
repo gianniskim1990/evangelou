@@ -7,7 +7,7 @@
 - Nothing of the Club is merged, deployed or active. Flags `EVC_CLUB_STAFF_ENABLED` / `EVC_CLUB_CUSTOMER_ENABLED` OFF; production redeem = 503.
 - **Last owner step:** after reviewing STAGE-03B.3b and answering its questions, the owner said «συνέχισε» (2026-10-26 12:45) → 03B.3b accepted for DEVELOPMENT only (not merge/deploy/activation).
 - **Owner scope:** the owner does not operate WooCommerce or the site; the shop (and the technician) confirm bank transfers in WooCommerce. The plugin must read what WooCommerce records.
-- **Active task:** STAGE-03C — READ-ONLY study: how the Club correctly reflects a BACS payment the shop confirms by completing the order in WooCommerce (vs. our in-plugin manager attestation), keeping D1/D2/D5 and strict provenance. Output: options + recommendation + at most 2 simple owner questions. No code until the owner chooses.
+- **Active task:** STAGE-03D — WooCommerce «Ολοκληρωμένη» by shop staff = Club payment confirmation (Option A, owner-approved 2026-10-26); cancel/refund freezes the card. Branch `feat/evc-wc-completion`, development only, opt-in constant OFF.
 - **Waiting on technician:** separate staging Club DB.
 
 ## STANDING WORKFLOW — Claude only (owner decision, 2026-10-26; supersedes the 2026-10-09 ChatGPT/Claude Code protocol below)
@@ -1073,3 +1073,8 @@ The existing website developer replied explicitly:
 - **Needs from technician:** site timezone Europe/Athens; separate Club DB + wp-config constants (pending); keep product/add-on settings; cron running. **Shop:** confirm with «Ολοκληρωμένη» using their own account; never re-complete a cancelled/refunded Club order.
 - **Owner questions (sent via Telegram):** (1) WC «Ολοκληρωμένη» by shop staff counts automatically as payment confirmation? (recommended yes) (2) cancellation/refund in WC freezes the Club card until paid again? (recommended yes).
 - **Next:** wait for the owner's answers; no code before that.
+
+## OWNER DECISION 2026-10-26 12:57 — STAGE-03C Option A APPROVED; STAGE-03D ACTIVE (development only)
+- (1) YES: a Club order set to «Ολοκληρωμένη» (Completed) in WooCommerce by a shop staff user with their own account counts automatically as the Club payment confirmation (only Completed, not Processing).
+- (2) YES: cancellation/refund of such an order in WooCommerce automatically freezes the Club card (no free coffee) until the customer pays again.
+- Scope: STAGE-03D implements Option A on branch `feat/evc-wc-completion` (stacked on `feat/evc-bacs-issuance`), behind a new opt-in constant that stays OFF. Rules D1/D2/D5, one coffee per Athens day and Option 2 unchanged. Not approved: merge, deploy, staging, activation, real DB migrations.
