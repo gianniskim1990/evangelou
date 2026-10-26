@@ -464,6 +464,9 @@ final class EVC_Wc_Completion_Confirmer {
             }
             $facts = $inspector->facts($actor, $order_id);
             $this->completion_context($facts, $marker, $store);
+            if ($acted) {
+                $facts->replaceable_row_ref = null; // the row now there is the one we issued, never the add-on's
+            }
             if ($facts->intent->outcome === EVC_Bacs_Intent_Read::MISSING) {
                 if ($step > 0) {
                     return new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, 'intent_not_found_after_create');

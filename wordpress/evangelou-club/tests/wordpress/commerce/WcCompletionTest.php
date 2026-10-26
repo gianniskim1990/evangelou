@@ -258,6 +258,9 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
                     $f = $cb['function'];
                     $owner = is_array($f) ? (is_object($f[0]) ? get_class($f[0]) : (string) $f[0]) : (is_object($f) ? get_class($f) : (string) $f);
                     if (strpos($owner, 'EVC_Wc_Completion') === 0 || strpos($owner, 'EVC_Bacs_Issuance_Guard') === 0) {
+                        if ($owner === 'EVC_Wc_Completion_Plugin' && is_array($f) && in_array($f[1], array('boot', 'deactivate'), true)) {
+                            continue; // the inert boot gate and the cleanup hook, like every other stage
+                        }
                         $ours[] = $hook . '@' . $priority . ':' . $owner;
                     }
                 }
@@ -891,9 +894,10 @@ final class WcCompletionTest extends EVC_WP_Test_Case {
         list(, $first) = $this->purchase($customer, $this->staff(), self::at7('-10 days'));
         $this->assertResult($first, EVC_Wc_Completion_Result::RECORDED);
         $order = $this->order($customer);
+        $before = $this->parts['confirmer']->suppressed_runs();
         $r = $this->complete($order->get_id(), 0); // e.g. a REST API key or an automation
         $this->assertResult($r, EVC_Wc_Completion_Result::NOT_ATTESTED, 'no_user');
-        $this->assertSame(0, $this->parts['confirmer']->suppressed_runs(), 'never suppressed when not claimed');
+        $this->assertSame($before, $this->parts['confirmer']->suppressed_runs(), 'never suppressed when not claimed');
         $rows = $this->rows($customer);
         $this->assertCount(2, $rows, 'the add-on extended the membership exactly as shipped');
         $this->assertAddOnRow($rows[1]);
