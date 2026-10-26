@@ -73,23 +73,26 @@ final class WcCompletionOnTest extends EVC_WP_Test_Case {
         return (new EVC_Wc_Completion_Markers($config->completion_marker_codec(), 'live'))->followup($order_id);
     }
 
-    private function hooked_on_completed(): bool {
+    /** How many confirmers are hooked (the real plugins_loaded boot already ran when the site was configured at load). */
+    private function hooked_on_completed(): int {
         global $wp_filter;
+        $n = 0;
         foreach ($wp_filter['woocommerce_order_status_completed']->callbacks[EVC_Wc_Completion_Confirmer::COMPLETION_PRIORITY] ?? array() as $cb) {
             if (is_array($cb['function']) && $cb['function'][0] instanceof EVC_Wc_Completion_Confirmer && $cb['function'][1] === 'on_completed') {
-                return true;
+                $n++;
             }
         }
-        return false;
+        return $n;
     }
 
     public function test_the_constant_is_on_and_boot_hooks_schedules_and_runs_the_recovery(): void {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $this->assertTrue(defined(EVC_Wc_Completion_Feature::CONSTANT));
         $this->assertTrue(EVC_Wc_Completion_Feature::enabled());
-        $this->assertFalse($this->hooked_on_completed(), 'nothing before boot');
-        EVC_Wc_Completion_Plugin::boot();
-        $this->assertTrue($this->hooked_on_completed());
+        if ($this->hooked_on_completed() === 0) {
+            EVC_Wc_Completion_Plugin::boot(); // the site constants were not there at plugins_loaded: boot as it would
+        }
+        $this->assertSame(1, $this->hooked_on_completed(), 'exactly one confirmer, hooked by the real boot()');
         $this->assertSame(10, has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order'));
         $this->assertNotFalse(has_filter('cron_schedules', array('EVC_Wc_Completion_Plugin', 'schedules')));
         $this->assertNotFalse(has_action(EVC_Wc_Completion_Plugin::CRON_HOOK, array('EVC_Wc_Completion_Plugin', 'run_recovery')));
@@ -134,7 +137,6 @@ final class WcCompletionOnTest extends EVC_WP_Test_Case {
     }
 
     public function test_deactivation_clears_the_schedule(): void {
-        EVC_Wc_Completion_Plugin::boot();
         EVC_Wc_Completion_Plugin::schedule();
         $this->assertNotFalse(wp_next_scheduled(EVC_Wc_Completion_Plugin::CRON_HOOK));
         EVC_Wc_Completion_Plugin::deactivate();
