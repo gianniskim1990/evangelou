@@ -29,8 +29,10 @@ defined('ABSPATH') || exit;
  * product (simple, published, sold individually, €20, EUR store, no
  * autocomplete), the add-on mapping (this product -> this level, and no other
  * product granting the level), the level (1 month, no recurring billing), and
- * every Club order (customer's own, BACS, EUR, exactly one Club item of
- * quantity 1). The site timezone is reported as is; the mapper requires
+ * every Club order (customer's own, BACS, EUR, total 20.00 (STAGE-03D),
+ * exactly one Club item of quantity 1); a recorded payment whose order was
+ * later cancelled / refunded / failed without a recorded correction
+ * (STAGE-03D). The site timezone is reported as is; the mapper requires
  * "Europe/Athens".
  *
  * Read-only: SELECTs and getters only, no write, no hook, no cache warm-up
@@ -72,7 +74,7 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
             if (!$fact instanceof EVC_Pmpro_Payment_Fact || !$fact->was_confirmed()) {
                 throw new UnexpectedValueException('Provenance returned a non-confirmed fact.');
             }
-            $settled[$fact->payment_ref] = true;
+            $settled[$fact->payment_ref] = $fact->status;
         }
         $payments = $confirmed;
         foreach ($this->club_orders($wp_user_id) as $order) {
@@ -82,10 +84,16 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
                 $conflicts[] = $problem;
                 continue;
             }
-            if (isset($settled[$ref])) {
-                continue; // the Club's own record of this order is authoritative
-            }
             $status = (string) $order->get_status();
+            if (isset($settled[$ref])) {
+                // STAGE-03D (owner decision 2: cancellation / refund freezes the card): a recorded payment
+                // whose order was cancelled, refunded or failed while its correction is not recorded yet
+                // (e.g. the Club database was unreachable at that moment) is never shown as paid.
+                if (in_array($status, self::FAILED_STATUSES, true) && $settled[$ref] === EVC_Pmpro_Payment_Fact::STATUS_CONFIRMED) {
+                    $conflicts[] = 'club_order_ended_after_recorded_payment';
+                }
+                continue; // otherwise the Club's own record of this order is authoritative
+            }
             if (in_array($status, self::NOT_EVIDENCE_STATUSES, true)) {
                 continue;
             }
@@ -267,6 +275,10 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
         }
         if ((string) $order->get_currency() !== EVC_Commerce_Source_Config::CURRENCY) {
             return 'club_order_not_eur';
+        }
+        // STAGE-03D: one Club month costs exactly 20.00 (a valid Club order always does).
+        if ((string) wc_format_decimal($order->get_total(), 2) !== EVC_Commerce_Source_Config::PRICE) {
+            return 'club_order_total_not_20_eur';
         }
         $club_items = 0;
         foreach ($order->get_items('line_item') as $item) {

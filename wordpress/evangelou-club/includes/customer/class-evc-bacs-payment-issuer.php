@@ -71,6 +71,12 @@ final class EVC_Bacs_Issuance_Result {
  */
 final class EVC_Bacs_Payment_Issuer {
     const EVENT = 'bacs_payment_issuance';
+    /**
+     * STAGE-03D: the order statuses this issuer completes. `processing` counts as awaiting payment
+     * in the recovery policy (like the reader), but the issuer still never treats it as a state it
+     * may confirm and complete (unchanged behaviour: order_status_unknown).
+     */
+    const AWAITING = array('pending', 'on-hold');
     /** create, complete, confirm, finalize (+ slack); a loop never runs unbounded */
     const MAX_STEPS = 6;
 
@@ -166,7 +172,7 @@ final class EVC_Bacs_Payment_Issuer {
     /** @param string[] $steps */
     private function under_lock(EVC_Member_Lock $lock, int $actor_user_id, WC_Order $order, string $attested_movement, string $received_on, ?string &$movement_id, array &$steps): EVC_Bacs_Issuance_Result {
         $order_id = (int) $order->get_id();
-        $site = $this->site_problem();
+        $site = self::site_problem($this->config);
         if ($site !== null) {
             return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, $site);
         }
@@ -234,6 +240,10 @@ final class EVC_Bacs_Payment_Issuer {
                 continue;
             }
             if ($decision->outcome === EVC_Bacs_Recovery_Decision::RESUME && $decision->step === EVC_Bacs_Recovery_Decision::STEP_COMPLETE_ORDER) {
+                if ($facts->order === null || !in_array($facts->order->status, self::AWAITING, true)) {
+                    // STAGE-03D: the policy now treats `processing` as awaiting; this issuer does not complete it.
+                    return $this->stopped(EVC_Bacs_Issuance_Result::CONFLICT, 'order_status_unknown', $risk);
+                }
                 if ($acted) {
                     return $this->stopped(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'order_not_completed', $risk);
                 }
@@ -304,7 +314,7 @@ final class EVC_Bacs_Payment_Issuer {
         if (in_array($o->status, EVC_Bacs_Recovery_Policy::ENDED, true)) {
             return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'order_ended');
         }
-        if (!in_array($o->status, EVC_Bacs_Recovery_Policy::AWAITING, true)) {
+        if (!in_array($o->status, self::AWAITING, true)) {
             // A completed order without an intent is never treated as paid; any other status is unknown.
             return $o->status === 'completed'
                 ? new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'completed_order_without_intent')
@@ -344,9 +354,41 @@ final class EVC_Bacs_Payment_Issuer {
             default:
                 return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'plan_' . (string) $plan->reason());
         }
+        $problem = self::membership_problem($this->config, $this->store, $plan, $facts->pmpro_rows, $run_start, $previous_row_ref);
+        if ($problem !== null) {
+            return $problem;
+        }
+
         try {
-            $run_start = EVC_Paid_Run::start_for($this->store, $plan);
-            $predecessor = $plan->kind() === EVC_Funded_Period::KIND_EARLY ? $this->store->period_for_movement((string) $plan->predecessor_movement_id()) : null;
+            $intent = EVC_Bacs_Intent::planned(EVC_Bacs_Payment_Confirmation::ENVIRONMENT, $o->order_id, $o->customer_id, $this->config->level_id, $attested_movement, $anchor, $actor_user_id, $verified_at, $plan, $run_start, $previous_row_ref);
+        } catch (InvalidArgumentException $e) {
+            return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::CONFLICT, 'intent_invalid');
+        }
+        $write = $this->intents->create($lock, $intent);
+        if (in_array($write->outcome, array(EVC_Bacs_Intent_Write::WRITTEN, EVC_Bacs_Intent_Write::ALREADY), true)) {
+            return null;
+        }
+        return $write->outcome === EVC_Bacs_Intent_Write::CONFLICT
+            ? new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::CONFLICT, 'intent_' . (string) $write->reason)
+            : new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::UNAVAILABLE, 'intent_create_' . $write->outcome);
+    }
+
+    /**
+     * PMPro must show exactly what the plan expects BEFORE anything is written: the paid-run start
+     * ($run_start, out), and for an early renewal exactly one active Club row = the row the last
+     * recorded payment is bound to, with start = run start and end = plan start ($previous_row_ref,
+     * out); initial / late: no active Club row. Both instants must be exactly writable as PMPro
+     * local dates. Null when it does; else why not. Reads only. STAGE-03D: shared (verbatim) with
+     * EVC_Wc_Completion_Confirmer.
+     *
+     * @param EVC_Pmpro_Membership_Row[] $pmpro_rows
+     */
+    public static function membership_problem(EVC_Commerce_Source_Config $config, EVC_Provenance_Store $store, EVC_Period_Plan $plan, array $pmpro_rows, ?DateTimeImmutable &$run_start, ?string &$previous_row_ref): ?EVC_Bacs_Issuance_Result {
+        $run_start = null;
+        $previous_row_ref = null;
+        try {
+            $run_start = EVC_Paid_Run::start_for($store, $plan);
+            $predecessor = $plan->kind() === EVC_Funded_Period::KIND_EARLY ? $store->period_for_movement((string) $plan->predecessor_movement_id()) : null;
         } catch (UnexpectedValueException $e) {
             return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'paid_chain_not_contiguous');
         } catch (Throwable $e) {
@@ -355,12 +397,11 @@ final class EVC_Bacs_Payment_Issuer {
 
         // PMPro must show exactly what the plan expects BEFORE anything is written.
         $active = array();
-        foreach ($facts->pmpro_rows as $row) {
-            if ($row->level_id === $this->config->level_id && $row->status === 'active') {
+        foreach ($pmpro_rows as $row) {
+            if ($row->level_id === $config->level_id && $row->status === 'active') {
                 $active[] = $row;
             }
         }
-        $previous_row_ref = null;
         if ($plan->kind() === EVC_Funded_Period::KIND_EARLY) {
             if (count($active) !== 1) {
                 return count($active) === 0
@@ -384,18 +425,7 @@ final class EVC_Bacs_Payment_Issuer {
             return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'period_not_representable_in_pmpro');
         }
 
-        try {
-            $intent = EVC_Bacs_Intent::planned(EVC_Bacs_Payment_Confirmation::ENVIRONMENT, $o->order_id, $o->customer_id, $this->config->level_id, $attested_movement, $anchor, $actor_user_id, $verified_at, $plan, $run_start, $previous_row_ref);
-        } catch (InvalidArgumentException $e) {
-            return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::CONFLICT, 'intent_invalid');
-        }
-        $write = $this->intents->create($lock, $intent);
-        if (in_array($write->outcome, array(EVC_Bacs_Intent_Write::WRITTEN, EVC_Bacs_Intent_Write::ALREADY), true)) {
-            return null;
-        }
-        return $write->outcome === EVC_Bacs_Intent_Write::CONFLICT
-            ? new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::CONFLICT, 'intent_' . (string) $write->reason)
-            : new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::UNAVAILABLE, 'intent_create_' . $write->outcome);
+        return null;
     }
 
     /**
@@ -419,7 +449,7 @@ final class EVC_Bacs_Payment_Issuer {
             return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'period_not_representable_in_pmpro');
         }
         // STAGE-03B.3b review (M1): the pinned environment again, immediately before writing.
-        $environment = $this->environment_problem();
+        $environment = self::environment_problem($this->config);
         if ($environment !== null) {
             return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, $environment);
         }
@@ -443,7 +473,7 @@ final class EVC_Bacs_Payment_Issuer {
      * with another level (else PMPro would no longer cancel that other level).
      * Read with plain SELECTs: PMPro's own group getters may create a default group (a write).
      */
-    private function site_problem(): ?string {
+    public static function site_problem(EVC_Commerce_Source_Config $config): ?string {
         global $wpdb;
         if ((string) get_option('timezone_string', '') !== EVC_Membership_Calendar::ZONE) {
             return 'site_timezone_not_athens';
@@ -451,12 +481,12 @@ final class EVC_Bacs_Payment_Issuer {
         if (!EVC_Wp_Commerce_Pmpro_Reader::commerce_plugins_loaded() || !isset($wpdb->pmpro_membership_levels_groups, $wpdb->pmpro_groups)) {
             return 'membership_plugin_unavailable';
         }
-        $environment = $this->environment_problem();
+        $environment = self::environment_problem($config);
         if ($environment !== null) {
             return $environment;
         }
         $wpdb->last_error = '';
-        $group = $wpdb->get_var($wpdb->prepare("SELECT `group` FROM {$wpdb->pmpro_membership_levels_groups} WHERE `level` = %d LIMIT 1", $this->config->level_id));
+        $group = $wpdb->get_var($wpdb->prepare("SELECT `group` FROM {$wpdb->pmpro_membership_levels_groups} WHERE `level` = %d LIMIT 1", $config->level_id));
         if ($wpdb->last_error !== '') {
             return 'level_group_unreadable';
         }
@@ -464,7 +494,7 @@ final class EVC_Bacs_Payment_Issuer {
             return null;
         }
         $allow = $wpdb->get_var($wpdb->prepare("SELECT allow_multiple_selections FROM {$wpdb->pmpro_groups} WHERE id = %d", (int) $group));
-        $others = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->pmpro_membership_levels_groups} WHERE `group` = %d AND `level` <> %d", (int) $group, $this->config->level_id));
+        $others = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->pmpro_membership_levels_groups} WHERE `group` = %d AND `level` <> %d", (int) $group, $config->level_id));
         if ($wpdb->last_error !== '') {
             return 'level_group_unreadable';
         }
@@ -478,8 +508,8 @@ final class EVC_Bacs_Payment_Issuer {
      * WooCommerce / PMPro unless it is exactly as pinned: a product mapped to another level would
      * otherwise make every completion or re-issue grant THAT level with the add-on's own dates.
      */
-    private function environment_problem(): ?string {
-        return EVC_Wp_Commerce_Pmpro_Reader::environment_conflicts($this->config) === array() ? null : 'commerce_environment_conflict';
+    public static function environment_problem(EVC_Commerce_Source_Config $config): ?string {
+        return EVC_Wp_Commerce_Pmpro_Reader::environment_conflicts($config) === array() ? null : 'commerce_environment_conflict';
     }
 
     private function stopped(string $outcome, string $reason, bool $risk): EVC_Bacs_Issuance_Result {

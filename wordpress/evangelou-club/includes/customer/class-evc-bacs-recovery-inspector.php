@@ -22,11 +22,21 @@ final class EVC_Bacs_Recovery_Inspector {
     private $recorder;
     /** @var EVC_Bacs_Recovery_Policy */
     private $policy;
+    /** @var callable(int): bool|null STAGE-03D: who may act on this path (null = the bank-confirmation rule) */
+    private $actor_rule;
+    /** @var string evidence kind of the payment a fresh plan describes */
+    private $evidence_kind;
 
-    public function __construct(EVC_Commerce_Source_Config $config, EVC_Provenance_Store $store, EVC_Wc_Bacs_Intent_Store $intents) {
+    /**
+     * @param callable(int): bool|null $actor_rule STAGE-03D: the WooCommerce-completion path passes its own
+     *        rule (shop staff completing in WooCommerce); default = the bank-confirmation rule (unchanged)
+     */
+    public function __construct(EVC_Commerce_Source_Config $config, EVC_Provenance_Store $store, EVC_Wc_Bacs_Intent_Store $intents, ?callable $actor_rule = null, string $evidence_kind = EVC_Payment_Evidence::KIND_MANUAL_CONFIRMATION) {
         $this->config = $config;
         $this->store = $store;
         $this->intents = $intents;
+        $this->actor_rule = $actor_rule;
+        $this->evidence_kind = $evidence_kind;
         $this->recorder = new EVC_Provenance_Recorder(
             $store,
             new EVC_Pmpro_Mapper_Config(array($config->level_id), EVC_Commerce_Source_Config::PMPRO_VERSION, EVC_Commerce_Source_Config::PMPRO_VERSION_EXCLUSIVE_MAX),
@@ -66,7 +76,7 @@ final class EVC_Bacs_Recovery_Inspector {
                 $corrections = $this->store->corrections_for($i->movement_id());
                 $owner = $this->store->movement_for_alias((new EVC_Movement_Alias(EVC_Movement_Alias::NS_WC_ORDER, $i->order_anchor()))->key());
                 if ($movement === null) {
-                    $plan = $this->recorder->plan(self::prospective($i));
+                    $plan = $this->recorder->plan(self::prospective($i, $this->evidence_kind));
                 }
             } catch (Throwable $e) {
                 $club_readable = false;
@@ -76,7 +86,7 @@ final class EVC_Bacs_Recovery_Inspector {
             EVC_Bacs_Payment_Confirmation::ENVIRONMENT,
             $this->config->level_id,
             $actor_user_id,
-            self::authorized($actor_user_id),
+            $this->actor_rule === null ? self::authorized($actor_user_id) : (bool) ($this->actor_rule)($actor_user_id),
             $intent,
             $order,
             $rows,
@@ -90,7 +100,7 @@ final class EVC_Bacs_Recovery_Inspector {
     }
 
     /** The payment the intent describes, as a prospective (row-less, unconfirmed) payment. */
-    public static function prospective(EVC_Bacs_Intent $i): EVC_Prospective_Payment {
+    public static function prospective(EVC_Bacs_Intent $i, string $evidence_kind = EVC_Payment_Evidence::KIND_MANUAL_CONFIRMATION): EVC_Prospective_Payment {
         return new EVC_Prospective_Payment(
             $i->movement_id(),
             $i->environment(),
@@ -101,7 +111,7 @@ final class EVC_Bacs_Recovery_Inspector {
             EVC_Commerce_Source_Config::CURRENCY,
             array(new EVC_Movement_Alias(EVC_Movement_Alias::NS_WC_ORDER, $i->order_anchor())),
             EVC_Verified_Movement::AUTHORITY_MANUAL_ADMIN,
-            EVC_Payment_Evidence::KIND_MANUAL_CONFIRMATION
+            $evidence_kind
         );
     }
 

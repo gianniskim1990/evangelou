@@ -86,6 +86,11 @@ final class EVC_Commerce_Source_Config {
         return new EVC_Bacs_Intent_Codec($this->evidence_key);
     }
 
+    /** STAGE-03D: signer for WooCommerce completion markers (own derived key; the evidence key never leaves this object). */
+    public function completion_marker_codec(): EVC_Wc_Completion_Marker_Codec {
+        return new EVC_Wc_Completion_Marker_Codec($this->evidence_key);
+    }
+
     public function mapper(): EVC_Pmpro_Entitlement_Mapper {
         return new EVC_Pmpro_Entitlement_Mapper(new EVC_Pmpro_Mapper_Config(array($this->level_id), self::PMPRO_VERSION, self::PMPRO_VERSION_EXCLUSIVE_MAX));
     }

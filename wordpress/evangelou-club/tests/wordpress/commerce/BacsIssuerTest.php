@@ -785,6 +785,12 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $cancelled = $this->order($this->customer(), $at->modify('-1 hour'));
         $cancelled->update_status('cancelled');
         $this->assertResult($this->issuer($at)->issue($actor, $cancelled->get_id(), self::attestation($this->reference(), $at)), EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'order_ended');
+        // STAGE-03D: the recovery policy treats `processing` as awaiting payment, but the issuer still never confirms it.
+        $processing = $this->order($this->customer(), $at->modify('-1 hour'));
+        $processing->update_status('processing');
+        $this->assertResult($this->issuer($at)->issue($actor, $processing->get_id(), self::attestation($this->reference(), $at)), EVC_Bacs_Issuance_Result::CONFLICT, 'order_status_unknown');
+        $this->assertSame(EVC_Bacs_Intent_Read::MISSING, $this->intent($processing->get_id())->outcome);
+        $this->assertSame('processing', wc_get_order($processing->get_id())->get_status());
         $this->assertSame(array(), $this->club()->member_movements($customer));
     }
 
