@@ -474,6 +474,83 @@ issued early renewal preserves the whole previous period and appends exactly
 one approved calendar month. Not production-safe until the owner decides the
 window policy and STAGE-03B.3b (completion + issuance) is reviewed.
 
+## STAGE-03B.3b: internal issuance orchestrator, Option 2 (NOT wired)
+
+Owner decision 2026-10-26: Option 2. `EVC_Bacs_Payment_Issuer::issue(actor,
+order, attestation)` does the whole BACS confirmation in ONE request under
+ONE member lock. Nothing constructs it or its guard (the packager forbids
+`new EVC_Bacs_Payment_Issuer` and `new EVC_Bacs_Issuance_Guard`). There is no
+route, button, hook at load, cron, role grant, migration or flag change.
+
+1. **Admission** (shared with the finalizer, `admit()`): the actor holds
+   `evc_confirm_bank_payment` and is not the shared staff account; the
+   attestation is well-formed (normalised reference → HMAC at once, 2000 cents
+   EUR, a real value date); the order exists with a customer account.
+2. **One lock.** `EVC_Bacs_Payment_Finalizer::with_member_lock()` is still the
+   only code that calls `EVC_Member_Lock::acquire(` (packager rule unchanged).
+   The issuer runs inside it and calls the finalization step through
+   `finalize_holding()`, which never takes or releases the lock and re-checks
+   ownership.
+3. **Pre-flight (nothing written yet):** site timezone `Europe/Athens`; the
+   Club level does not share a single-selection PMPro level group with another
+   level (read with plain SELECTs, because PMPro's own group getters may create
+   a default group); order awaiting payment (pending / on-hold), BACS, EUR
+   20.00, one Club item, not the actor's own; value date within the window;
+   fresh `plan()` (prospective payment: movement = HMAC of the reference,
+   anchor = HMAC of the order, verified at = now, whole second, no PMPro row);
+   paid-run start; PMPro must match the plan: initial/late → no active Club
+   row; early → exactly one, and it must be the row the last recorded payment
+   is bound to, with start = paid-run start and end = plan start; both
+   instants must be **exactly writable** as PMPro local dates
+   (`EVC_Pmpro_Local_Time::exact()`; a confirmation inside the first repeated
+   autumn hour is refused: `period_not_representable_in_pmpro`). Then the
+   signed `planned` intent is created (read back).
+4. **Armed completion.** `EVC_Bacs_Issuance_Guard` is armed for the intent's
+   customer, level and exact local dates, then `$order->update_status('completed')`
+   runs, and the guard is disarmed in `finally`. While armed:
+   `pmprowoo_checkout_level` at priority 1000 (after the add-on's own
+   priority-10 extension) sets `startdate` = `'<run start>'` (single-quoted, as
+   the add-on passes it; PMPro strips single quotes) and `enddate` = `<planned
+   end>`, only for that customer and level; `pmpro_deactivate_old_levels`
+   returns false only for the level change that follows that replacement for
+   that customer and level (tracked via `pmpro_before_change_membership_level`),
+   once. No callback writes to the database (`$wpdb->insert_id` hazard). So the
+   paid row stays `active` until PMPro's INSERT; PMPro's own duplicate removal
+   then sets it `changed`. Unarmed completions (e.g. a manual "Completed") see
+   no callback at all.
+5. **Fresh re-read → policy.** Only `resume: confirm_issuance` moves the intent
+   planned → issued (row ref from the re-read, compare-and-set);
+   `issuance_mismatch` → intent `issuance_mismatch` (manager); anything else
+   stops with the policy's reason. Upstream return values and exceptions are
+   ignored; only the re-read decides.
+6. **Finalization** inside the same lock (record_expecting, issued →
+   recorded), unchanged from STAGE-03B.3a.
+7. **Resume / re-issue:** with an intent stored, each step follows the policy
+   on fresh facts. `membership_not_reissued` (completed order, the paid row
+   still the only active one — e.g. the PMPro INSERT failed, or the request
+   crashed before the add-on ran) is re-issued on the NEXT request by calling
+   the add-on's own `pmprowoo_add_membership_from_order($order_id)` under the
+   armed guard (it reads the order and calls the same shim; it does not check
+   the order status; it is only called when the re-read shows no new row). At
+   most one issuance action per request.
+
+**Effects (tested with the real plugins, HPOS and legacy storage):** initial
+purchase → active with the exact Athens end; early renewal → old row
+`changed`, new row start = paid-run start, end = previous paid end + one
+calendar month, `/me` active; PMPro INSERT failure → old row still ACTIVE,
+`/me` still active, intent `planned`, `membership_not_reissued`, nothing
+recorded, and the next call re-issues and records; failed duplicate removal →
+two active rows → policy conflict, `/me` unverified; crashes between steps
+resume via `complete_order` / `confirm_issuance` / `record_movement`; the
+guard is disarmed after an exception; DST-crossing and 31-January plans are
+exact.
+
+**Not changed:** the reader treats WooCommerce `processing` as pending, the
+recovery policy as unknown. BACS orders are never `processing` in this flow
+(the issuer only accepts pending / on-hold), so neither rule was changed.
+An initial purchase whose PMPro INSERT failed (`membership_row_missing`) is
+NOT re-issued automatically (ambiguous: a manager must look).
+
 ## Order lookup is bounded
 
 The reader now selects only the customer's own Club orders in SQL (HPOS

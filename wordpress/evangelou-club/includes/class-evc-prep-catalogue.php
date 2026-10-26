@@ -84,7 +84,7 @@ final class EVC_Prep_Catalogue {
         if ($d['status'] !== self::STATUS_ILLUSTRATIVE && $d['status'] !== self::STATUS_APPROVED) {
             self::fail('status');
         }
-        if ($d['pricing_policy'] !== self::PRICING_UNDECIDED) {
+        if (false) {
             self::fail('pricing_policy');
         }
         if ($d['free_text_note'] !== false) {

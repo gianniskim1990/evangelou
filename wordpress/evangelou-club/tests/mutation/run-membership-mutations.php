@@ -2328,6 +2328,25 @@ $mutants = array(
         'file' => 'includes/class-evc-provenance-recorder.php',
         'search' => "            \$outcome = \$this->record_or_throw(\$movement, \$expected);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::unavailable(\$e instanceof EVC_Provenance_Commit_Unknown_Exception ? 'commit_outcome_unknown' : 'store_unavailable');",
         'replace' => "            \$outcome = \$this->record_or_throw(\$movement, \$expected);\n        } catch (EVC_Provenance_Conflict_Exception \$e) {\n            return EVC_Record_Outcome::conflict('concurrent_update');\n        } catch (Throwable \$e) {\n            return EVC_Record_Outcome::unavailable('store_unavailable');",
+    ),    // STAGE-03B.3b: exact PMPro local dates for planned instants (EVC_Pmpro_Local_Time). The sub-second
+    // guard has no mutant: it is EQUIVALENT (the round-trip comparison already rejects any fraction).
+    array(
+        'id' => 'LT1-unrepresentable-local-time-written',
+        'file' => 'includes/class-evc-pmpro-local-time.php',
+        'search' => '        return $back !== null && $back == $utc ? $local : null;',
+        'replace' => '        return $local;',
+    ),
+    array(
+        'id' => 'LT2-read-mode-ignored',
+        'file' => 'includes/class-evc-pmpro-local-time.php',
+        'search' => "(int) \$m[6], 0, \$mode)['instant'];",
+        'replace' => "(int) \$m[6], 0, EVC_Membership_Calendar::EARLIEST)['instant'];",
+    ),
+    array(
+        'id' => 'LT3-placeholder-year-read-as-date',
+        'file' => 'includes/class-evc-pmpro-local-time.php',
+        'search' => ' || (int) $m[1] < EVC_Pmpro_Entitlement_Mapper::MIN_REAL_YEAR) {',
+        'replace' => ') {',
     ),
 );
 
