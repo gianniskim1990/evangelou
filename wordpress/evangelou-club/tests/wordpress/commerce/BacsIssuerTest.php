@@ -209,6 +209,8 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->assertFalse(has_filter('pmprowoo_checkout_level', array($this->guard, 'checkout_level')));
         $this->assertFalse(has_action('pmpro_before_change_membership_level', array($this->guard, 'before_change')));
         $this->assertFalse(has_filter('pmpro_deactivate_old_levels', array($this->guard, 'deactivate_old_levels')));
+        $this->assertFalse(has_action('woocommerce_order_status_completed', array($this->guard, 'completing')));
+        $this->assertFalse(has_action('shutdown', array($this->guard, 'disarm')));
     }
 
     /** Nothing was written for this order: no intent, still awaiting payment, no PMPro row, no Club record. */
@@ -564,8 +566,11 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
     public function test_the_guard_changes_dates_only_for_the_armed_customer_and_level(): void {
         $g = new EVC_Bacs_Issuance_Guard();
         $this->assertSame(self::level(11, 1), $g->checkout_level(self::level(11, 1)), 'unarmed: untouched');
-        $g->arm(11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
+        $g->completing(501);
+        $g->arm(501, 11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
         try {
+            $this->assertSame(self::level(11, 1), $g->checkout_level(self::level(11, 1)), 'armed, but no order is being completed yet');
+            $g->completing(501);
             $this->assertSame(self::level(12, 1), $g->checkout_level(self::level(12, 1)), 'another customer');
             $this->assertSame(self::level(11, 2), $g->checkout_level(self::level(11, 2)), 'another level');
             $this->assertSame('not-a-level', $g->checkout_level('not-a-level'));
@@ -579,9 +584,34 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->assertSame(self::level(11, 1), $g->checkout_level(self::level(11, 1)), 'disarmed: untouched');
     }
 
+    public function test_the_guard_changes_dates_only_while_the_armed_order_is_processed(): void {
+        $g = new EVC_Bacs_Issuance_Guard();
+        $g->arm(501, 11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
+        try {
+            $g->completing(502);
+            $this->assertSame(self::level(11, 1), $g->checkout_level(self::level(11, 1)), 'another order of the same customer and level');
+            $this->assertTrue($g->deactivate_old_levels(true), 'nothing matched: the other order keeps PMPro\'s own ordering');
+            $g->completing(501);
+            $this->assertSame('2026-11-15 12:00:07', $g->checkout_level(self::level(11, 1))['enddate']);
+            $g->completing(502);
+            $this->assertSame(self::level(11, 1), $g->checkout_level(self::level(11, 1)), 'a later order in the same request');
+            $this->assertSame(1, $g->applied());
+        } finally {
+            $g->disarm();
+        }
+        $g->arm(501, 11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
+        try {
+            $this->assertSame(self::level(11, 1), $g->checkout_level(self::level(11, 1)), 'a new arm forgets the previously processed order');
+            $this->assertSame(0, $g->applied());
+        } finally {
+            $g->disarm();
+        }
+    }
+
     public function test_the_guard_keeps_the_paid_row_only_for_the_armed_change(): void {
         $g = new EVC_Bacs_Issuance_Guard();
-        $g->arm(11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
+        $g->arm(501, 11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
+        $g->completing(501);
         try {
             $this->assertTrue($g->deactivate_old_levels(true), 'no armed level passed through the add-on');
             $g->checkout_level(self::level(12, 1));
@@ -602,11 +632,15 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
     public function test_disarming_removes_every_guard_callback(): void {
         $g = new EVC_Bacs_Issuance_Guard();
         $this->assertFalse(has_filter('pmpro_deactivate_old_levels', array($g, 'deactivate_old_levels')));
-        $g->arm(11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
+        $this->assertFalse(has_action('shutdown', array($g, 'disarm')));
+        $g->arm(501, 11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
         $this->assertGreaterThan(10, has_filter('pmprowoo_checkout_level', array($g, 'checkout_level')), 'after the add-on\'s own priority-10 extension');
         $this->assertSame(EVC_Bacs_Issuance_Guard::PRIORITY, has_filter('pmpro_deactivate_old_levels', array($g, 'deactivate_old_levels')));
+        $this->assertLessThan(10, has_action('woocommerce_order_status_completed', array($g, 'completing')), 'before the add-on\'s own priority-10 issuance');
+        $this->assertSame(10, has_action('woocommerce_order_status_completed', 'pmprowoo_add_membership_from_order'), 'the add-on issues at priority 10');
+        $this->assertSame(0, has_action('shutdown', array($g, 'disarm')), 'a fatal error while armed still disarms first');
         try {
-            $g->arm(11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
+            $g->arm(501, 11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07');
             $this->fail('a guard is armed once');
         } catch (LogicException $e) {
             $this->assertTrue($g->is_armed());
@@ -616,12 +650,15 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->assertFalse(has_filter('pmprowoo_checkout_level', array($g, 'checkout_level')));
         $this->assertFalse(has_action('pmpro_before_change_membership_level', array($g, 'before_change')));
         $this->assertFalse(has_filter('pmpro_deactivate_old_levels', array($g, 'deactivate_old_levels')));
-        foreach (array(array(0, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07'), array(11, 1, "2026-10-15 12:00:07'", '2026-11-15 12:00:07'), array(11, 1, '2026-11-15 12:00:07', '2026-10-15 12:00:07')) as $bad) {
+        $this->assertFalse(has_action('woocommerce_order_status_completed', array($g, 'completing')));
+        $this->assertFalse(has_action('shutdown', array($g, 'disarm')));
+        foreach (array(array(0, 11, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07'), array(501, 0, 1, '2026-10-15 12:00:07', '2026-11-15 12:00:07'), array(501, 11, 1, "2026-10-15 12:00:07'", '2026-11-15 12:00:07'), array(501, 11, 1, '2026-11-15 12:00:07', '2026-10-15 12:00:07')) as $bad) {
             try {
                 $g->arm(...$bad);
                 $this->fail('invalid arm accepted');
             } catch (InvalidArgumentException $e) {
                 $this->assertFalse($g->is_armed());
+                $this->assertFalse(has_action('shutdown', array($g, 'disarm')));
             }
         }
     }
@@ -809,6 +846,273 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $r = $this->issuer($at)->issue($this->manager(), $order->get_id(), self::attestation($this->reference(), $at));
         $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'period_not_representable_in_pmpro');
         $this->assertUntouched($customer, $order);
+    }
+
+    // ---- review fixes: environment, order scope, lock, unexpected errors (STAGE-03B.3b review) ----------
+
+    /** A second PMPro level the Club product could be (mis)mapped to. */
+    private function other_level(): int {
+        global $wpdb, $pmpro_levels;
+        $other = $this->config->level_id + 1;
+        $wpdb->replace($wpdb->pmpro_membership_levels, array('id' => $other, 'name' => 'Other level', 'description' => '', 'confirmation' => '', 'initial_payment' => 20, 'billing_amount' => 0, 'cycle_number' => 0, 'cycle_period' => '', 'billing_limit' => 0, 'trial_amount' => 0, 'trial_limit' => 0, 'allow_signups' => 0, 'expiration_number' => 1, 'expiration_period' => 'Month'));
+        $pmpro_levels = array();
+        return $other;
+    }
+
+    private function map_product_to(int $level): void {
+        global $pmprowoo_product_levels;
+        update_option('_pmprowoo_product_levels', array(EVC_TEST_CLUB_PRODUCT => $level));
+        $pmprowoo_product_levels = array(EVC_TEST_CLUB_PRODUCT => $level); // what the add-on itself uses
+        wp_cache_flush();
+    }
+
+    private function rows_of_level(int $user_id, int $level): array {
+        global $wpdb;
+        return $wpdb->get_results($wpdb->prepare("SELECT id, status FROM {$wpdb->pmpro_memberships_users} WHERE user_id = %d AND membership_id = %d", $user_id, $level), ARRAY_A);
+    }
+
+    public function test_nothing_is_written_unless_the_commerce_environment_is_the_pinned_one(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $other = $this->other_level();
+        $actor = $this->manager();
+
+        // (a) The Club product grants another level: refused before anything is written.
+        $customer = $this->customer();
+        $at = self::whole_second(new DateTimeImmutable('-30 seconds'));
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        $this->map_product_to($other);
+        $r = $this->issuer($at)->issue($actor, $order->get_id(), self::attestation($this->reference(), $at));
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'commerce_environment_conflict');
+        $this->assertSame(array(), $r->steps);
+        $this->assertUntouched($customer, $order);
+        $this->assertSame(array(), $this->rows_of_level($customer, $other));
+        $this->map_product_to($this->config->level_id);
+
+        // (b) A pending re-issue (completed order, paid row still the only active one) is NOT
+        // re-issued while the product grants another level: every manager retry would otherwise
+        // issue THAT level with the add-on's own dates.
+        $customer2 = $this->customer();
+        list(, $first) = $this->purchase($customer2, $actor, self::ten_days_ago());
+        $this->assertResult($first, EVC_Bacs_Issuance_Result::RECORDED);
+        $this->hook('woocommerce_order_status_completed', function () {
+            throw new Error('simulated crash during completion');
+        }, 5);
+        list($order2, $r2, $reference2, $at2) = $this->purchase($customer2, $actor, new DateTimeImmutable('-30 seconds'));
+        remove_all_actions('woocommerce_order_status_completed', 5);
+        $this->assertResult($r2, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'membership_not_reissued');
+        $before = $this->rows($customer2);
+        $this->map_product_to($other);
+        foreach (array(1, 2) as $retry) {
+            $again = $this->issuer(self::whole_second(new DateTimeImmutable('now')))->issue($actor, $order2->get_id(), self::attestation($reference2, $at2));
+            $this->assertResult($again, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'commerce_environment_conflict');
+            $this->assertSame(array(), $again->steps, "retry $retry");
+            $this->assertGuardInert();
+        }
+        $this->assertSame(array(), $this->rows_of_level($customer2, $other), 'the other level was never issued');
+        $this->assertSame($before, $this->rows($customer2), 'the Club rows are untouched');
+        $this->assertSame(EVC_Bacs_Intent::STATE_PLANNED, $this->intent_state($order2->get_id()));
+        $this->assertCount(1, $this->periods($customer2));
+    }
+
+    public function test_the_commerce_environment_is_checked_again_immediately_before_issuing(): void {
+        $customer = $this->customer();
+        $actor = $this->manager();
+        $at = self::whole_second(new DateTimeImmutable('-30 seconds'));
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        // The mapping changes while the request runs (after the pre-flight, when the intent is written).
+        $changed = false;
+        $this->hook('query', function ($sql) use (&$changed) {
+            if (preg_match('/^\s*(INSERT|UPDATE)\b/i', $sql) && strpos($sql, EVC_Wc_Bacs_Intent_Store::META_KEY) !== false) {
+                $changed = true;
+            }
+            return $sql;
+        }, 10);
+        $this->hook('pre_option__pmprowoo_product_levels', function ($pre) use (&$changed) {
+            return $changed ? array(EVC_TEST_CLUB_PRODUCT => $this->config->level_id, 999 => $this->config->level_id) : $pre;
+        }, 10);
+        $r = $this->issuer($at)->issue($actor, $order->get_id(), self::attestation($this->reference(), $at));
+        remove_all_filters('query');
+        $this->assertTrue($changed);
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'commerce_environment_conflict');
+        $this->assertSame(array('planned', 'complete_order'), $r->steps);
+        $this->assertGuardInert();
+        $this->assertSame('on-hold', wc_get_order($order->get_id())->get_status(), 'never completed');
+        $this->assertSame(array(), $this->rows($customer));
+        $this->assertSame(EVC_Bacs_Intent::STATE_PLANNED, $this->intent_state($order->get_id()));
+    }
+
+    public function test_a_second_club_order_completed_in_the_same_request_never_gets_the_planned_dates(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $customer = $this->customer();
+        $actor = $this->manager();
+        $at = self::whole_second(new DateTimeImmutable('-30 seconds'));
+        $at = $at->setTime((int) $at->format('H'), (int) $at->format('i'), 7); // never on the add-on's :00
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        $second = $this->order($customer, $at->modify('-50 minutes'));
+        $done = false;
+        // Another plugin completes the customer's other Club order while the armed order completes.
+        $this->hook('woocommerce_order_status_completed', function ($order_id) use ($order, $second, &$done) {
+            if ((int) $order_id === (int) $order->get_id() && !$done) {
+                $done = true;
+                wc_get_order($second->get_id())->update_status('completed');
+            }
+        }, 20);
+        $r = $this->issuer($at)->issue($actor, $order->get_id(), self::attestation($this->reference(), $at));
+        remove_all_actions('woocommerce_order_status_completed', 20);
+        $this->assertTrue($done);
+        $this->assertGuardInert();
+        $this->assertSame('completed', wc_get_order($second->get_id())->get_status());
+
+        $planned_end = self::local(EVC_Membership_Calendar::add_calendar_month($at));
+        $rows = $this->rows($customer);
+        $this->assertCount(2, $rows);
+        $this->assertSame($planned_end, $rows[0]['enddate'], 'the armed order got the planned dates');
+        $this->assertNotSame($planned_end, $rows[1]['enddate'], 'the other order kept the add-on\'s own dates');
+        $this->assertMatchesRegularExpression('/:00$/', $rows[1]['enddate']);
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'issuance_mismatch');
+        $this->assertSame(EVC_Bacs_Intent::STATE_ISSUANCE_MISMATCH, $this->intent_state($order->get_id()));
+        $this->assertSame(array(), $this->club()->member_movements($customer), 'nothing recorded');
+    }
+
+    public function test_an_issuance_not_replaced_exactly_once_is_never_confirmed(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $customer = $this->customer();
+        $actor = $this->manager();
+        $at = self::whole_second(new DateTimeImmutable('-30 seconds'));
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        $done = false;
+        // Something issues the armed order a second time inside the same completion.
+        $this->hook('woocommerce_order_status_completed', function ($order_id) use ($order, &$done) {
+            if ((int) $order_id === (int) $order->get_id() && !$done) {
+                $done = true;
+                pmprowoo_add_membership_from_order($order_id);
+            }
+        }, 20);
+        $r = $this->issuer($at)->issue($actor, $order->get_id(), self::attestation($this->reference(), $at));
+        remove_all_actions('woocommerce_order_status_completed', 20);
+        $this->assertTrue($done);
+        $this->assertGuardInert();
+        $this->assertCount(2, $this->rows($customer));
+        $this->assertCount(1, $this->active_rows($customer));
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'issuance_not_guarded_once');
+        $this->assertSame(array('planned', 'complete_order'), $r->steps);
+        $this->assertSame(EVC_Bacs_Intent::STATE_PLANNED, $this->intent_state($order->get_id()), 'never issued');
+        $this->assertSame(array(), $this->club()->member_movements($customer), 'nothing recorded');
+    }
+
+    public function test_the_lock_must_be_this_customers_and_held_before_arming(): void {
+        $customer = $this->customer();
+        $actor = $this->manager();
+        list($order, $planned) = $this->planned_only($customer, $actor, new DateTimeImmutable('-2 minutes'));
+        $issuer = $this->issuer(self::whole_second(new DateTimeImmutable('now')));
+        $armed = new ReflectionMethod(EVC_Bacs_Payment_Issuer::class, 'armed');
+        $armed->setAccessible(true);
+        $ran = false;
+        $act = function () use (&$ran) {
+            $ran = true;
+        };
+
+        $someone_else = EVC_Member_Lock::acquire($GLOBALS['wpdb'], $this->customer(), 0);
+        $unguarded = false;
+        $r = $armed->invokeArgs($issuer, array($someone_else, $planned, (int) $order->get_id(), $act, &$unguarded));
+        $someone_else->release();
+        $this->assertFalse($ran, 'never armed under another customer\'s lock');
+        $this->assertNotNull($r);
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'lock_not_for_intent_customer');
+
+        $released = EVC_Member_Lock::acquire($GLOBALS['wpdb'], $customer, 0);
+        $released->release();
+        $r = $armed->invokeArgs($issuer, array($released, $planned, (int) $order->get_id(), $act, &$unguarded));
+        $this->assertFalse($ran, 'never armed without the lock');
+        $this->assertNotNull($r);
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::UNAVAILABLE, 'lock_lost');
+        $this->assertGuardInert();
+
+        $held = EVC_Member_Lock::acquire($GLOBALS['wpdb'], $customer, 0);
+        $r = $armed->invokeArgs($issuer, array($held, $planned, (int) $order->get_id(), $act, &$unguarded));
+        $held->release();
+        $this->assertNull($r, 'held by this request for this customer: the action runs');
+        $this->assertTrue($ran);
+        $this->assertTrue($unguarded, 'nothing was replaced');
+        $this->assertGuardInert();
+    }
+
+    public function test_a_lock_lost_during_the_request_stops_before_the_next_step(): void {
+        global $wpdb;
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $customer = $this->customer();
+        $at = self::whole_second(new DateTimeImmutable('-30 seconds'));
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        // The session loses the member lock after the add-on issued (e.g. a reconnect).
+        $this->hook('woocommerce_order_status_completed', function () use ($wpdb, $customer) {
+            $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', EVC_Member_Lock::name_for($wpdb, $customer)));
+        }, 100);
+        $r = $this->issuer($at)->issue($this->manager(), $order->get_id(), self::attestation($this->reference(), $at));
+        remove_all_actions('woocommerce_order_status_completed', 100);
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::UNAVAILABLE, 'lock_lost');
+        $this->assertSame(array('planned', 'complete_order'), $r->steps);
+        $this->assertGuardInert();
+        $this->assertSame(EVC_Bacs_Intent::STATE_PLANNED, $this->intent_state($order->get_id()), 'nothing moved without the lock');
+        $this->assertSame(array(), $this->club()->member_movements($customer));
+    }
+
+    public function test_the_site_must_run_on_athens_time(): void {
+        $customer = $this->customer();
+        $at = self::whole_second(new DateTimeImmutable('-30 seconds'));
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        update_option('timezone_string', 'UTC');
+        $r = $this->issuer($at)->issue($this->manager(), $order->get_id(), self::attestation($this->reference(), $at));
+        update_option('timezone_string', 'Europe/Athens');
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'site_timezone_not_athens');
+        $this->assertUntouched($customer, $order);
+    }
+
+    public function test_an_unreadable_level_group_stops_before_anything_is_written(): void {
+        $customer = $this->customer();
+        $at = self::whole_second(new DateTimeImmutable('-30 seconds'));
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        $GLOBALS['wpdb']->suppress_errors(true);
+        $this->hook('query', function ($sql) {
+            return preg_match('/^\s*SELECT\s+`group`\s+FROM\s+`?\w*pmpro_membership_levels_groups`?/i', $sql) ? 'SELECT x FROM evc_no_such_table_for_test' : $sql;
+        }, 10);
+        $r = $this->issuer($at)->issue($this->manager(), $order->get_id(), self::attestation($this->reference(), $at));
+        remove_all_filters('query');
+        $GLOBALS['wpdb']->suppress_errors(false);
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'level_group_unreadable');
+        $this->assertUntouched($customer, $order);
+    }
+
+    public function test_an_unexpected_error_fails_closed_and_is_audited_without_details(): void {
+        $customer = $this->customer();
+        $actor = $this->manager();
+        $at = self::whole_second(new DateTimeImmutable('-30 seconds'));
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        $secret = 'evc-secret-exception-text-' . wp_generate_password(8, false, false);
+        $this->hook('pre_option__pmprowoo_product_levels', function () use ($secret) {
+            throw new RuntimeException($secret);
+        }, 10);
+        try {
+            $r = $this->issuer($at)->issue($actor, $order->get_id(), self::attestation($this->reference(), $at));
+        } catch (Throwable $e) {
+            $this->fail('an exception escaped the issuer: ' . get_class($e));
+        }
+        remove_all_filters('pre_option__pmprowoo_product_levels');
+        $this->assertResult($r, EVC_Bacs_Issuance_Result::UNAVAILABLE, 'unexpected_error');
+        $this->assertTrue($r->audited);
+        $this->assertGuardInert();
+        $this->assertUntouched($customer, $order);
+        $lock = EVC_Member_Lock::acquire($this->second_connection(), $customer, 0);
+        $this->assertNotNull($lock, 'the member lock was released');
+        $lock->release();
+        $club = EVC_Club_Db::connect(EVC_Db_Config::from_constants());
+        $events = $club->fetch_all("SELECT outcome, details_json FROM evc_audit_events WHERE event_type = 'bacs_payment_issuance' AND staff_wp_user_id = ? ORDER BY id", array($actor));
+        $this->assertCount(1, $events);
+        $this->assertSame('unavailable', $events[0]['outcome']);
+        $this->assertStringContainsString('unexpected_error', $events[0]['details_json']);
+        $this->assertStringNotContainsString($secret, $events[0]['details_json']);
+        foreach ($this->references as $reference) {
+            $this->assertStringNotContainsString($reference, $events[0]['details_json']);
+        }
     }
 
     // ---- no leakage --------------------------------------------------------------------------------

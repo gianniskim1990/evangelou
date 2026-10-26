@@ -201,7 +201,8 @@ jobs:
     name: wordpress commerce php ${{ matrix.php }} / ${{ matrix.db }} / orders ${{ matrix.storage }}
     runs-on: ubuntu-latest
     # STAGE-03B.3b: 62 commerce mutants x the whole commerce suite (~24 min at 47 before) need more room.
-    timeout-minutes: 60
+    # STAGE-03B.3b review: 75 commerce mutants (~40 min at 62) -> 90 minutes.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

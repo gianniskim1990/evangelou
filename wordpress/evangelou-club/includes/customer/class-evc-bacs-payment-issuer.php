@@ -138,7 +138,14 @@ final class EVC_Bacs_Payment_Issuer {
         $order_ref = $order_id > 0 ? $this->config->ref('wc_order', (string) $order_id) : null;
         $steps = array();
         $movement_id = null;
-        $result = $this->decide($actor_user_id, $order_id, $attestation, $movement_id, $steps);
+        try {
+            $result = $this->decide($actor_user_id, $order_id, $attestation, $movement_id, $steps);
+        } catch (Throwable $e) {
+            // STAGE-03B.3b review (L2): anything unexpected fails closed and is still audited
+            // (opaque references only; the exception and its message are never stored).
+            $this->guard->disarm();
+            $result = new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::UNAVAILABLE, 'unexpected_error');
+        }
         $result->steps = $steps;
         $this->audit_attempt($actor_user_id, $result, $movement_id, $order_ref);
         return $result;
@@ -165,6 +172,8 @@ final class EVC_Bacs_Payment_Issuer {
         }
         $acted = false;
         $risk = false;
+        // The last issuance action did not replace the dates exactly once (see armed()).
+        $unguarded = false;
         for ($step = 0; $step < self::MAX_STEPS; $step++) {
             if (!$lock->is_held()) {
                 return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::UNAVAILABLE, 'lock_lost');
@@ -200,6 +209,12 @@ final class EVC_Bacs_Payment_Issuer {
                 return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::REFUSED, $window);
             }
 
+            if ($unguarded && ($decision->outcome === EVC_Bacs_Recovery_Decision::ALREADY_COMPLETE
+                || ($decision->outcome === EVC_Bacs_Recovery_Decision::RESUME && in_array($decision->step, array(EVC_Bacs_Recovery_Decision::STEP_RECORD_MOVEMENT, EVC_Bacs_Recovery_Decision::STEP_CONFIRM_ISSUANCE), true)))) {
+                // The re-read was done, but this request's issuance was not exactly the armed one
+                // (dates replaced never or more than once): never confirm or record it here.
+                return $this->stopped(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'issuance_not_guarded_once', $risk);
+            }
             if ($decision->outcome === EVC_Bacs_Recovery_Decision::ALREADY_COMPLETE
                 || ($decision->outcome === EVC_Bacs_Recovery_Decision::RESUME && $decision->step === EVC_Bacs_Recovery_Decision::STEP_RECORD_MOVEMENT)) {
                 // The existing finalization step, inside THIS request's lock (it never takes the lock itself).
@@ -224,12 +239,12 @@ final class EVC_Bacs_Payment_Issuer {
                 }
                 $acted = true;
                 $steps[] = 'complete_order';
-                $stop = $this->armed($intent, function () use ($order_id) {
+                $stop = $this->armed($lock, $intent, $order_id, function () use ($order_id) {
                     $current = wc_get_order($order_id);
                     if ($current instanceof WC_Order) {
                         $current->update_status('completed');
                     }
-                });
+                }, $unguarded);
                 if ($stop !== null) {
                     return $stop;
                 }
@@ -244,9 +259,11 @@ final class EVC_Bacs_Payment_Issuer {
                 }
                 $acted = true;
                 $steps[] = 'reissue';
-                $stop = $this->armed($intent, function () use ($order_id) {
+                $stop = $this->armed($lock, $intent, $order_id, function () use ($order_id) {
+                    // Called directly (no WooCommerce status change): name the order ourselves.
+                    $this->guard->completing($order_id);
                     pmprowoo_add_membership_from_order($order_id);
-                });
+                }, $unguarded);
                 if ($stop !== null) {
                     return $stop;
                 }
@@ -382,17 +399,31 @@ final class EVC_Bacs_Payment_Issuer {
     }
 
     /**
-     * Runs ONE issuance action ($act) with the guard armed for the intent's customer, level and
-     * exact dates; the guard is ALWAYS disarmed in `finally`. Whatever $act returns or throws is
-     * ignored: the caller re-reads every fact. Null, or why nothing was attempted.
+     * Runs ONE issuance action ($act) with the guard armed for the intent's order, customer,
+     * level and exact dates; the guard is ALWAYS disarmed in `finally`. Whatever $act returns or
+     * throws is ignored: the caller re-reads every fact. $unguarded is set when the guard did not
+     * replace the dates exactly once (the caller then stops after the re-read). Null, or why
+     * nothing was attempted.
      */
-    private function armed(EVC_Bacs_Intent $intent, callable $act): ?EVC_Bacs_Issuance_Result {
+    private function armed(EVC_Member_Lock $lock, EVC_Bacs_Intent $intent, int $order_id, callable $act, bool &$unguarded): ?EVC_Bacs_Issuance_Result {
+        // STAGE-03B.3b review (L1): only while THIS request still holds THIS customer's lock.
+        if ($lock->wp_user_id() !== $intent->customer_id()) {
+            return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'lock_not_for_intent_customer');
+        }
+        if (!$lock->is_held()) {
+            return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::UNAVAILABLE, 'lock_lost');
+        }
         $start = EVC_Pmpro_Local_Time::exact($intent->run_start_utc(), EVC_Membership_Calendar::LATEST);
         $end = EVC_Pmpro_Local_Time::exact($intent->period_end_utc(), EVC_Membership_Calendar::EARLIEST);
         if ($start === null || $end === null) {
             return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'period_not_representable_in_pmpro');
         }
-        $this->guard->arm($intent->customer_id(), $intent->level_id(), $start, $end);
+        // STAGE-03B.3b review (M1): the pinned environment again, immediately before writing.
+        $environment = $this->environment_problem();
+        if ($environment !== null) {
+            return new EVC_Bacs_Issuance_Result(EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, $environment);
+        }
+        $this->guard->arm($order_id, $intent->customer_id(), $intent->level_id(), $start, $end);
         try {
             $act();
         } catch (Throwable $e) {
@@ -400,13 +431,16 @@ final class EVC_Bacs_Payment_Issuer {
         } finally {
             $this->guard->disarm();
         }
+        // STAGE-03B.3b review (M2): exactly one replacement for exactly this order, else stop.
+        $unguarded = $this->guard->applied() !== 1;
         return null;
     }
 
     /**
      * Configuration the guard's `pmpro_deactivate_old_levels` = false relies on: the site clock is
-     * Athens (PMPro stores site-local dates), and the Club level shares no single-selection PMPro
-     * level group with another level (else PMPro would no longer cancel that other level).
+     * Athens (PMPro stores site-local dates), the commerce environment is exactly the pinned one
+     * (environment_problem()), and the Club level shares no single-selection PMPro level group
+     * with another level (else PMPro would no longer cancel that other level).
      * Read with plain SELECTs: PMPro's own group getters may create a default group (a write).
      */
     private function site_problem(): ?string {
@@ -414,8 +448,12 @@ final class EVC_Bacs_Payment_Issuer {
         if ((string) get_option('timezone_string', '') !== EVC_Membership_Calendar::ZONE) {
             return 'site_timezone_not_athens';
         }
-        if (!isset($wpdb->pmpro_membership_levels_groups, $wpdb->pmpro_groups)) {
+        if (!EVC_Wp_Commerce_Pmpro_Reader::commerce_plugins_loaded() || !isset($wpdb->pmpro_membership_levels_groups, $wpdb->pmpro_groups)) {
             return 'membership_plugin_unavailable';
+        }
+        $environment = $this->environment_problem();
+        if ($environment !== null) {
+            return $environment;
         }
         $wpdb->last_error = '';
         $group = $wpdb->get_var($wpdb->prepare("SELECT `group` FROM {$wpdb->pmpro_membership_levels_groups} WHERE `level` = %d LIMIT 1", $this->config->level_id));
@@ -431,6 +469,17 @@ final class EVC_Bacs_Payment_Issuer {
             return 'level_group_unreadable';
         }
         return $allow !== null && (int) $allow === 0 && (int) $others > 0 ? 'club_level_group_not_exclusive' : null;
+    }
+
+    /**
+     * STAGE-03B.3b review (M1): the pinned commerce environment the reader verifies (exact plugin
+     * versions, the product -> Club level mapping with no other product granting the level, the
+     * level = 1 Month without recurring billing, no autocomplete, ...). The issuer never writes to
+     * WooCommerce / PMPro unless it is exactly as pinned: a product mapped to another level would
+     * otherwise make every completion or re-issue grant THAT level with the add-on's own dates.
+     */
+    private function environment_problem(): ?string {
+        return EVC_Wp_Commerce_Pmpro_Reader::environment_conflicts($this->config) === array() ? null : 'commerce_environment_conflict';
     }
 
     private function stopped(string $outcome, string $reason, bool $risk): EVC_Bacs_Issuance_Result {
