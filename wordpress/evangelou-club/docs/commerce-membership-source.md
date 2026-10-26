@@ -616,6 +616,22 @@ must keep the constant gate; `new EVC_Bacs_Payment_Issuer / _Finalizer /
 _Confirmation` stay forbidden everywhere; the member lock may be taken only in
 the finalizer and the confirmer.
 
+Re-review (L-A), packager rules (token based, `app/scripts/php-guards.mjs`, with
+negative fixtures run on every package): the guarded class names and
+`EVC_Wc_Completion_Plugin` may appear at all (identifier or inside a string)
+only in an allowlist of ten files; `class_alias`, `Reflection*`, `newInstance*`,
+`unserialize`, dynamic `new $x` / `new (...)`, `$x::` calls and `new self|static|
+parent` inside a guarded class are refused; `boot()`, `build()` and `wire()` are
+defined exactly once; `EVC_Member_Lock::acquire` is checked on tokens (spacing,
+leading backslash, string callables). Not covered statically: a class name
+assembled from string pieces at run time. Second layer: the six guarded classes
+refuse construction (`LogicException`) while the constant is off
+(`EVC_Wc_Completion_Feature::assert_constructible`). The PHPUnit bootstraps
+define the TEST-ONLY `EVC_TEST_WC_COMPLETION_CONSTRUCTION` (boolean true) to
+construct them with the constant off; the packager refuses any shipped file
+that defines it. A site owner who defines it deliberately could equally edit
+the plugin, so it is not a security boundary against the site owner.
+
 ### Who confirms (review fixes: only a human click in the WooCommerce admin)
 
 `woocommerce_order_status_completed` at priority 5 (before the add-on's own
@@ -623,26 +639,41 @@ the finalizer and the confirmer.
 Throwable (WooCommerce 11.2.1 `status_transition()` catches only `Exception`).
 A completion is a payment confirmation only when ALL hold:
 
-1. **The channel is a manual WooCommerce-admin status change.** WooCommerce
-   passes `{from, to, note, manual}` as the third hook argument; `manual` is
-   `true` for the order edit screen, the bulk action and the order-list
-   «complete» button (admin-ajax), and `false` for REST and plain programmatic
-   `update_status()` (a CI test proves it on the pinned WooCommerce, and a second
-   one reads the three admin entry points in its source). The Club also requires
-   `is_admin()` and rejects REST (consumer key, application password, the
-   WooCommerce mobile app), WP-CLI, WP-Cron, storefront AJAX and any front-end
-   call, even when they run as a real shop user with `edit_shop_orders`
-   (`EVC_Wc_Completion_Context`; fail closed: anything not positively an admin
-   click is not attested).
+1. **It is a manual click in one of the three WooCommerce admin entry points,
+   for this very order** (re-review M-C: identified positively, never inferred
+   from `is_admin()` or admin-ajax alone). WooCommerce passes
+   `{from, to, note, manual}` as the third hook argument and `manual` must be
+   `true`; the channel must be the admin (`is_admin()`, not REST, not WP-CLI, not
+   WP-Cron); and the request must have verified, through `check_admin_referer()`
+   (the Club listens to WordPress's `check_admin_referer` action), the nonce of:
+   - the order edit screen of THIS order: `update-order_<id>` (HPOS, wc-orders)
+     or `update-post_<id>` (posts storage, post.php `editpost`); or
+   - the bulk action of the order list, with this order in the request:
+     `bulk-orders` + `id[]` (HPOS) or `bulk-posts` + `post[]` (posts storage); or
+   - the order-list «complete» button: admin-ajax
+     `action=woocommerce_mark_order_status` with `order_id` = this order and the
+     nonce `woocommerce-mark-order-status`.
+   Everything else is `not_attested`, even as a real shop user with
+   `edit_shop_orders`: REST (consumer key, application password, the WooCommerce
+   mobile app), WP-CLI, WP-Cron, any other admin-ajax action (front-end plugin
+   AJAX, Action Scheduler's async runner with a staff cookie, other plugins),
+   wc-ajax / storefront AJAX, and any programmatic `update_status(..., true)`
+   during an admin page load. CI proves `manual` on the pinned WooCommerce and
+   reads the entry points and their nonce names from its source (and from
+   WordPress core for the posts storage). An exception that escapes a REST callback
+   leaves the rest of THAT request classified as REST (fail closed); the next
+   request is attested again.
 2. **The actor** is a logged-in user with `edit_shop_orders`, not the order's
    customer, not the shared Club staff account.
 
 | completed by / through | result |
 |---|---|
-| a shop user, order edit screen / bulk action / list button | confirmation |
+| a shop user, order edit screen / bulk action / list button of THIS order | confirmation |
 | the same user through REST (API key, app password, mobile app) | `not_attested` / `channel_rest` |
-| WP-CLI / WP-Cron / storefront AJAX / any other call | `not_attested` / `channel_cli`, `channel_cron`, `channel_ajax`, `channel_other` |
-| admin screen but not a manual change (programmatic `update_status`) | `not_attested` / `not_a_manual_status_change` |
+| WP-CLI / WP-Cron / wc-ajax or storefront AJAX / any other call | `not_attested` / `channel_cli`, `channel_cron`, `channel_ajax`, `channel_other` |
+| admin page, not a manual change (programmatic `update_status`) | `not_attested` / `not_a_manual_status_change` |
+| admin page, `update_status(..., true)` without the entry point's nonce for this order (another plugin, another order's screen or bulk selection) | `not_attested` / `not_a_woocommerce_admin_action` |
+| admin-ajax with any other action | `not_attested` / `not_a_woocommerce_admin_action` |
 | nobody (user 0) | `not_attested` / `no_user` |
 | the order's customer (even with the capability) | `not_attested` / `customer` |
 | the shared Club staff account (even with the capability) | `not_attested` / `club_staff_account` |
@@ -658,8 +689,8 @@ The order must be a Club bank-transfer order exactly as the reader accepts it
 (BACS, EUR, total 20.00, exactly one Club item of quantity 1, a customer
 account). A refusal now says why: `order_not_bank_transfer`, `order_not_eur`,
 `order_not_a_single_club_item` (extra item or quantity 2),
-`order_total_changed_by_tax_or_discount` (tax / fees / a discount changed the
-total), `order_total_not_20_eur`. It must also never have been cancelled /
+`order_total_changed_by_tax_or_discount` (tax or a discount changed the total),
+`order_total_not_20_eur` (any other difference, fees included). It must also never have been cancelled /
 refunded / failed (the transition's `from` status, a private
 `_evc_club_wc_ended` flag written while the feature is on, or any refund,
 partial ones included) — otherwise `completed_after_cancellation_or_refund`,
@@ -700,11 +731,30 @@ run.) An ordinary (non-Club) order gets the add-on back at once and behaves as
 shipped. Only the claimed, attested completion issues a membership, through this
 path (armed, exact dates).
 
+Every path puts it back (re-review M-B):
+- a later callback of the same order throws and WooCommerce catches it, so
+  priority 11 never runs: the hold is stale, and the next completion of the
+  request that is not nested in another one (read from the call stack: no other
+  `WC_Order::status_transition()` frame) puts the add-on back first; `shutdown`
+  does it in any case;
+- a completion nested inside another one (a plugin completing a linked order
+  between priorities 5 and 11) shares the removal: the add-on comes back only
+  when the last of them is over, so it runs for neither;
+- an error in the Club's own callback before it knows the order: the catch puts
+  the add-on back when the order is not a Club order (unknown: it stays
+  withheld, fail closed);
+- results say what really happened to the add-on: `suppressed` (withheld),
+  `shipped` (registered at priority 10, it ran) or `not_registered` (it was not
+  there at all, e.g. removed by someone else).
+
 Consequence, deliberately accepted (document, owner question 1): a Club-order
 completion that is **refused, not attested (REST, mobile app, cron, wrong user),
 a toggle after the paid period ended, or a re-completion** gives the customer no
 membership at all, from either path, and leaves no stray row that could block a
-later legitimate confirmation. Staff set it right with an on-hold → Completed in
+later legitimate confirmation. This holds on the pinned environment only: outside
+it (for example a sale price on the Club product, which the reader reports as
+`club_product_price_not_20_eur`) the add-on is not withheld, runs as shipped and
+CAN leave its own row (flagged for a manager, see the gate below). Staff set it right with an on-hold → Completed in
 the admin. Earlier text said the add-on "behaves as shipped" for those cases;
 that is no longer true while the feature is ON and the environment is pinned.
 
@@ -717,7 +767,8 @@ add-on stays withheld (fail closed; the recovery re-checks).
 
 Tripwire (priority 11, after the add-on's slot): an **active Club row without
 an end date** for the customer → audit `endless_membership_row`, follow-up
-`manager:endless_membership_row`, note on the order.
+`manager:endless_membership_row`, note on the order. If the rows cannot be read,
+it is flagged too (`membership_rows_unreadable`; re-review L-D, fail closed).
 
 ### Idempotency
 
@@ -737,6 +788,26 @@ written from the catch of `on_completed` for an error before the claim. The
 index is removed on `recorded` / `already_recorded`; the marker stays. Refused or
 unattested completions write no marker (a refused completion must never poison a
 later legitimate one; a deliberate narrowing of "attested and Club order").
+
+Re-review L-B: the claim is written under the member lock when the lock can be
+had (one lock for claim and pipeline), so two requests of a double submit cannot
+race the marker write; when the lock is busy the claim is still written (never
+stranded). If a claim cannot be stored (for example a second marker row left by
+such a race) and the order's intent already shows `recorded` for this order's
+movement, the result is `already_recorded` (no manager flag, no «not confirmed»
+note) instead of a false alarm.
+
+Re-review M-A: an order that ended or was refunded is never confirmed later.
+- `correct()` (cancelled / refunded / failed) of an order whose claim is still
+  open and nothing is recorded closes the claim for a manager
+  (`manager:ended_before_confirmation`, a note on the order).
+- The recovery refuses an open claim whose order carries the ended flag
+  (`completed_after_cancellation_or_refund`) or any refund
+  (`refunded_before_confirmation`; never the full 20 EUR for a partly refunded
+  order), and an ended order whose claim exists but nothing was recorded
+  (`ended_before_confirmation`), each with a manager flag and a note.
+- A re-completion after a cancellation / refund that the hook refuses also turns
+  any open claim of the order into a manager flag.
 
 Deferred (fail closed now, finished later): member lock busy, Club database
 down / unreadable, a confirmation inside the repeated autumn hour, a late
@@ -765,6 +836,13 @@ Behaviour of the recovery (documented, not changed):
 - **A staff user demoted or deleted before the recovery ran** is not re-trusted:
   the recovery stops with a refusal, `manager:<reason>`, a note on the order, and
   nothing is issued (test). The marker's user is the one who is checked.
+- **Who is named (re-review L-C, documented, not changed):** the recovery finishes
+  the FIRST attested completion of the order: its signed marker is immutable, the
+  intent's actor and the recovery audit row (`trigger: recovery`) name that first
+  user. A later re-completion by another user is a separate attempt, audited
+  under THAT user with its own outcome (`deferred` / `already_recorded`), so each
+  audit row names the person whose click it records; nobody is named for a click
+  they did not make. A signed append-only list of later actors was not added.
 - The unused default-off policy facts `reissue_if_missing` / `replaceable_row_ref`
   of the first version remain in the policy class; this path sets
   `reissue_if_missing` (the add-on never issues for a claimed completion) and no
@@ -854,19 +932,22 @@ rule 5) that the owner has to approve.
 
 `tests/wordpress/commerce/WcCompletionTest.php` (real plugins, HPOS and legacy
 storage in CI), `tests/wordpress/commerce-on/WcCompletionOnTest.php` (a separate
-PHPUnit process with the constant ON: real `boot()`, cron schedule,
-`run_recovery()`, `deactivate()`), `CommerceMembershipSourceTest` (total),
-`BacsIssuerTest`, unit `WcCompletionContextTest`, `BacsRecoveryPolicyTest`,
-`WcCompletionMarkerTest`, `MutationEvidenceTest`. Mutants: RP19-RP23, MK1-MK3
-(membership runner); WC1-WC52 (commerce runner, named killers; WC49-WC51 run in
-the constant-ON process). A commerce mutant with named killers runs exactly those
-tests (a mutant counts as killed only if each killer fails an assertion). Known
+PHPUnit process with the constant ON: the confirmer must have been hooked by the
+REAL `plugins_loaded` boot, cron schedule, `run_recovery()`, `deactivate()`),
+`CommerceMembershipSourceTest` (total), `BacsIssuerTest`, `BacsConfirmationTest`
+(its clock is now pinned off a whole minute: the former 1-in-60 flake), unit
+`WcCompletionContextTest`, `WcCompletionConstructionTest`, `BacsRecoveryPolicyTest`,
+`WcCompletionMarkerTest`, `MutationEvidenceTest`. Mutants: RP19-RP23, MK1-MK3,
+CX1-CX4 (entry points), CN1-CN2 (construction guard) in the membership runner;
+WC1-WC75 in the commerce runner (named killers; WC49-WC51 run in the constant-ON
+process; the HPOS-specific nonce mutants WC65/WC66 run in the HPOS mutation job).
+Each lock check (every step, before the issuance, before the record) has its own
+test and mutant (WC70-WC72). A commerce mutant with named killers runs exactly
+those tests (a mutant counts as killed only if each killer fails an assertion);
+surviving or invalid mutants are reported as CI error annotations. Known
 equivalent (not mutated): the `disarm()` in `on_completed`'s `finally` is a second
-layer behind the one in `armed()`.
-
-The packager's construction guard is token based (`app/scripts/php-guards.mjs`:
-comments, strings, `new \EVC_X`, spacing and case variants) and runs negative
-fixtures on every package.
+layer behind the one in `armed()`; `saw_referer()` ignoring a failed nonce cannot
+be observed (WordPress dies right after firing the action for a failed nonce).
 
 ## Order lookup is bounded
 
