@@ -117,6 +117,17 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         return new DateTimeImmutable($s, new DateTimeZone('UTC'));
     }
 
+    /**
+     * A first purchase ten days ago, pinned to :07 seconds (review L3): the add-on's own dates are
+     * minute-rounded (H:i:00), so with a non-zero second they can never coincide with the Club's
+     * planned end (formerly ~1/60 runs used :00 and a mutant could survive). With :07 this also
+     * holds on days 29-31, where PHP's `+1 month` (add-on) and the clamped Athens month differ.
+     */
+    private static function ten_days_ago(): DateTimeImmutable {
+        $t = new DateTimeImmutable('-10 days', new DateTimeZone('UTC'));
+        return $t->setTime((int) $t->format('H'), (int) $t->format('i'), 7);
+    }
+
     private static function whole_second(DateTimeImmutable $t): DateTimeImmutable {
         return self::utc($t->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s'));
     }
@@ -298,7 +309,7 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $actor = $this->manager();
-        list(, $first, , $first_at) = $this->purchase($customer, $actor, new DateTimeImmutable('-10 days'));
+        list(, $first, , $first_at) = $this->purchase($customer, $actor, self::ten_days_ago());
         $this->assertResult($first, EVC_Bacs_Issuance_Result::RECORDED);
         $first_end = EVC_Membership_Calendar::add_calendar_month($first_at);
         $old = $this->active_rows($customer)[0];
@@ -345,7 +356,7 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $actor = $this->manager();
-        list(, $first) = $this->purchase($customer, $actor, new DateTimeImmutable('-10 days'));
+        list(, $first) = $this->purchase($customer, $actor, self::ten_days_ago());
         $this->assertResult($first, EVC_Bacs_Issuance_Result::RECORDED);
         $row = $this->active_rows($customer)[0];
         $wpdb->update($wpdb->pmpro_memberships_users, array('enddate' => date('Y-m-d H:i:s', strtotime($row['enddate'] . ' +1 hour'))), array('id' => $row['id']));
@@ -364,7 +375,7 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $actor = $this->manager();
-        list(, $first, , $first_at) = $this->purchase($customer, $actor, new DateTimeImmutable('-10 days'));
+        list(, $first, , $first_at) = $this->purchase($customer, $actor, self::ten_days_ago());
         $this->assertResult($first, EVC_Bacs_Issuance_Result::RECORDED);
         $first_end = EVC_Membership_Calendar::add_calendar_month($first_at);
 
@@ -394,9 +405,19 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->assertSame($first_end->format(DATE_ATOM), $me['paid_until_utc']);
 
         // Resume: the add-on does not fire again on a completed order, so the issuer re-issues it, armed.
+        $writes = array();
+        $this->hook('query', function ($sql) use (&$writes) {
+            if (preg_match('/^\s*(INSERT|UPDATE)\b.*pmpro_memberships_users/is', $sql, $m)) {
+                $writes[] = strtoupper($m[1]);
+            }
+            return $sql;
+        }, 10);
         $again = $this->issuer(self::whole_second(new DateTimeImmutable('now')))->issue($actor, $order->get_id(), self::attestation($reference, $at));
+        remove_all_filters('query');
         $this->assertResult($again, EVC_Bacs_Issuance_Result::RECORDED);
         $this->assertSame(array('reissue', 'issued', 'finalize'), $again->steps);
+        $this->assertSame('INSERT', $writes[0] ?? null, 'the re-issue INSERTs the new row before any UPDATE of the paid row');
+        $this->assertContains('UPDATE', array_slice($writes, 1));
         $this->assertGuardInert();
         $new_end = EVC_Membership_Calendar::add_calendar_month($first_end);
         $active = $this->active_rows($customer);
@@ -411,7 +432,7 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $actor = $this->manager();
-        list(, $first) = $this->purchase($customer, $actor, new DateTimeImmutable('-10 days'));
+        list(, $first) = $this->purchase($customer, $actor, self::ten_days_ago());
         $this->assertResult($first, EVC_Bacs_Issuance_Result::RECORDED);
 
         $GLOBALS['wpdb']->suppress_errors(true);
@@ -513,7 +534,7 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $customer = $this->customer();
         $actor = $this->manager();
-        list(, $first) = $this->purchase($customer, $actor, new DateTimeImmutable('-10 days'));
+        list(, $first) = $this->purchase($customer, $actor, self::ten_days_ago());
         $this->assertResult($first, EVC_Bacs_Issuance_Result::RECORDED);
 
         // A crash inside the completion, before the add-on issues anything.
