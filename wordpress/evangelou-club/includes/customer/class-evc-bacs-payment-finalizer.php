@@ -137,43 +137,88 @@ final class EVC_Bacs_Payment_Finalizer {
 
     private function decide(int $actor_user_id, int $order_id, array $attestation, ?string &$movement_id): EVC_Bacs_Finalization_Result {
         $movement_id = null;
+        $refusal = $this->admit($actor_user_id, $order_id, $attestation, $attested_movement, $received_on, $order);
+        if ($refusal !== null) {
+            return $refusal;
+        }
+        $result = $this->with_member_lock((int) $order->get_customer_id(), function (EVC_Member_Lock $lock) use ($actor_user_id, $order, $attested_movement, $received_on, &$movement_id) {
+            return $this->finalize_holding($lock, $actor_user_id, $order, $attested_movement, $received_on, $movement_id);
+        });
+        return $result ?? new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::BUSY, 'member_locked');
+    }
+
+    /**
+     * STAGE-03B.3b (shared with EVC_Bacs_Payment_Issuer): the checks made BEFORE the member lock —
+     * the actor holds the capability and is not the shared staff account, the attestation is
+     * well-formed (reference normalised and turned into its HMAC at once; 2000 cents EUR; a real
+     * value date) and the order exists with a customer account. Null when admitted (out-params
+     * set), else the refusal. Reads only; writes nothing.
+     */
+    public function admit(int $actor_user_id, int $order_id, array $attestation, ?string &$attested_movement, ?string &$received_on, ?WC_Order &$order): ?EVC_Bacs_Finalization_Result {
+        $attested_movement = null;
+        $received_on = null;
+        $order = null;
         $actor = $actor_user_id > 0 ? get_userdata($actor_user_id) : false;
         if (!$actor instanceof WP_User || !user_can($actor, EVC_Bacs_Payment_Confirmation::CAPABILITY) || EVC_Staff_Role::has_staff_role($actor)) {
             return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::REFUSED, 'not_authorised');
         }
         $reference = EVC_Bacs_Payment_Confirmation::normalise_reference($attestation['bank_reference'] ?? null);
-        $received_on = $attestation['received_on'] ?? null;
-        if ($reference === null || !is_string($received_on) || !preg_match('/^\d{4}-\d{2}-\d{2}$/D', $received_on)) {
+        $date = $attestation['received_on'] ?? null;
+        if ($reference === null || !is_string($date) || !preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date)) {
             return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::REFUSED, 'invalid_attestation');
         }
         if (($attestation['amount_minor'] ?? null) !== EVC_Bacs_Payment_Confirmation::AMOUNT_MINOR || ($attestation['currency'] ?? null) !== EVC_Commerce_Source_Config::CURRENCY) {
             return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::REFUSED, 'amount_not_20_eur');
         }
-        $attested_movement = $this->config->ref('bacs_transfer', $reference);
+        $movement = $this->config->ref('bacs_transfer', $reference);
         unset($reference);
 
-        $order = $order_id > 0 ? wc_get_order($order_id) : false;
-        if (!$order instanceof WC_Order || $order instanceof WC_Order_Refund) {
+        $found = $order_id > 0 ? wc_get_order($order_id) : false;
+        if (!$found instanceof WC_Order || $found instanceof WC_Order_Refund) {
             return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::REFUSED, 'order_not_found');
         }
-        $customer_id = (int) $order->get_customer_id();
-        if ($customer_id < 1) {
+        if ((int) $found->get_customer_id() < 1) {
             return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::REFUSED, 'order_without_customer_account');
         }
+        $attested_movement = $movement;
+        $received_on = $date;
+        $order = $found;
+        return null;
+    }
 
+    /**
+     * STAGE-03B.3b: runs $work($lock) holding the member's lock, released in `finally`. Returns
+     * $work's result, or null when another session holds the lock past the bounded wait. The
+     * ONLY place in the plugin that acquires EVC_Member_Lock (the packager enforces it), so one
+     * request holds exactly one lock and the finalization step can run inside the issuer's lock.
+     *
+     * @return mixed|null
+     */
+    public function with_member_lock(int $customer_id, callable $work) {
         $lock = EVC_Member_Lock::acquire($this->db, $customer_id, $this->lock_wait);
         if ($lock === null) {
-            return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::BUSY, 'member_locked');
+            return null;
         }
         try {
-            return $this->under_lock($lock, $actor_user_id, $order, $attested_movement, $received_on, $movement_id);
+            return $work($lock);
         } finally {
             $lock->release();
         }
     }
 
-    private function under_lock(EVC_Member_Lock $lock, int $actor_user_id, WC_Order $order, string $attested_movement, string $received_on, ?string &$movement_id): EVC_Bacs_Finalization_Result {
-        if (!$lock->is_held()) {
+    /** True when this finalizer records into exactly these stores and decides with exactly this inspector. */
+    public function uses(EVC_Provenance_Store $store, EVC_Wc_Bacs_Intent_Store $intents, EVC_Bacs_Recovery_Inspector $inspector): bool {
+        return $this->store === $store && $this->intents === $intents && $this->inspector === $inspector;
+    }
+
+    /**
+     * The finalization step itself, for a caller that ALREADY holds this member's lock
+     * (finalize() above, or EVC_Bacs_Payment_Issuer inside its single locked request).
+     * It never acquires or releases the lock; ownership is re-checked here and before recording.
+     */
+    public function finalize_holding(EVC_Member_Lock $lock, int $actor_user_id, WC_Order $order, string $attested_movement, string $received_on, ?string &$movement_id): EVC_Bacs_Finalization_Result {
+        $movement_id = null;
+        if ($lock->wp_user_id() !== (int) $order->get_customer_id() || !$lock->is_held()) {
             return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::UNAVAILABLE, 'lock_lost');
         }
         // Every fact re-read now, under the lock: signed intent, actor, order, PMPro rows, Club record.
@@ -190,7 +235,7 @@ final class EVC_Bacs_Payment_Finalizer {
         if (!hash_equals($intent->movement_id(), $attested_movement)) {
             return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::REFUSED, 'attestation_does_not_match_intent');
         }
-        $window = $this->value_date_problem($order, $intent, $received_on);
+        $window = $this->value_date_problem($order, $intent->verified_at_utc(), $received_on);
         if ($window !== null) {
             return new EVC_Bacs_Finalization_Result(EVC_Bacs_Finalization_Result::REFUSED, $window);
         }
@@ -300,9 +345,10 @@ final class EVC_Bacs_Payment_Finalizer {
 
     /**
      * Existing BACS rule (value date between the order date and Athens today), and the money
-     * must have arrived no later than the confirmation instant recorded in the signed intent.
+     * must have arrived no later than the confirmation instant (the signed intent's, or for a
+     * new attempt the instant about to be signed). Shared with EVC_Bacs_Payment_Issuer.
      */
-    private function value_date_problem(WC_Order $order, EVC_Bacs_Intent $intent, string $received_on): ?string {
+    public function value_date_problem(WC_Order $order, DateTimeImmutable $confirmed_at_utc, string $received_on): ?string {
         $zone = new DateTimeZone(EVC_Bacs_Payment_Confirmation::BUSINESS_TIMEZONE);
         $received = DateTimeImmutable::createFromFormat('!Y-m-d', $received_on, $zone);
         if ($received === false || $received->format('Y-m-d') !== $received_on) {
@@ -310,7 +356,7 @@ final class EVC_Bacs_Payment_Finalizer {
         }
         $created = $order->get_date_created();
         $today = (($this->now)())->setTimezone($zone)->format('Y-m-d');
-        $confirmed = $intent->verified_at_utc()->setTimezone($zone)->format('Y-m-d');
+        $confirmed = $confirmed_at_utc->setTimezone($zone)->format('Y-m-d');
         if ($created === null || $received_on < $created->setTimezone($zone)->format('Y-m-d') || $received_on > $today || $received_on > $confirmed) {
             return 'received_date_outside_order_window';
         }
