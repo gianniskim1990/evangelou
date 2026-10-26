@@ -64,7 +64,7 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
         if ($wp_user_id < 1 || get_userdata($wp_user_id) === false) {
             return new EVC_Pmpro_Snapshot(EVC_Pmpro_Snapshot::CONTRACT_VERSION, true, $pmpro_version, $timezone, false, array(), array());
         }
-        $conflicts = $this->environment_conflicts();
+        $conflicts = self::environment_conflicts($this->config);
         $rows = $this->membership_rows($wp_user_id);
         $confirmed = $this->provenance->confirmed_payments($wp_user_id);
         $settled = array();
@@ -96,14 +96,29 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
     }
 
     private function plugins_loaded(): bool {
+        return self::commerce_plugins_loaded();
+    }
+
+    /**
+     * STAGE-03B.3b review (M1): the pinned plugins are loaded. Shared with
+     * EVC_Bacs_Payment_Issuer, which refuses to write while this is false.
+     */
+    public static function commerce_plugins_loaded(): bool {
         global $wpdb;
         return defined('PMPRO_VERSION') && function_exists('pmpro_getLevel') && isset($wpdb->pmpro_memberships_users)
             && defined('WC_VERSION') && function_exists('wc_get_orders') && function_exists('wc_get_product') && function_exists('get_woocommerce_currency')
             && defined('PMPROWC_DIR') && function_exists('pmprowoo_add_membership_from_order');
     }
 
-    /** @return string[] */
-    private function environment_conflicts(): array {
+    /**
+     * Every difference from the pinned commerce environment (exact versions, product, add-on
+     * mapping, level). Read-only. Requires commerce_plugins_loaded(). Shared with
+     * EVC_Bacs_Payment_Issuer (STAGE-03B.3b review, M1): the issuer writes to WooCommerce / PMPro
+     * only while this returns nothing.
+     *
+     * @return string[]
+     */
+    public static function environment_conflicts(EVC_Commerce_Source_Config $config): array {
         $c = array();
         if ((string) WC_VERSION !== EVC_Commerce_Source_Config::WOOCOMMERCE_VERSION) {
             $c[] = 'unsupported_woocommerce_version';
@@ -119,7 +134,7 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
             $c[] = 'store_currency_not_eur';
         }
 
-        $product_id = $this->config->product_id;
+        $product_id = $config->product_id;
         $product = wc_get_product($product_id);
         if (!$product instanceof WC_Product) {
             $c[] = 'club_product_missing';
@@ -141,18 +156,18 @@ final class EVC_Wp_Commerce_Pmpro_Reader implements EVC_Pmpro_Reader {
 
         // PMPro WooCommerce 1.11 keeps its product -> level map in this option (pmprowoo_init()).
         $map = get_option('_pmprowoo_product_levels');
-        if (!is_array($map) || !isset($map[$product_id]) || (int) $map[$product_id] !== $this->config->level_id) {
+        if (!is_array($map) || !isset($map[$product_id]) || (int) $map[$product_id] !== $config->level_id) {
             $c[] = 'club_product_not_mapped_to_club_level';
         } else {
             foreach ($map as $other_product => $level) {
-                if ((int) $other_product !== $product_id && (int) $level === $this->config->level_id) {
+                if ((int) $other_product !== $product_id && (int) $level === $config->level_id) {
                     $c[] = 'club_level_granted_by_another_product';
                 }
             }
         }
 
-        $level = pmpro_getLevel($this->config->level_id);
-        if (empty($level) || !isset($level->id) || (int) $level->id !== $this->config->level_id) {
+        $level = pmpro_getLevel($config->level_id);
+        if (empty($level) || !isset($level->id) || (int) $level->id !== $config->level_id) {
             $c[] = 'club_level_missing';
         } else {
             if ((int) $level->expiration_number !== 1 || (string) $level->expiration_period !== 'Month') {
