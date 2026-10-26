@@ -14,6 +14,7 @@ import { execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { problemsFor, selfTest } from "./php-guards.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginSrc = join(appDir, "..", "wordpress", "evangelou-club");
@@ -118,34 +119,36 @@ for (const f of files.filter((x) => /\.(js|css)$/.test(x))) {
     if (text.includes(needle)) fail(`forbidden content "${needle}" in ${f}`);
   }
 }
-// STAGE-03D: these may be constructed ONLY by the WooCommerce-completion bootstrap, which does nothing
-// unless wp-config.php defines EVC_CLUB_WC_COMPLETION_ENABLED === true. Everywhere else they stay forbidden
-// (as before STAGE-03D); EVC_Bacs_Payment_Issuer / _Finalizer / _Confirmation stay forbidden everywhere.
+// STAGE-03D: the guarded classes may be constructed ONLY by the WooCommerce-completion bootstrap, inside
+// wire(), reached only through build() <- boot() after the real gate statement
+// `if (!EVC_Wc_Completion_Feature::enabled()) { return; }` (token-based checks in php-guards.mjs: comments,
+// strings, `new \EVC_X`, spacing and case variants are all handled; selfTest() runs negative fixtures on every
+// package). Everywhere else they stay forbidden (as before STAGE-03D); EVC_Bacs_Payment_Issuer / _Finalizer /
+// _Confirmation stay forbidden everywhere.
 const WC_COMPLETION_BOOTSTRAP = "includes/customer/class-evc-wc-completion-plugin.php";
-const BOOTSTRAP_ONLY_PHP_STRINGS = ["new EVC_Wc_Bacs_Intent_Store", "new EVC_Bacs_Recovery_Inspector", "new EVC_Bacs_Issuance_Guard", "new EVC_Wc_Completion_Confirmer", "new EVC_Wc_Completion_Recovery", "new EVC_Wc_Completion_Markers"];
+const GUARDED_CLASSES = ["EVC_Wc_Bacs_Intent_Store", "EVC_Bacs_Recovery_Inspector", "EVC_Bacs_Issuance_Guard", "EVC_Wc_Completion_Confirmer", "EVC_Wc_Completion_Recovery", "EVC_Wc_Completion_Markers"];
+const FORBIDDEN_CLASSES = ["EVC_Bacs_Payment_Confirmation", "EVC_Bacs_Payment_Finalizer", "EVC_Bacs_Payment_Issuer"];
+const guardSelfTest = selfTest();
+if (guardSelfTest.length > 0) fail(`PHP construction guard self-test failed: ${guardSelfTest.join("; ")}`);
 // Only these may take the member lock: the (never constructed) internal finalizer, which the issuer uses through
 // with_member_lock(), and the STAGE-03D confirmer (constructed only by the bootstrap above).
 const MEMBER_LOCK_FILES = ["includes/customer/class-evc-bacs-payment-finalizer.php", "includes/customer/class-evc-wc-completion-confirmer.php"];
-let bootstrapConstructions = 0;
+let sawBootstrap = false;
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
   const path = f.replace(/\\/g, "/");
   for (const needle of FORBIDDEN_PHP_STRINGS) {
     if (text.includes(needle)) fail(`test-only PHP "${needle}" in ${f}`);
   }
-  for (const needle of BOOTSTRAP_ONLY_PHP_STRINGS) {
-    if (!text.includes(needle)) continue;
-    if (path !== WC_COMPLETION_BOOTSTRAP) fail(`"${needle}" outside the STAGE-03D bootstrap in ${f}`);
-    bootstrapConstructions++;
-  }
-  if (path === WC_COMPLETION_BOOTSTRAP && !text.includes("if (!EVC_Wc_Completion_Feature::enabled()) {\n            return;\n        }")) {
-    fail(`the STAGE-03D bootstrap is not gated by EVC_CLUB_WC_COMPLETION_ENABLED in ${f}`);
+  if (path === WC_COMPLETION_BOOTSTRAP) sawBootstrap = true;
+  for (const problem of problemsFor(path, text, { bootstrap: WC_COMPLETION_BOOTSTRAP, guarded: GUARDED_CLASSES, forbidden: FORBIDDEN_CLASSES })) {
+    fail(problem);
   }
   if (text.includes("EVC_Member_Lock::acquire(") && !MEMBER_LOCK_FILES.includes(path)) {
     fail(`member lock taken outside the internal finalizer / STAGE-03D confirmer in ${f}`);
   }
 }
-if (bootstrapConstructions !== BOOTSTRAP_ONLY_PHP_STRINGS.length) fail(`STAGE-03D bootstrap constructions: expected ${BOOTSTRAP_ONLY_PHP_STRINGS.length}, found ${bootstrapConstructions}`);
+if (!sawBootstrap) fail("the STAGE-03D bootstrap file is missing from the package");
 
 console.log(
   `[evidence] club-plugin-package: files=${files.length} entry=${entry.file} css=${(entry.css ?? []).join(",")} customer=${customerEntry.file} commit=${commit.slice(0, 7)} path=${relative(appDir, out)}`,

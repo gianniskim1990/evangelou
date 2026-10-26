@@ -14,6 +14,7 @@ on:
       - 'app/src/customer/**'
       - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
+      - 'app/scripts/php-guards.mjs'
       - 'app/package.json'
       - 'app/package-lock.json'
   pull_request:
@@ -30,6 +31,7 @@ on:
       - 'app/src/customer/**'
       - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
+      - 'app/scripts/php-guards.mjs'
       - 'app/package.json'
       - 'app/package-lock.json'
 
@@ -265,6 +267,14 @@ jobs:
           rc=$?
           # Failures as annotations (readable through the check-runs API); never changes the result.
           if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/commerce-junit.xml" 10; fi
+          exit $rc
+
+      - name: Commerce suite - WooCommerce completion constant ON (STAGE-03D boot, schedule, recovery, deactivate)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_WC_COMPLETION_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-commerce-on --log-junit "$RUNNER_TEMP/commerce-on-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/commerce-on-junit.xml" 10; fi
           exit $rc
 
       - name: Commerce source mutation tests (real plugins)
