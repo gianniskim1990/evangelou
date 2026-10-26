@@ -957,16 +957,29 @@ final class BacsIssuerTest extends EVC_WP_Test_Case {
                 wc_get_order($second->get_id())->update_status('completed');
             }
         }, 20);
+        $inserts = array();
+        $this->hook('query', function ($sql) use (&$inserts) {
+            if (preg_match('/^\s*INSERT\b.*pmpro_memberships_users/is', $sql)) {
+                $inserts[] = $sql;
+            }
+            return $sql;
+        }, 10);
         $r = $this->issuer($at)->issue($actor, $order->get_id(), self::attestation($this->reference(), $at));
+        remove_all_filters('query');
         remove_all_actions('woocommerce_order_status_completed', 20);
         $this->assertTrue($done);
         $this->assertGuardInert();
         $this->assertSame('completed', wc_get_order($second->get_id())->get_status());
 
+        // (The armed order's row is later set `changed`, enddate = now, by PMPro when the other
+        // order's own issuance deactivates old levels; so its planned end is checked on the INSERT.)
         $planned_end = self::local(EVC_Membership_Calendar::add_calendar_month($at));
+        $this->assertCount(2, $inserts);
+        $this->assertStringContainsString($planned_end, $inserts[0], 'the armed order was inserted with the planned end');
+        $this->assertStringNotContainsString($planned_end, $inserts[1], 'the other order was not');
         $rows = $this->rows($customer);
         $this->assertCount(2, $rows);
-        $this->assertSame($planned_end, $rows[0]['enddate'], 'the armed order got the planned dates');
+        $this->assertSame('changed', $rows[0]['status']);
         $this->assertNotSame($planned_end, $rows[1]['enddate'], 'the other order kept the add-on\'s own dates');
         $this->assertMatchesRegularExpression('/:00$/', $rows[1]['enddate']);
         $this->assertResult($r, EVC_Bacs_Issuance_Result::MANAGER_REQUIRED, 'issuance_mismatch');
