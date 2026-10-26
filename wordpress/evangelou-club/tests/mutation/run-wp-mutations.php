@@ -582,6 +582,13 @@ $mutants = array(
 /** Output of the most recent suite run (printed only when the baseline fails). */
 $evc_last_output = '';
 
+/** A GitHub Actions error annotation (the job log is not always readable; annotations are). */
+function evc_mutation_ci_error(string $message): void {
+    if ((string) getenv('GITHUB_ACTIONS') === 'true') {
+        echo '::error title=WP mutation::' . str_replace(array('%', "\r", "\n"), array('%25', '%0D', '%0A'), substr($message, 0, 4000)) . "\n";
+    }
+}
+
 function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string $filter = null): int {
     global $evc_last_output;
     if ($mode === 'customer') {
@@ -634,6 +641,7 @@ foreach ($evc_commerce_only ? array('commerce', 'commerce_on') : array('disabled
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");
+        evc_mutation_ci_error("baseline ($mode) not green: " . substr($evc_last_output, -3500));
         fwrite(STDERR, substr($evc_last_output, -6000) . "\n");
         exit(1);
     }
@@ -654,6 +662,7 @@ foreach ($mutants as $m) {
     $count = substr_count($normalized, $search);
     if ($count !== 1) {
         fwrite(STDERR, sprintf("ABORT: %s pattern found %d times in %s (expected 1).\n", $id, $count, $file));
+        evc_mutation_ci_error(sprintf('%s pattern found %d times in %s', $id, $count, $file));
         exit(1);
     }
     try {
@@ -691,6 +700,9 @@ foreach ($mutants as $m) {
         @unlink($junit);
     }
     printf("%-42s [%s] %s (exit %d%s)\n", $id, $mode, $status, $exit, $evidence);
+    if ($status !== 'KILLED') {
+        evc_mutation_ci_error($id . ' [' . $mode . '] ' . $status . $evidence);
+    }
 }
 
 $restored = true;
