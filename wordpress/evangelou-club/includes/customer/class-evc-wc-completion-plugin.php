@@ -25,17 +25,31 @@ final class EVC_Wc_Completion_Plugin {
         if (!EVC_Wc_Completion_Feature::enabled()) {
             return;
         }
-        $parts = self::build(EVC_Commerce_Source_Config::from_constants(), EVC_Db_Config::from_constants(), function () {
-            return new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        });
-        if ($parts === null) {
-            return; // not configured: nothing hooked (the add-on behaves as shipped)
+        $confirmer = null;
+        try {
+            $parts = self::build(EVC_Commerce_Source_Config::from_constants(), EVC_Db_Config::from_constants(), function () {
+                return new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            });
+            if ($parts === null) {
+                return; // not configured: nothing hooked (the add-on behaves as shipped)
+            }
+            $confirmer = $parts['confirmer'];
+            $confirmer->register();
+            self::$recovery = $parts['recovery'];
+            add_filter('cron_schedules', array(__CLASS__, 'schedules'));
+            add_action(self::CRON_HOOK, array(__CLASS__, 'run_recovery'));
+            add_action('init', array(__CLASS__, 'schedule'));
+        } catch (Throwable $e) {
+            // A throw while wiring must never fatal the site: stay inert (the add-on behaves as shipped).
+            if ($confirmer !== null) {
+                $confirmer->unregister();
+            }
+            self::$recovery = null;
+            remove_filter('cron_schedules', array(__CLASS__, 'schedules'));
+            remove_action(self::CRON_HOOK, array(__CLASS__, 'run_recovery'));
+            remove_action('init', array(__CLASS__, 'schedule'));
+            error_log('Evangelou Club: the WooCommerce completion path stayed inert (' . get_class($e) . ' while wiring).');
         }
-        $parts['confirmer']->register();
-        self::$recovery = $parts['recovery'];
-        add_filter('cron_schedules', array(__CLASS__, 'schedules'));
-        add_action(self::CRON_HOOK, array(__CLASS__, 'run_recovery'));
-        add_action('init', array(__CLASS__, 'schedule'));
     }
 
     /**
@@ -50,6 +64,16 @@ final class EVC_Wc_Completion_Plugin {
         if ($config === null || $db === null || !defined('EVC_CLUB_PAYMENT_PROVENANCE') || constant('EVC_CLUB_PAYMENT_PROVENANCE') !== 'club_db_v1') {
             return null;
         }
+        try {
+            return self::wire($config, $db, $now, $open_store, $lock_wait_seconds);
+        } catch (Throwable $e) {
+            error_log('Evangelou Club: the WooCommerce completion path could not be built (' . get_class($e) . ').');
+            return null;
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private static function wire(EVC_Commerce_Source_Config $config, EVC_Db_Config $db, callable $now, ?callable $open_store, int $lock_wait_seconds): array {
         $environment = EVC_Bacs_Payment_Confirmation::ENVIRONMENT;
         $intents = new EVC_Wc_Bacs_Intent_Store($config->intent_codec(), $environment);
         $markers = new EVC_Wc_Completion_Markers($config->completion_marker_codec(), $environment);

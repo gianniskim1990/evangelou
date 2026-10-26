@@ -100,10 +100,12 @@ final class EVC_Wc_Completion_Confirmer {
     const CAPABILITY = 'edit_shop_orders';
     /** Before the add-on's own issuance (10). */
     const COMPLETION_PRIORITY = 5;
-    /** After the add-on's own issuance: the suppression ends here. */
+    /** After the add-on's own priority: the add-on is put back here (never runs for the order it was removed for). */
     const AFTER_ADDON_PRIORITY = 11;
-    /** `pmpro_change_level`: last word on the level passed in. */
-    const SUPPRESS_PRIORITY = 1000;
+    /** PMPro WooCommerce's own completion callback: pmprowoo_add_membership_from_order (add-on 1.11: registered at 10, one argument). */
+    const ADDON_HOOK = 'woocommerce_order_status_completed';
+    const ADDON_FUNCTION = 'pmprowoo_add_membership_from_order';
+    const ADDON_PRIORITY = 10;
     /** Cancelled / refunded / failed: before the add-on's own cancellation (10), so an exception there cannot skip it. */
     const ENDED_PRIORITY = 5;
     const MAX_STEPS = 6;
@@ -113,6 +115,8 @@ final class EVC_Wc_Completion_Confirmer {
     const ENDED = array('cancelled', 'refunded', 'failed');
     /** Manager-required reasons that clear by themselves: the recovery step retries them. */
     const RETRY_REASONS = array('period_not_representable_in_pmpro', 'late_renewal_before_pmpro_expiry', 'plan_same_instant_payment', 'plan_out_of_order_payment');
+    /** An outage of a source (lock held elsewhere, Club database or order meta unreadable): a cron tick during it is not an attempt. */
+    const OUTAGE_REASONS = array('member_locked', 'club_unavailable', 'club_record_unavailable', 'marker_unreadable', 'membership_unreadable', 'plan_unavailable', 'lock_lost');
 
     /** @var EVC_Commerce_Source_Config */
     private $config;
@@ -141,10 +145,14 @@ final class EVC_Wc_Completion_Confirmer {
 
     /** @var EVC_Provenance_Store|null opened lazily, once */
     private $store;
-    /** @var array<int,int[]> order id => [customer id, level id]: that order's add-on run is suppressed, once */
-    private $suppress = array();
-    /** @var int how often the add-on's own run was suppressed (diagnostics only) */
-    private $suppressed = 0;
+    /** @var array<int,bool> order id => the add-on's priority-10 callback is removed for this completion (put back at priority 11) */
+    private $held = array();
+    /** @var array<int,int> order id => customer id of a Club-product order this request is completing (for the tripwire) */
+    private $club = array();
+    /** @var int how often the add-on's own run was withheld from a completion (diagnostics only) */
+    private $withheld = 0;
+    /** @var int running REST dispatches (rest_request_before_callbacks .. rest_request_after_callbacks) */
+    private $rest_depth = 0;
     /** @var EVC_Wc_Completion_Result|null */
     private $last;
 
@@ -186,7 +194,8 @@ final class EVC_Wc_Completion_Confirmer {
     public function register(): void {
         add_action('woocommerce_order_status_completed', array($this, 'on_completed'), self::COMPLETION_PRIORITY, 3);
         add_action('woocommerce_order_status_completed', array($this, 'after_add_on'), self::AFTER_ADDON_PRIORITY, 1);
-        add_filter('pmpro_change_level', array($this, 'suppress_add_on'), self::SUPPRESS_PRIORITY, 2);
+        add_filter('rest_request_before_callbacks', array($this, 'rest_begin'), 0, 1);
+        add_filter('rest_request_after_callbacks', array($this, 'rest_end'), 9999, 1);
         foreach (self::ENDED as $status) {
             add_action('woocommerce_order_status_' . $status, array($this, 'on_ended'), self::ENDED_PRIORITY, 1);
         }
@@ -197,19 +206,29 @@ final class EVC_Wc_Completion_Confirmer {
     public function unregister(): void {
         remove_action('woocommerce_order_status_completed', array($this, 'on_completed'), self::COMPLETION_PRIORITY);
         remove_action('woocommerce_order_status_completed', array($this, 'after_add_on'), self::AFTER_ADDON_PRIORITY);
-        remove_filter('pmpro_change_level', array($this, 'suppress_add_on'), self::SUPPRESS_PRIORITY);
+        remove_filter('rest_request_before_callbacks', array($this, 'rest_begin'), 0);
+        remove_filter('rest_request_after_callbacks', array($this, 'rest_end'), 9999);
         foreach (self::ENDED as $status) {
             remove_action('woocommerce_order_status_' . $status, array($this, 'on_ended'), self::ENDED_PRIORITY);
         }
         remove_action('woocommerce_order_refunded', array($this, 'on_refund'), 10);
         remove_action('shutdown', array($this, 'forget'), 0);
         $this->forget();
+        $this->rest_depth = 0;
     }
 
     /**
      * `woocommerce_order_status_completed` (priority 5). Never throws: WooCommerce catches only
-     * Exception, and nothing here may abort its hook run (the add-on still runs, or is suppressed
-     * as designed).
+     * Exception, and nothing here may abort its hook run.
+     *
+     * First thing, before anything can fail: PMPro WooCommerce's own priority-10 callback is
+     * REMOVED for this order (put back at priority 11 by after_add_on(), so it never runs for this
+     * order and is there again for the next one of the same request). No completion of a
+     * Club-product order may ever let the add-on issue a membership by itself: a stray row it made
+     * for a completion the Club did not claim (a refused or unattested one, a toggle after the paid
+     * period ended, a re-completion after a cancellation) would block a later legitimate
+     * confirmation. Only the claimed, attested completion issues a membership, through this path.
+     * An ordinary (non-Club) order gets the add-on back at once and behaves exactly as shipped.
      *
      * @param mixed $order_id
      * @param mixed $order
@@ -217,64 +236,133 @@ final class EVC_Wc_Completion_Confirmer {
      */
     public function on_completed($order_id, $order = null, $transition = null): void {
         $order_id = is_numeric($order_id) ? (int) $order_id : 0;
-        unset($this->suppress[$order_id]); // decided anew for every completion of the order
         try {
+            $this->hold_add_on($order_id);
             $from = is_array($transition) && isset($transition['from']) && is_string($transition['from']) ? $transition['from'] : null;
-            $this->last = $this->confirm((int) get_current_user_id(), $order_id, $from);
+            $channel = $this->channel();
+            $this->last = $this->confirm((int) get_current_user_id(), $order_id, $from, $channel, EVC_Wc_Completion_Context::problem($channel, $transition));
+            if ($this->last->outcome === EVC_Wc_Completion_Result::IGNORED) {
+                $this->release_add_on($order_id); // not a Club order: the add-on as shipped
+            }
         } catch (Throwable $e) {
             $this->last = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, 'unexpected_error');
+            $this->flag_after_error($order_id, $transition);
         } finally {
             $this->guard->disarm();
         }
     }
 
-    /** `woocommerce_order_status_completed` (priority 11): the add-on's own run for this order is over. */
+    /**
+     * `woocommerce_order_status_completed` (priority 11): the add-on's own priority is over. It is
+     * put back for the next order (it does not run for this one: WP_Hook never revisits a lower
+     * priority), then the tripwire looks for a stray endless Club row.
+     */
     public function after_add_on($order_id): void {
-        if (is_numeric($order_id)) {
-            unset($this->suppress[(int) $order_id]);
+        $order_id = is_numeric($order_id) ? (int) $order_id : 0;
+        try {
+            $this->release_add_on($order_id);
+            if (isset($this->club[$order_id])) {
+                $customer = $this->club[$order_id];
+                unset($this->club[$order_id]);
+                $this->tripwire($order_id, $customer);
+            }
+        } catch (Throwable $e) {
+            // Never aborts WooCommerce's hook run.
         }
     }
 
-    /** `shutdown`: no suppression survives the request. */
+    /** `shutdown`: nothing survives the request. */
     public function forget(): void {
-        $this->suppress = array();
+        $this->rest_depth = 0;
+        foreach (array_keys($this->held) as $order_id) {
+            $this->release_add_on((int) $order_id);
+        }
+        $this->held = array();
+        $this->club = array();
+    }
+
+    /** `rest_request_before_callbacks`: a REST handler (and everything it triggers) is running. */
+    public function rest_begin($response = null) {
+        $this->rest_depth++;
+        return $response;
+    }
+
+    /** `rest_request_after_callbacks`: it is over (also applied by rest_do_request(), unlike rest_post_dispatch). */
+    public function rest_end($response = null) {
+        $this->rest_depth = max(0, $this->rest_depth - 1);
+        return $response;
+    }
+
+    /** Removes the add-on's own completion callback for this order; only on the pinned Club environment. */
+    private function hold_add_on(int $order_id): void {
+        if ($order_id < 1 || !function_exists(self::ADDON_FUNCTION) || has_action(self::ADDON_HOOK, self::ADDON_FUNCTION) !== self::ADDON_PRIORITY) {
+            return;
+        }
+        // Gate: the Club only takes over on the environment it has pinned (PMPro / add-on versions, level group).
+        try {
+            if (EVC_Bacs_Payment_Issuer::environment_problem($this->config) !== null) {
+                return;
+            }
+        } catch (Throwable $e) {
+            // Unknown: fail closed, the add-on stays withheld (the recovery re-checks the environment).
+        }
+        remove_action(self::ADDON_HOOK, self::ADDON_FUNCTION, self::ADDON_PRIORITY);
+        $this->held[$order_id] = true;
+        $this->withheld++;
+    }
+
+    /** Puts the add-on's callback back (priority 10) when this completion removed it. */
+    private function release_add_on(int $order_id): void {
+        if (!isset($this->held[$order_id])) {
+            return;
+        }
+        unset($this->held[$order_id]);
+        if (has_action(self::ADDON_HOOK, self::ADDON_FUNCTION) === false && function_exists(self::ADDON_FUNCTION)) {
+            add_action(self::ADDON_HOOK, self::ADDON_FUNCTION, self::ADDON_PRIORITY, 1);
+        }
+    }
+
+    /** The channel of the running request. */
+    private function channel(): string {
+        return EVC_Wc_Completion_Context::detect($this->rest_depth, is_admin());
+    }
+
+    /** Diagnostics: how often the add-on's run was withheld from a Club-order completion. */
+    public function withheld_runs(): int {
+        return $this->withheld;
     }
 
     /**
-     * `pmpro_change_level`: returns the integer level id (PMPro then returns early because the user
-     * already has the level: no deactivation, no insert) ONLY inside the add-on's own run
-     * pmprowoo_add_membership_from_order($order_id) for an order whose suppression this request
-     * decided (the order id is read from that call itself; pmpro_change_level carries none), only
-     * for that order's customer and the Club level, only once, and only while the customer holds an
-     * active Club row right now. Never writes.
-     *
-     * @param mixed $level
-     * @param mixed $user_id
-     * @return mixed
+     * After the add-on's priority: no ACTIVE Club row of this customer may be endless (PMPro inserts
+     * such a row for a level without an end date). Audited, flagged for a manager, noted on the order.
      */
-    public function suppress_add_on($level, $user_id = null) {
+    private function tripwire(int $order_id, int $customer): void {
+        if ($customer < 1 || $this->endless_rows($customer) < 1) {
+            return;
+        }
+        $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'endless_membership_row');
+        $r->paid_time_at_risk = false;
         try {
-            $order = self::add_on_order();
-            if ($order === null) {
-                return $level; // not the add-on's own issuance
-            }
-            $s = $this->suppress[$order] ?? null;
-            if ($s === null || !is_array($level) || !isset($level['user_id'], $level['membership_id'])
-                || (int) $level['user_id'] !== $s[0] || (int) $user_id !== $s[0] || (int) $level['membership_id'] !== $s[1]) {
-                return $level;
-            }
-            unset($this->suppress[$order]); // once
-            // Never without an active Club row: PMPro would insert an integer level with no end date.
-            if ($this->active_club_rows($s[0]) < 1) {
-                return $level;
-            }
-            if (function_exists('pmpro_clear_level_cache_for_user')) {
-                pmpro_clear_level_cache_for_user($s[0]); // PMPro re-reads the rows itself (cache only, no write)
-            }
-            $this->suppressed++;
-            return $s[1];
+            $r->followup = $this->markers->set_followup($order_id, EVC_Wc_Completion_Markers::MANAGER_PREFIX . 'endless_membership_row') ? EVC_Wc_Completion_Markers::MANAGER_PREFIX . 'endless_membership_row' : 'followup_not_written';
         } catch (Throwable $e) {
-            return $level;
+            $r->followup = 'followup_not_written';
+        }
+        $this->audit_completion($r, null, $order_id, 'tripwire');
+        $this->note($order_id, $r);
+    }
+
+    /** Active Club rows of the customer without an end date (0 when unreadable: the tripwire only adds, never blocks). */
+    private function endless_rows(int $customer): int {
+        try {
+            $this->db->last_error = '';
+            $n = $this->db->get_var($this->db->prepare(
+                "SELECT COUNT(*) FROM {$this->db->pmpro_memberships_users} WHERE user_id = %d AND membership_id = %d AND status = 'active' AND (enddate IS NULL OR enddate = '0000-00-00 00:00:00')",
+                $customer,
+                $this->config->level_id
+            ));
+            return $this->db->last_error === '' ? (int) $n : 0;
+        } catch (Throwable $e) {
+            return 0;
         }
     }
 
@@ -300,10 +388,6 @@ final class EVC_Wc_Completion_Confirmer {
         return $this->last;
     }
 
-    public function suppressed_runs(): int {
-        return $this->suppressed;
-    }
-
     /**
      * The actor rule of this path (also the recovery inspector's): a real user who can edit shop
      * orders and is not the shared Club staff account. "Not the order's customer" is checked
@@ -315,35 +399,66 @@ final class EVC_Wc_Completion_Confirmer {
 
     // ---- completion --------------------------------------------------------------------------
 
-    /** One completion of $order_id by $actor (0 = nobody: REST API keys, cron, automation). */
-    public function confirm(int $actor, int $order_id, ?string $from_status): EVC_Wc_Completion_Result {
+    /**
+     * One completion of $order_id by $actor (0 = nobody). $channel / $channel_problem: where it came
+     * from (EVC_Wc_Completion_Context); a completion that is not a manual admin click is not a payment
+     * confirmation, whoever the user is.
+     */
+    public function confirm(int $actor, int $order_id, ?string $from_status, string $channel = EVC_Wc_Completion_Context::CHANNEL_ADMIN, ?string $channel_problem = null): EVC_Wc_Completion_Result {
         $order = $order_id > 0 ? wc_get_order($order_id) : false;
         if (!$order instanceof WC_Order || $order instanceof WC_Order_Refund || !$this->has_club_item($order)) {
             return new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::IGNORED, 'not_a_club_order');
         }
         $customer = (int) $order->get_customer_id();
-        $not_attested = self::actor_problem($actor, $customer);
+        $this->club[$order_id] = $customer;
+        $not_attested = self::actor_problem($actor, $customer) ?? $channel_problem;
         if ($not_attested !== null) {
-            // The add-on behaves as shipped; the Club stays unverified for this order.
+            // No membership is issued for it (the add-on is withheld); the Club stays unverified for this order.
             $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::NOT_ATTESTED, $not_attested);
-            $this->audit_completion($r, null, $order_id, 'completion');
+            $r->addon = isset($this->held[$order_id]) ? EVC_Wc_Completion_Marker::ADDON_SUPPRESSED : EVC_Wc_Completion_Marker::ADDON_SHIPPED;
+            $this->audit_completion($r, $actor > 0 ? $actor : null, $order_id, 'completion', null, $channel);
+            $this->note($order_id, $r);
             return $r;
         }
         $shape = $this->order_problem($order);
         if ($shape !== null) {
             $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::CONFLICT, $shape);
-            $this->audit_completion($r, $actor, $order_id, 'completion');
+            $r->addon = isset($this->held[$order_id]) ? EVC_Wc_Completion_Marker::ADDON_SUPPRESSED : EVC_Wc_Completion_Marker::ADDON_SHIPPED;
+            $this->audit_completion($r, $actor, $order_id, 'completion', null, $channel);
+            $this->note($order_id, $r);
             return $r;
         }
         if (in_array((string) $from_status, self::ENDED, true) || $this->markers->was_ended($order_id) || (float) $order->get_total_refunded() > 0) {
             // Never re-confirmed after a cancellation / refund (fail closed, flagged).
             $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::MANAGER_REQUIRED, 'completed_after_cancellation_or_refund');
-            $this->audit_completion($r, $actor, $order_id, 'completion');
+            $r->addon = isset($this->held[$order_id]) ? EVC_Wc_Completion_Marker::ADDON_SUPPRESSED : EVC_Wc_Completion_Marker::ADDON_SHIPPED;
+            $this->audit_completion($r, $actor, $order_id, 'completion', null, $channel);
+            $this->note($order_id, $r);
+            return $r;
+        }
+        if (!isset($this->held[$order_id])) {
+            // The Club does not take over outside its pinned environment (the add-on runs as shipped).
+            $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::MANAGER_REQUIRED, EVC_Bacs_Payment_Issuer::environment_problem($this->config) ?? 'add_on_not_withheld');
+            $r->addon = EVC_Wc_Completion_Marker::ADDON_SHIPPED;
+            $this->audit_completion($r, $actor, $order_id, 'completion', null, $channel);
+            $this->note($order_id, $r);
             return $r;
         }
 
-        // Claimed: from here on this path owns the completion.
+        // Claimed: from here on this path owns the completion. The signed marker and the open
+        // follow-up index are written BEFORE anything is issued, so a crash at any point after this
+        // is found and finished by the recovery step (never stranded).
         $completed_at = self::whole_second(($this->now)());
+        $floor = 0;
+        $this->active_club_rows($customer, $floor);
+        $opened = $this->open_claim($order_id, $customer, $actor, $completed_at, $floor);
+        if ($opened !== null) {
+            $r = new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::MANAGER_REQUIRED, $opened);
+            $r->addon = EVC_Wc_Completion_Marker::ADDON_SUPPRESSED;
+            $this->audit_completion($r, $actor, $order_id, 'completion', $completed_at, $channel);
+            $this->note($order_id, $r);
+            return $r;
+        }
         $steps = array();
         try {
             $r = $this->with_member_lock($customer, function (EVC_Member_Lock $lock) use ($actor, $order, $completed_at, &$steps) {
@@ -355,21 +470,79 @@ final class EVC_Wc_Completion_Confirmer {
         }
         $r->steps = $steps;
         self::settle($r);
-
-        // The add-on's own priority-10 run: suppressed only while the customer holds an active Club row.
-        $floor = 0;
-        $active = $this->active_club_rows($customer, $floor);
-        if ($active > 0) {
-            $this->suppress[$order_id] = array($customer, $this->config->level_id);
-            $r->addon = EVC_Wc_Completion_Marker::ADDON_SUPPRESSED;
-        } else {
-            $r->addon = EVC_Wc_Completion_Marker::ADDON_SHIPPED;
-        }
+        $r->addon = EVC_Wc_Completion_Marker::ADDON_SUPPRESSED;
+        $this->close_or_flag($r, $order_id);
+        $this->audit_completion($r, $actor, $order_id, 'completion', $completed_at, $channel);
         if (!in_array($r->outcome, array(EVC_Wc_Completion_Result::RECORDED, EVC_Wc_Completion_Result::ALREADY_RECORDED), true)) {
-            $this->remember($r, $order_id, $customer, $actor, $completed_at, $floor);
+            $this->note($order_id, $r);
         }
-        $this->audit_completion($r, $actor, $order_id, 'completion', $completed_at);
         return $r;
+    }
+
+    /**
+     * The signed marker (once) and the open follow-up index of a claimed completion. Null when both
+     * are stored (a marker of an earlier completion of the same order is kept as it is: it is
+     * immutable); else why not (nothing is issued then).
+     */
+    private function open_claim(int $order_id, int $customer, int $actor, DateTimeImmutable $completed_at, int $floor): ?string {
+        try {
+            $marker = EVC_Wc_Completion_Marker::create(EVC_Bacs_Payment_Confirmation::ENVIRONMENT, $order_id, $customer, $actor, $completed_at, 'claimed', EVC_Wc_Completion_Marker::ADDON_SUPPRESSED, $floor);
+            $write = $this->markers->create($marker);
+            if (!in_array($write->outcome, array(EVC_Bacs_Intent_Write::WRITTEN, EVC_Bacs_Intent_Write::ALREADY, EVC_Bacs_Intent_Write::CONFLICT), true)
+                || ($write->outcome === EVC_Bacs_Intent_Write::CONFLICT && strpos((string) $write->reason, 'stored_marker_invalid') === 0)) {
+                return 'marker_' . $write->outcome;
+            }
+            $open = EVC_Wc_Completion_Markers::OPEN_PREFIX . '0';
+            if (EVC_Wc_Completion_Markers::open_attempts($this->markers->followup($order_id)) === null && !$this->markers->set_followup($order_id, $open)) {
+                return 'followup_not_written';
+            }
+            return null;
+        } catch (Throwable $e) {
+            return 'marker_not_written';
+        }
+    }
+
+    /** The outcome is final (recorded): the follow-up index is removed; else a manager is flagged (deferred ones stay open). */
+    private function close_or_flag(EVC_Wc_Completion_Result $r, int $order_id): void {
+        try {
+            if (in_array($r->outcome, array(EVC_Wc_Completion_Result::RECORDED, EVC_Wc_Completion_Result::ALREADY_RECORDED), true)) {
+                $r->followup = $this->markers->set_followup($order_id, null) ? null : 'followup_not_written';
+                return;
+            }
+            if ($r->outcome === EVC_Wc_Completion_Result::DEFERRED) {
+                $r->followup = $this->markers->followup($order_id);
+                return;
+            }
+            $value = EVC_Wc_Completion_Markers::MANAGER_PREFIX . self::code((string) $r->reason);
+            $r->followup = $this->markers->set_followup($order_id, $value) ? $value : 'followup_not_written';
+        } catch (Throwable $e) {
+            $r->followup = 'followup_not_written';
+        }
+    }
+
+    /**
+     * An exception escaped the confirmation (nothing is shown to WooCommerce). If the completion was
+     * an attested manual admin one on a Club order, the signed marker and the open index are written
+     * now, so the recovery finishes it with everything re-read. Best effort; never throws.
+     */
+    private function flag_after_error(int $order_id, $transition): void {
+        try {
+            $order = $order_id > 0 ? wc_get_order($order_id) : false;
+            if (!$order instanceof WC_Order || !$this->has_club_item($order)) {
+                return;
+            }
+            $actor = (int) get_current_user_id();
+            $customer = (int) $order->get_customer_id();
+            if (self::actor_problem($actor, $customer) !== null || EVC_Wc_Completion_Context::problem($this->channel(), $transition) !== null
+                || $this->order_problem($order) !== null || $this->markers->was_ended($order_id)) {
+                return;
+            }
+            $floor = 0;
+            $this->active_club_rows($customer, $floor);
+            $this->open_claim($order_id, $customer, $actor, self::whole_second(($this->now)()), $floor);
+        } catch (Throwable $e) {
+            // Nothing more can be done in this request.
+        }
     }
 
     /**
@@ -430,6 +603,9 @@ final class EVC_Wc_Completion_Confirmer {
         self::settle($r);
         $this->next_followup($r, $order_id, $attempts);
         $this->audit_completion($r, $read->marker !== null ? $read->marker->actor_id() : null, $order_id, 'recovery');
+        if ($r->followup !== null && strpos($r->followup, EVC_Wc_Completion_Markers::MANAGER_PREFIX) === 0) {
+            $this->note($order_id, $r); // a manager must look: visible on the order itself
+        }
         return $r;
     }
 
@@ -463,10 +639,7 @@ final class EVC_Wc_Completion_Confirmer {
                 return new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, 'lock_lost');
             }
             $facts = $inspector->facts($actor, $order_id);
-            $this->completion_context($facts, $marker, $store);
-            if ($acted) {
-                $facts->replaceable_row_ref = null; // the row now there is the one we issued, never the add-on's
-            }
+            $this->completion_context($facts);
             if ($facts->intent->outcome === EVC_Bacs_Intent_Read::MISSING) {
                 if ($step > 0) {
                     return new EVC_Wc_Completion_Result(EVC_Wc_Completion_Result::UNAVAILABLE, 'intent_not_found_after_create');
@@ -554,45 +727,15 @@ final class EVC_Wc_Completion_Confirmer {
     }
 
     /**
-     * What PMPro WooCommerce did for this completion, for the recovery policy (STAGE-03D facts):
-     * in the hook it has issued nothing yet; during recovery the signed marker says whether its run
-     * was suppressed (nothing issued) or ran as shipped (its own row may be replaced, if identified).
+     * What PMPro WooCommerce did for this completion, for the recovery policy: nothing. Its
+     * completion callback is withheld for every claimed completion, so no row of its own ever exists
+     * for it; a completed order with no row yet is issued by this path (armed).
      */
-    private function completion_context(EVC_Bacs_Recovery_Facts $facts, ?EVC_Wc_Completion_Marker $marker, EVC_Provenance_Store $store): void {
-        if ($marker === null) {
-            $facts->reissue_if_missing = true;
-            $facts->replaceable_row_ref = null;
-            return;
-        }
-        $facts->reissue_if_missing = $marker->addon() === EVC_Wc_Completion_Marker::ADDON_SUPPRESSED;
-        $facts->replaceable_row_ref = $marker->addon() === EVC_Wc_Completion_Marker::ADDON_SHIPPED
-            ? $this->addon_row($marker->customer_id(), $marker->row_floor(), $store)
-            : null;
+    private function completion_context(EVC_Bacs_Recovery_Facts $facts): void {
+        $facts->reissue_if_missing = true;
+        $facts->replaceable_row_ref = null;
     }
 
-    /**
-     * The add-on's own row for a deferred completion whose add-on run was not suppressed: the ONE
-     * active Club row of the customer, newer than every row that existed at the completion
-     * (row_floor), and bound to no recorded Club payment. Else null (never guessed).
-     */
-    private function addon_row(int $customer, int $row_floor, EVC_Provenance_Store $store): ?string {
-        try {
-            $this->db->last_error = '';
-            $ids = $this->db->get_col($this->db->prepare("SELECT id FROM {$this->db->pmpro_memberships_users} WHERE user_id = %d AND membership_id = %d AND status = 'active'", $customer, $this->config->level_id));
-            if (!is_array($ids) || $this->db->last_error !== '' || count($ids) !== 1 || (int) $ids[0] <= $row_floor) {
-                return null;
-            }
-            $ref = $this->config->ref('pmpro_membership_row', (string) $ids[0]);
-            foreach ($store->member_movements($customer) as $m) {
-                if ($m->pmpro_row_ref() === $ref) {
-                    return null;
-                }
-            }
-            return $ref;
-        } catch (Throwable $e) {
-            return null;
-        }
-    }
 
     /** The first, durable record of this confirmation. Null when the signed `planned` intent is stored. */
     private function plan_intent(EVC_Member_Lock $lock, EVC_Bacs_Recovery_Facts $facts, int $actor, DateTimeImmutable $now, EVC_Provenance_Store $store, EVC_Provenance_Recorder $recorder): ?EVC_Wc_Completion_Result {
@@ -944,15 +1087,26 @@ final class EVC_Wc_Completion_Confirmer {
         return false;
     }
 
-    /** A Club bank-transfer order exactly as the reader accepts it, else why not. */
+    /**
+     * A Club bank-transfer order exactly as the reader accepts it, else why not (a reason the manager
+     * can act on: a total that differs from 20.00 because of tax or fees says so).
+     */
     private function order_problem(WC_Order $order): ?string {
+        if ((int) $order->get_customer_id() < 1) {
+            return 'order_has_no_customer';
+        }
+        if ((string) $order->get_payment_method() !== EVC_Commerce_Source_Config::PAYMENT_METHOD) {
+            return 'order_not_bank_transfer';
+        }
+        if ((string) $order->get_currency() !== EVC_Commerce_Source_Config::CURRENCY) {
+            return 'order_not_eur';
+        }
         $items = array_values($order->get_items('line_item'));
-        if ((int) $order->get_customer_id() < 1
-            || (string) $order->get_payment_method() !== EVC_Commerce_Source_Config::PAYMENT_METHOD
-            || (string) $order->get_currency() !== EVC_Commerce_Source_Config::CURRENCY
-            || (string) wc_format_decimal($order->get_total(), 2) !== EVC_Commerce_Source_Config::PRICE
-            || count($items) !== 1 || (int) $items[0]->get_product_id() !== $this->config->product_id || (int) $items[0]->get_quantity() !== 1) {
-            return 'order_not_a_club_bank_transfer';
+        if (count($items) !== 1 || (int) $items[0]->get_product_id() !== $this->config->product_id || (int) $items[0]->get_quantity() !== 1) {
+            return 'order_not_a_single_club_item';
+        }
+        if ((string) wc_format_decimal($order->get_total(), 2) !== EVC_Commerce_Source_Config::PRICE) {
+            return (float) $order->get_total_tax() > 0 || (float) $order->get_total_discount() > 0 ? 'order_total_changed_by_tax_or_discount' : 'order_total_not_20_eur';
         }
         return null;
     }
@@ -980,42 +1134,6 @@ final class EVC_Wc_Completion_Confirmer {
         }
     }
 
-    /**
-     * The order of the add-on's own issuance in progress: the argument of the innermost
-     * pmprowoo_add_membership_from_order($order_id) on the call stack; null when the level change
-     * does not come from it.
-     */
-    private static function add_on_order(): ?int {
-        foreach (debug_backtrace(0, 40) as $frame) {
-            if (!isset($frame['class']) && ($frame['function'] ?? '') === 'pmprowoo_add_membership_from_order') {
-                return isset($frame['args'][0]) && is_numeric($frame['args'][0]) ? (int) $frame['args'][0] : null;
-            }
-        }
-        return null;
-    }
-
-    /** Stores the signed marker and the follow-up index of a claimed completion that is not recorded. */
-    private function remember(EVC_Wc_Completion_Result $r, int $order_id, int $customer, int $actor, DateTimeImmutable $completed_at, int $floor): void {
-        try {
-            $marker = EVC_Wc_Completion_Marker::create(EVC_Bacs_Payment_Confirmation::ENVIRONMENT, $order_id, $customer, $actor, $completed_at, self::code((string) $r->reason), (string) $r->addon, $floor);
-            $write = $this->markers->create($marker);
-            if (!in_array($write->outcome, array(EVC_Bacs_Intent_Write::WRITTEN, EVC_Bacs_Intent_Write::ALREADY), true)) {
-                $r->followup = 'marker_' . $write->outcome;
-                return;
-            }
-            $current = $this->markers->followup($order_id);
-            if (EVC_Wc_Completion_Markers::open_attempts($current) !== null && $r->outcome === EVC_Wc_Completion_Result::DEFERRED) {
-                $r->followup = $current; // already open (e.g. a second completion of the same order)
-                return;
-            }
-            $value = $r->outcome === EVC_Wc_Completion_Result::DEFERRED
-                ? EVC_Wc_Completion_Markers::OPEN_PREFIX . '0'
-                : EVC_Wc_Completion_Markers::MANAGER_PREFIX . self::code((string) $r->reason);
-            $r->followup = $this->markers->set_followup($order_id, $value) ? $value : 'followup_not_written';
-        } catch (Throwable $e) {
-            $r->followup = 'marker_not_written';
-        }
-    }
 
     /** Follow-up after a recovery attempt: done → removed; deferred → one more attempt (bounded); else a manager. */
     private function next_followup(EVC_Wc_Completion_Result $r, int $order_id, int $attempts = 0): void {
@@ -1023,7 +1141,9 @@ final class EVC_Wc_Completion_Confirmer {
             if (in_array($r->outcome, array(EVC_Wc_Completion_Result::RECORDED, EVC_Wc_Completion_Result::ALREADY_RECORDED, EVC_Wc_Completion_Result::CORRECTED, EVC_Wc_Completion_Result::ALREADY_CORRECTED, EVC_Wc_Completion_Result::NOT_RECORDED), true)) {
                 $value = null;
             } elseif ($r->outcome === EVC_Wc_Completion_Result::DEFERRED) {
-                $value = $attempts + 1 < self::MAX_ATTEMPTS ? EVC_Wc_Completion_Markers::OPEN_PREFIX . ($attempts + 1) : EVC_Wc_Completion_Markers::MANAGER_PREFIX . 'attempts_exhausted';
+                // A tick during an outage of a source (lock held elsewhere, Club database down) is not an attempt.
+                $used = in_array((string) $r->reason, self::OUTAGE_REASONS, true) ? $attempts : $attempts + 1;
+                $value = $used < self::MAX_ATTEMPTS ? EVC_Wc_Completion_Markers::OPEN_PREFIX . $used : EVC_Wc_Completion_Markers::MANAGER_PREFIX . 'attempts_exhausted';
             } else {
                 $value = EVC_Wc_Completion_Markers::MANAGER_PREFIX . self::code((string) $r->reason);
             }
@@ -1071,9 +1191,10 @@ final class EVC_Wc_Completion_Confirmer {
 
     // ---- audit (opaque references and numeric ids only; a failure never changes the result) ----
 
-    private function audit_completion(EVC_Wc_Completion_Result $r, ?int $actor, int $order_id, string $trigger, ?DateTimeImmutable $completed_at = null): void {
+    private function audit_completion(EVC_Wc_Completion_Result $r, ?int $actor, int $order_id, string $trigger, ?DateTimeImmutable $completed_at = null, ?string $channel = null): void {
         $this->audit_event(self::EVENT, $r, $actor, array(
             'trigger' => $trigger,
+            'channel' => $channel,
             'reason' => $r->reason,
             'order' => $order_id > 0 ? $this->config->ref('wc_order', (string) $order_id) : null,
             'movement' => $order_id > 0 ? $this->movement_id($order_id) : null,
@@ -1084,6 +1205,21 @@ final class EVC_Wc_Completion_Confirmer {
             'paid_time_at_risk' => $r->paid_time_at_risk ? 'yes' : 'no',
             'period_end_utc' => $r->period ? $r->period->end_utc()->format('Y-m-d H:i:s') : null,
         ));
+    }
+
+    /**
+     * A short private note on the order for the shop manager (Greek, reason code only: no personal
+     * data, never shown to the customer). Best effort; never throws.
+     */
+    private function note(int $order_id, EVC_Wc_Completion_Result $r): void {
+        try {
+            $order = $order_id > 0 ? wc_get_order($order_id) : false;
+            if ($order instanceof WC_Order && !$order instanceof WC_Order_Refund) {
+                $order->add_order_note('Club: η ολοκλήρωση της παραγγελίας ΔΕΝ επιβεβαίωσε πληρωμή αυτόματα και χρειάζεται έλεγχο από υπεύθυνο (κωδικός: ' . self::code((string) $r->reason) . ').', 0, false);
+            }
+        } catch (Throwable $e) {
+            // The audit event and the follow-up index remain.
+        }
     }
 
     private function audit_correction(EVC_Wc_Completion_Result $r, int $order_id, string $trigger): void {
