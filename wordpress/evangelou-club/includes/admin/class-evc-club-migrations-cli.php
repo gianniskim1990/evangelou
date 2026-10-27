@@ -48,7 +48,9 @@ final class EVC_Club_Migrations_Cli {
         $report = $this->service->status();
         $this->print_report($report);
         if ($report['refusals']) {
-            ($this->io['line'])('Η εφαρμογή ΔΕΝ επιτρέπεται μέχρι να διορθωθούν τα παραπάνω.');
+            // Non-zero exit (WP_CLI::error) so scripts and the technician see the refusal.
+            ($this->io['error'])('Η εφαρμογή ΔΕΝ επιτρέπεται μέχρι να διορθωθούν τα παραπάνω: ' . implode(', ', $report['refusals']) . '.');
+            return;
         } elseif ($report['can_apply']) {
             ($this->io['line'])('Μπορεί να γίνει εφαρμογή: wp evc-club migrations apply --yes');
         } else {

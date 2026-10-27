@@ -7,7 +7,9 @@ defined('ABSPATH') || exit;
  *
  * GET shows the read-only status. Applying needs ALL of: a POST, the WordPress nonce
  * (check_admin_referer), the capability checked again, and the exact typed word
- * EVC_Club_Migrations_Service::CONFIRM_WORD. Every value printed is escaped; no host, user,
+ * EVC_Club_Migrations_Service::CONFIRM_WORD. The POST is handled on the page's load-* hook (before
+ * any output) and answered with a redirect to the GET page (POST/redirect/GET); the result waits in
+ * a short-lived per-user transient that the next GET shows once, so a refresh never re-applies. Every value printed is escaped; no host, user,
  * password or database name is ever printed (the name only as a masked hint).
  */
 final class EVC_Club_Migrations_Admin_Page {
@@ -20,6 +22,8 @@ final class EVC_Club_Migrations_Admin_Page {
     const ACTION_APPLY = 'apply';
     const NOT_ALLOWED = 'Δεν έχετε δικαίωμα για αυτή τη σελίδα.';
     const WRONG_WORD = 'Η λέξη επιβεβαίωσης δεν είναι σωστή. Δεν έγινε καμία αλλαγή.';
+    const RESULT_TRANSIENT = 'evc_club_migrations_result_';
+    const RESULT_TTL = 300;
 
     const CHECK_LABELS = array(
         'config' => 'Στοιχεία σύνδεσης στο wp-config.php',
@@ -45,21 +49,45 @@ final class EVC_Club_Migrations_Admin_Page {
     }
 
     public function add_menu(): void {
-        add_management_page(self::TITLE, self::TITLE, self::CAPABILITY, self::SLUG, array($this, 'render'));
+        $hook = add_management_page(self::TITLE, self::TITLE, self::CAPABILITY, self::SLUG, array($this, 'render'));
+        if (is_string($hook) && $hook !== '') {
+            add_action('load-' . $hook, array($this, 'handle_load'));
+        }
     }
 
-    /** Administrators only: manage_options and not a Club staff account. */
+    /** Administrators only: manage_options, not a Club staff account, single-site WordPress. */
     public static function may_manage($user): bool {
-        return $user instanceof WP_User && $user->exists() && user_can($user, self::CAPABILITY) && !EVC_Staff_Role::has_staff_role($user);
+        return $user instanceof WP_User && $user->exists() && user_can($user, self::CAPABILITY) && !EVC_Staff_Role::has_staff_role($user)
+            && EVC_Club_Migrations_Plugin::supported_site(is_multisite());
     }
 
+    /** load-tools_page_evc-club-db: handles the apply POST, then redirects to the GET page. */
+    public function handle_load(): void {
+        if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST[self::FIELD_ACTION])) {
+            return;
+        }
+        if (!self::may_manage(wp_get_current_user())) {
+            wp_die(esc_html(self::NOT_ALLOWED), '', array('response' => 403));
+        }
+        $notice = $this->handle_post();
+        set_transient(self::RESULT_TRANSIENT . get_current_user_id(), $notice, self::RESULT_TTL);
+        wp_safe_redirect(admin_url('tools.php?page=' . self::SLUG));
+        exit;
+    }
+
+    /** GET only: a POST that reaches the render callback is ignored (never applies). */
     public function render(): void {
         if (!self::may_manage(wp_get_current_user())) {
             wp_die(esc_html(self::NOT_ALLOWED), '', array('response' => 403));
         }
+        $key = self::RESULT_TRANSIENT . get_current_user_id();
+        $stored = get_transient($key);
         $notice = null;
-        if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST[self::FIELD_ACTION])) {
-            $notice = $this->handle_post();
+        if ($stored !== false) {
+            delete_transient($key);
+            if (is_array($stored) && isset($stored['kind'], $stored['lines']) && is_string($stored['kind']) && is_array($stored['lines'])) {
+                $notice = array('kind' => $stored['kind'], 'lines' => array_map('strval', $stored['lines']));
+            }
         }
         echo $this->html($this->service->status(), $notice); // phpcs:ignore WordPress.Security.EscapeOutput -- built from escaped parts
     }
@@ -94,7 +122,12 @@ final class EVC_Club_Migrations_Admin_Page {
             case EVC_Club_Migrations_Service::RESULT_NOTHING_PENDING:
                 return array('kind' => 'info', 'lines' => array(EVC_Club_Migrations_Service::message(EVC_Club_Migrations_Service::RESULT_NOTHING_PENDING)));
             case EVC_Club_Migrations_Service::RESULT_FAILED:
-                return array('kind' => 'error', 'lines' => array(EVC_Club_Migrations_Service::message(EVC_Club_Migrations_Service::RESULT_FAILED, array('version' => $outcome['failed_version'], 'versions' => $versions))));
+                return array('kind' => 'error', 'lines' => array(
+                    EVC_Club_Migrations_Service::message(EVC_Club_Migrations_Service::RESULT_FAILED, array('version' => $outcome['failed_version'], 'versions' => $versions, 'state_unknown' => !empty($outcome['state_unknown']))),
+                    $outcome['audit'] === 'written'
+                        ? 'Η αποτυχία καταγράφηκε στο ημερολόγιο ελέγχου του Club.'
+                        : 'Η αποτυχία ΔΕΝ καταγράφηκε στο ημερολόγιο ελέγχου του Club· υπάρχει μόνο στο αρχείο σφαλμάτων του διακομιστή.',
+                ));
             default:
                 $lines = array();
                 foreach ($outcome['refusals'] as $code) {

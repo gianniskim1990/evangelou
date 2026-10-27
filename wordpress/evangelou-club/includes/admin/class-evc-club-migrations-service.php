@@ -38,6 +38,7 @@ final class EVC_Club_Migrations_Service {
     const SAME_DATABASE = 'same_database_as_wordpress';
     const WORDPRESS_IDENTITY_UNKNOWN = 'wordpress_identity_unknown';
     const WORDPRESS_TABLES_PRESENT = 'wordpress_tables_present';
+    const WORDPRESS_PREFIX_AMBIGUOUS = 'wordpress_prefix_ambiguous';
     const UNKNOWN_TABLES_PRESENT = 'unknown_tables_present';
     const BOOKKEEPING_INVALID = 'bookkeeping_table_invalid';
     const DRIFT = 'drift';
@@ -58,7 +59,7 @@ final class EVC_Club_Migrations_Service {
         'config' => array(self::CONFIG_MISSING, self::CONFIG_INVALID),
         'connection' => array(self::CONNECTION_FAILED),
         'separate_from_wordpress' => array(self::SAME_DATABASE, self::WORDPRESS_IDENTITY_UNKNOWN),
-        'no_wordpress_tables' => array(self::WORDPRESS_TABLES_PRESENT),
+        'no_wordpress_tables' => array(self::WORDPRESS_TABLES_PRESENT, self::WORDPRESS_PREFIX_AMBIGUOUS),
         'no_unknown_tables' => array(self::UNKNOWN_TABLES_PRESENT),
         'club_tables_recorded' => array(self::UNRECORDED_CLUB_TABLES, self::MISSING_CLUB_TABLES),
         'no_drift' => array(self::DRIFT, self::BOOKKEEPING_INVALID, self::MIGRATION_FILES_INVALID),
@@ -127,13 +128,13 @@ final class EVC_Club_Migrations_Service {
      * Applies the pending shipped migrations, in order, only when every check passes. The caller
      * (admin page / CLI) has already checked who asks (capability, nonce, typed word / --yes).
      *
-     * @return array{result:string,versions:int[],refusals:string[],failed_version:?int,audit:string}
+     * @return array{result:string,versions:int[],refusals:string[],failed_version:?int,state_unknown:bool,audit:string}
      */
     public function apply(int $actor_user_id, string $channel): array {
         if (!in_array($channel, self::CHANNELS, true)) {
             throw new InvalidArgumentException('Unknown channel.');
         }
-        $outcome = array('result' => self::RESULT_REFUSED, 'versions' => array(), 'refusals' => array(), 'failed_version' => null, 'audit' => 'not_written');
+        $outcome = array('result' => self::RESULT_REFUSED, 'versions' => array(), 'refusals' => array(), 'failed_version' => null, 'state_unknown' => false, 'audit' => 'not_written');
         $report = self::blank_report();
         $config = $this->load_config($report);
         if ($config !== null && $this->separate_by_configuration($config, $report)) {
@@ -173,6 +174,8 @@ final class EVC_Club_Migrations_Service {
                 return 'Δεν μπόρεσε να επιβεβαιωθεί ότι η βάση του Club είναι διαφορετική από τη βάση του WordPress. Δεν έγινε καμία αλλαγή.';
             case self::WORDPRESS_TABLES_PRESENT:
                 return 'Η βάση του Club περιέχει πίνακες του WordPress, άρα μάλλον δείχνει σε λάθος βάση. Δεν έγινε καμία αλλαγή.';
+            case self::WORDPRESS_PREFIX_AMBIGUOUS:
+                return 'Το πρόθεμα πινάκων του WordPress μοιάζει με το πρόθεμα «evc_» του Club, άρα οι πίνακες δεν μπορούν να ξεχωριστούν με ασφάλεια. Ενημερώστε τον προγραμματιστή. Δεν έγινε καμία αλλαγή.';
             case self::UNKNOWN_TABLES_PRESENT:
                 return 'Η βάση του Club περιέχει πίνακες που δεν ανήκουν στο Club. Χρειάζεται μια άδεια, ξεχωριστή βάση μόνο για το Club. Δεν έγινε καμία αλλαγή.';
             case self::BOOKKEEPING_INVALID:
@@ -194,6 +197,9 @@ final class EVC_Club_Migrations_Service {
             case self::RESULT_NOTHING_PENDING:
                 return 'Δεν υπάρχει καμία εκκρεμής μετάβαση. Δεν έγινε καμία αλλαγή.';
             case self::RESULT_FAILED:
+                if (!empty($context['state_unknown'])) {
+                    return 'Η εφαρμογή μεταβάσεων απέτυχε και η κατάσταση της βάσης του Club δεν μπόρεσε να διαβαστεί μετά (άγνωστο ποιες μεταβάσεις εφαρμόστηκαν). Η βάση μπορεί να έμεινε μισοτελειωμένη: επαναφέρετε το αντίγραφο ασφαλείας που πήρατε πριν και ενημερώστε τον προγραμματιστή.';
+                }
                 return 'Η μετάβαση ' . ($version !== '' ? $version . ' ' : '') . 'απέτυχε. Η βάση μπορεί να έμεινε μισοτελειωμένη: επαναφέρετε το αντίγραφο ασφαλείας που πήρατε πριν και ενημερώστε τον προγραμματιστή.' . ($versions !== '' ? ' Πριν από την αποτυχία εφαρμόστηκαν: ' . $versions . '.' : '');
             default:
                 return 'Άγνωστη κατάσταση. Δεν έγινε καμία αλλαγή.';
@@ -274,7 +280,9 @@ final class EVC_Club_Migrations_Service {
     /** False (with the refusal) when the configured name and host are WordPress's own. */
     private function separate_by_configuration(EVC_Db_Config $config, array &$report): bool {
         $host = preg_match('/host=([^;]*);/', $config->dsn(), $m) ? $m[1] : '';
-        if (strtolower($config->database()) === strtolower($this->wordpress['name'])
+        // Exact (case-sensitive) names here: names differing only in case may be two schemas
+        // (lower_case_table_names = 0), which the server identity check in inspect() decides.
+        if ($config->database() === $this->wordpress['name']
             && self::normalized_host($host) === self::normalized_host($this->wordpress['host'])) {
             $report['refusals'][] = self::SAME_DATABASE;
             return false;
@@ -321,14 +329,20 @@ final class EVC_Club_Migrations_Service {
             $version = $db->fetch_one('SELECT VERSION() AS v');
             $report['server_version'] = $version === null ? null : (string) $version['v'];
 
-            $club = $db->fetch_one('SELECT @@hostname AS h, @@port AS p, DATABASE() AS d');
+            $club = $db->fetch_one('SELECT @@hostname AS h, @@port AS p, DATABASE() AS d, @@lower_case_table_names AS l');
             $wordpress = ($this->wordpress_server)();
             if (!is_array($wordpress) || !isset($wordpress['h'], $wordpress['p'], $wordpress['d']) || $club === null) {
                 $report['refusals'][] = self::WORDPRESS_IDENTITY_UNKNOWN;
             } elseif (strtolower((string) $club['h']) === strtolower((string) $wordpress['h'])
                 && (int) $club['p'] === (int) $wordpress['p']
-                && strtolower((string) $club['d']) === strtolower((string) $wordpress['d'])) {
+                && self::same_schema_name((string) $club['d'], (string) $wordpress['d'], (int) $club['l'])) {
                 $report['refusals'][] = self::SAME_DATABASE;
+            }
+
+            $prefix = strtolower($this->wordpress['prefix']);
+            if ($prefix !== '' && strpos(self::CLUB_TABLE_PREFIX, $prefix) === 0) {
+                // 'e', 'ev', 'evc', 'evc_': WordPress tables and Club tables cannot be told apart.
+                $report['refusals'][] = self::WORDPRESS_PREFIX_AMBIGUOUS;
             }
 
             $tables = array();
@@ -411,6 +425,11 @@ final class EVC_Club_Migrations_Service {
         }
     }
 
+    /** Schema names on one server: case-sensitive only where the server keeps them so (lower_case_table_names = 0). */
+    public static function same_schema_name(string $a, string $b, int $lower_case_table_names): bool {
+        return $lower_case_table_names === 0 ? $a === $b : strtolower($a) === strtolower($b);
+    }
+
     /** 'wordpress' | 'club' | 'unknown' */
     private function table_kind(string $table): string {
         $name = strtolower($table);
@@ -473,11 +492,16 @@ final class EVC_Club_Migrations_Service {
             } catch (Throwable $e) {
                 $outcome['result'] = self::RESULT_FAILED;
                 $now_applied = $this->recorded_versions($db);
-                $outcome['versions'] = array_values(array_diff($now_applied, $before));
-                foreach ($report['pending'] as $pending) {
-                    if (!in_array((int) $pending['version'], $now_applied, true)) {
-                        $outcome['failed_version'] = (int) $pending['version'];
-                        break;
+                if ($now_applied === null) {
+                    // Cannot read back what was recorded: never guess which migration failed.
+                    $outcome['state_unknown'] = true;
+                } else {
+                    $outcome['versions'] = array_values(array_diff($now_applied, $before));
+                    foreach ($report['pending'] as $pending) {
+                        if (!in_array((int) $pending['version'], $now_applied, true)) {
+                            $outcome['failed_version'] = (int) $pending['version'];
+                            break;
+                        }
                     }
                 }
             }
@@ -492,14 +516,14 @@ final class EVC_Club_Migrations_Service {
         }
     }
 
-    /** @return int[] */
-    private function recorded_versions(EVC_Club_Db $db): array {
+    /** @return int[]|null null when the bookkeeping table cannot be read */
+    private function recorded_versions(EVC_Club_Db $db): ?array {
         try {
             return array_map(function ($row) {
                 return (int) $row['version'];
             }, $db->fetch_all('SELECT version FROM ' . EVC_Migrator::TABLE . ' ORDER BY version'));
         } catch (Throwable $e) {
-            return array();
+            return null;
         }
     }
 
@@ -513,6 +537,9 @@ final class EVC_Club_Migrations_Service {
             $details = array('channel' => $channel, 'versions' => self::version_list($outcome['versions']));
             if ($outcome['failed_version'] !== null) {
                 $details['failed_version'] = sprintf('%03d', $outcome['failed_version']);
+            }
+            if ($outcome['state_unknown']) {
+                $details['state'] = 'unknown';
             }
             $this->audit->record($db, array(
                 'event_type' => self::AUDIT_EVENT,
@@ -537,6 +564,9 @@ final class EVC_Club_Migrations_Service {
         );
         if ($outcome['failed_version'] !== null) {
             $line .= sprintf(' failed=%03d', $outcome['failed_version']);
+        }
+        if ($outcome['state_unknown']) {
+            $line .= ' state=unknown';
         }
         if ($outcome['refusals']) {
             $line .= ' reasons=' . implode(',', $outcome['refusals']);

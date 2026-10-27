@@ -18,6 +18,11 @@ final class EVC_Club_Migrations_Plugin {
         if (!EVC_Club_Migrations_Feature::enabled()) {
             return;
         }
+        if (!self::supported_site(is_multisite())) {
+            // Every subsite administrator holds manage_options: never offer one shared Club DB to them.
+            error_log('Evangelou Club: the Club DB migrations page is not available on WordPress multisite.');
+            return;
+        }
         try {
             $parts = self::build();
             $parts['page']->register();
@@ -30,6 +35,11 @@ final class EVC_Club_Migrations_Plugin {
         }
     }
 
+    /** Single-site WordPress only (STAGE-04A review): on multisite nothing is offered at all. */
+    public static function supported_site(bool $multisite): bool {
+        return !$multisite;
+    }
+
     /**
      * @param callable(): ?EVC_Db_Config|null $config default: the EVC_CLUB_DB_* constants
      * @param callable(EVC_Db_Config): EVC_Club_Db|null $connect default: EVC_Club_Db::connect
@@ -37,15 +47,16 @@ final class EVC_Club_Migrations_Plugin {
      * @param array{line:callable,success:callable,error:callable}|null $io default: WP_CLI output
      * @param array{name:string,host:string,prefix:string}|null $wordpress default: DB_NAME, DB_HOST, $wpdb->base_prefix
      * @param callable(): ?array|null $wordpress_server default: the WordPress connection's @@hostname / @@port / DATABASE()
+     * @param string|null $directory default: the shipped database/ directory (tests point it elsewhere)
      * @return array{service:EVC_Club_Migrations_Service,page:EVC_Club_Migrations_Admin_Page,cli:EVC_Club_Migrations_Cli}
      */
-    public static function build(?callable $config = null, ?callable $connect = null, ?callable $log = null, ?array $io = null, ?array $wordpress = null, ?callable $wordpress_server = null): array {
-        return self::wire($config, $connect, $log, $io, $wordpress, $wordpress_server);
+    public static function build(?callable $config = null, ?callable $connect = null, ?callable $log = null, ?array $io = null, ?array $wordpress = null, ?callable $wordpress_server = null, ?string $directory = null): array {
+        return self::wire($config, $connect, $log, $io, $wordpress, $wordpress_server, $directory);
     }
 
-    private static function wire(?callable $config, ?callable $connect, ?callable $log, ?array $io, ?array $wordpress, ?callable $wordpress_server): array {
+    private static function wire(?callable $config, ?callable $connect, ?callable $log, ?array $io, ?array $wordpress, ?callable $wordpress_server, ?string $directory): array {
         global $wpdb;
-        $directory = dirname(__DIR__, 2) . '/database';
+        $directory = $directory ?? dirname(__DIR__, 2) . '/database';
         $service = new EVC_Club_Migrations_Service(
             $config ?? function () {
                 return EVC_Db_Config::from_constants();
