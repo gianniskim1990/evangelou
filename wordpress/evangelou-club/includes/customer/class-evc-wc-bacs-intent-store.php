@@ -63,6 +63,7 @@ final class EVC_Wc_Bacs_Intent_Store {
     private $environment;
 
     public function __construct(EVC_Bacs_Intent_Codec $codec, string $environment) {
+        EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
         $this->codec = $codec;
         $this->environment = $environment;
     }

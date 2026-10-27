@@ -2,13 +2,15 @@
 /**
  * Plugin Name: Evangelou Club
  * Description: QR, staff redemption and membership integration for Evangelou Club.
- * Version: 0.1.0-dev
+ * Version: 0.1.0
+ * Author: TechPi
+ * Author URI: https://techpi.eu
  * Requires PHP: 7.4
  * Text Domain: evangelou-club
  */
 defined('ABSPATH') || exit;
 
-define('EVC_CLUB_VERSION', '0.1.0-dev');
+define('EVC_CLUB_VERSION', '0.1.0');
 define('EVC_CLUB_FILE', __FILE__);
 define('EVC_CLUB_PATH', plugin_dir_path(__FILE__));
 require_once EVC_CLUB_PATH . 'includes/bootstrap.php';
@@ -31,3 +33,9 @@ add_action('plugins_loaded', array('EVC_Staff_Plugin', 'boot'));
 // source stays unavailable until a verified PMPro/WooCommerce reader exists.
 register_deactivation_hook(__FILE__, array('EVC_Customer_Plugin', 'deactivate'));
 add_action('plugins_loaded', array('EVC_Customer_Plugin', 'boot'));
+
+// STAGE-03D: WooCommerce «Completed» by shop staff = Club payment confirmation, cancellation /
+// refund freezes the card, recovery on WP-Cron. ONLY when wp-config.php defines
+// EVC_CLUB_WC_COMPLETION_ENABLED as boolean true (default: OFF = nothing hooked or scheduled).
+register_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));
+add_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));

@@ -46,6 +46,10 @@ defined('ABSPATH') || exit;
  * (the packager forbids it); it is never registered at load.
  */
 final class EVC_Bacs_Issuance_Guard {
+    public function __construct() {
+        EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
+    }
+
     /** After the add-on's own priority-10 `pmprowoo_checkout_level` callback. */
     const PRIORITY = 1000;
     /**

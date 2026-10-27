@@ -247,6 +247,61 @@ final class BacsRecoveryPolicyTest extends TestCase {
         $this->assertDecision($this->decide(self::facts($i, array('order' => self::order(101, 'completed'), 'rows' => array($same)))), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'membership_not_reissued');
     }
 
+    // ---- STAGE-03D: completion by shop staff (the order is completed BEFORE the Club issues) ----
+
+    /** @param array<string,mixed> $o */
+    private static function deferred_facts(EVC_Bacs_Intent $i, array $o, bool $reissue_if_missing, ?string $replaceable): EVC_Bacs_Recovery_Facts {
+        $f = self::facts($i, $o);
+        $f->reissue_if_missing = $reissue_if_missing;
+        $f->replaceable_row_ref = $replaceable;
+        return $f;
+    }
+
+    public function test_defaults_keep_the_existing_rules(): void {
+        $f = self::facts(EVC_Bacs_Intent_Fixture::initial());
+        $this->assertFalse($f->reissue_if_missing);
+        $this->assertNull($f->replaceable_row_ref);
+    }
+
+    public function test_a_completed_order_without_any_row_is_issued_only_when_nothing_was_issued_for_it(): void {
+        $i = EVC_Bacs_Intent_Fixture::initial();
+        $completed = array('order' => self::order(100, 'completed'), 'rows' => array());
+        $this->assertDecision($this->decide(self::deferred_facts($i, $completed, true, null)), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'membership_not_reissued');
+        $this->assertDecision($this->decide(self::deferred_facts($i, $completed, false, null)), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'membership_row_missing');
+        // Never for an early renewal whose paid row vanished (paid time at risk), never after issuance.
+        $early = EVC_Bacs_Intent_Fixture::early('2026-11-10 09:00:00', '2026-10-15 12:00:00', '2026-11-15 12:00:00');
+        $d = $this->decide(self::deferred_facts($early, array('order' => self::order(101, 'completed'), 'rows' => array()), true, null));
+        $this->assertDecision($d, EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'membership_row_missing');
+        $this->assertTrue($d->paid_time_at_risk);
+        foreach (array($i->issuance_mismatch(), $i->recovery_required()) as $sticky) {
+            $this->assertDecision($this->decide(self::deferred_facts($sticky, $completed, true, null)), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'intent_' . $sticky->state());
+        }
+        $issued = $i->issued(self::ref('row:new'));
+        $this->assertDecision($this->decide(self::deferred_facts($issued, $completed, true, null)), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'membership_row_missing');
+        // Awaiting payment is still completion, never issuance.
+        $this->assertDecision($this->decide(self::deferred_facts($i, array('rows' => array()), true, null)), EVC_Bacs_Recovery_Decision::RESUME, null, EVC_Bacs_Recovery_Decision::STEP_COMPLETE_ORDER);
+    }
+
+    public function test_only_the_identified_add_on_row_of_a_deferred_completion_may_be_replaced(): void {
+        $i = EVC_Bacs_Intent_Fixture::initial();
+        $addon = self::row('row:addon', '2026-10-15 12:03:00', '2026-11-15 12:03:00');
+        $completed = array('order' => self::order(100, 'completed'), 'rows' => array($addon));
+        $this->assertDecision($this->decide(self::deferred_facts($i, $completed, false, self::ref('row:addon'))), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'membership_not_reissued');
+        // Not identified, or another row: the add-on's dates are never accepted.
+        $this->assertDecision($this->decide(self::deferred_facts($i, $completed, false, null)), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'issuance_mismatch');
+        $this->assertDecision($this->decide(self::deferred_facts($i, $completed, false, self::ref('row:other'))), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'issuance_mismatch');
+        // Two active rows are never resolved by replacing one of them.
+        $this->assertDecision($this->decide(self::deferred_facts($i, array('rows' => array($addon, self::issued_row($i))) + $completed, false, self::ref('row:addon'))), EVC_Bacs_Recovery_Decision::CONFLICT, 'multiple_active_membership_rows');
+        // Only a planned intent without a row to continue (initial / late).
+        $this->assertDecision($this->decide(self::deferred_facts($i->issuance_mismatch(), $completed, false, self::ref('row:addon'))), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'intent_issuance_mismatch');
+        $early = EVC_Bacs_Intent_Fixture::early('2026-11-10 09:00:00', '2026-10-15 12:00:00', '2026-11-15 12:00:00');
+        $this->assertDecision($this->decide(self::deferred_facts($early, array('order' => self::order(101, 'completed'), 'rows' => array($addon)), false, self::ref('row:addon'))), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'issuance_mismatch');
+        // Once the Club's own row exists with the planned dates, it is confirmed as before.
+        $replaced = self::row('row:addon', '2026-10-15 12:03:00', '2026-10-15 12:10:00', 'changed');
+        $d = $this->decide(self::deferred_facts($i, array('order' => self::order(100, 'completed'), 'rows' => array($replaced, self::issued_row($i))), false, self::ref('row:addon')));
+        $this->assertDecision($d, EVC_Bacs_Recovery_Decision::RESUME, null, EVC_Bacs_Recovery_Decision::STEP_CONFIRM_ISSUANCE);
+    }
+
     // ---- 18: authorisation, bindings, order --------------------------------------------------
 
     public function test_unauthorised_actor_or_own_order_is_refused_before_anything_else(): void {
@@ -265,7 +320,10 @@ final class BacsRecoveryPolicyTest extends TestCase {
         foreach (array('cancelled', 'refunded', 'failed') as $status) {
             $this->assertDecision($this->decide(self::facts($i, array('order' => self::order(100, $status)))), EVC_Bacs_Recovery_Decision::MANAGER_REQUIRED, 'order_ended');
         }
-        $this->assertDecision($this->decide(self::facts($i, array('order' => self::order(100, 'processing')))), EVC_Bacs_Recovery_Decision::CONFLICT, 'order_status_unknown');
+        // STAGE-03D (owner-approved item 5): `processing` is awaiting payment, as in the reader
+        // (was order_status_unknown before). It is still never a confirmation (see the issuer).
+        $this->assertDecision($this->decide(self::facts($i, array('order' => self::order(100, 'processing')))), EVC_Bacs_Recovery_Decision::RESUME, null, EVC_Bacs_Recovery_Decision::STEP_COMPLETE_ORDER);
+        $this->assertDecision($this->decide(self::facts($i, array('order' => self::order(100, 'awaiting-bank')))), EVC_Bacs_Recovery_Decision::CONFLICT, 'order_status_unknown');
         $this->assertDecision($this->decide(self::facts($i, array('owner' => self::ref('mv:another-transfer')))), EVC_Bacs_Recovery_Decision::CONFLICT, 'order_funded_by_another_transfer');
     }
 

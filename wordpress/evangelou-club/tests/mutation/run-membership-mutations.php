@@ -28,6 +28,8 @@
  * And STAGE-03B.1 (PL1-PL15: advisory pre-issuance period planning).
  * And STAGE-03B.2 (IN1-IN15, RP1-RP18, PR1-PR3: signed BACS intent, recovery policy, paid run).
  * And STAGE-03B.3a (RE1-RE4: record_expecting commits only the signed period).
+ * And STAGE-03D (RP19-RP23: recovery policy after a WooCommerce completion; MK1-MK3: signed completion marker;
+ * CX1-CX4: admin entry points; CN1-CN2: the construction guard).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2286,6 +2288,55 @@ $mutants = array(
         'search' => "        if (\$f->corrections !== array()) {\n            return EVC_Bacs_Recovery_Decision::manager('correction_recorded_for_transfer', \$at_risk);",
         'replace' => "        if (false) {\n            return EVC_Bacs_Recovery_Decision::manager('correction_recorded_for_transfer', \$at_risk);",
     ),
+    // STAGE-03D: completion by shop staff (policy branches used only with a signed completion marker / the completion hook).
+    array(
+        'id' => 'RP19-missing-row-reissued-without-completion-context',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '            if ($f->reissue_if_missing && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+        'replace' => '            if ($i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+    ),
+    array(
+        'id' => 'RP20-missing-row-reissued-for-early-renewal',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '            if ($f->reissue_if_missing && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+        'replace' => '            if ($f->reissue_if_missing && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+    ),
+    array(
+        'id' => 'RP21-any-row-replaceable',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($f->replaceable_row_ref !== null && $ref === $f->replaceable_row_ref && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+        'replace' => '        if ($i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+    ),
+    array(
+        'id' => 'RP22-add-on-row-replaced-for-early-renewal',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => '        if ($f->replaceable_row_ref !== null && $ref === $f->replaceable_row_ref && $i->previous_row_ref() === null && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+        'replace' => '        if ($f->replaceable_row_ref !== null && $ref === $f->replaceable_row_ref && $i->state() === EVC_Bacs_Intent::STATE_PLANNED) {',
+    ),
+    array(
+        'id' => 'RP23-processing-not-awaiting',
+        'file' => 'includes/class-evc-bacs-recovery-policy.php',
+        'search' => "    const AWAITING = array('pending', 'on-hold', 'processing');",
+        'replace' => "    const AWAITING = array('pending', 'on-hold');",
+    ),
+    array(
+        'id' => 'MK1-marker-signature-not-checked',
+        'file' => 'includes/class-evc-wc-completion-marker.php',
+        'search' => '        if (!hash_equals($this->mac(self::json($marker->to_wire())), $sig)) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'MK2-marker-not-bound-to-its-order',
+        'file' => 'includes/class-evc-wc-completion-marker.php',
+        'search' => '        if ($marker->order_id() !== $order_id) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'MK3-customer-may-mark-own-completion',
+        'file' => 'includes/class-evc-wc-completion-marker.php',
+        'search' => "        if (\$f['actor_id'] === \$f['customer_id']) {\n            throw new InvalidArgumentException('A customer can never confirm their own payment.');",
+        'replace' => "        if (false) {\n            throw new InvalidArgumentException('A customer can never confirm their own payment.');",
+    ),
     array(
         'id' => 'PR1-early-renewal-run-restarts',
         'file' => 'includes/class-evc-paid-run.php',
@@ -2347,6 +2398,44 @@ $mutants = array(
         'file' => 'includes/class-evc-pmpro-local-time.php',
         'search' => ' || (int) $m[1] < EVC_Pmpro_Entitlement_Mapper::MIN_REAL_YEAR) {',
         'replace' => ') {',
+    ),
+    array(
+        'id' => 'CX1-list-button-order-not-checked',
+        'file' => 'includes/class-evc-wc-completion-context.php',
+        'search' => '
+                && is_scalar($request[\'order_id\'] ?? null) && (int) $request[\'order_id\'] === $order_id;',
+        'replace' => ';',
+    ),
+    array(
+        'id' => 'CX2-bulk-ids-not-strictly-numeric',
+        'file' => 'includes/class-evc-wc-completion-context.php',
+        'search' => '            if (is_scalar($v) && preg_match(\'/^\\d{1,19}$/D\', (string) $v)) {',
+        'replace' => '            if (is_scalar($v)) {',
+    ),
+    array(
+        'id' => 'CX3-posts-bulk-reads-the-hpos-key',
+        'file' => 'includes/class-evc-wc-completion-context.php',
+        'search' => 'self::ids($request[\'post\'] ?? null)',
+        'replace' => 'self::ids($request[\'id\'] ?? null)',
+    ),
+    array(
+        'id' => 'CX4-ajax-nonce-not-required',
+        'file' => 'includes/class-evc-wc-completion-context.php',
+        'search' => '                && in_array(self::AJAX_NONCE, $verified, true)
+',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'CN1-guarded-construction-allowed-when-off',
+        'file' => 'includes/customer/class-evc-wc-completion-feature.php',
+        'search' => '        if (self::enabled() || (defined(self::TEST_CONSTRUCTION) && constant(self::TEST_CONSTRUCTION) === true)) {',
+        'replace' => '        if (true) {',
+    ),
+    array(
+        'id' => 'CN2-test-hook-accepts-any-value',
+        'file' => 'includes/customer/class-evc-wc-completion-feature.php',
+        'search' => 'constant(self::TEST_CONSTRUCTION) === true)) {',
+        'replace' => 'constant(self::TEST_CONSTRUCTION))) {',
     ),
 );
 

@@ -25,6 +25,20 @@ if ($evc_customer_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-03D: the WooCommerce-completion constant, fixed per PHPUnit process like the others:
+// EVC_TEST_WC_COMPLETION_FLAG=enabled defines it as boolean true (the wp-commerce-on suite); unset/disabled leaves it undefined.
+$evc_wc_mode = getenv('EVC_TEST_WC_COMPLETION_FLAG');
+if ($evc_wc_mode === 'enabled') {
+    define('EVC_CLUB_WC_COMPLETION_ENABLED', true);
+} elseif ($evc_wc_mode !== false && $evc_wc_mode !== '' && $evc_wc_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_WC_COMPLETION_FLAG must be enabled or disabled.\n");
+    exit(1);
+}
+
+// STAGE-03D review: TEST-ONLY hook so the suites may construct the WooCommerce-completion classes with the
+// feature constant OFF (EVC_Wc_Completion_Feature::assert_constructible; the packager refuses it in shipped files).
+define('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);
+
 define('WP_TESTS_CONFIG_FILE_PATH', __DIR__ . '/wp-tests-config.php');
 define('WP_TESTS_PHPUNIT_POLYFILLS_PATH', $evc_root . '/vendor/yoast/phpunit-polyfills');
 

@@ -63,4 +63,21 @@ final class MutationEvidenceTest extends TestCase {
             }
         }
     }
+
+    public function test_the_killer_filter_selects_exactly_the_named_tests(): void {
+        $f = evc_mutation_killer_filter(array('WcCompletionTest::test_a', 'BacsIssuerTest::test_b', 'WcCompletionTest::test_a'));
+        $this->assertSame('/^(?:WcCompletionTest::test_a|BacsIssuerTest::test_b)(?: with data set .*)?$/', $f);
+        $this->assertSame(1, preg_match($f, 'WcCompletionTest::test_a'));
+        $this->assertSame(1, preg_match($f, 'BacsIssuerTest::test_b with data set #0'));
+        $this->assertSame(0, preg_match($f, 'WcCompletionTest::test_ab'), 'never a prefix match');
+        $this->assertSame(0, preg_match($f, 'XWcCompletionTest::test_a'));
+        foreach (array(array(), array('no_separator'), array('C::m)|.*'), array('C::')) as $killers) {
+            try {
+                evc_mutation_killer_filter($killers);
+                $this->fail('accepted ' . json_encode($killers));
+            } catch (InvalidArgumentException $e) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
 }

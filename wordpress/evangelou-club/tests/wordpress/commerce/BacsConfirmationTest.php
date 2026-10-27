@@ -179,7 +179,16 @@ final class BacsConfirmationTest extends EVC_WP_Test_Case {
     public function test_the_known_add_on_date_discrepancy_never_shortens_or_extends_paid_time(): void {
         $customer = $this->customer();
         $order = $this->order($customer, 'completed');
-        $result = $this->confirm($this->manager(), $order, self::reference());
+        // Deterministic (review): the confirmation instant is pinned off a whole minute, so it can never coincide
+        // with the add-on's minute-rounded end (the former real-clock flake, about 1 run in 60).
+        $at = new DateTimeImmutable((new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s'), new DateTimeZone('UTC'));
+        if ($at->format('s') === '00') {
+            $at = $at->modify('+1 second');
+        }
+        $result = $this->service(function () use ($at) {
+            return $at;
+        })->confirm($this->manager(), array('order_id' => $order->get_id(), 'bank_reference' => self::reference(), 'amount_minor' => 2000, 'currency' => 'EUR', 'received_on' => self::today()));
+        $this->assertSame(EVC_Record_Outcome::NEWLY_RECORDED, $result->outcome);
         $row = $this->pmpro_row($customer);
         // VERIFIED add-on formula: minute-rounded PHP "+1 month" from its own completion time,
         // started at completion (before the manager's confirmation).

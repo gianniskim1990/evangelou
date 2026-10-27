@@ -21,6 +21,12 @@ require_once $evc_customer . 'class-evc-bacs-payment-finalizer.php';
 // STAGE-03B.3b: internal issuance orchestrator (Option 2) and its request-scoped guard. Nothing constructs them.
 require_once $evc_customer . 'class-evc-bacs-issuance-guard.php';
 require_once $evc_customer . 'class-evc-bacs-payment-issuer.php';
+// STAGE-03D: WooCommerce «Completed» by shop staff = Club payment confirmation. Only EVC_Wc_Completion_Plugin constructs it, behind EVC_CLUB_WC_COMPLETION_ENABLED.
+require_once $evc_customer . 'class-evc-wc-completion-feature.php';
+require_once $evc_customer . 'class-evc-wc-completion-markers.php';
+require_once $evc_customer . 'class-evc-wc-completion-confirmer.php';
+require_once $evc_customer . 'class-evc-wc-completion-recovery.php';
+require_once $evc_customer . 'class-evc-wc-completion-plugin.php';
 require_once $evc_customer . 'class-evc-customer-rest-security.php';
 require_once $evc_customer . 'class-evc-rest-me-controller.php';
 require_once $evc_customer . 'class-evc-customer-shell.php';

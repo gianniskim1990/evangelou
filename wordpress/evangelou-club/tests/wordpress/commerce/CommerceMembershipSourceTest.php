@@ -271,6 +271,23 @@ final class CommerceMembershipSourceTest extends EVC_WP_Test_Case {
         $this->assertSame('unverified', $this->me($custom)['state'], 'a status added by another plugin is never guessed');
     }
 
+    public function test_a_club_order_whose_total_is_not_20_eur_is_a_source_conflict(): void {
+        // STAGE-03D: a valid Club order (20.00) keeps its approved state ...
+        $valid = $this->customer();
+        $this->order($valid, 'on-hold');
+        $this->assertSame(array('state' => 'pending_payment', 'paid_until_utc' => null), $this->me($valid));
+        // ... any other total is never interpreted (unverified), whatever its status.
+        foreach (array('19.00', '20.01', '40.00', '0.00') as $total) {
+            $user = $this->customer();
+            $order = $this->order($user, 'pending');
+            $order->set_total($total);
+            $order->save();
+            $order->update_status('on-hold');
+            $this->assertSame('unverified', $this->me($user)['state'], $total);
+            $this->assertContains('club_order_total_not_20_eur', $this->reader()->snapshot($user)->source_conflicts, $total);
+        }
+    }
+
     public function test_the_reader_is_read_only_and_reports_no_personal_data(): void {
         $this->expect_add_on_shim_notice();
         $user = $this->customer();

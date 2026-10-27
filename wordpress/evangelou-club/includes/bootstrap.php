@@ -50,6 +50,9 @@ require_once $evc_includes . 'class-evc-period-plan.php';
 require_once $evc_includes . 'class-evc-paid-run.php';
 require_once $evc_includes . 'class-evc-bacs-intent.php';
 require_once $evc_includes . 'class-evc-bacs-recovery-policy.php';
+// STAGE-03D: signed WooCommerce completion marker (definitions only; written only behind EVC_CLUB_WC_COMPLETION_ENABLED).
+require_once $evc_includes . 'class-evc-wc-completion-marker.php';
+require_once $evc_includes . 'class-evc-wc-completion-context.php';
 require_once $evc_includes . 'class-evc-provenance-recorder.php';
 // Task 1D-G: SQL store definition only; nothing constructs it outside tests.
 require_once $evc_includes . 'class-evc-sql-provenance-store.php';
