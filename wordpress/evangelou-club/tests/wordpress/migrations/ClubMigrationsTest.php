@@ -71,15 +71,15 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
     }
 
     /** @return array{service:EVC_Club_Migrations_Service,page:EVC_Club_Migrations_Admin_Page,cli:EVC_Club_Migrations_Cli} */
-    private function parts(?EVC_Db_Config $config = null, ?array $wordpress = null, ?callable $wordpress_server = null): array {
+    private function parts(?EVC_Db_Config $config = null, ?array $wordpress = null, ?callable $wordpress_server = null, ?string $directory = null, ?callable $connect = null): array {
         $config = $config ?? $this->config();
         return EVC_Club_Migrations_Plugin::build(
             function () use ($config) {
                 return $config;
             },
-            function (EVC_Db_Config $db) {
+            function (EVC_Db_Config $db) use ($connect) {
                 $this->connects++;
-                return EVC_Club_Db::connect($db);
+                return $connect !== null ? $connect($db) : EVC_Club_Db::connect($db);
             },
             function (string $line) {
                 $this->log[] = $line;
@@ -97,7 +97,8 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
                 },
             ),
             $wordpress,
-            $wordpress_server
+            $wordpress_server,
+            $directory
         );
     }
 
@@ -107,17 +108,43 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         return $id;
     }
 
-    /** Renders the page for the current user; a POST when $post is given. */
+    /** @var string|null location of the last redirect answered by handle_load() */
+    private $redirected_to = null;
+
+    /**
+     * POSTs $post to the page's load-* handler (which must answer with a redirect), then renders the
+     * GET page it redirects to, as the browser would. Without $post: just the GET page.
+     */
     private function render(EVC_Club_Migrations_Admin_Page $page, ?array $post = null): string {
         if ($post !== null) {
-            $_SERVER['REQUEST_METHOD'] = 'POST';
-            $_POST = wp_slash($post);
-            $_REQUEST = $_POST;
-        } else {
+            $this->submit($page, $post);
+        }
+        return $this->render_raw($page);
+    }
+
+    private function submit(EVC_Club_Migrations_Admin_Page $page, array $post): void {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = wp_slash($post);
+        $_REQUEST = $_POST;
+        $this->redirected_to = null;
+        $catch = function ($location) {
+            throw new ClubMigrationsTestRedirect((string) $location);
+        };
+        add_filter('wp_redirect', $catch);
+        try {
+            $page->handle_load();
+            $this->fail('the apply POST was not answered with a redirect');
+        } catch (ClubMigrationsTestRedirect $r) {
+            $this->redirected_to = $r->getMessage();
+        } finally {
+            remove_filter('wp_redirect', $catch);
             $_SERVER['REQUEST_METHOD'] = 'GET';
             $_POST = array();
             $_REQUEST = array();
         }
+    }
+
+    private function render_raw(EVC_Club_Migrations_Admin_Page $page): string {
         ob_start();
         try {
             $page->render();
@@ -218,6 +245,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertNotNull($entry);
         $this->assertSame('manage_options', $entry[1]);
         $this->assertSame('Evangelou Club — Βάση δεδομένων', $entry[0]);
+        $this->assertNotFalse(has_action('load-' . get_plugin_page_hookname(EVC_Club_Migrations_Admin_Page::SLUG, 'tools.php'), array($pages[0], 'handle_load')), 'the apply POST is handled before any output');
 
         // The real wiring reads the EVC_CLUB_DB_* constants, which this site does not define.
         $html = $this->render($pages[0]);
@@ -361,6 +389,9 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertSame(array('channel' => 'admin', 'versions' => '001, 002'), json_decode($audit[0]['details_json'], true));
 
         $this->assertSame(array(sprintf('Evangelou Club: Club DB migrations apply via admin by user #%d: result=applied versions=001,002 audit=written', $admin)), $this->log);
+        // The (nested) migration lock is fully released afterwards.
+        $this->assertSame('1', (string) EVC_Test_Database::admin_pdo()->query("SELECT GET_LOCK(CONCAT('" . EVC_Migrator::LOCK_PREFIX . "', SHA1('" . $this->club->name() . "')), 0)")->fetchColumn());
+        $this->assertSame(admin_url('tools.php?page=evc-club-db'), $this->redirected_to);
         $this->assert_no_secrets($html . implode("\n", $this->log) . $audit[0]['details_json'], 'apply');
     }
 
@@ -426,7 +457,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
     public function test_the_wordpress_database_itself_is_refused_before_connecting(): void {
         $this->admin();
         $wp_tables_before = $this->tables(DB_NAME);
-        foreach (array(DB_NAME, strtoupper(DB_NAME)) as $name) {
+        foreach (array(DB_NAME) as $name) {
             $page = $this->parts($this->config($name))['page'];
             $html = $this->refused_apply($page, EVC_Club_Migrations_Service::SAME_DATABASE);
             $this->assertContains(EVC_Club_Migrations_Service::SAME_DATABASE, $this->refusal_codes($html));
@@ -626,8 +657,14 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
     public function test_cli_refuses_with_the_same_checks(): void {
         $this->club_pdo()->exec('CREATE TABLE wptests_users (id INT PRIMARY KEY) ENGINE=InnoDB');
         $cli = $this->parts()['cli'];
-        $cli->status(array(), array());
+        try {
+            $cli->status(array(), array());
+            $this->fail('status with a refusal must end with an error (non-zero exit)');
+        } catch (RuntimeException $e) {
+            $this->assertSame('cli-error', $e->getMessage());
+        }
         $this->assertStringContainsString('ΑΡΝΗΣΗ [wordpress_tables_present]', implode("\n", $this->cli_out));
+        $this->assertStringStartsWith('error: Η εφαρμογή ΔΕΝ επιτρέπεται', end($this->cli_out));
         $this->cli_out = array();
         try {
             $cli->apply(array(), array('yes' => true));
@@ -638,4 +675,154 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertSame(array('wptests_users'), $this->tables());
         $this->assert_no_secrets(implode("\n", $this->cli_out) . implode("\n", $this->log), 'CLI');
     }
+
+    // ---- STAGE-04A review fixes -------------------------------------------------------------------
+
+    public function test_multisite_is_never_supported(): void {
+        $this->assertFalse(EVC_Club_Migrations_Plugin::supported_site(true));
+        $this->assertTrue(EVC_Club_Migrations_Plugin::supported_site(false));
+    }
+
+    /** A temp migrations dir with the real 001 and a 002 that creates a table and then breaks. */
+    private function broken_migrations(): string {
+        $dir = sys_get_temp_dir() . '/evc_mig_broken_' . bin2hex(random_bytes(5));
+        mkdir($dir);
+        copy(EVC_Test_Database::migrations_dir() . '/001_initial.sql', $dir . '/001_initial.sql');
+        file_put_contents($dir . '/002_broken.sql', "CREATE TABLE evc_broken_part (id INT PRIMARY KEY) ENGINE=InnoDB;\nTHIS IS NOT SQL AT ALL;\n");
+        $this->temp_dirs[] = $dir;
+        return $dir;
+    }
+
+    public function test_a_migration_failing_half_way_is_reported_audited_and_blocks_the_next_apply(): void {
+        $admin = $this->admin();
+        $parts = $this->parts(null, null, null, $this->broken_migrations());
+        $html = $this->render($parts['page'], $this->apply_post());
+        $this->assertStringContainsString('notice-error evc-club-db-result', $html);
+        $this->assertStringContainsString('Η μετάβαση 002 απέτυχε.', $html);
+        $this->assertStringContainsString('επαναφέρετε το αντίγραφο ασφαλείας', $html);
+        $this->assertStringContainsString('Πριν από την αποτυχία εφαρμόστηκαν: 001.', $html);
+        $this->assertStringContainsString('Η αποτυχία καταγράφηκε στο ημερολόγιο ελέγχου του Club.', $html);
+        $this->assertStringNotContainsString('ενημερώθηκε', $html);
+        $this->assertSame(array('1'), array_map('strval', array_column($this->recorded(), 'version')));
+
+        $audit = $this->audit_rows();
+        $this->assertCount(1, $audit);
+        $this->assertSame('failed', $audit[0]['outcome']);
+        $this->assertSame((string) $admin, (string) $audit[0]['staff_wp_user_id']);
+        $this->assertSame(array('channel' => 'admin', 'versions' => '001', 'failed_version' => '002'), json_decode($audit[0]['details_json'], true));
+        $this->assertSame(sprintf('Evangelou Club: Club DB migrations apply via admin by user #%d: result=failed versions=001 failed=002 audit=written', $admin), end($this->log));
+
+        // The half-made table is not recorded: the next status refuses and offers no form.
+        $status = $parts['service']->status();
+        $this->assertContains(EVC_Club_Migrations_Service::UNRECORDED_CLUB_TABLES, $status['refusals']);
+        $this->assertFalse($status['can_apply']);
+        $next = $this->render($parts['page']);
+        $this->assertContains(EVC_Club_Migrations_Service::UNRECORDED_CLUB_TABLES, $this->refusal_codes($next));
+        $this->assertStringNotContainsString('<form', $next);
+        $this->assert_no_secrets($html . $next . implode("\n", $this->log), 'failure');
+    }
+
+    public function test_an_unreadable_state_after_a_failure_is_reported_as_unknown(): void {
+        $this->admin();
+        $connect = function (EVC_Db_Config $config) {
+            $pdo = new PDO($config->dsn(), $config->user(), $config->password(), array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
+            return new class($pdo) extends EVC_Club_Db {
+                public function fetch_all(string $sql, array $params = array()): array {
+                    if ($sql === 'SELECT version FROM ' . EVC_Migrator::TABLE . ' ORDER BY version') {
+                        throw new EVC_Db_Exception('Club database operation failed.');
+                    }
+                    return parent::fetch_all($sql, $params);
+                }
+            };
+        };
+        $parts = $this->parts(null, null, null, $this->broken_migrations(), $connect);
+        $html = $this->render($parts['page'], $this->apply_post());
+        $this->assertStringContainsString('άγνωστο ποιες μεταβάσεις εφαρμόστηκαν', $html);
+        $this->assertStringNotContainsString('Η μετάβαση 001', $html);
+        $this->assertStringNotContainsString('Η μετάβαση 002', $html);
+        $this->assertStringContainsString('result=failed versions=- state=unknown audit=written', end($this->log));
+        $audit = $this->audit_rows();
+        $this->assertSame(array('channel' => 'admin', 'versions' => '', 'state' => 'unknown'), json_decode($audit[0]['details_json'], true));
+    }
+
+    public function test_post_redirect_get_never_reapplies_on_refresh(): void {
+        $id = $this->admin();
+        $page = $this->parts()['page'];
+        $this->submit($page, $this->apply_post());
+        $this->assertSame(admin_url('tools.php?page=evc-club-db'), $this->redirected_to);
+        $this->assertIsArray(get_transient(EVC_Club_Migrations_Admin_Page::RESULT_TRANSIENT . $id));
+        $first = $this->render_raw($page);
+        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 001, 002.', $first);
+        $this->assertFalse(get_transient(EVC_Club_Migrations_Admin_Page::RESULT_TRANSIENT . $id));
+        $refresh = $this->render_raw($page);
+        $this->assertStringNotContainsString('evc-club-db-result', $refresh);
+        $this->assertCount(1, $this->audit_rows());
+        $this->assertCount(1, $this->log);
+    }
+
+    public function test_a_post_reaching_the_render_callback_never_applies(): void {
+        $this->admin();
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = wp_slash($this->apply_post());
+        $_REQUEST = $_POST;
+        $html = $this->render_raw($this->parts()['page']);
+        $this->assertStringContainsString('<form', $html);
+        $this->assertSame(array(), $this->tables());
+        $this->assertSame(array(), $this->log);
+    }
+
+    public function test_a_schema_differing_only_in_case_is_another_schema_when_the_server_says_so(): void {
+        $server = EVC_Test_Database::admin_pdo()->query('SELECT @@hostname AS h, @@port AS p, @@lower_case_table_names AS l')->fetch(PDO::FETCH_ASSOC);
+        if ((int) $server['l'] !== 0) {
+            $this->markTestSkipped('lower_case_table_names is not 0 on this test server');
+        }
+        $this->admin();
+        $upper = strtoupper($this->club->name());
+        $same_server = function () use ($server, $upper) {
+            return array('h' => $server['h'], 'p' => $server['p'], 'd' => $upper);
+        };
+        // WordPress is "CLUB_NAME" on the same server: a different schema under lower_case_table_names = 0.
+        $parts = $this->parts(null, array('name' => $upper, 'host' => EVC_Test_Database::host(), 'prefix' => 'wptests_'), $same_server);
+        $status = $parts['service']->status();
+        $this->assertSame(array(), $status['refusals']);
+        $this->assertTrue($status['can_apply']);
+        // The very same name on the same server is still refused by the server identity check.
+        $exact = function () use ($server) {
+            return array('h' => $server['h'], 'p' => $server['p'], 'd' => $this->club->name());
+        };
+        $parts = $this->parts(null, array('name' => 'other_name', 'host' => EVC_Test_Database::host(), 'prefix' => 'wptests_'), $exact);
+        $this->assertContains(EVC_Club_Migrations_Service::SAME_DATABASE, $parts['service']->status()['refusals']);
+        $this->assertTrue(EVC_Club_Migrations_Service::same_schema_name('Club', 'club', 1));
+        $this->assertFalse(EVC_Club_Migrations_Service::same_schema_name('Club', 'club', 0));
+    }
+
+    public function test_loopback_spellings_are_one_host(): void {
+        $this->admin();
+        foreach (array('localhost', 'localhost:/var/run/mysqld/mysqld.sock', ':/tmp/mysql.sock', '127.0.0.1:3306', '[::1]:3306', '::1', '127.0.1.1') as $wordpress_host) {
+            $this->connects = 0;
+            $status = $this->parts(null, array('name' => $this->club->name(), 'host' => $wordpress_host, 'prefix' => 'wptests_'))['service']->status();
+            $this->assertSame(array(EVC_Club_Migrations_Service::SAME_DATABASE), $status['refusals'], $wordpress_host);
+            $this->assertSame(0, $this->connects, $wordpress_host . ': refused before connecting');
+        }
+        // Another schema behind the same loopback host is fine.
+        $status = $this->parts(null, array('name' => 'other_db', 'host' => 'localhost', 'prefix' => 'wptests_'))['service']->status();
+        $this->assertSame(array(), $status['refusals']);
+        $this->assertSame('db.example', EVC_Club_Migrations_Service::normalized_host('DB.example:3307'));
+    }
+
+    public function test_a_wordpress_prefix_that_looks_like_evc_is_refused(): void {
+        $this->admin();
+        foreach (array('e', 'ev', 'evc', 'evc_', 'EV') as $prefix) {
+            $parts = $this->parts(null, array('name' => DB_NAME, 'host' => 'db.other', 'prefix' => $prefix));
+            $status = $parts['service']->status();
+            $this->assertContains(EVC_Club_Migrations_Service::WORDPRESS_PREFIX_AMBIGUOUS, $status['refusals'], $prefix);
+            $this->refused_apply($parts['page'], EVC_Club_Migrations_Service::WORDPRESS_PREFIX_AMBIGUOUS);
+        }
+        $this->assertSame(array(), $this->tables());
+        $this->assertSame(array(), $this->parts(null, array('name' => DB_NAME, 'host' => 'db.other', 'prefix' => 'evc_wp_'))['service']->status()['refusals']);
+    }
+}
+
+/** Thrown from the wp_redirect filter so the tested handler never reaches its exit. */
+final class ClubMigrationsTestRedirect extends RuntimeException {
 }
