@@ -161,6 +161,14 @@ export function problemsFor(path, src, { bootstrap, guarded, forbidden, allowlis
       if (memberLockFiles !== null && !memberLockFiles.includes(path) && v.includes("evc_member_lock")) problems.push(`${path}: a string names EVC_Member_Lock`);
     }
     if (tk.t === "var" && tokens[k + 1]?.v === "::") problems.push(`${path}: dynamic static call ${tk.v}::`);
+    // STAGE-04A review: string callables reaching build()/wire() (array('X_Plugin', 'build'), 'X_Plugin::wire'),
+    // even inside allowlisted files; only boot()/deactivate() may be named that way (the plugin entrypoint).
+    if (tk.t === "str") {
+      const sv = tk.v.replace(/^\\+/, "").toLowerCase();
+      const plugin = pluginClass.toLowerCase();
+      if (sv === plugin && tokens[k + 1]?.v === "," && tokens[k + 2]?.t === "str" && ["build", "wire"].includes(tokens[k + 2].v.toLowerCase())) problems.push(`${path}: string callable ${pluginClass}::${tokens[k + 2].v}`);
+      if (sv.replace(/\s+/g, "") === plugin + "::build" || sv.replace(/\s+/g, "") === plugin + "::wire") problems.push(`${path}: string callable ${tk.v}`);
+    }
   });
   if (memberLockFiles !== null && !memberLockFiles.includes(path)) {
     for (const call of staticCalls(tokens, ["acquire"])) {
@@ -259,6 +267,10 @@ function migrationsSelfTest() {
   expect("defines the opt-in constant in the bootstrap", boot, GOOD_MIGRATIONS.replace("final class", "define('EVC_CLUB_MIGRATIONS_ENABLED', true);\nfinal class"), true);
   expect("new self inside the migrator", "includes/class-evc-migrator.php", "<?php\nfinal class EVC_Migrator { public static function make() { return new self(); } }", true);
   expect("file paths with hyphens are not names", "includes/admin/bootstrap.php", "<?php\nrequire_once $d . 'class-evc-club-migrations-service.php';", false);
+  expect("entrypoint may hook boot()", "evangelou-club.php", "<?php\nadd_action('plugins_loaded', array('EVC_Club_Migrations_Plugin', 'boot'));", false);
+  expect("array callable to build() in an allowlisted file", "evangelou-club.php", "<?php\nadd_action('init', array('EVC_Club_Migrations_Plugin', 'build'));", true);
+  expect("array callable to wire() in an allowlisted file", allowed, "<?php\ncall_user_func(array('\\\\EVC_Club_Migrations_Plugin', 'WIRE'));", true);
+  expect("string callable to build() in an allowlisted file", "evangelou-club.php", "<?php\nadd_action('init', 'EVC_Club_Migrations_Plugin::build');", true);
   return bad;
 }
 
@@ -327,5 +339,8 @@ export function selfTest() {
   expect("member lock where allowed", "includes/customer/class-evc-wc-completion-confirmer.php", "<?php\n$l = EVC_Member_Lock::acquire($db, 1, 0);", false);
   expect("member lock through a string", other, "<?php\ncall_user_func(array('EVC_Member_Lock', 'acquire'), $db, 1, 0);", true);
   expect("defines the test constant", other, "<?php\ndefine('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);", true);
+  expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
+  expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
+  expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
   return bad.concat(migrationsSelfTest());
 }
