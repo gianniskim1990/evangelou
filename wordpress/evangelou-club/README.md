@@ -778,6 +778,17 @@ mutations on 8.2 + MySQL).
   exception messages or other members' data.
 - No names, phones, e-mails, credentials or payment data in the Club DB.
 
+## Club database migrations (STAGE-04A — constant-gated, NOT run on any real DB)
+
+The separate Club database starts empty; its tables come from `database/001_initial.sql` and
+`database/002_payment_provenance.sql`. Nothing in the plugin migrates automatically (activation
+included). With `define('EVC_CLUB_MIGRATIONS_ENABLED', true);` an administrator gets
+**Tools → «Evangelou Club — Βάση δεδομένων»** (status + confirmed apply after separation checks)
+and the technician gets `wp evc-club migrations status|apply --yes`. Staging install order:
+back up → create an empty Club DB + `EVC_CLUB_DB_*` constants → enable the constant → check that
+every safety check says «Εντάξει» → apply (only with the owner's approval) → optionally remove the
+constant. Operator guide (Greek) and developer notes: `docs/club-db-migrations.md`.
+
 ## Known deployment blockers
 
 - Hosting PHP version, MySQL/MariaDB version and pdo_mysql availability.

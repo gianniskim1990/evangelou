@@ -14,7 +14,7 @@ import { execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { problemsFor, selfTest } from "./php-guards.mjs";
+import { MIGRATIONS_RULES, problemsFor, selfTest } from "./php-guards.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginSrc = join(appDir, "..", "wordpress", "evangelou-club");
@@ -157,6 +157,7 @@ const GUARDED_CLASS_FILES = [
   "includes/customer/class-evc-bacs-issuance-guard.php",
 ];
 let sawBootstrap = false;
+let sawMigrationsBootstrap = false;
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
   const path = f.replace(/\\/g, "/");
@@ -167,8 +168,14 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   for (const problem of problemsFor(path, text, { bootstrap: WC_COMPLETION_BOOTSTRAP, guarded: GUARDED_CLASSES, forbidden: FORBIDDEN_CLASSES, allowlist: GUARDED_NAME_FILES, guardedFiles: GUARDED_CLASS_FILES, memberLockFiles: MEMBER_LOCK_FILES })) {
     fail(problem);
   }
+  // STAGE-04A: the Club-DB migrations page / command / EVC_Migrator only behind EVC_CLUB_MIGRATIONS_ENABLED.
+  if (path === MIGRATIONS_RULES.bootstrap) sawMigrationsBootstrap = true;
+  for (const problem of problemsFor(path, text, MIGRATIONS_RULES)) {
+    fail(problem);
+  }
 }
 if (!sawBootstrap) fail("the STAGE-03D bootstrap file is missing from the package");
+if (!sawMigrationsBootstrap) fail("the STAGE-04A migrations bootstrap file is missing from the package");
 
 console.log(
   `[evidence] club-plugin-package: files=${files.length} entry=${entry.file} css=${(entry.css ?? []).join(",")} customer=${customerEntry.file} commit=${commit.slice(0, 7)} path=${relative(appDir, out)}`,

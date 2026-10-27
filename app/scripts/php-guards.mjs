@@ -105,13 +105,13 @@ export function functionBodies(tokens) {
   return bodies;
 }
 
-const GATE = ["{", "if", "(", "!", "EVC_Wc_Completion_Feature", "::", "enabled", "(", ")", ")", "{", "return", ";", "}"];
+const gateFor = (featureClass) => ["{", "if", "(", "!", featureClass, "::", "enabled", "(", ")", ")", "{", "return", ";", "}"];
 
-/** True when boot()'s body STARTS with the real gate statement. */
-export function bootIsGated(tokens, bodies) {
+/** True when boot()'s body STARTS with the real gate statement of $featureClass. */
+export function bootIsGated(tokens, bodies, featureClass = "EVC_Wc_Completion_Feature") {
   const b = bodies.boot;
   if (!b) return false;
-  return GATE.every((v, i) => {
+  return gateFor(featureClass).every((v, i) => {
     const tk = tokens[b.start + i];
     return tk && (tk.t === "str" ? false : same(tk.v, v) || tk.v === v);
   });
@@ -137,11 +137,11 @@ const inside = (bodies, fn, at) => bodies[fn] && at > bodies[fn].start && at < b
 const DANGEROUS = ["class_alias", "reflectionclass", "reflectionobject", "reflectionmethod", "newinstance", "newinstanceargs", "newinstancewithoutconstructor", "unserialize"];
 const TEST_CONSTANT = "EVC_TEST_WC_COMPLETION_CONSTRUCTION";
 
-export function problemsFor(path, src, { bootstrap, guarded, forbidden, allowlist = null, guardedFiles = [], memberLockFiles = null }) {
+export function problemsFor(path, src, { bootstrap, guarded, forbidden, allowlist = null, guardedFiles = [], memberLockFiles = null, pluginClass = "EVC_Wc_Completion_Plugin", featureClass = "EVC_Wc_Completion_Feature", forbiddenDefines = [TEST_CONSTANT] }) {
   const tokens = tokenize(src);
   const bodies = functionBodies(tokens);
   const problems = [];
-  const restricted = [...guarded, "EVC_Wc_Completion_Plugin"].map((n) => n.toLowerCase());
+  const restricted = [...guarded, pluginClass].map((n) => n.toLowerCase());
   const allowed = allowlist === null || allowlist.includes(path);
   tokens.forEach((tk, k) => {
     if (tk.t === "id") {
@@ -153,7 +153,7 @@ export function problemsFor(path, src, { bootstrap, guarded, forbidden, allowlis
         if (!nx || nx.t === "var" || nx.v === "(" || nx.t === "str") problems.push(`${path}: dynamic construction (new ${nx ? nx.v : ""})`);
         else if (guardedFiles.includes(path) && nx.t === "id" && ["self", "static", "parent", "class"].includes(nx.v.toLowerCase())) problems.push(`${path}: new ${nx.v} inside a guarded class`);
       }
-      if (v === "define" && tokens[k + 1]?.v === "(" && tokens[k + 2]?.t === "str" && tokens[k + 2].v.replace(/^\\+/, "") === TEST_CONSTANT) problems.push(`${path}: defines the TEST-ONLY ${TEST_CONSTANT}`);
+      if (v === "define" && tokens[k + 1]?.v === "(" && tokens[k + 2]?.t === "str" && forbiddenDefines.includes(tokens[k + 2].v.replace(/^\\+/, ""))) problems.push(`${path}: defines ${tokens[k + 2].v} (never in a shipped file)`);
     }
     if (tk.t === "str") {
       const v = tk.v.toLowerCase();
@@ -161,6 +161,14 @@ export function problemsFor(path, src, { bootstrap, guarded, forbidden, allowlis
       if (memberLockFiles !== null && !memberLockFiles.includes(path) && v.includes("evc_member_lock")) problems.push(`${path}: a string names EVC_Member_Lock`);
     }
     if (tk.t === "var" && tokens[k + 1]?.v === "::") problems.push(`${path}: dynamic static call ${tk.v}::`);
+    // STAGE-04A review: string callables reaching build()/wire() (array('X_Plugin', 'build'), 'X_Plugin::wire'),
+    // even inside allowlisted files; only boot()/deactivate() may be named that way (the plugin entrypoint).
+    if (tk.t === "str") {
+      const sv = tk.v.replace(/^\\+/, "").toLowerCase();
+      const plugin = pluginClass.toLowerCase();
+      if (sv === plugin && tokens[k + 1]?.v === "," && tokens[k + 2]?.t === "str" && ["build", "wire"].includes(tokens[k + 2].v.toLowerCase())) problems.push(`${path}: string callable ${pluginClass}::${tokens[k + 2].v}`);
+      if (sv.replace(/\s+/g, "") === plugin + "::build" || sv.replace(/\s+/g, "") === plugin + "::wire") problems.push(`${path}: string callable ${tk.v}`);
+    }
   });
   if (memberLockFiles !== null && !memberLockFiles.includes(path)) {
     for (const call of staticCalls(tokens, ["acquire"])) {
@@ -179,15 +187,91 @@ export function problemsFor(path, src, { bootstrap, guarded, forbidden, allowlis
     }
   }
   for (const call of staticCalls(tokens, ["build", "wire"])) {
-    if (call.cls.toLowerCase() === "evc_wc_completion_plugin" || (path === bootstrap && ["self", "static"].includes(call.cls.toLowerCase()))) {
+    if (call.cls.toLowerCase() === pluginClass.toLowerCase() || (path === bootstrap && ["self", "static"].includes(call.cls.toLowerCase()))) {
       if (path !== bootstrap) { problems.push(`${path}: calls ${call.cls}::${call.name}() outside the bootstrap`); continue; }
       const okIn = call.name === "wire" ? "build" : "boot";
       if (!inside(bodies, okIn, call.at)) problems.push(`${path}: ${call.cls}::${call.name}() outside ${okIn}()`);
-      if (call.name === "build" && bodies.boot && inside(bodies, "boot", call.at) && !bootIsGated(tokens, bodies)) problems.push(`${path}: boot() is not gated by the Feature::enabled() statement`);
+      if (call.name === "build" && bodies.boot && inside(bodies, "boot", call.at) && !bootIsGated(tokens, bodies, featureClass)) problems.push(`${path}: boot() is not gated by the Feature::enabled() statement`);
     }
   }
-  if (path === bootstrap && !bootIsGated(tokens, bodies)) problems.push(`${path}: boot() does not start with if (!EVC_Wc_Completion_Feature::enabled()) { return; }`);
+  if (path === bootstrap && !bootIsGated(tokens, bodies, featureClass)) problems.push(`${path}: boot() does not start with if (!${featureClass}::enabled()) { return; }`);
   return problems;
+}
+
+// ---- STAGE-04A rule set: the Club-DB migrations page / command exist only behind EVC_CLUB_MIGRATIONS_ENABLED ----
+// Same rules as above with its own bootstrap and gate: the service, admin page, CLI command AND EVC_Migrator
+// may be constructed only inside EVC_Club_Migrations_Plugin::wire() (reached only via build() <- boot() after
+// `if (!EVC_Club_Migrations_Feature::enabled()) { return; }`); their names appear only in the allowlisted
+// files; no shipped file may define EVC_CLUB_MIGRATIONS_ENABLED itself.
+const MIGRATIONS_BOOTSTRAP = "includes/admin/class-evc-club-migrations-plugin.php";
+export const MIGRATIONS_RULES = Object.freeze({
+  bootstrap: MIGRATIONS_BOOTSTRAP,
+  pluginClass: "EVC_Club_Migrations_Plugin",
+  featureClass: "EVC_Club_Migrations_Feature",
+  guarded: ["EVC_Club_Migrations_Service", "EVC_Club_Migrations_Admin_Page", "EVC_Club_Migrations_Cli", "EVC_Migrator"],
+  forbidden: [],
+  allowlist: [
+    "evangelou-club.php",
+    MIGRATIONS_BOOTSTRAP,
+    "includes/admin/class-evc-club-migrations-service.php",
+    "includes/admin/class-evc-club-migrations-admin-page.php",
+    "includes/admin/class-evc-club-migrations-cli.php",
+    "includes/class-evc-migrator.php",
+  ],
+  guardedFiles: [
+    MIGRATIONS_BOOTSTRAP,
+    "includes/admin/class-evc-club-migrations-service.php",
+    "includes/admin/class-evc-club-migrations-admin-page.php",
+    "includes/admin/class-evc-club-migrations-cli.php",
+    "includes/class-evc-migrator.php",
+  ],
+  memberLockFiles: null,
+  forbiddenDefines: ["EVC_CLUB_MIGRATIONS_ENABLED"],
+});
+const GOOD_MIGRATIONS = `<?php
+final class EVC_Club_Migrations_Plugin {
+    public static function boot(): void {
+        if (!EVC_Club_Migrations_Feature::enabled()) {
+            return;
+        }
+        $p = self::build();
+    }
+    public static function build() { return self::wire(); }
+    private static function wire() {
+        $s = new EVC_Club_Migrations_Service(function ($db) { return new EVC_Migrator($db, 'd'); });
+        return array(new EVC_Club_Migrations_Admin_Page($s), new EVC_Club_Migrations_Cli($s));
+    }
+}`;
+
+function migrationsSelfTest() {
+  const bad = [];
+  const expect = (label, path, src, want) => {
+    const got = problemsFor(path, src, MIGRATIONS_RULES).length > 0;
+    if (got !== want) bad.push(`migrations ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  const boot = MIGRATIONS_BOOTSTRAP;
+  const allowed = "includes/admin/class-evc-club-migrations-service.php";
+  expect("good bootstrap", boot, GOOD_MIGRATIONS, false);
+  expect("service constructed elsewhere", allowed, "<?php\n$s = new EVC_Club_Migrations_Service(1);", true);
+  expect("EVC_Migrator constructed in an allowlisted file", allowed, "<?php\n$m = new \\EVC_Migrator($db, $dir);", true);
+  expect("EVC_Migrator constructed in another file", "includes/x.php", "<?php\n$m = new EVC_Migrator($db, $dir);", true);
+  expect("migrator named outside the allowlist", "includes/x.php", "<?php\nfunction f(EVC_Migrator $m) { return $m; }", true);
+  expect("migrator static call outside the allowlist", "includes/x.php", "<?php\n$x = EVC_Migrator::split_statements($s);", true);
+  expect("admin page constructed outside wire()", boot, GOOD_MIGRATIONS.replace("public static function build() {", "public static function build() { new EVC_Club_Migrations_Admin_Page(1);"), true);
+  expect("gate of another feature", boot, GOOD_MIGRATIONS.replace("EVC_Club_Migrations_Feature::enabled", "EVC_Wc_Completion_Feature::enabled"), true);
+  expect("gate missing", boot, GOOD_MIGRATIONS.replace("if (!EVC_Club_Migrations_Feature::enabled()) {\n            return;\n        }", ""), true);
+  expect("gate negation dropped", boot, GOOD_MIGRATIONS.replace("if (!EVC_Club_Migrations_Feature", "if (EVC_Club_Migrations_Feature"), true);
+  expect("build() from another file", "includes/x.php", "<?php\nEVC_Club_Migrations_Plugin::build();", true);
+  expect("plugin named in a string elsewhere", "includes/x.php", "<?php\nadd_action('init', array('EVC_Club_Migrations_Plugin', 'build'));", true);
+  expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_MIGRATIONS_ENABLED', true);", true);
+  expect("defines the opt-in constant in the bootstrap", boot, GOOD_MIGRATIONS.replace("final class", "define('EVC_CLUB_MIGRATIONS_ENABLED', true);\nfinal class"), true);
+  expect("new self inside the migrator", "includes/class-evc-migrator.php", "<?php\nfinal class EVC_Migrator { public static function make() { return new self(); } }", true);
+  expect("file paths with hyphens are not names", "includes/admin/bootstrap.php", "<?php\nrequire_once $d . 'class-evc-club-migrations-service.php';", false);
+  expect("entrypoint may hook boot()", "evangelou-club.php", "<?php\nadd_action('plugins_loaded', array('EVC_Club_Migrations_Plugin', 'boot'));", false);
+  expect("array callable to build() in an allowlisted file", "evangelou-club.php", "<?php\nadd_action('init', array('EVC_Club_Migrations_Plugin', 'build'));", true);
+  expect("array callable to wire() in an allowlisted file", allowed, "<?php\ncall_user_func(array('\\\\EVC_Club_Migrations_Plugin', 'WIRE'));", true);
+  expect("string callable to build() in an allowlisted file", "evangelou-club.php", "<?php\nadd_action('init', 'EVC_Club_Migrations_Plugin::build');", true);
+  return bad;
 }
 
 // ---- self test: negative fixtures, run on every package --------------------------------------------
@@ -255,5 +339,8 @@ export function selfTest() {
   expect("member lock where allowed", "includes/customer/class-evc-wc-completion-confirmer.php", "<?php\n$l = EVC_Member_Lock::acquire($db, 1, 0);", false);
   expect("member lock through a string", other, "<?php\ncall_user_func(array('EVC_Member_Lock', 'acquire'), $db, 1, 0);", true);
   expect("defines the test constant", other, "<?php\ndefine('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);", true);
-  return bad;
+  expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
+  expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
+  expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
+  return bad.concat(migrationsSelfTest());
 }

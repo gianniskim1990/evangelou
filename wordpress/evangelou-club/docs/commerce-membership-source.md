@@ -927,6 +927,9 @@ rule 5) that the owner has to approve.
 - WP-Cron must run (real cron hitting `wp-cron.php` recommended).
 - Keep the product / add-on settings as verified (no autocomplete, product
   mapped only to the Club level); separate Club database + constants on staging.
+- The Club database tables are created only through Tools → «Evangelou Club — Βάση δεδομένων»
+  (or `wp evc-club migrations apply --yes`) with `EVC_CLUB_MIGRATIONS_ENABLED`, after a backup and
+  the owner's approval: see `docs/club-db-migrations.md` (STAGE-04A).
 
 ### Tests and mutants
 

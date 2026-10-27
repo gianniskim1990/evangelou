@@ -5,6 +5,7 @@
   EVC_TEST_STAFF_FLAG=enabled (wp-common + wp-enabled).
   STAGE-01: EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled (wp-customer).
   STAGE-03D: the wp-commerce-on suite also sets EVC_TEST_WC_COMPLETION_FLAG=enabled.
+  STAGE-04A: wp-migrations runs with EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CLUB_MIGRATIONS_FLAG=enabled.
   STAGE-02: same flags + EVC_TEST_COMMERCE_PLUGINS=<dir of pinned WooCommerce/PMPro/add-on> (wp-commerce).
 -->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -34,6 +35,10 @@
         <!-- STAGE-03D: the same site with EVC_CLUB_WC_COMPLETION_ENABLED=true (EVC_TEST_WC_COMPLETION_FLAG=enabled). -->
         <testsuite name="wp-commerce-on">
             <directory>tests/wordpress/commerce-on</directory>
+        </testsuite>
+        <!-- STAGE-04A: Club-DB migrations page / CLI with EVC_CLUB_MIGRATIONS_ENABLED=true (EVC_TEST_CLUB_MIGRATIONS_FLAG=enabled). -->
+        <testsuite name="wp-migrations">
+            <directory>tests/wordpress/migrations</directory>
         </testsuite>
     </testsuites>
 </phpunit>

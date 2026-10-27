@@ -35,6 +35,16 @@ if ($evc_wc_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-04A: the Club-DB migrations constant, fixed per PHPUnit process: EVC_TEST_CLUB_MIGRATIONS_FLAG=enabled
+// defines it as boolean true (the wp-migrations suite); unset/disabled leaves it undefined (every other suite).
+$evc_migrations_mode = getenv('EVC_TEST_CLUB_MIGRATIONS_FLAG');
+if ($evc_migrations_mode === 'enabled') {
+    define('EVC_CLUB_MIGRATIONS_ENABLED', true);
+} elseif ($evc_migrations_mode !== false && $evc_migrations_mode !== '' && $evc_migrations_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_CLUB_MIGRATIONS_FLAG must be enabled or disabled.\n");
+    exit(1);
+}
+
 // STAGE-03D review: TEST-ONLY hook so the suites may construct the WooCommerce-completion classes with the
 // feature constant OFF (EVC_Wc_Completion_Feature::assert_constructible; the packager refuses it in shipped files).
 define('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);
