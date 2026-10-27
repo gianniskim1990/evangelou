@@ -1141,3 +1141,7 @@ The existing website developer replied explicitly:
 - **Local:** wp-migrations 34/34, unit 1005, WP mutation runner 79/79 killed (W1–W43, MG1–MG36), mutant preflight 229/229, packager with real build. Local integration has 2 errors in pre-existing least-privilege tests (`SqlProvenancePlanTest`, `SqlProvenanceStoreTest`), identical with the unmodified `EVC_Club_Db` (local MariaDB anonymous-user shadowing of `'u'@'%'`); green in CI.
 - **CI:** commits c1b40f8, 0a330d6, 26778df, d2bd8af, b0357be (docs). Code SHA `b0357bebc379f4f0c6533aba475c190ba041991a`: run 40475996174 18/18 success, first attempt, no re-run; frontend 40475996076 4/4.
 - **NOT verified:** real staging/production; real WP-CLI runtime; a real multisite install (pure predicate only); the real redirect + exit (tests stop at the `wp_redirect` filter); a PHP-7.4 warning actually being produced (the test passes either way on 8.x).
+
+## OWNER APPROVAL 2026-10-27 11:56 — apply Club-DB migrations on STAGING
+- Owner wrote «εγκρίνω» to step 6: create the Club tables (001 + 002) on the STAGING Club DB through Tools → «Evangelou Club — Βάση δεδομένων» (or `wp evc-club migrations apply --yes`), ONLY after backups and only if every status check is green (connection, separation, empty DB, no drift). Production is NOT approved.
+- Claude cannot reach staging; the owner or the technician performs steps 1-6 and reports what the status page shows.
