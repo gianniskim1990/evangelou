@@ -31,6 +31,8 @@ database.** Running it on staging or production needs the owner's explicit appro
 - Μόνο **διαχειριστής** του WordPress (δικαίωμα «manage_options»). Ο υπεύθυνος καταστήματος
   (shop manager), ο κοινός λογαριασμός του Club και οι πελάτες **δεν** βλέπουν τη σελίδα.
 - Εναλλακτικά ο τεχνικός από τον διακομιστή με WP-CLI (δείτε παρακάτω).
+- Σε WordPress **multisite** η σελίδα και η εντολή δεν υπάρχουν καθόλου (κάθε διαχειριστής υπο-site θα
+  είχε πρόσβαση στην κοινή βάση του Club).
 
 ### Τι πρέπει να έχει γίνει πριν (από τον τεχνικό)
 
@@ -51,7 +53,8 @@ database.** Running it on staging or production needs the owner's explicit appro
 5. Πρέπει να δείτε: «Η βάση του Club ενημερώθηκε. Εφαρμόστηκαν οι μεταβάσεις: 001, 002.» και
    «Η βάση του Club είναι ενημερωμένη.» Οι μεταβάσεις φαίνονται πλέον στις «Εφαρμοσμένες» με
    «Ίδιο (εντάξει)».
-6. Αν το ξαναπατήσετε, δεν γίνεται τίποτα («Δεν υπάρχει καμία εκκρεμής μετάβαση»).
+6. Αν το ξαναπατήσετε, δεν γίνεται τίποτα («Δεν υπάρχει καμία εκκρεμής μετάβαση»). Η ανανέωση της
+   σελίδας (F5) μετά την εφαρμογή **δεν** την επαναλαμβάνει· το αποτέλεσμα εμφανίζεται μία φορά.
 
 Η σελίδα ποτέ δεν δείχνει τον κωδικό, τον χρήστη ή τον διακομιστή της βάσης· το όνομα της βάσης
 φαίνεται μόνο κρυμμένο (π.χ. `e•••b (14)`).
@@ -74,9 +77,10 @@ database.** Running it on staging or production needs the owner's explicit appro
 |---|---|
 | Δεν έχουν οριστεί τα στοιχεία σύνδεσης… | Ο τεχνικός προσθέτει τα `EVC_CLUB_DB_*` στο `wp-config.php`. |
 | Τα στοιχεία σύνδεσης… δεν είναι έγκυρα | Ο τεχνικός ελέγχει το όνομα βάσης (μόνο γράμματα, αριθμοί, `_`) και τη θύρα. |
-| Δεν έγινε σύνδεση με τη βάση του Club | Ο τεχνικός ελέγχει ότι η βάση υπάρχει, ότι ο χρήστης έχει δικαιώματα και ότι ο κωδικός είναι σωστός. Ο «κωδικός σφάλματος» (π.χ. 1045 = λάθος χρήστης/κωδικός, 1049 = δεν υπάρχει η βάση, 2002 = δεν βρέθηκε ο διακομιστής) βοηθά τον τεχνικό. |
+| Δεν έγινε σύνδεση με τη βάση του Club | Ο τεχνικός ελέγχει ότι η βάση υπάρχει, ότι ο χρήστης έχει δικαιώματα και ότι ο κωδικός είναι σωστός. Ο «κωδικός σφάλματος» (π.χ. 1045 = λάθος χρήστης/κωδικός, 1049 = δεν υπάρχει η βάση, 2002 = δεν έγινε σύνδεση στον διακομιστή) βοηθά τον τεχνικό. |
 | Η βάση του Club είναι η ίδια με τη βάση του WordPress | **Σταματήστε.** Ο τεχνικός πρέπει να φτιάξει **νέα** βάση για το Club και να αλλάξει το `EVC_CLUB_DB_NAME`. |
 | Δεν μπόρεσε να επιβεβαιωθεί ότι η βάση… είναι διαφορετική | Ενημερώστε τον τεχνικό/προγραμματιστή (το WordPress δεν απάντησε στον έλεγχο). |
+| Το πρόθεμα πινάκων του WordPress μοιάζει με το «evc_» | Το WordPress χρησιμοποιεί πρόθεμα όπως `e`, `ev`, `evc` ή `evc_`, οπότε οι πίνακες δεν ξεχωρίζουν. Ενημερώστε τον προγραμματιστή. |
 | Η βάση του Club περιέχει πίνακες του WordPress | **Σταματήστε.** Οι ρυθμίσεις δείχνουν σε λάθος βάση. Ο τεχνικός διορθώνει το `EVC_CLUB_DB_NAME`. |
 | …πίνακες που δεν ανήκουν στο Club | Χρειάζεται **άδεια** βάση μόνο για το Club. Ο τεχνικός δίνει νέα βάση (δεν σβήνουμε τίποτα από εδώ). |
 | Ο πίνακας που καταγράφει τις μεταβάσεις… απρόσμενη μορφή | Μην προχωρήσετε· ενημερώστε τον προγραμματιστή. |
@@ -86,7 +90,8 @@ database.** Running it on staging or production needs the owner's explicit appro
 | Τα αρχεία μεταβάσεων του plugin δεν είναι σωστά | Εγκαταστήστε ξανά το plugin από το επίσημο πακέτο. |
 | Ο έλεγχος της βάσης… δεν ολοκληρώθηκε | Δοκιμάστε ξανά σε λίγο· αν επαναληφθεί, ενημερώστε τον τεχνικό. |
 | Τρέχει ήδη μια άλλη εφαρμογή μεταβάσεων | Περιμένετε λίγα λεπτά και ξαναδοκιμάστε (κάποιος άλλος πάτησε ήδη ή τρέχει το WP-CLI). |
-| Η μετάβαση NNN απέτυχε… | **Μην ξαναπατήσετε.** Επαναφέρετε το αντίγραφο ασφαλείας της βάσης του Club και ενημερώστε τον προγραμματιστή. |
+| Η μετάβαση NNN απέτυχε… | **Μην ξαναπατήσετε.** Επαναφέρετε το αντίγραφο ασφαλείας της βάσης του Club και ενημερώστε τον προγραμματιστή. Μετά από αποτυχία η σελίδα δεν επιτρέπει νέα εφαρμογή (ο μισοτελειωμένος πίνακας δεν είναι καταγεγραμμένος) μέχρι να γίνει η επαναφορά. Το μήνυμα λέει και αν η αποτυχία γράφτηκε στο ημερολόγιο ελέγχου. |
+| …η κατάσταση της βάσης του Club δεν μπόρεσε να διαβαστεί μετά | Όπως παραπάνω: επαναφορά αντιγράφου και ενημέρωση του προγραμματιστή (δεν είναι γνωστό ποιες μεταβάσεις πέρασαν). |
 | Η λέξη επιβεβαίωσης δεν είναι σωστή | Γράψτε ακριβώς `ΕΦΑΡΜΟΓΗ` (ελληνικά κεφαλαία, χωρίς τόνο). |
 | Δεν έχετε δικαίωμα για αυτή τη σελίδα | Χρειάζεται λογαριασμός διαχειριστή. |
 
@@ -97,8 +102,9 @@ wp evc-club migrations status
 wp evc-club migrations apply --yes
 ```
 
-Υπάρχει μόνο όταν `EVC_CLUB_MIGRATIONS_ENABLED` είναι `true`. Κάνει τους ίδιους ελέγχους· χωρίς
-`--yes` αρνείται. Με `--user=<διαχειριστής>` ο χρήστης καταγράφεται στο ημερολόγιο ελέγχου.
+Υπάρχει μόνο όταν `EVC_CLUB_MIGRATIONS_ENABLED` είναι `true` (και όχι σε multisite). Κάνει τους
+ίδιους ελέγχους· χωρίς `--yes` αρνείται. Το `status` τελειώνει με σφάλμα (μη μηδενικός κωδικός
+εξόδου) όταν κάποιος έλεγχος αρνείται. Με `--user=<διαχειριστής>` ο χρήστης καταγράφεται στο ημερολόγιο ελέγχου.
 
 ### Μετά
 
@@ -128,17 +134,27 @@ wp evc-club migrations apply --yes
 ### Decisions
 
 - **Access:** `manage_options` AND not `evc_club_staff` (a staff account given `manage_options` is
-  still refused). Checked on every render and again after the nonce.
-- **Apply request:** POST + `check_admin_referer('evc_club_migrations_apply')` + capability re-check +
-  typed word `ΕΦΑΡΜΟΓΗ` (exact, case-sensitive; surrounding whitespace ignored).
+  still refused) AND single-site WordPress (`EVC_Club_Migrations_Plugin::supported_site()`: on
+  multisite `boot()` hooks nothing and `may_manage()` refuses). Checked on every render, on the POST
+  handler and again after the nonce.
+- **Apply request:** POST handled on `load-<page hook>` (before output): capability +
+  `check_admin_referer('evc_club_migrations_apply')` + capability re-check + typed word `ΕΦΑΡΜΟΓΗ`
+  (exact, case-sensitive; surrounding whitespace ignored), then `wp_safe_redirect` to the GET page
+  (POST/redirect/GET). The notice travels in the per-user transient `evc_club_migrations_result_<id>`
+  (5 minutes), shown once and deleted. The render callback never acts on a POST.
 - **Lock:** `GET_LOCK(CONCAT('evc_migrations_', SHA1(DATABASE())), 0)` taken first (no wait →
   `lock_busy`) and held across inspection + `EVC_Migrator::migrate()`. GET_LOCK is re-entrant per
   connection on MySQL ≥ 5.7 / MariaDB ≥ 10.0.2, so the migrator's own lock nests inside it.
 - **Separation checks** (`inspect()`, all read-only; any failure refuses):
-  - configured name + normalised host equal to `DB_NAME` + `DB_HOST` → refused **before connecting**
-    (every loopback spelling counts as the same host; ports / sockets ignored: over-refusal is safe);
+  - configured name (exact, case-sensitive) + normalised host equal to `DB_NAME` + `DB_HOST` →
+    refused **before connecting** (every loopback spelling — `localhost`, `127.*`, `::1`, `[::1]:port`,
+    `host:/socket`, `:/socket` — counts as the same host; ports / sockets ignored: over-refusal is safe);
   - server identity `@@hostname`, `@@port`, `DATABASE()` of the Club connection equal to the
-    WordPress connection's → refused; WordPress identity unreadable → refused;
+    WordPress connection's → refused (schema names compared case-sensitively only when the server's
+    `lower_case_table_names` is 0, i.e. when `Club` and `club` really are two schemas; otherwise
+    case-insensitively); WordPress identity unreadable → refused;
+  - a WordPress prefix that is itself a prefix of `evc_` (`e`, `ev`, `evc`, `evc_`, any case) →
+    `wordpress_prefix_ambiguous`;
   - tables (`information_schema.TABLES`, views included): `$wpdb->base_prefix*` or a core WordPress
     name (`options`, `posts`, `users`, … with any prefix) → `wordpress_tables_present`; not `evc_*`
     → `unknown_tables_present`;
@@ -156,8 +172,13 @@ wp evc-club migrations apply --yes
   `first•••last (length)`; exceptions are mapped to codes (driver code only for connection
   failures); `EVC_Club_Db` already drops driver messages.
 - **Failure mid-way:** MySQL DDL auto-commits; a failed migration is not recorded, the result is
-  `failed` with the first unrecorded version, and the operator restores the backup (as documented in
-  `EVC_Migrator`).
+  `failed` with the first unrecorded version and the versions recorded before it, the audit row has
+  outcome `failed`, and the next status refuses (`unrecorded_club_tables` for the half-made table) until
+  the operator restores the backup. If the bookkeeping table cannot be read back after the failure,
+  no version is guessed: `state_unknown` (message, audit `state: unknown`, log `state=unknown`).
+- **Connection warnings:** `EVC_Club_Db::connect()` swallows PHP warnings raised while connecting
+  (PHP 7.4 / mysqlnd can name the host in one) and restores the previous handler.
+- **CLI exit code:** `status` ends with `WP_CLI::error` (non-zero) when anything is refused.
 
 ### Packager guard
 
@@ -165,7 +186,9 @@ wp evc-club migrations apply --yes
 `EVC_Club_Migrations_Admin_Page`, `EVC_Club_Migrations_Cli`, `EVC_Migrator` (constructed only inside
 `EVC_Club_Migrations_Plugin::wire()`; `boot()` must start with the real gate; `build()` / `wire()` only
 from the bootstrap); their names only in six allowlisted files; no shipped file may
-`define('EVC_CLUB_MIGRATIONS_ENABLED', …)`. Negative fixtures run on every package.
+`define('EVC_CLUB_MIGRATIONS_ENABLED', …)`; string callables `array('X_Plugin', 'build'|'wire')` /
+`'X_Plugin::build'` are refused in every file, allowlisted ones included (only `boot` / `deactivate`
+may be named). Negative fixtures run on every package.
 
 ### Tests
 
@@ -178,12 +201,18 @@ from the bootstrap); their names only in six allowlisted files; no shipped file 
   no route, `boot()` silent, construction refused, only `true` enables.
 - WP-CLI itself is not loaded in tests: the command class is tested with recording output callables;
   the `WP_CLI::add_command` registration line is not executed by any test.
-- Mutants `MG1`–`MG27` in `tests/mutation/run-wp-mutations.php` (mode `migrations`, OFF-gate ones in
+- Review tests: half-way failure end to end (temp dir with the real 001 and a 002 that creates a table
+  then breaks), unreadable state after a failure, POST/redirect/GET and refresh, a POST reaching the
+  render callback, multisite, case-only schema names, loopback spellings, ambiguous prefix, CLI exit,
+  the lock fully released after apply; `tests/unit/ClubDbConnectWarningTest.php` (no warning escapes
+  a failed connect; on PHP 8.x the recorder is simply empty).
+- Mutants `MG1`–`MG36` in `tests/mutation/run-wp-mutations.php` (mode `migrations`, OFF-gate ones in
   mode `disabled`), each with named killer tests.
 
 ### Not covered
 
-- No real staging/production run; no real WP-CLI run; multisite not considered (single site);
-  a migration that fails half-way is not exercised end to end (the migrator's own tests cover its
-  failure path); a class name assembled from string pieces at run time escapes the static guard
-  (the constructors refuse while the constant is off).
+- No real staging/production run; no real WP-CLI run; multisite only via the pure
+  `supported_site()` (the test site is single-site); the real redirect + `exit` (tests stop at the
+  `wp_redirect` filter); the warning-swallowing only bites where PHP actually warns (PHP 7.4 in CI);
+  a class name assembled from string pieces at run time escapes the static guard (the constructors
+  refuse while the constant is off).
