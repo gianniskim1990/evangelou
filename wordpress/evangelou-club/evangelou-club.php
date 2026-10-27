@@ -16,6 +16,7 @@ define('EVC_CLUB_PATH', plugin_dir_path(__FILE__));
 require_once EVC_CLUB_PATH . 'includes/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/staff/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/customer/bootstrap.php';
+require_once EVC_CLUB_PATH . 'includes/admin/bootstrap.php';
 
 // Staff authentication foundation (Task 1C-C). Role-scoped session policy,
 // admin guard and login throttling are active for users holding the
@@ -39,3 +40,9 @@ add_action('plugins_loaded', array('EVC_Customer_Plugin', 'boot'));
 // EVC_CLUB_WC_COMPLETION_ENABLED as boolean true (default: OFF = nothing hooked or scheduled).
 register_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));
 add_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));
+
+// STAGE-04A: Club-DB migration status and the confirmed «apply pending migrations» step, for
+// administrators (Tools → «Evangelou Club — Βάση δεδομένων») and WP-CLI (`wp evc-club migrations`).
+// ONLY when wp-config.php defines EVC_CLUB_MIGRATIONS_ENABLED as boolean true (default: OFF =
+// nothing hooked, no menu, no command). Activation never migrates.
+add_action('plugins_loaded', array('EVC_Club_Migrations_Plugin', 'boot'));
