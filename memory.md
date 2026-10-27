@@ -1114,3 +1114,8 @@ The existing website developer replied explicitly:
 - (2) Mis-click Cancelled/Refund freezes the card with no undo: **YES, keep** (customer places a new order).
 - (3) New payment during a frozen period: the owner says it does not concern him because the plugin pulls data from the website (WooCommerce/PMPro). **No rule change**: D2 / mapper rule 5 stay as approved; do not unfreeze earlier.
 - Owner wants to try the plugin on staging "to a degree". Fresh package built from `8920f87` (code SHA `ec5cb3b`, CI green): all flags OFF, no credentials inside. Club DB tables are not created yet (migration needs separate approval).
+
+## OWNER DECISION 2026-10-27 08:58 — STAGE-04A ACTIVE: safe Club-DB migration runner (development only)
+- Owner said «προχωράμε» to the roadmap: (1) Club-DB migration runner → (2) first real staging test → (3) coffee redemption wired to real memberships → (4) in-store QR onboarding + FluentCRM tags → (5) polish, staff accounts, pilot, production only with approval.
+- STAGE-04A scope: an admin-only, opt-in, nonce-protected way to see migration status and apply `database/001_initial.sql` + `002_payment_provenance.sql` through the existing `EVC_Migrator` on the separate Club DB. Running it on any real DB (staging included) still needs the owner's explicit approval at that time. Branch `feat/evc-club-migrations` stacked on `feat/evc-wc-completion`.
+- Plugin header is now Version 0.1.0, Author TechPi (https://techpi.eu) (`f9f52ea`, owner request).
