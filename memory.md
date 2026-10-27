@@ -1108,3 +1108,9 @@ The existing website developer replied explicitly:
 - **Test gaps:** each lock check has its own test and mutant (WC70 every step, WC71 before issuance, WC72 before record); WC40 killed by a failing later cancellation handler; the ON suite fails unless the real `plugins_loaded` boot hooked exactly one confirmer; `BacsConfirmationTest` clock pinned off a whole minute (former 1-in-60 flake); REST depth: nested `rest_do_request` and an exception in a REST callback (the rest of that request stays REST, fail closed; reset at shutdown) — WC73-WC74.
 - **CI:** code SHA `ec5cb3b7fe5e662df8dcee1fed853dd6524eab8e`, push run 40376354987 18/18 success on the first attempt (no re-run), PR run 40376363904 green. Earlier rounds on this re-review: 40374291353 (d77ce19, lock test read count), 40374719035 / 40374730573 (422ee60, ON test without the entry-point nonce).
 - **NOT verified:** the real WooCommerce admin handlers end to end (they exit); staging/production; real WP-Cron firing; a class name assembled from string pieces at run time (documented gap of the static guard).
+
+## OWNER ANSWERS 2026-10-27 08:39 — STAGE-03D questions
+- (1) WooCommerce mobile app / other software as confirmation: **NO** (admin screen on a computer only).
+- (2) Mis-click Cancelled/Refund freezes the card with no undo: **YES, keep** (customer places a new order).
+- (3) New payment during a frozen period: the owner says it does not concern him because the plugin pulls data from the website (WooCommerce/PMPro). **No rule change**: D2 / mapper rule 5 stay as approved; do not unfreeze earlier.
+- Owner wants to try the plugin on staging "to a degree". Fresh package built from `8920f87` (code SHA `ec5cb3b`, CI green): all flags OFF, no credentials inside. Club DB tables are not created yet (migration needs separate approval).
