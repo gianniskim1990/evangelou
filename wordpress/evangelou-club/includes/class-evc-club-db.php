@@ -43,6 +43,11 @@ class EVC_Club_Db {
         if (!extension_loaded('pdo_mysql')) {
             throw new EVC_Db_Exception('Club database driver (pdo_mysql) is not available.');
         }
+        // Some PHP / mysqlnd versions (e.g. PHP 7.4) ALSO raise an E_WARNING naming the host when a
+        // connection fails; swallowed here so it can never reach a page or a log (STAGE-04A review).
+        set_error_handler(function () {
+            return true;
+        });
         try {
             $pdo = new PDO($config->dsn(), $config->user(), $config->password(), array(
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -52,6 +57,8 @@ class EVC_Club_Db {
         } catch (PDOException $e) {
             $code = is_numeric($e->getCode()) ? (int) $e->getCode() : null;
             throw new EVC_Db_Exception('Club database is unavailable.', null, $code);
+        } finally {
+            restore_error_handler();
         }
         return new self($pdo);
     }
