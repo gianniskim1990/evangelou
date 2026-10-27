@@ -703,7 +703,94 @@ $mutants = array(
         }',
         '        } finally {
         }',
-        array('WcCompletionTest::test_an_exception_inside_the_confirmation_never_aborts_woocommerce'))
+        array('WcCompletionTest::test_an_exception_inside_the_confirmation_never_aborts_woocommerce')),
+    // STAGE-04A Club-DB migrations page / CLI (mode "migrations": EVC_CLUB_MIGRATIONS_ENABLED = true, wp-migrations
+    // suite; the OFF-gate mutants run in mode "disabled", whose wp-common suite holds ClubMigrationsOffTest).
+    array('MG1-capability-not-required', 'migrations', 'includes/admin/class-evc-club-migrations-admin-page.php',
+        'return $user instanceof WP_User && $user->exists() && user_can($user, self::CAPABILITY) && !EVC_Staff_Role::has_staff_role($user);',
+        'return $user instanceof WP_User && $user->exists() && !EVC_Staff_Role::has_staff_role($user);',
+        array('ClubMigrationsTest::test_users_without_manage_options_or_club_staff_get_no_access')),
+    array('MG2-club-staff-not-excluded', 'migrations', 'includes/admin/class-evc-club-migrations-admin-page.php',
+        'return $user instanceof WP_User && $user->exists() && user_can($user, self::CAPABILITY) && !EVC_Staff_Role::has_staff_role($user);',
+        'return $user instanceof WP_User && $user->exists() && user_can($user, self::CAPABILITY);',
+        array('ClubMigrationsTest::test_club_staff_with_manage_options_is_refused', 'ClubMigrationsTest::test_users_without_manage_options_or_club_staff_get_no_access')),
+    array('MG3-capability-not-rechecked-after-nonce', 'migrations', 'includes/admin/class-evc-club-migrations-admin-page.php',
+        '        if (!self::may_manage($user)) {', '        if (false) {',
+        array('ClubMigrationsTest::test_capability_is_checked_again_after_the_nonce')),
+    array('MG4-nonce-not-checked', 'migrations', 'includes/admin/class-evc-club-migrations-admin-page.php',
+        "        check_admin_referer(self::NONCE_ACTION);\n", '',
+        array('ClubMigrationsTest::test_missing_or_wrong_nonce_never_applies')),
+    array('MG5-typed-word-not-checked', 'migrations', 'includes/admin/class-evc-club-migrations-admin-page.php',
+        '        if (!EVC_Club_Migrations_Service::confirmation_matches($typed)) {', '        if (false) {',
+        array('ClubMigrationsTest::test_wrong_typed_word_never_applies')),
+    array('MG6-typed-word-case-insensitive', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        'return is_string($typed) && trim($typed) === self::CONFIRM_WORD;',
+        "return is_string(\$typed) && mb_strtolower(trim(\$typed), 'UTF-8') === mb_strtolower(self::CONFIRM_WORD, 'UTF-8');",
+        array('ClubMigrationsTest::test_wrong_typed_word_never_applies')),
+    array('MG7-configured-wordpress-database-not-refused', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "        if (strtolower(\$config->database()) === strtolower(\$this->wordpress['name'])", "        if (false",
+        array('ClubMigrationsTest::test_the_wordpress_database_itself_is_refused_before_connecting')),
+    array('MG8-server-identity-not-compared', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "                && strtolower((string) \$club['d']) === strtolower((string) \$wordpress['d'])) {", '                && false) {',
+        array('ClubMigrationsTest::test_the_same_server_database_is_refused_even_under_another_configured_name')),
+    array('MG9-unknown-wordpress-identity-accepted', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "                \$report['refusals'][] = self::WORDPRESS_IDENTITY_UNKNOWN;\n", '',
+        array('ClubMigrationsTest::test_unknown_wordpress_identity_is_refused')),
+    array('MG10-wordpress-tables-not-classified', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "                if (\$kind === 'wordpress') {", '                if (false) {',
+        array('ClubMigrationsTest::test_wordpress_tables_are_refused')),
+    array('MG11-wordpress-prefix-ignored', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "        if (\$prefix !== '' && strpos(\$name, \$prefix) === 0) {", '        if (false) {',
+        array('ClubMigrationsTest::test_wordpress_tables_are_refused')),
+    array('MG12-core-wordpress-names-ignored', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "            if (\$name === \$core || substr(\$name, -strlen('_' . \$core)) === '_' . \$core) {", '            if (false) {',
+        array('ClubMigrationsTest::test_wordpress_tables_are_refused')),
+    array('MG13-unknown-tables-accepted', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "                    \$report['refusals'][] = self::UNKNOWN_TABLES_PRESENT;\n", '',
+        array('ClubMigrationsTest::test_unknown_tables_are_refused')),
+    array('MG14-unrecorded-club-tables-accepted', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "                    \$report['refusals'][] = self::UNRECORDED_CLUB_TABLES;\n", '',
+        array('ClubMigrationsTest::test_unrecorded_club_tables_are_refused')),
+    array('MG15-missing-club-tables-accepted', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "                        \$report['refusals'][] = self::MISSING_CLUB_TABLES;\n", '',
+        array('ClubMigrationsTest::test_missing_club_tables_are_refused')),
+    array('MG16-checksum-drift-ignored', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "\$checksum_ok = \$file !== null && hash_equals(\$file['checksum'], (string) \$row['checksum']) && \$file['name'] === (string) \$row['name'];",
+        '$checksum_ok = $file !== null;',
+        array('ClubMigrationsTest::test_checksum_drift_is_refused')),
+    array('MG17-out-of-order-ignored', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        '                if ($version < $latest) {', '                if (false) {',
+        array('ClubMigrationsTest::test_out_of_order_history_is_refused')),
+    array('MG18-applies-despite-refusals', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "            if (\$report['refusals'] !== array() || !\$report['inspected']) {", "            if (!\$report['inspected']) {",
+        array('ClubMigrationsTest::test_wordpress_tables_are_refused', 'ClubMigrationsTest::test_unknown_tables_are_refused')),
+    array('MG19-lock-not-required', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "        if (\$lock === null || (int) \$lock['acquired'] !== 1) {", '        if (false) {',
+        array('ClubMigrationsTest::test_lock_held_by_another_connection_is_refused')),
+    array('MG20-nothing-pending-still-migrates', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "            if (\$report['pending'] === array()) {", '            if (false) {',
+        array('ClubMigrationsTest::test_a_second_apply_changes_nothing')),
+    array('MG21-database-name-unmasked', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "        return \$value[0] . '•••' . \$value[\$length - 1] . ' (' . \$length . ')';", '        return $value;',
+        array('ClubMigrationsTest::test_output_never_contains_connection_secrets')),
+    array('MG22-audit-event-skipped', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
+        "            if (\$exists === null || (int) \$exists['n'] !== 1) {", '            if (true) {',
+        array('ClubMigrationsTest::test_fresh_database_applies_001_then_002_with_checksums_and_an_audit_event')),
+    array('MG23-cli-apply-without-yes', 'migrations', 'includes/admin/class-evc-club-migrations-cli.php',
+        "        if (!is_array(\$assoc_args) || !array_key_exists('yes', \$assoc_args) || (\$assoc_args['yes'] !== true && \$assoc_args['yes'] !== '')) {", '        if (false) {',
+        array('ClubMigrationsTest::test_cli_status_and_apply')),
+    array('MG24-off-gate-always-on', 'disabled', 'includes/admin/class-evc-club-migrations-feature.php',
+        '        return defined(self::CONSTANT) && self::is_enabled_value(constant(self::CONSTANT));', '        return true;',
+        array('ClubMigrationsOffTest::test_nothing_exists_while_the_constant_is_off')),
+    array('MG25-off-gate-accepts-truthy-values', 'disabled', 'includes/admin/class-evc-club-migrations-feature.php',
+        '        return $value === true;', '        return (bool) $value;',
+        array('ClubMigrationsOffTest::test_only_the_boolean_true_enables_it')),
+    array('MG26-boot-gate-removed', 'disabled', 'includes/admin/class-evc-club-migrations-plugin.php',
+        "        if (!EVC_Club_Migrations_Feature::enabled()) {\n            return;\n        }\n", '',
+        array('ClubMigrationsOffTest::test_nothing_exists_while_the_constant_is_off')),
+    array('MG27-construction-allowed-while-off', 'disabled', 'includes/admin/class-evc-club-migrations-feature.php',
+        '        if (!self::enabled()) {', '        if (false) {',
+        array('ClubMigrationsOffTest::test_the_classes_refuse_construction_while_off'))
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -724,6 +811,10 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
     } elseif ($mode === 'commerce') {
         $suite = 'wp-commerce';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled'));
+    } elseif ($mode === 'migrations') {
+        // STAGE-04A: EVC_CLUB_MIGRATIONS_ENABLED = true (separate process, own constant).
+        $suite = 'wp-migrations';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'disabled', 'EVC_TEST_CLUB_MIGRATIONS_FLAG' => 'enabled'));
     } elseif ($mode === 'commerce_on') {
         // STAGE-03D: the same site with EVC_CLUB_WC_COMPLETION_ENABLED = true (separate process, own constant).
         $suite = 'wp-commerce-on';
@@ -764,7 +855,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach ($evc_commerce_only ? array('commerce', 'commerce_on') : array('disabled', 'enabled', 'customer') as $mode) {
+foreach ($evc_commerce_only ? array('commerce', 'commerce_on') : array('disabled', 'enabled', 'customer', 'migrations') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

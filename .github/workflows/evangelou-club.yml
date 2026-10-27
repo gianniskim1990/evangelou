@@ -188,6 +188,15 @@ jobs:
       - name: WordPress suite - CUSTOMER flag ENABLED, staff flag DISABLED (STAGE-01, test environment only)
         run: EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-customer
 
+      - name: WordPress suite - Club DB migrations constant ON (STAGE-04A, disposable Club test databases only)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CLUB_MIGRATIONS_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-migrations --log-junit "$RUNNER_TEMP/migrations-junit.xml"
+          rc=$?
+          # Failures as annotations (readable through the check-runs API); never changes the result.
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/migrations-junit.xml" 40; fi
+          exit $rc
+
       - name: Authorization mutation tests (real WordPress)
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-wp-mutations.php
