@@ -616,12 +616,14 @@ final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
         $this->assertFalse($shared->in_transaction(), 'no transaction left open on the shared connection');
         $this->assertSame('1', (string) $shared->fetch_one('SELECT 1 AS ok')['ok'], 'the shared connection still works');
 
-        // The next run (healthy connection) creates both rows. Earlier tests of this file left other running
-        // candidates (e.g. the 2040 ones), so the scan starts at the oldest here (the cursor is a WP option).
-        delete_option(EVC_Club_Member_Sync::CURSOR_OPTION);
+        // A healthy connection afterwards creates both rows, here through the customers' member step: the
+        // scan's order is by the heads' updated_at_utc (the store's real write time), so the 44 hopeless
+        // candidates of the previous test come first and these customers are reached only after a few runs
+        // (proven by test_the_recovery_scan_reaches_an_older_eligible_customer_behind_many_hopeless_candidates).
         $this->wire($at->modify('+30 minutes'));
-        $this->parts['recovery']->run();
         foreach ($orders as $customer) {
+            $kind = $this->parts['members']->after_payment($customer);
+            $this->assertSame(EVC_Member_Sync_Result::PROVISIONED, $kind, 'customer ' . $customer);
             $this->assertCount(1, $this->members($customer));
         }
     }
