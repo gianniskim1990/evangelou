@@ -22,7 +22,9 @@ require_once EVC_CLUB_PATH . 'includes/admin/bootstrap.php';
 // admin guard and login throttling are active for users holding the
 // evc_club_staff role only. The Club REST routes exist ONLY when wp-config.php
 // defines EVC_CLUB_STAFF_ENABLED as boolean true (default: disabled), and even
-// then redemption fails closed: no production membership adapter exists yet.
+// then redemption fails closed (503) unless wp-config.php ALSO defines
+// EVC_CLUB_REDEMPTION_SOURCE as 'club_db_v1' (STAGE-05A, default OFF) and every
+// piece behind it is configured (docs/staff-redemption.md).
 // No database connection or migration is ever opened automatically.
 register_activation_hook(__FILE__, array('EVC_Staff_Plugin', 'activate'));
 register_deactivation_hook(__FILE__, array('EVC_Staff_Plugin', 'deactivate'));
