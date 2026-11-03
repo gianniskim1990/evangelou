@@ -34,6 +34,9 @@ final class MemberSyncRedeemTest extends EVC_WP_Test_Case {
             $this->parts['guard']->disarm();
         }
         unset($_REQUEST['_wpnonce'], $GLOBALS['current_screen']);
+        // PHPUnit keeps every test object until the end of the run: release the Club DB connections now.
+        $this->parts = null;
+        $this->club = null;
         parent::tear_down();
     }
 

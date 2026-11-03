@@ -80,8 +80,8 @@ account status changes, enabling anything.
   its `service()`) over the SQL store, the directory and the SAME membership source as the STAGE-05A
   redeem route (`EVC_Pmpro_Membership_Adapter` over `EVC_Wp_Commerce_Pmpro_Reader` +
   `EVC_Store_Club_Payment_Provenance` / `EVC_Sql_Provenance_Store`). A row is created only for a
-  CUSTOMER with a verified, currently eligible membership (UI-04F rule, unchanged). It has its own Club
-  DB connection, opened lazily; it is itself the sync's clock (the confirmer's `$now`).
+  CUSTOMER with a verified, currently eligible membership (UI-04F rule, unchanged). It uses the confirmer's
+  lazily opened, shared audit connection (autocommit; no extra connection per request); it is itself the sync's clock (the confirmer's `$now`).
 
 **Where sync happens (decision).** After the confirmation is final and the member lock released:
 `EVC_Wc_Completion_Confirmer::confirm()` and `::recover()` call `sync_member()` only for

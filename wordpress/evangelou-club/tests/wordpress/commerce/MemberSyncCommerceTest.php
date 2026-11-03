@@ -43,6 +43,9 @@ final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
         }
         unset($_REQUEST['_wpnonce'], $GLOBALS['current_screen']);
         wp_set_current_user(0);
+        // PHPUnit keeps every test object until the end of the run: release the Club DB connections now.
+        $this->parts = null;
+        $this->club = null;
         parent::tear_down();
     }
 

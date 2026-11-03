@@ -63,7 +63,7 @@ final class EVC_Wc_Completion_Plugin {
      *
      * @param callable(): DateTimeImmutable $now
      * @param callable(): EVC_Provenance_Store|null $open_store default: the configured Club database
-     * @param callable(): EVC_Club_Db|null $open_members_db TEST seam (STAGE-05B); default: a new connection to the configured Club database
+     * @param callable(): EVC_Club_Db|null $open_members_db TEST seam (STAGE-05B); default: the confirmer's shared audit connection
      * @return array{confirmer:EVC_Wc_Completion_Confirmer,recovery:EVC_Wc_Completion_Recovery,markers:EVC_Wc_Completion_Markers,intents:EVC_Wc_Bacs_Intent_Store,guard:EVC_Bacs_Issuance_Guard,members:EVC_Club_Member_Sync}|null
      */
     public static function build(?EVC_Commerce_Source_Config $config, ?EVC_Db_Config $db, callable $now, ?callable $open_store = null, int $lock_wait_seconds = EVC_Wc_Completion_Confirmer::LOCK_WAIT_SECONDS, ?callable $open_members_db = null): ?array {
@@ -99,10 +99,9 @@ final class EVC_Wc_Completion_Plugin {
             }
             return $audit_db;
         };
-        // STAGE-05B: its own Club DB connection, opened lazily (only after a recorded confirmation or in the recovery run).
-        $members = new EVC_Club_Member_Sync($config, $open_members_db ?? function () use ($db) {
-            return EVC_Club_Db::connect($db);
-        }, $now);
+        // STAGE-05B: the confirmer's lazily opened audit connection (autocommit, no transaction left open on it), so a
+        // request opens no extra Club DB connection; used only after a recorded confirmation or in the recovery run.
+        $members = new EVC_Club_Member_Sync($config, $open_members_db ?? $open_audit_db, $now);
         $confirmer = new EVC_Wc_Completion_Confirmer($config, $open_store, $inspector_for, $intents, $markers, $guard, $GLOBALS['wpdb'], $now, new EVC_Db_Audit_Log(), $open_audit_db, $lock_wait_seconds, $members);
         return array(
             'confirmer' => $confirmer,
