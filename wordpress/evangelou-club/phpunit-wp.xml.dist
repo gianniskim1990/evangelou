@@ -6,6 +6,8 @@
   STAGE-01: EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled (wp-customer).
   STAGE-03D: the wp-commerce-on suite also sets EVC_TEST_WC_COMPLETION_FLAG=enabled.
   STAGE-04A: wp-migrations runs with EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CLUB_MIGRATIONS_FLAG=enabled.
+  STAGE-05A: wp-redemption runs with EVC_TEST_STAFF_FLAG=enabled EVC_TEST_CLUB_REDEMPTION_FLAG=enabled;
+  wp-commerce-redeem adds EVC_TEST_COMMERCE_PLUGINS (CI commerce job).
   STAGE-02: same flags + EVC_TEST_COMMERCE_PLUGINS=<dir of pinned WooCommerce/PMPro/add-on> (wp-commerce).
 -->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -39,6 +41,14 @@
         <!-- STAGE-04A: Club-DB migrations page / CLI with EVC_CLUB_MIGRATIONS_ENABLED=true (EVC_TEST_CLUB_MIGRATIONS_FLAG=enabled). -->
         <testsuite name="wp-migrations">
             <directory>tests/wordpress/migrations</directory>
+        </testsuite>
+        <!-- STAGE-05A: staff flag ON + EVC_CLUB_REDEMPTION_SOURCE='club_db_v1' (EVC_TEST_CLUB_REDEMPTION_FLAG=enabled), no commerce constants. -->
+        <testsuite name="wp-redemption">
+            <directory>tests/wordpress/redemption</directory>
+        </testsuite>
+        <!-- STAGE-05A: the same with the real WooCommerce / PMPro site, recorded provenance and the Club DB (CI commerce job). -->
+        <testsuite name="wp-commerce-redeem">
+            <directory>tests/wordpress/commerce-redeem</directory>
         </testsuite>
     </testsuites>
 </phpunit>

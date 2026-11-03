@@ -197,6 +197,14 @@ jobs:
           if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/migrations-junit.xml" 40; fi
           exit $rc
 
+      - name: WordPress suite - staff redemption source ON, no other Club constants (STAGE-05A, test environment only)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=enabled EVC_TEST_CLUB_REDEMPTION_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-redemption --log-junit "$RUNNER_TEMP/redemption-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/redemption-junit.xml" 40; fi
+          exit $rc
+
       - name: Authorization mutation tests (real WordPress)
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-wp-mutations.php
@@ -284,6 +292,14 @@ jobs:
           EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_WC_COMPLETION_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-commerce-on --log-junit "$RUNNER_TEMP/commerce-on-junit.xml"
           rc=$?
           if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/commerce-on-junit.xml" 40; fi
+          exit $rc
+
+      - name: Commerce suite - staff redemption on real memberships (STAGE-05A, staff flag ON, redemption source ON, test environment only)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=enabled EVC_TEST_CUSTOMER_FLAG=disabled EVC_TEST_CLUB_REDEMPTION_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-commerce-redeem --log-junit "$RUNNER_TEMP/commerce-redeem-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/commerce-redeem-junit.xml" 40; fi
           exit $rc
 
       - name: Commerce source mutation tests (real plugins)
