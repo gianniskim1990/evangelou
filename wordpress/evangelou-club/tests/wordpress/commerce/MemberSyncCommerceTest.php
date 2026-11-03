@@ -67,11 +67,11 @@ final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
         };
     }
 
-    private function wire(DateTimeImmutable $now, ?callable $open_members_db = null): array {
+    private function wire(DateTimeImmutable $now, ?callable $open_members_db = null, ?callable $open_store = null): array {
         if ($this->parts !== null) {
             $this->parts['confirmer']->unregister();
         }
-        $this->parts = EVC_Wc_Completion_Plugin::build($this->config, EVC_Db_Config::from_constants(), self::clock($now), null, 1, $open_members_db);
+        $this->parts = EVC_Wc_Completion_Plugin::build($this->config, EVC_Db_Config::from_constants(), self::clock($now), $open_store, 1, $open_members_db);
         $this->assertNotNull($this->parts);
         $this->assertInstanceOf(EVC_Club_Member_Sync::class, $this->parts['members']);
         $this->parts['confirmer']->register();
@@ -341,6 +341,21 @@ final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
             $this->assertSame(EVC_Member_Sync_Result::NOT_ELIGIBLE, $this->parts['members']->after_payment($u), 'even asked directly: no recorded payment, no row');
             $this->assertSame(array(), $this->members($u));
         }
+    }
+
+    public function test_a_claimed_completion_that_is_not_recorded_yet_runs_no_member_step(): void {
+        // Claimed and attested, but the Club record is down: deferred (signed marker, recovery later).
+        $customer = $this->customer();
+        $at = self::utc(self::BASE)->modify('+4 days')->modify('+1 hour');
+        $this->wire($at, null, function () {
+            throw new RuntimeException('simulated: Club provenance store unreachable');
+        });
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        $r = $this->complete($order->get_id(), $this->staff());
+        $this->assertOutcome($r, EVC_Wc_Completion_Result::DEFERRED);
+        $this->assertNull($r->member, 'only a recorded / already recorded confirmation runs the member step');
+        $this->assertSame(array(), $this->members($customer));
+        $this->assertSame(array(), $this->sync_events(null, $customer), 'not even attempted');
     }
 
     public function test_a_privileged_account_that_pays_gets_no_member_row(): void {
