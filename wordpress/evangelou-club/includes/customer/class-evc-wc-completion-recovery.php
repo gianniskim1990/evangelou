@@ -19,6 +19,8 @@ final class EVC_Wc_Completion_Recovery {
     private $confirmer;
     /** @var EVC_Wc_Completion_Markers */
     private $markers;
+    /** @var array<int,string> */
+    private $members = array();
 
     public function __construct(EVC_Wc_Completion_Confirmer $confirmer, EVC_Wc_Completion_Markers $markers) {
         EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
@@ -26,17 +28,29 @@ final class EVC_Wc_Completion_Recovery {
         $this->markers = $markers;
     }
 
-    /** @return array<int,EVC_Wc_Completion_Result> order id => result of this run */
+    /**
+     * The open completions first, then (STAGE-05B) the Club member rows still missing for customers
+     * with a running recorded paid period (EVC_Wc_Completion_Confirmer::reconcile_members()), which
+     * also runs when the open-order scan fails.
+     *
+     * @return array<int,EVC_Wc_Completion_Result> order id => result of this run
+     */
     public function run(int $limit = self::BATCH): array {
+        $results = array();
         try {
             $orders = $this->markers->open_orders($limit);
         } catch (Throwable $e) {
-            return array();
+            $orders = array();
         }
-        $results = array();
         foreach ($orders as $order_id) {
             $results[$order_id] = $this->confirmer->recover($order_id);
         }
+        $this->members = $this->confirmer->reconcile_members();
         return $results;
+    }
+
+    /** @return array<int,string> STAGE-05B: WordPress user id => member-row result of the last run() */
+    public function last_members(): array {
+        return $this->members;
     }
 }

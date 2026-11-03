@@ -94,6 +94,9 @@ require_once $evc_includes . 'class-evc-member-lookup.php';
 // UI-04F member identity + trusted synchronisation core: signals are hints,
 // identity never follows payment state. Definitions only, NOT wired.
 require_once $evc_includes . 'class-evc-member-sync.php';
+// STAGE-05B: the SQL member identity store (evc_members, migration 001). Constructed only by
+// EVC_Club_Member_Sync, behind EVC_CLUB_WC_COMPLETION_ENABLED.
+require_once $evc_includes . 'class-evc-sql-member-identity-store.php';
 // UI-04G pure v2 JSON response contracts + HTTP status recommendations.
 // Definitions only: no route, no WP_REST_Response, no hook.
 require_once $evc_includes . 'class-evc-response-contract.php';

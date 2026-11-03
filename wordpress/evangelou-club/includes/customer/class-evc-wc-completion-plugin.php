@@ -12,6 +12,11 @@ defined('ABSPATH') || exit;
  * EVC_CLUB_DB_*) configured: the completion / cancellation / refund hooks, and
  * the recovery step on WP-Cron every 15 minutes. The Club database is opened
  * lazily, only when a Club order event needs it.
+ *
+ * STAGE-05B: the same wiring builds EVC_Club_Member_Sync (the only place that may),
+ * so a recorded confirmation also gives the paying customer exactly one Club member
+ * row (`evc_members`), and the recovery run re-tries missing rows. No new constant:
+ * it exists exactly when this path exists. A member row grants nothing by itself.
  */
 final class EVC_Wc_Completion_Plugin {
     const CRON_HOOK = 'evc_club_wc_completion_recovery';
@@ -58,14 +63,16 @@ final class EVC_Wc_Completion_Plugin {
      *
      * @param callable(): DateTimeImmutable $now
      * @param callable(): EVC_Provenance_Store|null $open_store default: the configured Club database
-     * @return array{confirmer:EVC_Wc_Completion_Confirmer,recovery:EVC_Wc_Completion_Recovery,markers:EVC_Wc_Completion_Markers,intents:EVC_Wc_Bacs_Intent_Store,guard:EVC_Bacs_Issuance_Guard}|null
+     * @param callable(): EVC_Club_Db|null $open_members_db TEST seam (STAGE-05B); default: the confirmer's shared audit connection
+     * @param callable(): EVC_Club_Db|null $connect_audit_db TEST seam (STAGE-05B review); how the shared audit connection is opened (default: EVC_Club_Db::connect)
+     * @return array{confirmer:EVC_Wc_Completion_Confirmer,recovery:EVC_Wc_Completion_Recovery,markers:EVC_Wc_Completion_Markers,intents:EVC_Wc_Bacs_Intent_Store,guard:EVC_Bacs_Issuance_Guard,members:EVC_Club_Member_Sync}|null
      */
-    public static function build(?EVC_Commerce_Source_Config $config, ?EVC_Db_Config $db, callable $now, ?callable $open_store = null, int $lock_wait_seconds = EVC_Wc_Completion_Confirmer::LOCK_WAIT_SECONDS): ?array {
+    public static function build(?EVC_Commerce_Source_Config $config, ?EVC_Db_Config $db, callable $now, ?callable $open_store = null, int $lock_wait_seconds = EVC_Wc_Completion_Confirmer::LOCK_WAIT_SECONDS, ?callable $open_members_db = null, ?callable $connect_audit_db = null): ?array {
         if ($config === null || $db === null || !defined('EVC_CLUB_PAYMENT_PROVENANCE') || constant('EVC_CLUB_PAYMENT_PROVENANCE') !== 'club_db_v1') {
             return null;
         }
         try {
-            return self::wire($config, $db, $now, $open_store, $lock_wait_seconds);
+            return self::wire($config, $db, $now, $open_store, $lock_wait_seconds, $open_members_db, $connect_audit_db);
         } catch (Throwable $e) {
             error_log('Evangelou Club: the WooCommerce completion path could not be built (' . get_class($e) . ').');
             return null;
@@ -73,7 +80,7 @@ final class EVC_Wc_Completion_Plugin {
     }
 
     /** @return array<string,mixed> */
-    private static function wire(EVC_Commerce_Source_Config $config, EVC_Db_Config $db, callable $now, ?callable $open_store, int $lock_wait_seconds): array {
+    private static function wire(EVC_Commerce_Source_Config $config, EVC_Db_Config $db, callable $now, ?callable $open_store, int $lock_wait_seconds, ?callable $open_members_db, ?callable $connect_audit_db): array {
         $environment = EVC_Bacs_Payment_Confirmation::ENVIRONMENT;
         $intents = new EVC_Wc_Bacs_Intent_Store($config->intent_codec(), $environment);
         $markers = new EVC_Wc_Completion_Markers($config->completion_marker_codec(), $environment);
@@ -87,19 +94,25 @@ final class EVC_Wc_Completion_Plugin {
             return new EVC_Bacs_Recovery_Inspector($config, $store, $intents, array('EVC_Wc_Completion_Confirmer', 'may_attest'), EVC_Payment_Evidence::KIND_WC_ORDER);
         };
         $audit_db = null;
-        $open_audit_db = function () use ($db, &$audit_db) {
+        $open_audit_db = function () use ($db, &$audit_db, $connect_audit_db) {
             if ($audit_db === null) {
-                $audit_db = EVC_Club_Db::connect($db);
+                $audit_db = $connect_audit_db !== null ? $connect_audit_db() : EVC_Club_Db::connect($db);
             }
             return $audit_db;
         };
-        $confirmer = new EVC_Wc_Completion_Confirmer($config, $open_store, $inspector_for, $intents, $markers, $guard, $GLOBALS['wpdb'], $now, new EVC_Db_Audit_Log(), $open_audit_db, $lock_wait_seconds);
+        // STAGE-05B: the confirmer's lazily opened, request-scoped audit connection (autocommit; the member step's
+        // only transaction is its one-INSERT create(), always committed or rolled back), so a request opens no extra
+        // Club DB connection. No reconnect within a request. Side effect: the member step's provenance reads set
+        // SESSION innodb_lock_wait_timeout = 5 on it (audit INSERTs take no contended row locks; harmless).
+        $members = new EVC_Club_Member_Sync($config, $open_members_db ?? $open_audit_db, $now);
+        $confirmer = new EVC_Wc_Completion_Confirmer($config, $open_store, $inspector_for, $intents, $markers, $guard, $GLOBALS['wpdb'], $now, new EVC_Db_Audit_Log(), $open_audit_db, $lock_wait_seconds, $members);
         return array(
             'confirmer' => $confirmer,
             'recovery' => new EVC_Wc_Completion_Recovery($confirmer, $markers),
             'markers' => $markers,
             'intents' => $intents,
             'guard' => $guard,
+            'members' => $members,
         );
     }
 

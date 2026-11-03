@@ -40,6 +40,8 @@ final class EVC_Wc_Completion_Result {
     public $paid_time_at_risk = false;
     /** @var bool */
     public $audited = false;
+    /** @var string|null STAGE-05B: the Club member row step after a recorded confirmation (EVC_Club_Member_Sync result kind); never changes $outcome */
+    public $member;
 
     public function __construct(string $outcome, ?string $reason = null, ?EVC_Funded_Period $period = null) {
         $this->outcome = $outcome;
@@ -140,6 +142,8 @@ final class EVC_Wc_Completion_Confirmer {
     private $lock_wait;
     /** @var EVC_Bacs_Recovery_Policy */
     private $policy;
+    /** @var EVC_Club_Member_Sync|null STAGE-05B */
+    private $members;
 
     /** @var EVC_Provenance_Store|null opened lazily, once */
     private $store;
@@ -161,6 +165,7 @@ final class EVC_Wc_Completion_Confirmer {
      * @param callable(EVC_Provenance_Store): EVC_Bacs_Recovery_Inspector $inspector_for an inspector over THAT store and $intents, with may_attest() as its actor rule
      * @param callable(): DateTimeImmutable $now
      * @param callable(): EVC_Club_Db|null $open_audit_db
+     * @param EVC_Club_Member_Sync|null $members STAGE-05B: the customer's Club member row after a recorded confirmation
      */
     public function __construct(
         EVC_Commerce_Source_Config $config,
@@ -173,7 +178,8 @@ final class EVC_Wc_Completion_Confirmer {
         callable $now,
         ?EVC_Audit_Log $audit = null,
         ?callable $open_audit_db = null,
-        int $lock_wait_seconds = self::LOCK_WAIT_SECONDS
+        int $lock_wait_seconds = self::LOCK_WAIT_SECONDS,
+        ?EVC_Club_Member_Sync $members = null
     ) {
         EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
         $this->config = $config;
@@ -188,6 +194,7 @@ final class EVC_Wc_Completion_Confirmer {
         $this->open_audit_db = $open_audit_db;
         $this->lock_wait = $lock_wait_seconds;
         $this->policy = new EVC_Bacs_Recovery_Policy();
+        $this->members = $members;
     }
 
     // ---- hooks ---------------------------------------------------------------------------------
@@ -570,7 +577,37 @@ final class EVC_Wc_Completion_Confirmer {
         if (!in_array($r->outcome, array(EVC_Wc_Completion_Result::RECORDED, EVC_Wc_Completion_Result::ALREADY_RECORDED), true)) {
             $this->note($order_id, $r);
         }
+        $this->sync_member($r, $customer);
         return $r;
+    }
+
+    /**
+     * STAGE-05B: once the confirmation is final (recorded / already recorded) and the member lock is
+     * released, the customer's Club member row. Never throws and never changes the confirmation's
+     * outcome, follow-up or audit; a failure is retried by the recovery run (reconcile) and by the
+     * customer's next confirmation.
+     */
+    private function sync_member(EVC_Wc_Completion_Result $r, int $customer): void {
+        if ($this->members === null || !in_array($r->outcome, array(EVC_Wc_Completion_Result::RECORDED, EVC_Wc_Completion_Result::ALREADY_RECORDED), true)) {
+            return;
+        }
+        try {
+            $r->member = $this->members->after_payment($customer);
+        } catch (Throwable $e) {
+            $r->member = EVC_Club_Member_Sync::UNAVAILABLE;
+        }
+    }
+
+    /** STAGE-05B: the recovery run's member-row step (EVC_Wc_Completion_Recovery); empty without one. @return array<int,string> */
+    public function reconcile_members(): array {
+        if ($this->members === null) {
+            return array();
+        }
+        try {
+            return $this->members->reconcile();
+        } catch (Throwable $e) {
+            return array();
+        }
     }
 
     /**
@@ -738,6 +775,7 @@ final class EVC_Wc_Completion_Confirmer {
         if ($r->followup !== null && strpos($r->followup, EVC_Wc_Completion_Markers::MANAGER_PREFIX) === 0) {
             $this->note($order_id, $r); // a manager must look: visible on the order itself
         }
+        $this->sync_member($r, $customer);
         return $r;
     }
 

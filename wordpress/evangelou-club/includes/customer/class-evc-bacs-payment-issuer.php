@@ -29,6 +29,8 @@ final class EVC_Bacs_Issuance_Result {
     public $steps = array();
     /** @var bool */
     public $audited = false;
+    /** @var string|null STAGE-05B: the Club member row step after a recorded confirmation (EVC_Club_Member_Sync result kind); never changes $outcome */
+    public $member;
 
     public function __construct(string $outcome, ?string $reason = null, ?EVC_Funded_Period $period = null, bool $intent_finalized = false) {
         $this->outcome = $outcome;
@@ -154,6 +156,8 @@ final class EVC_Bacs_Payment_Issuer {
         }
         $result->steps = $steps;
         $this->audit_attempt($actor_user_id, $result, $movement_id, $order_ref);
+        // STAGE-05B: the finalizer's member-row step (its EVC_Club_Member_Sync, if it was given one), lock released.
+        $this->finalizer->sync_member($result, $order_id);
         return $result;
     }
 

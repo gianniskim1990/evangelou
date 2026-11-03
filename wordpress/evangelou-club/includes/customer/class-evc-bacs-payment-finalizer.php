@@ -25,6 +25,8 @@ final class EVC_Bacs_Finalization_Result {
     public $intent_finalized;
     /** @var bool */
     public $audited = false;
+    /** @var string|null STAGE-05B: the Club member row step after a recorded confirmation (EVC_Club_Member_Sync result kind); never changes $outcome */
+    public $member;
 
     public function __construct(string $outcome, ?string $reason = null, ?EVC_Funded_Period $period = null, bool $intent_finalized = false) {
         $this->outcome = $outcome;
@@ -88,8 +90,13 @@ final class EVC_Bacs_Payment_Finalizer {
     private $inspector;
     /** @var EVC_Bacs_Recovery_Policy */
     private $policy;
+    /** @var EVC_Club_Member_Sync|null */
+    private $members;
 
-    /** @param EVC_Bacs_Recovery_Inspector $inspector built over the SAME $store and $intents */
+    /**
+     * @param EVC_Bacs_Recovery_Inspector $inspector built over the SAME $store and $intents
+     * @param EVC_Club_Member_Sync|null $members STAGE-05B: the customer's Club member row after a recorded finalization
+     */
     public function __construct(
         EVC_Commerce_Source_Config $config,
         EVC_Provenance_Store $store,
@@ -99,7 +106,8 @@ final class EVC_Bacs_Payment_Finalizer {
         callable $now,
         ?EVC_Audit_Log $audit = null,
         ?EVC_Club_Db $audit_db = null,
-        int $lock_wait_seconds = 3
+        int $lock_wait_seconds = 3,
+        ?EVC_Club_Member_Sync $members = null
     ) {
         if (!$inspector->reads($store, $intents)) {
             // Preconditions read from one Club record and the payment written to another would bind nothing.
@@ -122,6 +130,7 @@ final class EVC_Bacs_Payment_Finalizer {
         );
         $this->inspector = $inspector;
         $this->policy = new EVC_Bacs_Recovery_Policy();
+        $this->members = $members;
     }
 
     /**
@@ -132,7 +141,26 @@ final class EVC_Bacs_Payment_Finalizer {
         $order_ref = $order_id > 0 ? $this->config->ref('wc_order', (string) $order_id) : null;
         $result = $this->decide($actor_user_id, $order_id, $attestation, $movement_id);
         $this->audit_attempt($actor_user_id, $result, $movement_id, $order_ref);
+        $this->sync_member($result, $order_id);
         return $result;
+    }
+
+    /**
+     * STAGE-05B (shared with EVC_Bacs_Payment_Issuer): after a recorded / already recorded payment,
+     * with the member lock released, the customer's Club member row. Never changes the result.
+     *
+     * @param EVC_Bacs_Finalization_Result|EVC_Bacs_Issuance_Result $result
+     */
+    public function sync_member($result, int $order_id): void {
+        if ($this->members === null || !in_array($result->outcome, array(EVC_Bacs_Finalization_Result::RECORDED, EVC_Bacs_Finalization_Result::ALREADY_RECORDED), true)) {
+            return;
+        }
+        try {
+            $order = $order_id > 0 ? wc_get_order($order_id) : false;
+            $result->member = $order instanceof WC_Order ? $this->members->after_payment((int) $order->get_customer_id()) : EVC_Club_Member_Sync::UNAVAILABLE;
+        } catch (Throwable $e) {
+            $result->member = EVC_Club_Member_Sync::UNAVAILABLE;
+        }
     }
 
     private function decide(int $actor_user_id, int $order_id, array $attestation, ?string &$movement_id): EVC_Bacs_Finalization_Result {
