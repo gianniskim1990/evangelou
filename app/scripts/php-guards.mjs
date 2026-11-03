@@ -298,6 +298,10 @@ export const REDEMPTION_RULES = Object.freeze({
 const STAFF_GATE = ["{", "if", "(", "!", "EVC_Staff_Feature", "::", "enabled", "(", ")", ")", "{", "return", ";", "}"];
 const BACKEND_PREFIX = ["EVC_Club_Redemption_Feature", "::", "enabled", "(", ")", "?"];
 const BACKEND_ARGS = ["(", "new", "EVC_Approved_Coffee_Catalogue_Source", "(", ")", ")"];
+// STAGE-05A review: the WHOLE statement, so the condition cannot be widened (`true || ...`, `!...`, `false && ...`,
+// parentheses) and the result cannot be replaced afterwards. It must stand alone (preceded by `;`, `{` or `}`).
+const BACKEND_STATEMENT = ["$backend", "=", ...BACKEND_PREFIX, "new", "EVC_Club_Redemption_Backend", ...BACKEND_ARGS, ":", "new", "EVC_Unavailable_Redemption_Backend", "(", ")", ";"];
+const BACKEND_USE = ["(", "new", "EVC_Rest_Redeem_Controller", "(", "$backend", ")", ")", "->", "register_routes", "(", ")", ";"];
 const matchAt = (tokens, at, seq) => seq.every((v, i) => { const tk = tokens[at + i]; return tk && tk.t !== "str" && same(tk.v, v); });
 
 export function redemptionProblemsFor(path, src, rules = REDEMPTION_RULES) {
@@ -333,7 +337,8 @@ export function redemptionProblemsFor(path, src, rules = REDEMPTION_RULES) {
     if (same(c.name, "EVC_Coffee_Catalog") && !(path === rules.catalogueFile && inside(bodies, "catalogue", c.at))) problems.push(`${path}: EVC_Coffee_Catalog constructed outside the approved catalogue source`);
     if (same(c.name, "EVC_Club_Redemption_Backend")) {
       backends++;
-      const ok = path === rules.plugin && inside(bodies, "register_routes", c.at) && matchAt(tokens, c.at - BACKEND_PREFIX.length, BACKEND_PREFIX) && matchAt(tokens, c.at + 2, BACKEND_ARGS);
+      const start = c.at - 2 - BACKEND_PREFIX.length;
+      const ok = path === rules.plugin && inside(bodies, "register_routes", c.at) && start > 0 && [";", "{", "}"].includes(tokens[start - 1]?.v) && matchAt(tokens, start, BACKEND_STATEMENT);
       if (!ok) problems.push(`${path}: EVC_Club_Redemption_Backend constructed outside \`EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source())\` in register_routes()`);
     }
     if (same(c.name, "EVC_Approved_Coffee_Catalogue_Source")) {
@@ -348,6 +353,23 @@ export function redemptionProblemsFor(path, src, rules = REDEMPTION_RULES) {
     if (!b || !matchAt(tokens, b.start, STAFF_GATE)) problems.push(`${path}: register_routes() does not start with if (!EVC_Staff_Feature::enabled()) { return; }`);
     if (!built.some((c) => same(c.name, "EVC_Unavailable_Redemption_Backend") && inside(bodies, "register_routes", c.at))) problems.push(`${path}: register_routes() lost the default EVC_Unavailable_Redemption_Backend`);
     if (backends !== 1) problems.push(`${path}: register_routes() must construct EVC_Club_Redemption_Backend exactly once (behind the opt-in)`);
+    if (b) {
+      let assignments = 0;
+      let uses = 0;
+      for (let k = b.start; k < b.end; k++) {
+        if (tokens[k].t === "var" && tokens[k].v === "$backend" && tokens[k + 1]?.v === "=" && tokens[k + 2]?.v !== "=") assignments++;
+        if (tokens[k].t === "var" && tokens[k].v === "$backend") {
+          // compound assignments: .= ??= |= <<= **= ...
+          let j = k + 1;
+          while (tokens[j] && tokens[j].t === "op" && ["+", "-", "*", "/", ".", "?", "|", "&", "^", "%", "<", ">"].includes(tokens[j].v)) j++;
+          const run = tokens.slice(k + 1, j).map((t) => t.v).join("");
+          if (j > k + 1 && run !== "<" && run !== ">" && tokens[j]?.v === "=" && tokens[j + 1]?.v !== "=") assignments++;
+        }
+        if (matchAt(tokens, k, BACKEND_USE)) uses++;
+      }
+      if (assignments !== 1) problems.push(`${path}: register_routes() must assign $backend exactly once`);
+      if (uses !== 1) problems.push(`${path}: register_routes() must pass $backend to exactly one EVC_Rest_Redeem_Controller`);
+    }
   }
   if (path === rules.featureFile) {
     const b = bodies.is_enabled_value;
@@ -397,6 +419,24 @@ function redemptionSelfTest() {
   expect("staff gate missing", R.plugin, GOOD_STAFF_PLUGIN.replace("if (!EVC_Staff_Feature::enabled()) {\n            return;\n        }", ""), true);
   expect("staff gate negation dropped", R.plugin, GOOD_STAFF_PLUGIN.replace("if (!EVC_Staff_Feature", "if (EVC_Staff_Feature"), true);
   expect("opt-in not checked", R.plugin, GOOD_STAFF_PLUGIN.replace("EVC_Club_Redemption_Feature::enabled() ? ", "true ? "), true);
+  for (const [label, cond] of [
+    ["true ||", "true || EVC_Club_Redemption_Feature::enabled()"],
+    ["negated", "!EVC_Club_Redemption_Feature::enabled()"],
+    ["false &&", "false && EVC_Club_Redemption_Feature::enabled()"],
+    ["|| true", "EVC_Club_Redemption_Feature::enabled() || true"],
+    ["parenthesised", "(EVC_Club_Redemption_Feature::enabled())"],
+    ["parenthesised || true", "(EVC_Club_Redemption_Feature::enabled() || true)"],
+    ["double negation", "!!EVC_Club_Redemption_Feature::enabled()"],
+    ["compared", "EVC_Club_Redemption_Feature::enabled() == false"],
+    ["or keyword", "1 or EVC_Club_Redemption_Feature::enabled()"],
+  ]) {
+    expect(`condition widened: ${label}`, R.plugin, GOOD_STAFF_PLUGIN.replace("EVC_Club_Redemption_Feature::enabled() ?", cond + " ?"), true);
+  }
+  expect("result replaced afterwards", R.plugin, GOOD_STAFF_PLUGIN.replace("(new EVC_Rest_Redeem_Controller($backend))", "$backend = new EVC_Unavailable_Redemption_Backend();\n        (new EVC_Rest_Redeem_Controller($backend))"), true);
+  expect("result compound-assigned afterwards", R.plugin, GOOD_STAFF_PLUGIN.replace("(new EVC_Rest_Redeem_Controller($backend))", "$backend ??= null;\n        (new EVC_Rest_Redeem_Controller($backend))"), true);
+  expect("another variable used", R.plugin, GOOD_STAFF_PLUGIN.replace("(new EVC_Rest_Redeem_Controller($backend))", "(new EVC_Rest_Redeem_Controller($other))"), true);
+  expect("branches swapped", R.plugin, GOOD_STAFF_PLUGIN.replace("? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source()) : new EVC_Unavailable_Redemption_Backend()", "? new EVC_Unavailable_Redemption_Backend() : new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source())"), true);
+  expect("statement nested in an expression", R.plugin, GOOD_STAFF_PLUGIN.replace("$backend = EVC_Club_Redemption_Feature", "$x = 1 + $backend = EVC_Club_Redemption_Feature"), true);
   expect("opt-in of another feature", R.plugin, GOOD_STAFF_PLUGIN.replace("EVC_Club_Redemption_Feature::enabled()", "EVC_Club_Migrations_Feature::enabled()"), true);
   expect("default backend dropped", R.plugin, GOOD_STAFF_PLUGIN.replace(" : new EVC_Unavailable_Redemption_Backend()", " : null"), true);
   expect("test seam passed in shipped code", R.plugin, GOOD_STAFF_PLUGIN.replace("new EVC_Approved_Coffee_Catalogue_Source())", "new EVC_Approved_Coffee_Catalogue_Source(), $env)"), true);
