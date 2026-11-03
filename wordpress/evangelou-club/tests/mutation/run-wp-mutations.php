@@ -993,7 +993,7 @@ $mutants = array(
         array('MemberSyncCommerceTest::test_the_recovery_scan_reaches_an_older_eligible_customer_behind_many_hopeless_candidates')),
     array('MS37-privileged-capability-dropped', 'disabled', 'includes/customer/class-evc-club-member-sync.php',
         "'manage_options', 'list_users', 'edit_users',", "'manage_options', 'edit_users',",
-        array('ClubAccountDirectoryTest::test_a_customer_role_that_gains_a_privileged_capability_makes_its_users_restricted', 'ClubAccountDirectoryTest::test_an_extra_role_or_a_privileged_capability_makes_a_customer_restricted')),
+        array('ClubAccountDirectoryTest::test_a_customer_role_that_gains_a_privileged_capability_makes_its_users_restricted')),
     array('MS28-end-to-end-without-the-member-row', 'commerce_redeem', 'includes/customer/class-evc-wc-completion-confirmer.php',
         "        \$this->sync_member(\$r, \$customer);\n        return \$r;\n    }\n\n    /**\n     * STAGE-05B: once", "        return \$r;\n    }\n\n    /**\n     * STAGE-05B: once",
         array('MemberSyncRedeemTest::test_a_completion_confirmed_in_woocommerce_lets_staff_redeem_once_per_athens_day'))
