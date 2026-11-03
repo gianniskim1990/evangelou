@@ -818,7 +818,101 @@ $mutants = array(
         array('ClubMigrationsTest::test_multisite_is_never_supported')),
     array('MG36-schema-names-always-case-insensitive', 'migrations', 'includes/admin/class-evc-club-migrations-service.php',
         '        return $lower_case_table_names === 0 ? $a === $b : strtolower($a) === strtolower($b);', '        return strtolower($a) === strtolower($b);',
-        array('ClubMigrationsTest::test_a_schema_differing_only_in_case_is_another_schema_when_the_server_says_so'))
+        array('ClubMigrationsTest::test_a_schema_differing_only_in_case_is_another_schema_when_the_server_says_so')),
+    // STAGE-05A staff redemption backend on real memberships (EVC_CLUB_REDEMPTION_SOURCE = 'club_db_v1'). Mode "enabled":
+    // staff flag ON, constant undefined (ClubRedemptionBackendTest, through the backend's test seams); "redemption":
+    // constant ON (RedemptionSourceOnTest); "commerce_redeem": constant ON on the real commerce site (CI only).
+    array('RB1-provenance-check-dropped', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (($env[\'provenance\'] ?? null) !== self::PAYMENT_PROVENANCE) {', '        if (false) {',
+        array('ClubRedemptionBackendTest::test_recorded_payment_provenance_is_required_and_never_falls_back')),
+    array('RB2-falls-back-to-unrecorded-provenance', 'commerce_redeem', 'includes/staff/class-evc-club-redemption-backend.php',
+        'new EVC_Wp_Commerce_Pmpro_Reader($commerce, $provenance)', 'new EVC_Wp_Commerce_Pmpro_Reader($commerce, new EVC_Unrecorded_Club_Payment_Provenance())',
+        array('CommerceRedemptionTest::test_the_configured_route_redeems_a_paid_member_through_the_real_sources')),
+    array('RB3-provenance-value-not-exact', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (($env[\'provenance\'] ?? null) !== self::PAYMENT_PROVENANCE) {', '        if (strtolower(trim((string) ($env[\'provenance\'] ?? \'\'))) !== self::PAYMENT_PROVENANCE) {',
+        array('ClubRedemptionBackendTest::test_recorded_payment_provenance_is_required_and_never_falls_back')),
+    array('RB4-shipped-catalogue-null', 'enabled', 'includes/staff/class-evc-redemption-catalogue-source.php',
+        '        return new EVC_Coffee_Catalog(self::ITEMS);', '        return null;',
+        array('ClubRedemptionBackendTest::test_the_approved_v1_catalogue_is_exactly_the_owner_list')),
+    array('RB5-shipped-catalogue-emptied', 'enabled', 'includes/staff/class-evc-redemption-catalogue-source.php',
+        '        return new EVC_Coffee_Catalog(self::ITEMS);', '        return new EVC_Coffee_Catalog(array());',
+        array('ClubRedemptionBackendTest::test_the_approved_v1_catalogue_is_exactly_the_owner_list')),
+    array('RB6-catch-all-coffee-removed', 'enabled', 'includes/staff/class-evc-redemption-catalogue-source.php',
+        "        'other_coffee' => 'Άλλος καφές',\n", '',
+        array('ClubRedemptionBackendTest::test_the_approved_v1_catalogue_is_exactly_the_owner_list')),
+    array('RB7-shipped-label-altered', 'enabled', 'includes/staff/class-evc-redemption-catalogue-source.php',
+        '        \'greek_coffee\' => \'Ελληνικός\',', '        \'greek_coffee\' => \'Greek coffee\',',
+        array('ClubRedemptionBackendTest::test_the_approved_v1_catalogue_is_exactly_the_owner_list')),
+    array('RB8-unapproved-code-added', 'enabled', 'includes/staff/class-evc-redemption-catalogue-source.php',
+        '        \'filter_coffee\' => \'Φίλτρου\',', "        'filter_coffee' => 'Φίλτρου',\n        'mocha_latte' => 'Mocha',",
+        array('ClubRedemptionBackendTest::test_the_approved_v1_catalogue_is_exactly_the_owner_list')),
+    array('RB9-empty-catalogue-accepted', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (!$catalog instanceof EVC_Coffee_Catalog || $catalog->codes() === array()) {', '        if (!$catalog instanceof EVC_Coffee_Catalog) {',
+        array('ClubRedemptionBackendTest::test_a_null_or_empty_catalogue_is_unavailable')),
+    array('RB10-null-catalogue-not-checked', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (!$catalog instanceof EVC_Coffee_Catalog || $catalog->codes() === array()) {', '        if (false) {',
+        array('ClubRedemptionBackendTest::test_a_null_or_empty_catalogue_is_unavailable')),
+    array('RB11-staff-gate-skipped', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (!EVC_Staff_Feature::is_enabled_value($env[\'staff\'] ?? null)) {', '        if (false) {',
+        array('ClubRedemptionBackendTest::test_staff_flag_must_be_exactly_true')),
+    array('RB12-redemption-constant-not-rechecked', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (!EVC_Club_Redemption_Feature::is_enabled_value($env[\'redemption\'] ?? null)) {', '        if (false) {',
+        array('ClubRedemptionBackendTest::test_redemption_constant_must_be_exactly_club_db_v1')),
+    array('RB13-constant-accepts-non-exact-spelling', 'enabled', 'includes/staff/class-evc-club-redemption-feature.php',
+        '        return $value === self::VALUE;', '        return is_string($value) && strtolower(trim($value)) === self::VALUE;',
+        array('ClubRedemptionBackendTest::test_only_the_exact_string_enables_the_constant', 'ClubRedemptionBackendTest::test_redemption_constant_must_be_exactly_club_db_v1')),
+    array('RB14-constant-accepts-truthy-values', 'enabled', 'includes/staff/class-evc-club-redemption-feature.php',
+        '        return $value === self::VALUE;', '        return (bool) $value;',
+        array('ClubRedemptionBackendTest::test_only_the_exact_string_enables_the_constant', 'ClubRedemptionBackendTest::test_redemption_constant_must_be_exactly_club_db_v1')),
+    array('RB15-constant-always-on', 'enabled', 'includes/staff/class-evc-club-redemption-feature.php',
+        '        return defined(self::CONSTANT) && self::is_enabled_value(constant(self::CONSTANT));', '        return true;',
+        array('ClubRedemptionBackendTest::test_without_the_constant_the_route_keeps_the_unavailable_backend_and_the_old_503')),
+    array('RB16-route-always-uses-club-backend', 'enabled', 'includes/staff/class-evc-staff-plugin.php',
+        '$backend = EVC_Club_Redemption_Feature::enabled() ?', '$backend = true ?',
+        array('ClubRedemptionBackendTest::test_without_the_constant_the_route_keeps_the_unavailable_backend_and_the_old_503')),
+    array('RB17-route-never-uses-club-backend', 'redemption', 'includes/staff/class-evc-staff-plugin.php',
+        '$backend = EVC_Club_Redemption_Feature::enabled() ?', '$backend = false ?',
+        array('RedemptionSourceOnTest::test_the_exact_constant_selects_the_club_backend')),
+    array('RB18-eager-build-at-route-registration', 'redemption', 'includes/staff/class-evc-staff-plugin.php',
+        '        (new EVC_Rest_Redeem_Controller($backend))->register_routes();', "        \$backend->service();\n        (new EVC_Rest_Redeem_Controller(\$backend))->register_routes();",
+        array('RedemptionSourceOnTest::test_registering_the_routes_builds_and_connects_nothing')),
+    array('RB19-eager-build-at-construction', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        "        \$this->clock = \$clock;\n", "        \$this->clock = \$clock;\n        \$this->service();\n",
+        array('ClubRedemptionBackendTest::test_constructing_the_backend_reads_and_connects_nothing')),
+    array('RB20-schema-read-failure-treated-as-success', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '            return $this->refuse(self::REASON_SCHEMA, $e);', '            $row = array(\'v\' => self::MIN_SCHEMA_VERSION);',
+        array('ClubRedemptionBackendTest::test_the_club_db_must_hold_migration_002')),
+    array('RB21-migration-002-not-required', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '(int) $row[\'v\'] < self::MIN_SCHEMA_VERSION', '(int) $row[\'v\'] < 1',
+        array('ClubRedemptionBackendTest::test_the_club_db_must_hold_migration_002')),
+    array('RB22-connects-before-the-checks', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        "        \$commerce = \$env['commerce'] ?? null;\n", "        if ((\$env['db'] ?? null) instanceof EVC_Db_Config) {\n            (\$this->connect)(\$env['db']);\n        }\n        \$commerce = \$env['commerce'] ?? null;\n",
+        array('ClubRedemptionBackendTest::test_commerce_source_must_be_configured', 'ClubRedemptionBackendTest::test_recorded_payment_provenance_is_required_and_never_falls_back')),
+    array('RB23-log-carries-the-exception-message', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        'self::safe_token(get_class($e))', '$e->getMessage()',
+        array('ClubRedemptionBackendTest::test_an_unreachable_club_db_is_unavailable_and_logs_no_secret')),
+    array('RB24-commerce-source-not-required', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (!$commerce instanceof EVC_Commerce_Source_Config) {', '        if (false) {',
+        array('ClubRedemptionBackendTest::test_commerce_source_must_be_configured')),
+    array('RB25-club-db-config-not-required', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (!$db_config instanceof EVC_Db_Config) {', '        if (false) {',
+        array('ClubRedemptionBackendTest::test_club_db_constants_are_required')),
+    array('RB26-connection-type-not-checked', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        '        if (!$db instanceof EVC_Club_Db) {', '        if (false) {',
+        array('ClubRedemptionBackendTest::test_an_unreachable_club_db_is_unavailable_and_logs_no_secret')),
+    array('RB27-injected-clock-ignored', 'commerce_redeem', 'includes/staff/class-evc-club-redemption-backend.php',
+        '            $this->clock ?? new EVC_System_Clock(),', '            new EVC_System_Clock(),',
+        array('CommerceRedemptionTest::test_one_coffee_per_athens_day_across_midnight_and_the_autumn_dst_change')),
+    array('RB28-environment-failure-not-caught', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
+        "        } catch (Throwable \$e) {\n            return \$this->refuse(self::REASON_ENVIRONMENT, \$e);", "        } catch (RuntimeException \$e) {\n            return \$this->refuse(self::REASON_ENVIRONMENT, \$e);",
+        array('ClubRedemptionBackendTest::test_an_unreadable_environment_is_unavailable')),
+    // STAGE-05A review: end to end through the real route (CI commerce job only).
+    array('RB29-paid-run-end-inclusive', 'commerce_redeem', 'includes/class-evc-pmpro-entitlement-mapper.php',
+        "        if (\$at >= \$last['end']) {", "        if (\$at > \$last['end']) {",
+        array('CommerceRedemptionTest::test_one_coffee_per_athens_day_across_midnight_and_the_autumn_dst_change')),
+    array('RB30-recorded-corrections-ignored', 'commerce_redeem', 'includes/customer/class-evc-store-club-payment-provenance.php',
+        '        if ($history === array()) {', '        if (true) {',
+        array('CommerceRedemptionTest::test_a_recorded_refund_or_reversal_freezes_the_card'))
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -843,6 +937,14 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
         // STAGE-04A: EVC_CLUB_MIGRATIONS_ENABLED = true (separate process, own constant).
         $suite = 'wp-migrations';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'disabled', 'EVC_TEST_CLUB_MIGRATIONS_FLAG' => 'enabled'));
+    } elseif ($mode === 'redemption') {
+        // STAGE-05A: staff flag ON + EVC_CLUB_REDEMPTION_SOURCE = 'club_db_v1', no other Club constants.
+        $suite = 'wp-redemption';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'enabled', 'EVC_TEST_CUSTOMER_FLAG' => 'disabled', 'EVC_TEST_CLUB_REDEMPTION_FLAG' => 'enabled'));
+    } elseif ($mode === 'commerce_redeem') {
+        // STAGE-05A: the real commerce site with staff flag ON + EVC_CLUB_REDEMPTION_SOURCE = 'club_db_v1'.
+        $suite = 'wp-commerce-redeem';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'enabled', 'EVC_TEST_CUSTOMER_FLAG' => 'disabled', 'EVC_TEST_CLUB_REDEMPTION_FLAG' => 'enabled'));
     } elseif ($mode === 'commerce_on') {
         // STAGE-03D: the same site with EVC_CLUB_WC_COMPLETION_ENABLED = true (separate process, own constant).
         $suite = 'wp-commerce-on';
@@ -871,7 +973,7 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
 // commerce mutants, which need the real plugins (EVC_TEST_COMMERCE_PLUGINS) and their own CI job.
 $evc_commerce_only = in_array('--mode=commerce', $argv, true);
 $mutants = array_values(array_filter($mutants, function ($m) use ($evc_commerce_only) {
-    return in_array($m[1], array('commerce', 'commerce_on'), true) === $evc_commerce_only;
+    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem'), true) === $evc_commerce_only;
 }));
 if ($evc_commerce_only && (string) getenv('EVC_TEST_COMMERCE_PLUGINS') === '') {
     fwrite(STDERR, "ABORT: --mode=commerce needs EVC_TEST_COMMERCE_PLUGINS.\n");
@@ -883,7 +985,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach ($evc_commerce_only ? array('commerce', 'commerce_on') : array('disabled', 'enabled', 'customer', 'migrations') as $mode) {
+foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

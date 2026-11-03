@@ -194,8 +194,8 @@ WooCommerce is not installed yet and payment methods are unconfirmed.
   store exists; it proves nothing about database concurrency. The interface
   documents the SQL requirements (transaction, member and per-movement
   correction-head row locks in a fixed order, unique constraints).
-- Still open: O1, O3 (PMPro date alignment), O4 (Viva capture-only), D3, D4,
-  D6–D10, month-end drift.
+- Still open: O1, O3 (PMPro date alignment), O4 (Viva capture-only), D4,
+  D6–D10, month-end drift. (D3 resolved 2026-11-03: any coffee; see STAGE-05A.)
 
 **SQL provenance store (Task 1D-G — disposable test databases only, NOT wired):**
 
@@ -467,8 +467,11 @@ enable it on staging or production** until every prerequisite below is met.
 3. Login throttling verified on staging together with Really Simple Security
    (edition/settings unknown) and the real client-IP source (CDN/proxy?).
 4. Real CORS/cache/WAF behaviour checked with `curl` from a foreign Origin.
-5. A reviewed production membership adapter (PMPro) and an approved coffee
-   list; until then the production backend is always unavailable (503).
+5. The real redemption backend (STAGE-05A) is opt-in with
+   `define('EVC_CLUB_REDEMPTION_SOURCE', 'club_db_v1');` plus the commerce
+   source, `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` and the migrated Club DB;
+   without the constant the redeem route stays always unavailable (503).
+   See `docs/staff-redemption.md`.
 6. The shared account created manually (strong password, owner recovery
    mailbox) and verified to hold only the Club role.
 
@@ -760,6 +763,7 @@ database; the installer DROPS all tables in `evc_wp_tests`):
     php tests/bin/create-wp-test-db.php
     EVC_TEST_STAFF_FLAG=disabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-common,wp-disabled
     EVC_TEST_STAFF_FLAG=enabled  vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-common,wp-enabled
+    EVC_TEST_STAFF_FLAG=enabled EVC_TEST_CLUB_REDEMPTION_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-redemption
     php tests/mutation/run-wp-mutations.php
 
 CI (`.github/workflows/evangelou-club.yml`): engine job PHP 7.4 / 8.2 / 8.4 ×
@@ -772,7 +776,9 @@ mutations on 8.2 + MySQL).
 ## Security boundaries
 
 - With the flag off (default) nothing is reachable over HTTP. With it on,
-  only the redeem route exists and it fails closed (503) in production.
+  only the redeem route exists and it fails closed (503) unless the separate
+  STAGE-05A opt-in `EVC_CLUB_REDEMPTION_SOURCE = 'club_db_v1'` and every
+  piece behind it are configured.
 - `staff_wp_user_id` comes from the authenticated WordPress session only.
 - Exceptions carry only SQLSTATE + driver codes; results carry no SQL text,
   exception messages or other members' data.
@@ -789,6 +795,18 @@ back up → create an empty Club DB + `EVC_CLUB_DB_*` constants → enable the c
 every safety check says «Εντάξει» → apply (only with the owner's approval) → optionally remove the
 constant. Operator guide (Greek) and developer notes: `docs/club-db-migrations.md`.
 
+## Staff redemption on real memberships (STAGE-05A — constant-gated, NOT active anywhere)
+
+With the staff flag on, the redeem route keeps the always-unavailable backend (503, unchanged)
+unless wp-config.php ALSO defines `define('EVC_CLUB_REDEMPTION_SOURCE', 'club_db_v1');` (exact
+string). Then `EVC_Club_Redemption_Backend` builds the Task 1B engine per redeem request from the Club
+DB (001 + 002), the WooCommerce/PMPro source with the Club's own recorded payments
+(`EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`, no fallback) and the owner-approved v1 coffee list
+(D3, 2026-11-03: any coffee; catch-all «Άλλος καφές»). Anything missing → 503, no connection
+opened early. Staging order (only with the owner's approval): migrations applied (STAGE-04A) →
+commerce + provenance + Club DB constants → member rows exist (later task) → add the constant.
+Greek operator note and developer notes: `docs/staff-redemption.md`.
+
 ## Known deployment blockers
 
 - Hosting PHP version, MySQL/MariaDB version and pdo_mysql availability.
@@ -797,7 +815,7 @@ constant. Operator guide (Greek) and developer notes: `docs/club-db-migrations.m
   completed-payment activation, renewal extension, refund handling).
 - Concrete PMPro/WooCommerce reader + per-payment period provenance recorder
   (not implemented; only the pure mapper exists), Club level ids and supported
-  PMPro version range, lookup/history endpoints, final coffee list (D3),
+  PMPro version range, lookup/history endpoints,
   QR delivery (D5), retention policy (D7),
   recovery mailbox for the shared account.
 - Staging verification of login throttling, CORS/cache/WAF, cookie flags and

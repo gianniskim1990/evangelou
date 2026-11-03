@@ -45,6 +45,17 @@ if ($evc_migrations_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-05A: the staff redemption source constant, fixed per PHPUnit process: EVC_TEST_CLUB_REDEMPTION_FLAG=enabled
+// defines EVC_CLUB_REDEMPTION_SOURCE as 'club_db_v1' (the wp-redemption and wp-commerce-redeem suites); unset/disabled
+// leaves it undefined (every other suite).
+$evc_redemption_mode = getenv('EVC_TEST_CLUB_REDEMPTION_FLAG');
+if ($evc_redemption_mode === 'enabled') {
+    define('EVC_CLUB_REDEMPTION_SOURCE', 'club_db_v1');
+} elseif ($evc_redemption_mode !== false && $evc_redemption_mode !== '' && $evc_redemption_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_CLUB_REDEMPTION_FLAG must be enabled or disabled.\n");
+    exit(1);
+}
+
 // STAGE-03D review: TEST-ONLY hook so the suites may construct the WooCommerce-completion classes with the
 // feature constant OFF (EVC_Wc_Completion_Feature::assert_constructible; the packager refuses it in shipped files).
 define('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);

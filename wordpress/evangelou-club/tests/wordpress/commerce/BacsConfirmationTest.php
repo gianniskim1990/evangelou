@@ -151,7 +151,17 @@ final class BacsConfirmationTest extends EVC_WP_Test_Case {
         $this->assertSame('unverified', $this->me($customer)['state'], 'completed but not confirmed: never active');
         $row_before = $this->pmpro_row($customer);
 
-        $result = $this->confirm($manager, wc_get_order($order->get_id()), self::reference());
+        // Deterministic (STAGE-05A CI): a confirmation landing on second :00 equals the add-on's minute-rounded
+        // dates (same real-clock flake as fixed in the test below, about 1 run in 60), so it is pinned off :00 —
+        // one second EARLIER, never later: the real-clock reads below (/me, flags_now) must not fall before the
+        // recorded start (a +1 s pin made flags_now see "not started yet" in CI run 41634817133).
+        $at = new DateTimeImmutable((new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s'), new DateTimeZone('UTC'));
+        if ($at->format('s') === '00') {
+            $at = $at->modify('-1 second');
+        }
+        $result = $this->service(function () use ($at) {
+            return $at;
+        })->confirm($manager, array('order_id' => $order->get_id(), 'bank_reference' => self::reference(), 'amount_minor' => 2000, 'currency' => 'EUR', 'received_on' => $at->setTimezone(new DateTimeZone('Europe/Athens'))->format('Y-m-d')));
         $this->assertSame(EVC_Record_Outcome::NEWLY_RECORDED, $result->outcome, (string) $result->reason);
         $this->assertTrue($result->funded());
         $this->assertTrue($result->audited);
