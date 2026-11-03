@@ -812,9 +812,10 @@ Greek operator note and developer notes: `docs/staff-redemption.md`.
 No new constant. Where the WooCommerce-completion path exists (STAGE-03D, its own approval), a
 payment the Club has RECORDED also gives the paying customer exactly one `evc_members` row
 (migration 001, unchanged): `EVC_Club_Member_Sync` runs the UI-04F `EVC_Member_Sync_Service` over
-`EVC_Sql_Member_Identity_Store` after the confirmation is final (outside the member lock; it never
-changes, undoes or delays the confirmation) and again in the 15-minute recovery run for customers
-whose latest recorded paid period is still running and who have no row yet. Database unique keys
+`EVC_Sql_Member_Identity_Store` after the confirmation is final (outside the member lock, in the same
+request; it never changes or undoes the confirmation and adds at most a few queries) and again in the
+15-minute recovery run (keyset cursor, 20 per run, so every candidate is reached) for customers whose
+latest recorded paid period is still running and who have no row yet. Database unique keys
 decide (one row per WordPress user); a row grants nothing by itself (the redeem route still decides
 from recorded provenance); staff / privileged accounts never become members. Greek operator note and
 developer notes: `docs/club-members.md`.

@@ -62,4 +62,22 @@ final class ClubAccountDirectoryTest extends EVC_WP_Test_Case {
         $this->assertTrue(is_super_admin($u));
         $this->assertSame(EVC_Wp_Account_Directory::RESTRICTED, $this->kind($u));
     }
+
+    public function test_a_customer_role_that_gains_a_privileged_capability_makes_its_users_restricted(): void {
+        // The capability list is reached when the customer / subscriber ROLE itself (or the user directly) holds one.
+        $u = $this->create_user_with_role('subscriber');
+        $role = get_role('subscriber');
+        // A literal list: dropping an entry from the shipped constant must fail here.
+        foreach (array('edit_posts', 'edit_shop_orders', 'manage_woocommerce', 'manage_options', 'list_users', 'edit_users', 'evc_confirm_bank_payment', 'evc_manage_club') as $cap) {
+            $role->add_cap($cap);
+            try {
+                $fresh = new WP_User($u);
+                $this->assertTrue(user_can($fresh, $cap), $cap);
+                $this->assertSame(EVC_Wp_Account_Directory::RESTRICTED, $this->kind($u), $cap);
+            } finally {
+                $role->remove_cap($cap);
+            }
+        }
+        $this->assertSame(EVC_Wp_Account_Directory::CUSTOMER, $this->kind($u));
+    }
 }

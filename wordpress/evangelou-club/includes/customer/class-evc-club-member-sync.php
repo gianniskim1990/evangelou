@@ -85,8 +85,12 @@ final class EVC_Club_Member_Sync implements EVC_Clock_Source {
     const TRIGGER_RECONCILE = 'reconcile';
     /** The Club database could not be opened, or something unexpected was thrown here. */
     const UNAVAILABLE = 'unavailable';
-    /** Results after which the connection is dropped and re-opened on the next attempt. */
-    const RECONNECT_AFTER = array(EVC_Member_Sync_Result::SERVER_ERROR, EVC_Member_Sync_Result::OUTCOME_UNKNOWN, self::UNAVAILABLE);
+    /**
+     * WordPress option holding the recovery scan's keyset cursor `<updated_at_utc>|<wp_user_id>` (the last
+     * candidate handed out); empty / absent = start from the oldest. Not autoloaded; never personal data.
+     */
+    const CURSOR_OPTION = 'evc_club_member_sync_cursor';
+    const CURSOR_PATTERN = '/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6})\|([1-9]\d{0,19})$/D';
 
     /** @var EVC_Commerce_Source_Config */
     private $config;
@@ -96,13 +100,17 @@ final class EVC_Club_Member_Sync implements EVC_Clock_Source {
     private $now;
     /** @var callable(string): void */
     private $log;
-    /** @var EVC_Club_Db|null opened lazily, once (again after a failure) */
+    /**
+     * @var EVC_Club_Db|null opened lazily, once per request. In production this is the confirmer's shared,
+     * request-scoped audit connection: there is no reconnect within a request (a broken connection fails
+     * the rest of this request's member steps, which the next recovery run re-tries on a new request).
+     */
     private $db;
     /** @var array<int,string> */
     private $last_reconcile = array();
 
     /**
-     * @param callable(): EVC_Club_Db $open_db a connection of its own to the Club database
+     * @param callable(): EVC_Club_Db $open_db the Club database connection to use (production: the confirmer's shared audit connection)
      * @param callable(): DateTimeImmutable $now
      * @param callable(string): void|null $log TEST seam; default: error_log
      */
@@ -129,8 +137,12 @@ final class EVC_Club_Member_Sync implements EVC_Clock_Source {
     }
 
     /**
-     * Recovery: customers whose latest recorded paid period has not ended and who have no member
-     * row yet, newest payments first (at most $limit, never more than RECONCILE_BATCH). Never throws.
+     * Recovery: customers whose latest recorded paid period has not ended and who have no member row
+     * yet. Keyset scan in ascending (updated_at_utc, wp_user_id) order from the stored cursor, at most
+     * $limit (never more than RECONCILE_BATCH) per run; a short batch wraps the cursor to the start.
+     * So every candidate is reached within ceil(candidates / RECONCILE_BATCH) + 1 runs, however many
+     * hopeless candidates (refused / privileged accounts, deleted users, not eligible) precede or
+     * follow it. Never throws.
      *
      * @return array<int,string> WordPress user id => result kind of this run
      */
@@ -138,27 +150,53 @@ final class EVC_Club_Member_Sync implements EVC_Clock_Source {
         $this->last_reconcile = array();
         try {
             $limit = max(1, min(self::RECONCILE_BATCH, $limit));
+            $cursor = self::read_cursor();
             $rows = $this->db()->fetch_all(
-                'SELECT h.wp_user_id FROM evc_pay_member_heads h'
+                'SELECT h.wp_user_id, h.updated_at_utc FROM evc_pay_member_heads h'
                 . ' JOIN evc_pay_periods p ON p.movement_id = h.latest_movement_id AND p.wp_user_id = h.wp_user_id'
                 . ' LEFT JOIN evc_members m ON m.wp_user_id = h.wp_user_id'
                 . ' WHERE m.id IS NULL AND p.end_utc > ?'
-                . ' ORDER BY h.updated_at_utc DESC, h.wp_user_id ASC LIMIT ?',
-                array($this->now()->format('Y-m-d H:i:s.u'), $limit)
+                . ' AND (h.updated_at_utc > ? OR (h.updated_at_utc = ? AND h.wp_user_id > ?))'
+                . ' ORDER BY h.updated_at_utc ASC, h.wp_user_id ASC LIMIT ?',
+                array($this->now()->format('Y-m-d H:i:s.u'), $cursor[0], $cursor[0], $cursor[1], $limit)
             );
         } catch (Throwable $e) {
-            $this->db = null;
             $this->log_line('reconcile_unavailable', get_class($e));
             return array();
         }
+        $last = null;
         foreach ($rows as $row) {
             $wp_user_id = filter_var($row['wp_user_id'] ?? null, FILTER_VALIDATE_INT);
             if ($wp_user_id === false || $wp_user_id < 1) {
                 continue;
             }
+            $last = array((string) $row['updated_at_utc'], $wp_user_id);
             $this->last_reconcile[$wp_user_id] = $this->sync_one($wp_user_id, 'scheduled_reconcile', 'periodic_check', self::TRIGGER_RECONCILE);
         }
+        self::write_cursor(count($rows) < $limit || $last === null ? null : $last);
         return $this->last_reconcile;
+    }
+
+    /** @return array{0:string,1:int} the stored cursor, or the start (before every candidate) */
+    private static function read_cursor(): array {
+        $value = get_option(self::CURSOR_OPTION, '');
+        if (is_string($value) && preg_match(self::CURSOR_PATTERN, $value, $m)) {
+            return array($m[1], (int) $m[2]);
+        }
+        return array('0000-01-01 00:00:00.000000', 0);
+    }
+
+    /** @param array{0:string,1:int}|null $last null = wrap to the start */
+    private static function write_cursor(?array $last): void {
+        try {
+            $value = $last === null ? '' : $last[0] . '|' . $last[1];
+            if ($value !== '' && !preg_match(self::CURSOR_PATTERN, $value)) {
+                $value = '';
+            }
+            update_option(self::CURSOR_OPTION, $value, false);
+        } catch (Throwable $e) {
+            // The next run starts from the stored (or the first) position again; nothing is lost.
+        }
     }
 
     /** @return array<int,string> the results of the last reconcile() */
@@ -180,18 +218,18 @@ final class EVC_Club_Member_Sync implements EVC_Clock_Source {
         if ($db !== null && ($trigger === self::TRIGGER_CONFIRMATION || $outcome === EVC_Member_Sync_Result::PROVISIONED)) {
             $this->audit($db, $outcome, $result !== null ? $result->member_public_id() : null, $wp_user_id, $trigger);
         }
-        if (in_array($outcome, self::RECONNECT_AFTER, true)) {
-            $this->db = null;
-        }
         return $outcome;
     }
 
     /** The ONLY construction site of EVC_Member_Sync_Service in shipped code (packager rule). */
     private function service(EVC_Club_Db $db): EVC_Member_Sync_Service {
         $config = $this->config;
-        $open_db = $this->open_db;
-        $provenance = new EVC_Store_Club_Payment_Provenance(function () use ($db, $open_db) {
-            return new EVC_Sql_Provenance_Store($db, $open_db, EVC_Bacs_Payment_Confirmation::ENVIRONMENT);
+        $provenance = new EVC_Store_Club_Payment_Provenance(function () use ($db) {
+            // Reads only. Its `$reconnect` contract is "a NEW connection" (commit recovery of writes): the
+            // member step never writes provenance, so it refuses instead of handing back the shared one.
+            return new EVC_Sql_Provenance_Store($db, function () {
+                throw new EVC_Db_Exception('The member step never opens a second Club database connection.');
+            }, EVC_Bacs_Payment_Confirmation::ENVIRONMENT);
         }, $config);
         return new EVC_Member_Sync_Service(
             new EVC_Sql_Member_Identity_Store($db),

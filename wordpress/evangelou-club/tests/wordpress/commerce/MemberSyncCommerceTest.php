@@ -13,6 +13,8 @@
  * customers of this file: earlier test files recorded periods that end long before.
  * Nothing here is a real payment.
  */
+require_once dirname(__DIR__, 2) . '/support/class-evc-faulty-pdo.php';
+
 final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
     /** A fixed instant at :07 seconds (never on the add-on's minute-rounded :00), no DST change nearby. */
     const BASE = '2030-03-12 10:00:07';
@@ -67,11 +69,11 @@ final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
         };
     }
 
-    private function wire(DateTimeImmutable $now, ?callable $open_members_db = null, ?callable $open_store = null): array {
+    private function wire(DateTimeImmutable $now, ?callable $open_members_db = null, ?callable $open_store = null, ?callable $connect_audit_db = null): array {
         if ($this->parts !== null) {
             $this->parts['confirmer']->unregister();
         }
-        $this->parts = EVC_Wc_Completion_Plugin::build($this->config, EVC_Db_Config::from_constants(), self::clock($now), $open_store, 1, $open_members_db);
+        $this->parts = EVC_Wc_Completion_Plugin::build($this->config, EVC_Db_Config::from_constants(), self::clock($now), $open_store, 1, $open_members_db, $connect_audit_db);
         $this->assertNotNull($this->parts);
         $this->assertInstanceOf(EVC_Club_Member_Sync::class, $this->parts['members']);
         $this->parts['confirmer']->register();
@@ -141,6 +143,31 @@ final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
             return $this->club->fetch_all('SELECT outcome, member_id, staff_wp_user_id, details_json FROM evc_audit_events WHERE event_type = ? AND member_id = ? ORDER BY id', array(EVC_Club_Member_Sync::EVENT, $member_id));
         }
         return $this->club->fetch_all('SELECT outcome, member_id, staff_wp_user_id, details_json FROM evc_audit_events WHERE event_type = ? AND details_json LIKE ? ORDER BY id', array(EVC_Club_Member_Sync::EVENT, '%"customer":' . $customer . '}%'));
+    }
+
+    /** The WooCommerce-completion audit rows of one order (event wc_completion_confirmation). */
+    private function completion_events(int $order_id): array {
+        return $this->club->fetch_all('SELECT outcome, details_json FROM evc_audit_events WHERE event_type = ? AND details_json LIKE ? ORDER BY id', array(EVC_Wc_Completion_Confirmer::EVENT, '%' . $this->config->ref('wc_order', (string) $order_id) . '%'));
+    }
+
+    private static function store_down(): callable {
+        return function () {
+            throw new RuntimeException('simulated: Club provenance store unreachable');
+        };
+    }
+
+    /**
+     * A recorded paid period for a WordPress user id that does not exist (a hopeless recovery candidate:
+     * identity_unavailable every run), written straight into the Club tables of migration 002.
+     */
+    private function hopeless_head(int $wp_user_id, string $updated_at, string $start, string $end): void {
+        $movement = hash('sha256', 'stage05b-hopeless-movement-' . $wp_user_id);
+        $row = hash('sha256', 'stage05b-hopeless-row-' . $wp_user_id);
+        $this->club->execute('INSERT INTO evc_pay_movements (movement_id, environment, wp_user_id, level_id, pmpro_row_ref, verified_at_utc, amount_minor, currency, authority, evidence_kind, state, recorded_at_utc) VALUES (?, ?, ?, ?, ?, ?, 2000, ?, ?, ?, ?, ?)',
+            array($movement, 'live', $wp_user_id, EVC_TEST_CLUB_LEVEL, $row, $start, 'EUR', 'manual_admin', EVC_Payment_Evidence::KIND_WC_ORDER, 'confirmed', $updated_at));
+        $this->club->execute("INSERT INTO evc_pay_periods (movement_id, wp_user_id, level_id, pmpro_row_ref, start_utc, end_utc, kind, predecessor_movement_id) VALUES (?, ?, ?, ?, ?, ?, 'initial', NULL)",
+            array($movement, $wp_user_id, EVC_TEST_CLUB_LEVEL, $row, $start, $end));
+        $this->club->execute('INSERT INTO evc_pay_member_heads (wp_user_id, latest_movement_id, version, updated_at_utc) VALUES (?, ?, 1, ?)', array($wp_user_id, $movement, $updated_at));
     }
 
     private function movements(int $wp_user_id): array {
@@ -231,6 +258,8 @@ final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
         $this->assertOutcome($r, EVC_Wc_Completion_Result::RECORDED);
         $this->assertNull($r->reason);
         $this->assertSame(EVC_Club_Member_Sync::UNAVAILABLE, $r->member);
+        $this->assertTrue($r->audited, 'the confirmation is audited as before');
+        $this->assertSame(array('recorded'), array_column($this->completion_events($order->get_id()), 'outcome'), 'exactly one completion audit row');
         $this->assertNull($this->parts['markers']->followup($order->get_id()), 'the confirmation is final; nothing reopened');
         $this->assertSame(EVC_Bacs_Intent::STATE_RECORDED, $this->parts['intents']->read($order->get_id())->intent->state());
         $this->assertCount(1, $this->movements($customer), 'the payment stays recorded');
@@ -491,5 +520,109 @@ final class MemberSyncCommerceTest extends EVC_WP_Test_Case {
         $this->assertNotNull($r->member, 'recorded: the member step ran');
         $this->assertContains($r->member, array(EVC_Member_Sync_Result::PROVISIONED, EVC_Member_Sync_Result::NOT_ELIGIBLE));
         $this->assertLessThanOrEqual(1, count($this->members($customer)));
+    }
+
+    // ---- review fixes: recovery scan reaches every candidate; shared connection isolation ----------------
+
+    public function test_the_recovery_scan_reaches_an_older_eligible_customer_behind_many_hopeless_candidates(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $customer = $this->customer();
+        $at = self::utc('2040-05-12 10:00:07');
+        list(, $r) = $this->purchase($customer, $this->staff(), $at, self::members_down());
+        $this->assertOutcome($r, EVC_Wc_Completion_Result::RECORDED);
+        $this->assertSame(EVC_Club_Member_Sync::UNAVAILABLE, $r->member);
+        $head = $this->club->fetch_one('SELECT updated_at_utc FROM evc_pay_member_heads WHERE wp_user_id = ?', array($customer));
+        $this->assertNotNull($head);
+        $updated = self::utc(substr($head['updated_at_utc'], 0, 19));
+
+        // 22 hopeless candidates OLDER than the eligible customer and 22 NEWER ones (users that do not exist).
+        $older = array();
+        $newer = array();
+        for ($k = 0; $k < 22; $k++) {
+            $older[] = 970000100 + $k;
+            $this->hopeless_head(970000100 + $k, $updated->modify('-' . (100 - $k) . ' seconds')->format('Y-m-d H:i:s.000000'), '2040-05-01 00:00:00', '2040-07-01 00:00:00');
+            $newer[] = 970000200 + $k;
+            $this->hopeless_head(970000200 + $k, $updated->modify('+' . (1 + $k) . ' seconds')->format('Y-m-d H:i:s.000000'), '2040-05-01 00:00:00', '2040-07-01 00:00:00');
+        }
+        $now = $at->modify('+2 days');
+        $this->wire($now);
+        $this->assertSame('', (string) get_option(EVC_Club_Member_Sync::CURSOR_OPTION, ''), 'the scan starts at the oldest');
+
+        // Run 1: exactly the 20 oldest, oldest first (batch limit and ascending keyset order pinned).
+        $this->parts['recovery']->run();
+        $run1 = $this->parts['recovery']->last_members();
+        $this->assertSame(array_slice($older, 0, 20), array_keys($run1));
+        $this->assertSame(array(EVC_Member_Sync_Result::IDENTITY_UNAVAILABLE), array_values(array_unique($run1)));
+        $this->assertSame(array(), $this->members($customer));
+
+        // Run 2: the rest of the older ones, then the eligible customer, then the first newer ones.
+        $this->wire($now->modify('+15 minutes'));
+        $this->parts['recovery']->run();
+        $run2 = $this->parts['recovery']->last_members();
+        $this->assertSame(array_merge(array_slice($older, 20), array($customer), array_slice($newer, 0, 17)), array_keys($run2));
+        $this->assertSame(EVC_Member_Sync_Result::PROVISIONED, $run2[$customer]);
+        $this->assertCount(1, $this->members($customer), 'reached within ceil(candidates / 20) + 1 runs');
+
+        // Run 3: the last 5 newer ones (a short batch wraps the cursor); run 4 starts at the oldest again.
+        $this->wire($now->modify('+30 minutes'));
+        $this->parts['recovery']->run();
+        $this->assertSame(array_slice($newer, 17), array_keys($this->parts['recovery']->last_members()));
+        $this->assertSame('', (string) get_option(EVC_Club_Member_Sync::CURSOR_OPTION, ''));
+        $this->wire($now->modify('+45 minutes'));
+        $this->parts['recovery']->run();
+        $this->assertSame(array_slice($older, 0, 20), array_keys($this->parts['recovery']->last_members()), 'wrapped around');
+
+        // Never more than one batch, whatever a caller asks for.
+        $this->assertCount(EVC_Club_Member_Sync::RECONCILE_BATCH, $this->wire($now->modify('+1 hour'))['members']->reconcile(1000));
+        // Hopeless reconcile attempts write no audit rows (only a created row is audited on this trigger).
+        foreach (array($older[0], $newer[21]) as $u) {
+            $this->assertSame(array(), $this->sync_events(null, $u));
+        }
+    }
+
+    public function test_a_member_step_failing_inside_create_on_the_shared_connection_leaves_the_next_audit_intact(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $at = self::utc(self::BASE)->modify('+8 days');
+        // Two attested completions deferred while the Club record is down (open for the recovery).
+        $this->wire($at, null, self::store_down());
+        $orders = array();
+        foreach (array($this->customer(), $this->customer()) as $customer) {
+            $order = $this->order($customer, $at->modify('-1 hour'));
+            $this->assertOutcome($this->complete($order->get_id(), $this->staff()), EVC_Wc_Completion_Result::DEFERRED);
+            $orders[$order->get_id()] = $customer;
+        }
+
+        // The recovery's SHARED audit connection fails every COMMIT: the member step's create() is the only
+        // transaction on it (audit rows are autocommit).
+        $db = EVC_Db_Config::from_constants();
+        $pdo = new EVC_Faulty_Pdo($db->dsn(), $db->user(), $db->password(), array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
+        $pdo->fail_commit_before = true;
+        $shared = new EVC_Club_Db($pdo);
+        $this->wire($at->modify('+15 minutes'), null, null, function () use ($shared) {
+            return $shared;
+        });
+        $results = $this->parts['recovery']->run();
+        foreach ($orders as $order_id => $customer) {
+            $this->assertArrayHasKey($order_id, $results);
+            $this->assertOutcome($results[$order_id], EVC_Wc_Completion_Result::RECORDED);
+            $this->assertSame(EVC_Member_Sync_Result::OUTCOME_UNKNOWN, $results[$order_id]->member, 'create() failed at COMMIT');
+            $this->assertTrue($results[$order_id]->audited);
+            $events = $this->completion_events($order_id);
+            $outcomes = array_column($events, 'outcome');
+            $this->assertSame('recorded', end($outcomes), 'each recovery audit row persisted, the second order\'s too');
+            $this->assertSame(1, count(array_keys($outcomes, 'recorded', true)));
+            $this->assertSame(array(), $this->members($customer), 'rolled back');
+        }
+        $this->assertFalse($shared->in_transaction(), 'no transaction left open on the shared connection');
+        $this->assertSame('1', (string) $shared->fetch_one('SELECT 1 AS ok')['ok'], 'the shared connection still works');
+
+        // The next run (healthy connection) creates both rows. Earlier tests of this file left other running
+        // candidates (e.g. the 2040 ones), so the scan starts at the oldest here (the cursor is a WP option).
+        delete_option(EVC_Club_Member_Sync::CURSOR_OPTION);
+        $this->wire($at->modify('+30 minutes'));
+        $this->parts['recovery']->run();
+        foreach ($orders as $customer) {
+            $this->assertCount(1, $this->members($customer));
+        }
     }
 }
