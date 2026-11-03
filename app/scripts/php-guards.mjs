@@ -462,6 +462,104 @@ function redemptionSelfTest() {
   return bad;
 }
 
+// ---- STAGE-05B rule set: Club member rows after a recorded payment confirmation ---------------------------------
+// Lifts the earlier blanket bans on `new EVC_Member_Sync_Service`, `implements EVC_Member_Identity_Store` and
+// `implements EVC_Wp_Account_Directory` for ONE approved site only:
+// 1. EVC_Member_Sync_Service, EVC_Sql_Member_Identity_Store and EVC_Wp_Club_Account_Directory are constructed only in
+//    the member-sync file, inside EVC_Club_Member_Sync::service() (defined exactly once), each exactly once.
+// 2. Only the store file implements EVC_Member_Identity_Store and only the member-sync file implements
+//    EVC_Wp_Account_Directory; no shipped interface extends either.
+// 3. Their names appear only in the allowlisted files (identifiers and strings).
+// EVC_Club_Member_Sync itself is a STAGE-03D guarded class (constructed only in EVC_Wc_Completion_Plugin::wire(),
+// behind EVC_CLUB_WC_COMPLETION_ENABLED). The account-status service, the QR coordinator and the status / QR-delivery
+// policy implementations stay banned (packager string bans), as do the QR / lookup / v2 constructions.
+export const MEMBER_SYNC_RULES = Object.freeze({
+  syncFile: "includes/customer/class-evc-club-member-sync.php",
+  storeFile: "includes/class-evc-sql-member-identity-store.php",
+  coreFile: "includes/class-evc-member-sync.php",
+});
+
+export function memberSyncProblemsFor(path, src, rules = MEMBER_SYNC_RULES) {
+  const tokens = tokenize(src);
+  const bodies = functionBodies(tokens);
+  const problems = [];
+  const names = [
+    ["evc_member_sync_service", [rules.coreFile, rules.syncFile]],
+    ["evc_sql_member_identity_store", [rules.storeFile, rules.syncFile]],
+    ["evc_wp_club_account_directory", [rules.syncFile]],
+  ];
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id" || tk.t === "str") {
+      const v = bare(tk.v).toLowerCase();
+      for (const [name, files] of names) {
+        const hit = tk.t === "id" ? v === name || v.endsWith("\\" + name) : v.includes(name);
+        if (hit && !files.includes(path)) problems.push(`${path}: names ${name} (member-sync allowlist)`);
+      }
+    }
+    if (tk.t === "id" && ["implements", "extends"].includes(tk.v.toLowerCase())) {
+      for (let j = k + 1; j < tokens.length && tokens[j].v !== "{"; j++) {
+        if (tokens[j].t !== "id") continue;
+        const ext = tk.v.toLowerCase() === "extends";
+        if (same(tokens[j].v, "EVC_Member_Identity_Store") && (ext || path !== rules.storeFile)) problems.push(`${path}: ${tk.v} EVC_Member_Identity_Store`);
+        if (same(tokens[j].v, "EVC_Wp_Account_Directory") && (ext || path !== rules.syncFile)) problems.push(`${path}: ${tk.v} EVC_Wp_Account_Directory`);
+      }
+    }
+  });
+  const counts = {};
+  for (const c of constructions(tokens)) {
+    for (const cls of ["EVC_Member_Sync_Service", "EVC_Sql_Member_Identity_Store", "EVC_Wp_Club_Account_Directory"]) {
+      if (!same(c.name, cls)) continue;
+      counts[cls] = (counts[cls] ?? 0) + 1;
+      if (!(path === rules.syncFile && inside(bodies, "service", c.at))) problems.push(`${path}: ${cls} constructed outside EVC_Club_Member_Sync::service()`);
+    }
+  }
+  for (const [cls, n] of Object.entries(counts)) {
+    if (n > 1) problems.push(`${path}: ${cls} constructed more than once`);
+  }
+  if (path === rules.syncFile && (bodies.__count.service ?? 0) !== 1) problems.push(`${path}: service() must be defined exactly once`);
+  return problems;
+}
+
+const GOOD_MEMBER_SYNC = `<?php
+final class EVC_Wp_Club_Account_Directory implements EVC_Wp_Account_Directory { public function account_kind(int $u): string { return self::MISSING; } }
+final class EVC_Club_Member_Sync implements EVC_Clock_Source {
+    private function service(EVC_Club_Db $db): EVC_Member_Sync_Service {
+        return new EVC_Member_Sync_Service(new EVC_Sql_Member_Identity_Store($db), new EVC_Wp_Club_Account_Directory(), $a, $this, null, function (array $d) { return 1; });
+    }
+}`;
+
+function memberSyncSelfTest() {
+  const bad = [];
+  const M = MEMBER_SYNC_RULES;
+  const expect = (label, path, src, want) => {
+    const got = memberSyncProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`member-sync ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good member-sync file", M.syncFile, GOOD_MEMBER_SYNC, false);
+  expect("store file implements the store", M.storeFile, "<?php\nfinal class EVC_Sql_Member_Identity_Store implements EVC_Member_Identity_Store { }", false);
+  expect("core file defines the service", M.coreFile, "<?php\nfinal class EVC_Member_Sync_Service { }\ninterface EVC_Member_Identity_Store { }", false);
+  expect("service constructed elsewhere", "includes/x.php", "<?php\n$s = new EVC_Member_Sync_Service($a, $b, $c, $d);", true);
+  expect("service constructed with a leading backslash", "includes/x.php", "<?php\n$s = new \\EVC_Member_Sync_Service($a, $b, $c, $d);", true);
+  expect("service constructed in the core file", M.coreFile, "<?php\nfunction f() { return new EVC_Member_Sync_Service($a, $b, $c, $d); }", true);
+  expect("service constructed outside service()", M.syncFile, GOOD_MEMBER_SYNC.replace("    private function service", "    public function other() { return new EVC_Member_Sync_Service($a, $b, $c, $d); }\n    private function service"), true);
+  expect("service constructed twice", M.syncFile, GOOD_MEMBER_SYNC.replace("        return new EVC_Member_Sync_Service(", "        $x = new EVC_Member_Sync_Service($a, $b, $c, $d);\n        return new EVC_Member_Sync_Service("), true);
+  expect("service() defined twice", M.syncFile, GOOD_MEMBER_SYNC.replace("final class EVC_Club_Member_Sync", "final class Y { private function service() { return 1; } }\nfinal class EVC_Club_Member_Sync"), true);
+  expect("store constructed elsewhere", "includes/x.php", "<?php\n$s = new EVC_Sql_Member_Identity_Store($db);", true);
+  expect("store constructed in its own file", M.storeFile, "<?php\nfinal class EVC_Sql_Member_Identity_Store implements EVC_Member_Identity_Store { public static function make($db) { return new EVC_Sql_Member_Identity_Store($db); } }", true);
+  expect("directory constructed outside service()", M.syncFile, GOOD_MEMBER_SYNC.replace("    private function service", "    public function d() { return new EVC_Wp_Club_Account_Directory(); }\n    private function service"), true);
+  expect("store named elsewhere", "includes/x.php", "<?php\nfunction f(EVC_Sql_Member_Identity_Store $s) { return $s; }", true);
+  expect("store named in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_Sql_Member_Identity_Store';", true);
+  expect("service named in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_Member_Sync_Service';", true);
+  expect("another store implementation", "includes/x.php", "<?php\nfinal class X implements EVC_Member_Identity_Store { }", true);
+  expect("store implementation listed second", "includes/x.php", "<?php\nfinal class X implements Countable, \\EVC_Member_Identity_Store { }", true);
+  expect("store interface extended", "includes/x.php", "<?php\ninterface X extends EVC_Member_Identity_Store { }", true);
+  expect("another account directory", "includes/x.php", "<?php\nfinal class X implements EVC_Wp_Account_Directory { }", true);
+  expect("account directory in the store file", M.storeFile, "<?php\nfinal class X implements EVC_Wp_Account_Directory { }", true);
+  expect("store implemented in the member-sync file", M.syncFile, GOOD_MEMBER_SYNC + "\nfinal class Z implements EVC_Member_Identity_Store { }", true);
+  expect("comment mention is fine", "includes/x.php", "<?php\n// new EVC_Member_Sync_Service(new EVC_Sql_Member_Identity_Store($db))\n$x = 1;", false);
+  return bad;
+}
+
 // ---- self test: negative fixtures, run on every package --------------------------------------------
 const OPTS = {
   bootstrap: "includes/customer/class-evc-wc-completion-plugin.php",
@@ -530,5 +628,5 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest());
 }

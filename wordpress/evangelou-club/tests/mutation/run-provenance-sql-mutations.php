@@ -30,6 +30,13 @@ $phpunit = array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $
 
 $sql = 'database/002_payment_provenance.sql';
 $store = 'includes/class-evc-sql-provenance-store.php';
+$members = 'includes/class-evc-sql-member-identity-store.php';
+// STAGE-05B: mutants with 'command' => 'members' run the member identity store tests instead.
+$commands = array(
+    'provenance' => $phpunit,
+    'members' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
+        '--filter', '/SqlMemberIdentityStoreTest/', '--exclude-group', 'concurrency'),
+);
 
 $mutants = array(
     // ---- schema backstops ---------------------------------------------------
@@ -92,6 +99,23 @@ $mutants = array(
         'search' => "            \$this->commit_or_unknown();\n", 'replace' => "            \$this->pdo->commit();\n"),
     array('id' => 'S23-deadlock-not-retried', 'file' => $store,
         'search' => "                if (\$attempt >= self::MAX_ATTEMPTS) {", 'replace' => '                if (true) {'),
+    // ---- STAGE-05B: the SQL member identity store (evc_members, migration 001) ----------------------
+    // Run against SqlMemberIdentityStoreTest only (sequential tests; the multi-process race test is
+    // proven in every CI engine job).
+    array('id' => 'MS1-one-member-per-wp-user-key-dropped', 'file' => 'database/001_initial.sql', 'command' => 'members',
+        'search' => "  UNIQUE KEY uq_members_wp_user (wp_user_id),\n", 'replace' => ''),
+    array('id' => 'MS2-check-then-insert-instead-of-the-unique-key', 'file' => $members, 'command' => 'members',
+        'search' => "        return (int) \$this->db->transactional(function (EVC_Club_Db \$db) use (\$member_public_id, \$wp_user_id, \$now_utc) {",
+        'replace' => "        \$existing = \$this->find_by_wp_user(\$wp_user_id);\n        if (\$existing !== null) {\n            return \$existing['id'];\n        }\n        return (int) \$this->db->transactional(function (EVC_Club_Db \$db) use (\$member_public_id, \$wp_user_id, \$now_utc) {"),
+    array('id' => 'MS3-create-outside-a-transaction', 'file' => $members, 'command' => 'members',
+        'search' => "        return (int) \$this->db->transactional(function (EVC_Club_Db \$db) use (\$member_public_id, \$wp_user_id, \$now_utc) {\n            return \$db->insert(\n                \"INSERT INTO evc_members (member_public_id, wp_user_id, status, created_at_utc, updated_at_utc) VALUES (?, ?, 'enabled', ?, ?)\",\n                array(\$member_public_id, \$wp_user_id, \$now_utc, \$now_utc)\n            );\n        });",
+        'replace' => "        return \$this->db->insert(\n            \"INSERT INTO evc_members (member_public_id, wp_user_id, status, created_at_utc, updated_at_utc) VALUES (?, ?, 'enabled', ?, ?)\",\n            array(\$member_public_id, \$wp_user_id, \$now_utc, \$now_utc)\n        );"),
+    array('id' => 'MS4-malformed-member-row-accepted', 'file' => $members, 'command' => 'members',
+        'search' => "            || !EVC_Member_Id::is_valid_format(\$public_id) || !in_array(\$status, self::STATUSES, true)) {",
+        'replace' => "            || !in_array(\$status, self::STATUSES, true)) {"),
+    array('id' => 'MS5-status-change-silently-accepted', 'file' => $members, 'command' => 'members',
+        'search' => "        throw new LogicException('Account status changes need a status version and status events (not in migration 001).');",
+        'replace' => '        return;'),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -119,6 +143,10 @@ foreach ($mutants as $m) {
 
 echo "Baseline (unmutated) provenance store run...\n";
 $baseline = evc_run_suite($phpunit);
+if ($baseline === 0) {
+    echo "Baseline (unmutated) member identity store run...\n";
+    $baseline = evc_run_suite($commands['members']);
+}
 if ($baseline !== 0) {
     fwrite(STDERR, "ABORT: baseline suite is not green (exit $baseline); mutation results would be meaningless.\n");
     fwrite(STDERR, substr($evc_last_output, -6000) . "\n");
@@ -142,7 +170,7 @@ foreach ($mutants as $m) {
         $mutated = str_replace($m['search'], $m['replace'], $normalized);
         evc_mutation_journal_begin($evc_journal, $path, $original, $mutated);
         file_put_contents($path, $mutated);
-        $exit = evc_run_suite($phpunit);
+        $exit = evc_run_suite($commands[$m['command'] ?? 'provenance']);
     } finally {
         file_put_contents($path, $original);
         evc_mutation_journal_end($evc_journal, $path);

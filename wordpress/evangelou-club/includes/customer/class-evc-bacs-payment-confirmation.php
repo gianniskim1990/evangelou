@@ -14,6 +14,8 @@ final class EVC_Bacs_Confirmation_Result {
     public $period;
     /** @var bool was the attempt written to the Club audit trail? */
     public $audited = false;
+    /** @var string|null STAGE-05B: the Club member row step after a recorded confirmation (EVC_Club_Member_Sync result kind); never changes $outcome */
+    public $member;
 
     public function __construct(string $outcome, ?string $reason, ?EVC_Funded_Period $period) {
         $this->outcome = $outcome;
@@ -82,8 +84,11 @@ final class EVC_Bacs_Payment_Confirmation {
     private $audit;
     /** @var EVC_Club_Db|null */
     private $audit_db;
+    /** @var EVC_Club_Member_Sync|null */
+    private $members;
 
-    public function __construct(EVC_Commerce_Source_Config $config, EVC_Provenance_Store $store, callable $now, ?EVC_Audit_Log $audit = null, ?EVC_Club_Db $audit_db = null) {
+    /** @param EVC_Club_Member_Sync|null $members STAGE-05B: the customer's Club member row after a recorded confirmation */
+    public function __construct(EVC_Commerce_Source_Config $config, EVC_Provenance_Store $store, callable $now, ?EVC_Audit_Log $audit = null, ?EVC_Club_Db $audit_db = null, ?EVC_Club_Member_Sync $members = null) {
         $this->config = $config;
         $this->store = $store;
         $this->recorder = new EVC_Provenance_Recorder(
@@ -96,6 +101,7 @@ final class EVC_Bacs_Payment_Confirmation {
         $this->now = $now;
         $this->audit = $audit;
         $this->audit_db = $audit_db;
+        $this->members = $members;
     }
 
     /**
@@ -104,6 +110,15 @@ final class EVC_Bacs_Payment_Confirmation {
     public function confirm(int $actor_user_id, array $input): EVC_Bacs_Confirmation_Result {
         $result = $this->decide($actor_user_id, $input, $movement_id, $order_ref);
         $this->audit($actor_user_id, $result, $movement_id, $order_ref);
+        if ($this->members !== null && $result->funded()) {
+            // STAGE-05B: after the recorded confirmation; never changes it (EVC_Club_Member_Sync never throws).
+            try {
+                $order = wc_get_order((int) $input['order_id']);
+                $result->member = $order instanceof WC_Order ? $this->members->after_payment((int) $order->get_customer_id()) : EVC_Club_Member_Sync::UNAVAILABLE;
+            } catch (Throwable $e) {
+                $result->member = EVC_Club_Member_Sync::UNAVAILABLE;
+            }
+        }
         return $result;
     }
 

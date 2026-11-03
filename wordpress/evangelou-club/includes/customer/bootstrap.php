@@ -23,6 +23,8 @@ require_once $evc_customer . 'class-evc-bacs-issuance-guard.php';
 require_once $evc_customer . 'class-evc-bacs-payment-issuer.php';
 // STAGE-03D: WooCommerce «Completed» by shop staff = Club payment confirmation. Only EVC_Wc_Completion_Plugin constructs it, behind EVC_CLUB_WC_COMPLETION_ENABLED.
 require_once $evc_customer . 'class-evc-wc-completion-feature.php';
+// STAGE-05B: Club member rows after a recorded payment confirmation (constructed only by EVC_Wc_Completion_Plugin).
+require_once $evc_customer . 'class-evc-club-member-sync.php';
 require_once $evc_customer . 'class-evc-wc-completion-markers.php';
 require_once $evc_customer . 'class-evc-wc-completion-confirmer.php';
 require_once $evc_customer . 'class-evc-wc-completion-recovery.php';

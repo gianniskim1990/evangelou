@@ -30,6 +30,7 @@
  * And STAGE-03B.3a (RE1-RE4: record_expecting commits only the signed period).
  * And STAGE-03D (RP19-RP23: recovery policy after a WooCommerce completion; MK1-MK3: signed completion marker;
  * CX1-CX4: admin entry points; CN1-CN2: the construction guard).
+ * And STAGE-05B (MS6: the member-sync construction guard).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2436,6 +2437,14 @@ $mutants = array(
         'file' => 'includes/customer/class-evc-wc-completion-feature.php',
         'search' => 'constant(self::TEST_CONSTRUCTION) === true)) {',
         'replace' => 'constant(self::TEST_CONSTRUCTION))) {',
+    ),
+    // STAGE-05B: EVC_Club_Member_Sync refuses to be constructed while EVC_CLUB_WC_COMPLETION_ENABLED is off.
+    array(
+        'id' => 'MS6-member-sync-constructible-when-off',
+        'file' => 'includes/customer/class-evc-club-member-sync.php',
+        'search' => '        EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
+',
+        'replace' => '',
     ),
 );
 

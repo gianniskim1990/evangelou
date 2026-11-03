@@ -12,6 +12,11 @@ defined('ABSPATH') || exit;
  * EVC_CLUB_DB_*) configured: the completion / cancellation / refund hooks, and
  * the recovery step on WP-Cron every 15 minutes. The Club database is opened
  * lazily, only when a Club order event needs it.
+ *
+ * STAGE-05B: the same wiring builds EVC_Club_Member_Sync (the only place that may),
+ * so a recorded confirmation also gives the paying customer exactly one Club member
+ * row (`evc_members`), and the recovery run re-tries missing rows. No new constant:
+ * it exists exactly when this path exists. A member row grants nothing by itself.
  */
 final class EVC_Wc_Completion_Plugin {
     const CRON_HOOK = 'evc_club_wc_completion_recovery';
@@ -58,14 +63,15 @@ final class EVC_Wc_Completion_Plugin {
      *
      * @param callable(): DateTimeImmutable $now
      * @param callable(): EVC_Provenance_Store|null $open_store default: the configured Club database
-     * @return array{confirmer:EVC_Wc_Completion_Confirmer,recovery:EVC_Wc_Completion_Recovery,markers:EVC_Wc_Completion_Markers,intents:EVC_Wc_Bacs_Intent_Store,guard:EVC_Bacs_Issuance_Guard}|null
+     * @param callable(): EVC_Club_Db|null $open_members_db TEST seam (STAGE-05B); default: a new connection to the configured Club database
+     * @return array{confirmer:EVC_Wc_Completion_Confirmer,recovery:EVC_Wc_Completion_Recovery,markers:EVC_Wc_Completion_Markers,intents:EVC_Wc_Bacs_Intent_Store,guard:EVC_Bacs_Issuance_Guard,members:EVC_Club_Member_Sync}|null
      */
-    public static function build(?EVC_Commerce_Source_Config $config, ?EVC_Db_Config $db, callable $now, ?callable $open_store = null, int $lock_wait_seconds = EVC_Wc_Completion_Confirmer::LOCK_WAIT_SECONDS): ?array {
+    public static function build(?EVC_Commerce_Source_Config $config, ?EVC_Db_Config $db, callable $now, ?callable $open_store = null, int $lock_wait_seconds = EVC_Wc_Completion_Confirmer::LOCK_WAIT_SECONDS, ?callable $open_members_db = null): ?array {
         if ($config === null || $db === null || !defined('EVC_CLUB_PAYMENT_PROVENANCE') || constant('EVC_CLUB_PAYMENT_PROVENANCE') !== 'club_db_v1') {
             return null;
         }
         try {
-            return self::wire($config, $db, $now, $open_store, $lock_wait_seconds);
+            return self::wire($config, $db, $now, $open_store, $lock_wait_seconds, $open_members_db);
         } catch (Throwable $e) {
             error_log('Evangelou Club: the WooCommerce completion path could not be built (' . get_class($e) . ').');
             return null;
@@ -73,7 +79,7 @@ final class EVC_Wc_Completion_Plugin {
     }
 
     /** @return array<string,mixed> */
-    private static function wire(EVC_Commerce_Source_Config $config, EVC_Db_Config $db, callable $now, ?callable $open_store, int $lock_wait_seconds): array {
+    private static function wire(EVC_Commerce_Source_Config $config, EVC_Db_Config $db, callable $now, ?callable $open_store, int $lock_wait_seconds, ?callable $open_members_db): array {
         $environment = EVC_Bacs_Payment_Confirmation::ENVIRONMENT;
         $intents = new EVC_Wc_Bacs_Intent_Store($config->intent_codec(), $environment);
         $markers = new EVC_Wc_Completion_Markers($config->completion_marker_codec(), $environment);
@@ -93,13 +99,18 @@ final class EVC_Wc_Completion_Plugin {
             }
             return $audit_db;
         };
-        $confirmer = new EVC_Wc_Completion_Confirmer($config, $open_store, $inspector_for, $intents, $markers, $guard, $GLOBALS['wpdb'], $now, new EVC_Db_Audit_Log(), $open_audit_db, $lock_wait_seconds);
+        // STAGE-05B: its own Club DB connection, opened lazily (only after a recorded confirmation or in the recovery run).
+        $members = new EVC_Club_Member_Sync($config, $open_members_db ?? function () use ($db) {
+            return EVC_Club_Db::connect($db);
+        }, $now);
+        $confirmer = new EVC_Wc_Completion_Confirmer($config, $open_store, $inspector_for, $intents, $markers, $guard, $GLOBALS['wpdb'], $now, new EVC_Db_Audit_Log(), $open_audit_db, $lock_wait_seconds, $members);
         return array(
             'confirmer' => $confirmer,
             'recovery' => new EVC_Wc_Completion_Recovery($confirmer, $markers),
             'markers' => $markers,
             'intents' => $intents,
             'guard' => $guard,
+            'members' => $members,
         );
     }
 
