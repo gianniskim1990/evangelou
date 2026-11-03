@@ -275,7 +275,7 @@ final class CommerceRedemptionTest extends EVC_WP_Test_Case {
             // STAGE-03D uses for a WooCommerce cancel / refund).
             $movement = $this->store()->member_movements($customer)[0];
             $recorder = new EVC_Provenance_Recorder($this->store(), new EVC_Pmpro_Mapper_Config(array(EVC_TEST_CLUB_LEVEL), '3.8.9', '3.8.10'), 'live', 2000, 'EUR');
-            $correction = new EVC_Movement_Correction(hash('sha256', 'stage05a-corr-' . $kind . $customer), $movement->movement_id(), $kind, EVC_Verified_Movement::AUTHORITY_MANUAL_ADMIN, new DateTimeImmutable('2026-10-12T09:00:00Z'));
+            $correction = new EVC_Movement_Correction(hash('sha256', 'stage05a-corr-' . $kind . $customer), $movement->movement_id(), $kind, EVC_Verified_Movement::AUTHORITY_MANUAL_ADMIN, new DateTimeImmutable('2026-10-12 09:00:00', new DateTimeZone('UTC')));
             $this->assertSame(EVC_Record_Outcome::NEWLY_RECORDED, $recorder->correct($correction)->outcome(), $kind);
 
             $clock->set('2026-10-13T08:00:00Z'); // the next Athens day, inside the (now voided) paid run
