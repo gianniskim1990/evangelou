@@ -10,8 +10,12 @@
 Όταν ο υπάλληλος πατά «Δωρεάν καφές» για ένα μέλος, το plugin:
 
 1. ελέγχει στο WooCommerce / Paid Memberships Pro αν το μέλος έχει **πληρωμένη** συνδρομή, και
-   μόνο αν η πληρωμή έχει **καταγραφεί από το Club** (επιβεβαιωμένο έμβασμα / «Ολοκληρωμένη»
-   από το προσωπικό του καταστήματος) — μια παραγγελία που περιμένει πληρωμή δεν δίνει ποτέ καφέ·
+   μόνο αν η πληρωμή έχει **καταγραφεί από το Club** στη βάση του Club. Μια παραγγελία σε
+   «Ολοκληρωμένη» **μόνη της δεν αρκεί**: μετράει μόνο όταν το Club έχει γράψει την πληρωμή, δηλαδή
+   (α) με την επιβεβαίωση τραπεζικής μεταφοράς από υπεύθυνο, ή (β) όταν είναι ενεργή η λειτουργία
+   «Ολοκληρωμένη = πληρωμή» (`EVC_CLUB_WC_COMPLETION_ENABLED`, ξεχωριστή έγκριση) και το
+   προσωπικό του καταστήματος έβαλε «Ολοκληρωμένη» από την οθόνη διαχείρισης. Παραγγελία που
+   περιμένει πληρωμή, ακυρωμένη ή με επιστροφή χρημάτων δεν δίνει ποτέ καφέ·
 2. επιτρέπει **έναν δωρεάν καφέ ανά ημέρα Αθήνας** (η ημέρα αλλάζει στις 00:00 ώρα Ελλάδας, και
    τη μέρα αλλαγής ώρας)·
 3. γράφει τον καφέ και τον υπάλληλο στη χωριστή βάση του Club.
@@ -46,12 +50,16 @@ Cappuccino, Freddo Cappuccino, Ελληνικός, Φίλτρου και **Άλ�
 
 | Αιτία στη γραμμή | Τι κάνετε |
 |---|---|
+| `staff_flag_off` | Το `EVC_CLUB_STAFF_ENABLED` δεν είναι `true`. |
 | `redemption_source_off` | Η σταθερά `EVC_CLUB_REDEMPTION_SOURCE` λείπει ή είναι γραμμένη λάθος. |
 | `commerce_source_not_configured` | Λείπει / είναι λάθος μια σταθερά της πηγής συνδρομών. |
 | `payment_provenance_not_recorded` | Λείπει ή είναι λάθος το `EVC_CLUB_PAYMENT_PROVENANCE`. |
 | `club_db_not_configured` | Λείπουν ή είναι λάθος οι `EVC_CLUB_DB_*`. |
 | `club_db_unavailable` | Η βάση του Club δεν απαντά (διακομιστής, κωδικός, όνομα βάσης). |
 | `club_db_schema_too_old` | Δεν έχουν εφαρμοστεί οι πίνακες 001 + 002. |
+| `coffee_catalogue_unavailable` | Η λίστα καφέδων λείπει ή είναι κενή (δεν συμβαίνει με την εγκεκριμένη λίστα· ειδοποιήστε τον προγραμματιστή). |
+| `environment_unreadable` | Μια σταθερά έχει μη έγκυρη τιμή (π.χ. λάθος θύρα στο `EVC_CLUB_DB_PORT`). |
+| `build_failed` | Απρόσμενο σφάλμα κατά την προετοιμασία· ειδοποιήστε τον προγραμματιστή. |
 
 ### Πώς απενεργοποιείται
 
@@ -80,13 +88,26 @@ Cappuccino, Freddo Cappuccino, Ελληνικός, Φίλτρου και **Άλ�
   new EVC_Store_Club_Payment_Provenance(... EVC_Sql_Provenance_Store on the same connection ...)),
   $commerce->mapper())`. Unlike `EVC_Customer_Plugin::payment_provenance()` there is NO fallback to
   `EVC_Unrecorded_Club_Payment_Provenance`.
+- **Shared connection, deliberate:** the provenance store reads on the SAME Club DB connection as the
+  ledger. Its first read (`ensure_ready()`) runs `SET SESSION innodb_lock_wait_timeout = 5`, so for the
+  rest of the request the ledger INSERT also waits at most 5 s for a row lock (the server default is
+  50 s). The engine retries deadlock / lock-wait errors up to 3 times (`MAX_TRANSACTION_ATTEMPTS`), so a
+  contended redeem gives up after about 15 s with `server_error` (500); retrying with the SAME
+  `request_id` is idempotent. This is kept on purpose: a till should fail fast rather than hang. The
+  only real lock contention is two tills redeeming the same member on the same day, where the
+  unique-key winner commits in milliseconds. One connection per request also means a single connect
+  failure is a clean 503 before anything is read. (A redeem that finds no member never reads
+  provenance; then the session keeps the server default.)
 - **Catalogue:** `EVC_Redemption_Catalogue_Source`; the shipped `EVC_Approved_Coffee_Catalogue_Source`
   (VERSION `evc-coffee-v1-2026-11-03`, 7 codes incl. the catch-all `other_coffee`). The catalogue version
   is not stored in the ledger (no new migration); the codes are. Changing the list = edit `ITEMS` +
   `VERSION` + the exact-list test + this doc, one reviewed PR.
 - **Test seams:** the backend constructor's `$environment`, `$connect`, `$clock`, `$log`. The packager
-  (`app/scripts/php-guards.mjs`, `REDEMPTION_RULES`) only allows the one-argument construction inside
-  `register_routes()` behind the opt-in, only the catalogue file may build `EVC_Coffee_Catalog` /
+  (`app/scripts/php-guards.mjs`, `REDEMPTION_RULES`) only allows the exact statement
+  `$backend = EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new
+  EVC_Approved_Coffee_Catalogue_Source()) : new EVC_Unavailable_Redemption_Backend();` (standalone, so the
+  condition cannot be widened) in `register_routes()` after the staff gate, with `$backend` assigned once
+  and passed to exactly one `EVC_Rest_Redeem_Controller`, only the catalogue file may build `EVC_Coffee_Catalog` /
   implement `EVC_Redemption_Catalogue_Source`, only the two backend files implement
   `EVC_Redemption_Backend`, the parser must stay `$value === self::VALUE`, and no shipped file may
   define `EVC_CLUB_REDEMPTION_SOURCE` / `EVC_CLUB_PAYMENT_PROVENANCE`. All earlier rule sets unchanged.
@@ -95,8 +116,9 @@ Cappuccino, Freddo Cappuccino, Ελληνικός, Φίλτρου και **Άλ�
   (constant ON, nothing else: 503, nothing built at registration), and
   `tests/wordpress/commerce-redeem/CommerceRedemptionTest.php` (CI only: real WooCommerce / PMPro, both
   order storages; 200, replay, one per Athens day across midnight and the 2026-10-25 DST change,
-  pending / unrecorded never eligible, unknown / disabled member, Club DB down 503, provenance read
-  failing 500). Mutants RB1–RB28 in `tests/mutation/run-wp-mutations.php` (modes `enabled`,
+  exclusive end (exactly at the recorded end: expired; one second before: allowed), recorded refund /
+  reversal freezes the card, pending / unrecorded never eligible, unknown / disabled member, Club DB
+  down 503, provenance read failing 500). Mutants RB1–RB30 in `tests/mutation/run-wp-mutations.php` (modes `enabled`,
   `redemption`, `commerce_redeem`).
 - **Not done here:** member rows / sync (`EVC_Member_Sync_Service` stays forbidden), QR tokens, lookup
   route, staff UI wiring, v2 prepared redemption, new migrations.
