@@ -804,8 +804,20 @@ DB (001 + 002), the WooCommerce/PMPro source with the Club's own recorded paymen
 (`EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`, no fallback) and the owner-approved v1 coffee list
 (D3, 2026-11-03: any coffee; catch-all «Άλλος καφές»). Anything missing → 503, no connection
 opened early. Staging order (only with the owner's approval): migrations applied (STAGE-04A) →
-commerce + provenance + Club DB constants → member rows exist (later task) → add the constant.
+commerce + provenance + Club DB constants → member rows exist (STAGE-05B, with the WooCommerce-completion path) → add the constant.
 Greek operator note and developer notes: `docs/staff-redemption.md`.
+
+## Club member rows after a recorded payment (STAGE-05B — behind EVC_CLUB_WC_COMPLETION_ENABLED, NOT active anywhere)
+
+No new constant. Where the WooCommerce-completion path exists (STAGE-03D, its own approval), a
+payment the Club has RECORDED also gives the paying customer exactly one `evc_members` row
+(migration 001, unchanged): `EVC_Club_Member_Sync` runs the UI-04F `EVC_Member_Sync_Service` over
+`EVC_Sql_Member_Identity_Store` after the confirmation is final (outside the member lock; it never
+changes, undoes or delays the confirmation) and again in the 15-minute recovery run for customers
+whose latest recorded paid period is still running and who have no row yet. Database unique keys
+decide (one row per WordPress user); a row grants nothing by itself (the redeem route still decides
+from recorded provenance); staff / privileged accounts never become members. Greek operator note and
+developer notes: `docs/club-members.md`.
 
 ## Known deployment blockers
 

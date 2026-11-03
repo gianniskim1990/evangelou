@@ -9,6 +9,12 @@
   or QR delivery policy, and any construction of the sync, account or
   coordinator services.
 
+**STAGE-05B update:** the sync service now has ONE approved shipped construction
+site, `EVC_Club_Member_Sync::service()` (behind `EVC_CLUB_WC_COMPLETION_ENABLED`),
+over the SQL identity store (`evc_members`, migration 001) and the WordPress
+account directory; the account, coordinator and policy services stay banned.
+See `docs/club-members.md`.
+
 ## Five concepts that stay separate
 
 | Concept | Owner | Changed by |

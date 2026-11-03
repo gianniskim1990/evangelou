@@ -68,8 +68,8 @@ Cappuccino, Freddo Cappuccino, Ελληνικός, Φίλτρου και **Άλ�
 
 ### Τι ΔΕΝ κάνει ακόμα
 
-Δεν δημιουργεί μέλη του Club (η γραμμή `evc_members` θα έρθει με το QR / την εγγραφή στο κατάστημα),
-δεν έχει QR, αναζήτηση μέλους ή οθόνη ταμείου συνδεδεμένη — αυτά είναι επόμενα βήματα.
+Δεν δημιουργεί μόνο του μέλη του Club· τους αριθμούς μέλους (`evc_members`) τους φτιάχνει, μετά από
+καταγεγραμμένη πληρωμή, το STAGE-05B (`docs/club-members.md`). Δεν έχει QR, αναζήτηση μέλους ή οθόνη ταμείου συνδεδεμένη — αυτά είναι επόμενα βήματα.
 
 ## Developer notes (English)
 
@@ -120,5 +120,5 @@ Cappuccino, Freddo Cappuccino, Ελληνικός, Φίλτρου και **Άλ�
   reversal freezes the card, pending / unrecorded never eligible, unknown / disabled member, Club DB
   down 503, provenance read failing 500). Mutants RB1–RB30 in `tests/mutation/run-wp-mutations.php` (modes `enabled`,
   `redemption`, `commerce_redeem`).
-- **Not done here:** member rows / sync (`EVC_Member_Sync_Service` stays forbidden), QR tokens, lookup
+- **Not done here:** member rows / sync (added later by STAGE-05B, `docs/club-members.md`), QR tokens, lookup
   route, staff UI wiring, v2 prepared redemption, new migrations.
