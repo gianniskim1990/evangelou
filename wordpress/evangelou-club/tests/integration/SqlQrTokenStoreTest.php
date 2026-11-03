@@ -6,6 +6,11 @@
  * server: digests only, compare-and-set rotation / revocation in one transaction, the unique keys
  * as the backstop, interleaved and truly concurrent writers, lost COMMIT, fail-closed reads, and
  * a QR that can never turn a frozen or expired membership into a coffee.
+ *
+ * Group qr-store: excluded from the engine mutation runner (run-mutations.php), whose mutants never
+ * touch this store; its own mutants QS1-QS10 run it in run-provenance-sql-mutations.php.
+ *
+ * @group qr-store
  */
 final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
     const NOW = '2026-11-03 10:00:00.000000';

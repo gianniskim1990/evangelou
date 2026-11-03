@@ -25,7 +25,9 @@ try {
     fwrite(STDERR, 'ABORT: ' . $e->getMessage() . "\n");
     exit(1);
 }
-$phpunit = array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist', '--exclude-group', 'concurrency');
+// STAGE-05C: the SQL QR token store tests (group qr-store) kill none of these engine mutants and have their
+// own runner (run-provenance-sql-mutations.php, QS1-QS10); excluded to keep the engine job inside its timeout.
+$phpunit = array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist', '--exclude-group', 'concurrency,qr-store');
 
 $mutants = array(
     array(

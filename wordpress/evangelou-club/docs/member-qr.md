@@ -119,7 +119,9 @@ redeem; a multi-process race (`tests/bin/qr-token-worker.php`, 10 rounds × 6 wo
 issuance and rotation) leaves exactly one active row and exactly one winner. WordPress:
 `RedemptionSourceOnTest::test_no_lookup_or_qr_route_is_registered` (staff + redemption ON) and
 `CustomerMeTest::test_no_qr_route_is_registered` (customer ON). Mutants QS1–QS10 in
-`tests/mutation/run-provenance-sql-mutations.php` (`'command' => 'qr'`).
+`tests/mutation/run-provenance-sql-mutations.php` (`'command' => 'qr'`). The test class is `@group qr-store`, excluded from the engine
+mutation runner `run-mutations.php` (none of its mutants touch this store; with it, the mysql:8.0
+engine job exceeded its 25-minute timeout).
 
 **Not done (needs owner decisions first).** Customer QR route / screen, staff lookup route, rate
 limiter, phone directory, lookup keys and TTL, staff UI wiring (STAGE-05D).
