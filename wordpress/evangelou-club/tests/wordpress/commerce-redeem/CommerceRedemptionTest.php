@@ -137,7 +137,10 @@ final class CommerceRedemptionTest extends EVC_WP_Test_Case {
         $this->login_as($staff);
         $request_id = self::uuid4();
 
+        $athens = new DateTimeZone('Europe/Athens');
+        $day_before = (new DateTimeImmutable('now', $athens))->format('Y-m-d');
         $response = $this->redeem($member, 'other_coffee', $request_id);
+        $day_after = (new DateTimeImmutable('now', $athens))->format('Y-m-d');
 
         $this->assertSame(200, $response->get_status(), wp_json_encode($response->get_data()));
         $data = $response->get_data();
@@ -146,7 +149,8 @@ final class CommerceRedemptionTest extends EVC_WP_Test_Case {
         $this->assertSame('other_coffee', $data['coffee_code'], 'the catch-all coffee is accepted (owner decision D3)');
         $this->assertSame($request_id, $data['request_id']);
         $this->assertFalse($data['replayed']);
-        $this->assertSame((new DateTimeImmutable('now', new DateTimeZone('Europe/Athens')))->format('Y-m-d'), $data['business_date']);
+        // The real system clock: the Athens day read before or after the request (never flaky at midnight).
+        $this->assertContains($data['business_date'], array($day_before, $day_after));
         $ledger = $this->ledger($member);
         $this->assertCount(1, $ledger);
         $this->assertSame($staff, (int) $ledger[0]['staff_wp_user_id']);
@@ -203,10 +207,18 @@ final class CommerceRedemptionTest extends EVC_WP_Test_Case {
         // The recorded run is one Athens calendar month: 13:00:07 EEST on 10 October to 13:00:07 EET on
         // 10 November = 11:00:07Z (one hour later in UTC across the DST change).
         $this->assertSame('2026-11-10T11:00:07+00:00', $period->end_utc()->format(DATE_ATOM));
-        $clock->set('2026-11-10T11:00:06Z'); // the last paid second
+        // D1: the end is exclusive. EXACTLY at the recorded end, on a day with nothing redeemed yet: expired
+        // (membership_inactive, not benefit_already_redeemed: membership is checked before the daily limit).
+        $clock->set('2026-11-10T11:00:07Z');
+        $at_end = $this->redeem($member);
+        $this->assertEnvelope($at_end, 409, 'membership_inactive');
+        $this->assertSame(array('status' => 'expired'), $at_end->get_data()['error']['details']);
+        $this->assertCount(3, $this->ledger($member));
+        $clock->set('2026-11-10T11:00:06Z'); // one second before the end, same (still unused) Athens day: allowed
         $last = $this->redeem($member);
         $this->assertSame(200, $last->get_status(), wp_json_encode($last->get_data()));
         $this->assertSame('2026-11-10', $last->get_data()['business_date']);
+        $this->assertSame('2026-11-10T13:00:06+02:00', $last->get_data()['redeemed_at']);
         $clock->set('2026-11-11T11:00:07Z'); // the next Athens day, after the paid run's end: expired
         $expired = $this->redeem($member);
         $this->assertEnvelope($expired, 409, 'membership_inactive');
@@ -247,6 +259,30 @@ final class CommerceRedemptionTest extends EVC_WP_Test_Case {
             $this->assertEnvelope($response, 409, 'membership_inactive');
             $this->assertSame(array('status' => 'inactive'), $response->get_data()['error']['details'], $label);
             $this->assertSame(array(), $this->ledger($member), $label);
+        }
+    }
+
+    public function test_a_recorded_refund_or_reversal_freezes_the_card(): void {
+        $this->login_as($this->create_staff_user());
+        foreach (array(EVC_Movement_Correction::KIND_REFUNDED, EVC_Movement_Correction::KIND_REVERSED) as $kind) {
+            list($customer, $member) = $this->paid_member(new DateTimeImmutable('2026-10-10T10:00:07Z'));
+            $clock = new EVC_Fixed_Clock('2026-10-12T08:00:00Z');
+            $this->with_clock($clock);
+            $before = $this->redeem($member);
+            $this->assertSame(200, $before->get_status(), $kind . ': paid before the correction ' . wp_json_encode($before->get_data()));
+
+            // The cancellation / refund as the Club records it (EVC_Provenance_Recorder::correct, the path
+            // STAGE-03D uses for a WooCommerce cancel / refund).
+            $movement = $this->store()->member_movements($customer)[0];
+            $recorder = new EVC_Provenance_Recorder($this->store(), new EVC_Pmpro_Mapper_Config(array(EVC_TEST_CLUB_LEVEL), '3.8.9', '3.8.10'), 'live', 2000, 'EUR');
+            $correction = new EVC_Movement_Correction(hash('sha256', 'stage05a-corr-' . $kind . $customer), $movement->movement_id(), $kind, EVC_Verified_Movement::AUTHORITY_MANUAL_ADMIN, new DateTimeImmutable('2026-10-12T09:00:00Z'));
+            $this->assertSame(EVC_Record_Outcome::NEWLY_RECORDED, $recorder->correct($correction)->outcome(), $kind);
+
+            $clock->set('2026-10-13T08:00:00Z'); // the next Athens day, inside the (now voided) paid run
+            $after = $this->redeem($member);
+            $this->assertEnvelope($after, 409, 'membership_inactive');
+            $this->assertSame(array('status' => 'inactive'), $after->get_data()['error']['details'], $kind);
+            $this->assertCount(1, $this->ledger($member), $kind . ': nothing granted after the correction');
         }
     }
 

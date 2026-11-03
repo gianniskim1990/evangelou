@@ -905,7 +905,14 @@ $mutants = array(
         array('CommerceRedemptionTest::test_one_coffee_per_athens_day_across_midnight_and_the_autumn_dst_change')),
     array('RB28-environment-failure-not-caught', 'enabled', 'includes/staff/class-evc-club-redemption-backend.php',
         "        } catch (Throwable \$e) {\n            return \$this->refuse(self::REASON_ENVIRONMENT, \$e);", "        } catch (RuntimeException \$e) {\n            return \$this->refuse(self::REASON_ENVIRONMENT, \$e);",
-        array('ClubRedemptionBackendTest::test_an_unreadable_environment_is_unavailable'))
+        array('ClubRedemptionBackendTest::test_an_unreadable_environment_is_unavailable')),
+    // STAGE-05A review: end to end through the real route (CI commerce job only).
+    array('RB29-paid-run-end-inclusive', 'commerce_redeem', 'includes/class-evc-pmpro-entitlement-mapper.php',
+        "        if (\$at >= \$last['end']) {", "        if (\$at > \$last['end']) {",
+        array('CommerceRedemptionTest::test_one_coffee_per_athens_day_across_midnight_and_the_autumn_dst_change')),
+    array('RB30-recorded-corrections-ignored', 'commerce_redeem', 'includes/customer/class-evc-store-club-payment-provenance.php',
+        '        if ($history === array()) {', '        if (true) {',
+        array('CommerceRedemptionTest::test_a_recorded_refund_or_reversal_freezes_the_card'))
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
