@@ -36,7 +36,11 @@ $commands = array(
     'provenance' => $phpunit,
     'members' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
         '--filter', '/SqlMemberIdentityStoreTest/', '--exclude-group', 'concurrency'),
+    // STAGE-05C: mutants with 'command' => 'qr' run the QR token store tests instead.
+    'qr' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
+        '--filter', '/SqlQrTokenStoreTest/', '--exclude-group', 'concurrency'),
 );
+$qr = 'includes/class-evc-sql-qr-token-store.php';
 
 $mutants = array(
     // ---- schema backstops ---------------------------------------------------
@@ -116,6 +120,34 @@ $mutants = array(
     array('id' => 'MS5-status-change-silently-accepted', 'file' => $members, 'command' => 'members',
         'search' => "        throw new LogicException('Account status changes need a status version and status events (not in migration 001).');",
         'replace' => '        return;'),
+    // ---- STAGE-05C: the SQL QR token store (evc_qr_tokens, migration 001) ---------------------------
+    // Run against SqlQrTokenStoreTest only (sequential tests; the multi-process race test is proven in
+    // every CI engine job). Not listed (equivalent by design, documented in docs/member-qr.md): removing
+    // the row lock alone or the affected-row check alone, because the digest compare-and-set, the guarded
+    // UPDATE and the unique key each still refuse the late writer.
+    array('id' => 'QS1-second-active-token-key-dropped', 'file' => 'database/001_initial.sql', 'command' => 'qr',
+        'search' => "  UNIQUE KEY uq_qr_tokens_one_active (active_member_id),\n", 'replace' => ''),
+    array('id' => 'QS2-stale-digest-accepted', 'file' => $qr, 'command' => 'qr',
+        'search' => "        if (!hash_equals(\$current, \$expected_active_hash)) {", 'replace' => '        if (false) {'),
+    array('id' => 'QS3-none-versus-active-mismatch-ignored', 'file' => $qr, 'command' => 'qr',
+        'search' => "            if (\$current !== \$expected_active_hash) {", 'replace' => '            if (false) {'),
+    array('id' => 'QS4-rotation-outside-one-transaction', 'file' => $qr, 'command' => 'qr',
+        'search' => "            \$this->db->transactional(\$work);", 'replace' => '            $work($this->db);'),
+    array('id' => 'QS5-deadlock-not-a-concurrent-change', 'file' => $qr, 'command' => 'qr',
+        'search' => "            throw new EVC_Qr_Rotation_Conflict('A concurrent QR token change won.');", 'replace' => '            throw $e;'),
+    array('id' => 'QS6-revocation-does-not-revoke', 'file' => $qr, 'command' => 'qr',
+        'search' => "\"UPDATE evc_qr_tokens SET status = 'revoked', revoked_at_utc = ?", 'replace' => "\"UPDATE evc_qr_tokens SET status = status, revoked_at_utc = ?"),
+    array('id' => 'QS7-malformed-token-row-accepted', 'file' => $qr, 'command' => 'qr',
+        'search' => "            && ((\$status === 'active' && \$revoked === null)", 'replace' => "            && ((\$status === 'active')"),
+    array('id' => 'QS8-malformed-member-row-accepted', 'file' => $qr, 'command' => 'qr',
+        'search' => "            || !EVC_Member_Id::is_valid_format(\$public_id) || !in_array(\$status, self::MEMBER_STATUSES, true)) {",
+        'replace' => "            || !in_array(\$status, self::MEMBER_STATUSES, true)) {"),
+    array('id' => 'QS9-lookup-returns-the-digest', 'file' => $qr, 'command' => 'qr',
+        'search' => "        return array('member_id' => \$member_id, 'status' => \$status, 'issued_at_utc' => \$issued, 'revoked_at_utc' => \$revoked);",
+        'replace' => "        return array('member_id' => \$member_id, 'status' => \$status, 'issued_at_utc' => \$issued, 'revoked_at_utc' => \$revoked, 'token_hash' => \$token_hash);"),
+    array('id' => 'QS10-plaintext-accepted-as-a-digest', 'file' => $qr, 'command' => 'qr',
+        'search' => "            || !preg_match(self::HASH_PATTERN, \$new_hash) || !preg_match(self::INSTANT_PATTERN, \$now_utc)) {",
+        'replace' => "            || !preg_match(self::INSTANT_PATTERN, \$now_utc)) {"),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -146,6 +178,10 @@ $baseline = evc_run_suite($phpunit);
 if ($baseline === 0) {
     echo "Baseline (unmutated) member identity store run...\n";
     $baseline = evc_run_suite($commands['members']);
+}
+if ($baseline === 0) {
+    echo "Baseline (unmutated) QR token store run...\n";
+    $baseline = evc_run_suite($commands['qr']);
 }
 if ($baseline !== 0) {
     fwrite(STDERR, "ABORT: baseline suite is not green (exit $baseline); mutation results would be meaningless.\n");

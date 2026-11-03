@@ -72,4 +72,15 @@ final class RedemptionSourceOnTest extends EVC_WP_Test_Case {
         $this->assertEnvelope($this->rest('POST', $this->redeem_route(EVC_Member_Id::mint()), array('request_id' => self::uuid4(), 'coffee_code' => 'espresso')), 401, 'unauthorized');
         $this->assertNull($this->registered_backend()->last_reason());
     }
+
+    /** STAGE-05C: the SQL QR token store exists as a definition only; no staff lookup / QR route is wired. */
+    public function test_no_lookup_or_qr_route_is_registered(): void {
+        foreach (array_keys(rest_get_server()->get_routes()) as $route) {
+            if (strpos($route, '/' . EVC_Rest_Security::NAMESPACE_V1) === 0) {
+                $this->assertDoesNotMatchRegularExpression('/lookup|qr/i', $route);
+            }
+        }
+        $this->login_as($this->create_staff_user());
+        $this->assertSame(404, $this->rest('POST', '/' . EVC_Rest_Security::NAMESPACE_V1 . '/members/lookup', array('method' => 'qr', 'qr_token' => EVC_Qr_Token::mint()), $this->nonce())->get_status());
+    }
 }

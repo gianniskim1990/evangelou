@@ -127,6 +127,10 @@ default**. The lifetime is an **open owner decision**; tests inject 300 s.
 
 ## Future SQL requirements (NOT implemented; migration authorisation required)
 
+> **STAGE-05C update:** the `evc_qr_tokens` part below is now implemented, on migration 001 with no
+> new migration, as `EVC_Sql_Qr_Token_Store` (definitions only, constructed nowhere; see
+> `docs/member-qr.md`). The rate limiter and phone directory are still not implemented.
+
 **`evc_qr_tokens` (migration 001) already has** `uq_qr_tokens_hash` and
 `uq_qr_tokens_one_active` (a stored generated column).
 

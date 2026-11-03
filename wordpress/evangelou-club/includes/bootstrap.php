@@ -97,6 +97,9 @@ require_once $evc_includes . 'class-evc-member-sync.php';
 // STAGE-05B: the SQL member identity store (evc_members, migration 001). Constructed only by
 // EVC_Club_Member_Sync, behind EVC_CLUB_WC_COMPLETION_ENABLED.
 require_once $evc_includes . 'class-evc-sql-member-identity-store.php';
+// STAGE-05C: the SQL QR token store (evc_qr_tokens, migration 001). Definitions only: constructed
+// nowhere in shipped code until an owner-approved QR issuance / lookup step names one site.
+require_once $evc_includes . 'class-evc-sql-qr-token-store.php';
 // UI-04G pure v2 JSON response contracts + HTTP status recommendations.
 // Definitions only: no route, no WP_REST_Response, no hook.
 require_once $evc_includes . 'class-evc-response-contract.php';

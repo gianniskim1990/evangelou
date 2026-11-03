@@ -560,6 +560,76 @@ function memberSyncSelfTest() {
   return bad;
 }
 
+// ---- STAGE-05C: the SQL QR token store (evc_qr_tokens, migration 001) ----------------------------------
+// The packager's blanket string ban on `implements EVC_Qr_Token_Store` is lifted at exactly ONE site, the SQL
+// store file. Nothing shipped may construct it yet (no owner-approved QR issuance / lookup step exists):
+// 1. Only the store file implements EVC_Qr_Token_Store; no shipped interface extends it.
+// 2. EVC_Sql_Qr_Token_Store is constructed nowhere (not even in its own file; no `new self|static` there).
+// 3. Its name appears only in its own file (identifiers and strings), so no alias, string `new $cls` or type
+//    hint elsewhere can reach it.
+// The bans on constructing EVC_Qr_Token_Service / EVC_Member_Lookup_Service / EVC_Lookup_Key_Ring /
+// EVC_Signed_Member_Context_Verifier and on implementing the phone directory / rate limiter are unchanged.
+export const QR_STORE_RULES = Object.freeze({
+  storeFile: "includes/class-evc-sql-qr-token-store.php",
+});
+
+export function qrStoreProblemsFor(path, src, rules = QR_STORE_RULES) {
+  const tokens = tokenize(src);
+  const problems = [];
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id" || tk.t === "str") {
+      const v = bare(tk.v).toLowerCase();
+      const hit = tk.t === "id" ? v === "evc_sql_qr_token_store" || v.endsWith("\\evc_sql_qr_token_store") : v.includes("evc_sql_qr_token_store");
+      if (hit && path !== rules.storeFile) problems.push(`${path}: names EVC_Sql_Qr_Token_Store (QR store allowlist)`);
+    }
+    if (tk.t === "id" && ["implements", "extends"].includes(tk.v.toLowerCase())) {
+      for (let j = k + 1; j < tokens.length && tokens[j].v !== "{"; j++) {
+        if (tokens[j].t !== "id") continue;
+        const ext = tk.v.toLowerCase() === "extends";
+        if (!same(tokens[j].v, "EVC_Qr_Token_Store")) continue;
+        // The implementing class must be EVC_Sql_Qr_Token_Store itself (no second or anonymous class).
+        let c = k - 1;
+        while (c >= 0 && !(tokens[c].t === "id" && tokens[c].v.toLowerCase() === "class")) c--;
+        const owner = c >= 0 && tokens[c + 1]?.t === "id" ? tokens[c + 1].v : "";
+        if (ext || path !== rules.storeFile || !same(owner, "EVC_Sql_Qr_Token_Store")) problems.push(`${path}: ${tk.v} EVC_Qr_Token_Store`);
+      }
+    }
+  });
+  for (const c of constructions(tokens)) {
+    if (same(c.name, "EVC_Sql_Qr_Token_Store")) problems.push(`${path}: EVC_Sql_Qr_Token_Store constructed (no approved construction site)`);
+    if (path === rules.storeFile && ["self", "static", "parent"].includes(c.name.toLowerCase())) problems.push(`${path}: new ${c.name} inside the QR store`);
+  }
+  return problems;
+}
+
+function qrStoreSelfTest() {
+  const bad = [];
+  const Q = QR_STORE_RULES;
+  const expect = (label, path, src, want) => {
+    const got = qrStoreProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`qr-store ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  const GOOD_QR = "<?php\nfinal class EVC_Sql_Qr_Token_Store implements EVC_Qr_Token_Store { public function __construct(EVC_Club_Db $db) { $this->db = $db; } }";
+  expect("good store file", Q.storeFile, GOOD_QR, false);
+  expect("the interface definition is fine", "includes/class-evc-member-lookup.php", "<?php\ninterface EVC_Qr_Token_Store { }\nfinal class S { public function __construct(EVC_Qr_Token_Store $t) { } }", false);
+  expect("comment mention is fine", "includes/x.php", "<?php\n// new EVC_Sql_Qr_Token_Store($db)\n$x = 1;", false);
+  expect("constructed elsewhere", "includes/x.php", "<?php\n$s = new EVC_Sql_Qr_Token_Store($db);", true);
+  expect("constructed with a leading backslash", "includes/x.php", "<?php\n$s = new \\EVC_Sql_Qr_Token_Store($db);", true);
+  expect("constructed upper-case over two lines", "includes/x.php", "<?php\n$s = NEW\n  EVC_SQL_QR_TOKEN_STORE($db);", true);
+  expect("constructed in its own file", Q.storeFile, GOOD_QR.replace("{ public function", "{ public static function make($db) { return new EVC_Sql_Qr_Token_Store($db); } public function"), true);
+  expect("new self in its own file", Q.storeFile, GOOD_QR.replace("{ public function", "{ public static function make($db) { return new self($db); } public function"), true);
+  expect("new static in its own file", Q.storeFile, GOOD_QR.replace("{ public function", "{ public static function make($db) { return new static($db); } public function"), true);
+  expect("named elsewhere (type hint)", "includes/x.php", "<?php\nfunction f(EVC_Sql_Qr_Token_Store $s) { return $s; }", true);
+  expect("named in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_Sql_Qr_Token_Store'; $s = new $c($db);", true);
+  expect("class_alias elsewhere", "includes/x.php", "<?php\nclass_alias('EVC_Sql_Qr_Token_Store', 'S');", true);
+  expect("another store implementation", "includes/x.php", "<?php\nfinal class X implements EVC_Qr_Token_Store { }", true);
+  expect("store implementation listed second", "includes/x.php", "<?php\nfinal class X implements Countable, \\EVC_Qr_Token_Store { }", true);
+  expect("store interface extended", "includes/x.php", "<?php\ninterface X extends EVC_Qr_Token_Store { }", true);
+  expect("second implementation in the store file", Q.storeFile, GOOD_QR + "\nfinal class Z implements EVC_Qr_Token_Store { }", true);
+  expect("anonymous implementation in the store file", Q.storeFile, GOOD_QR + "\n$x = new class implements EVC_Qr_Token_Store { };", true);
+  return bad;
+}
+
 // ---- self test: negative fixtures, run on every package --------------------------------------------
 const OPTS = {
   bootstrap: "includes/customer/class-evc-wc-completion-plugin.php",
@@ -628,5 +698,5 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrStoreSelfTest());
 }

@@ -820,6 +820,18 @@ decide (one row per WordPress user); a row grants nothing by itself (the redeem 
 from recorded provenance); staff / privileged accounts never become members. Greek operator note and
 developer notes: `docs/club-members.md`.
 
+## Club member QR token store (STAGE-05C — definitions only, NOT wired, NOT active anywhere)
+
+`EVC_Sql_Qr_Token_Store` is the SQL `EVC_Qr_Token_Store` (UI-04C interface) over `evc_qr_tokens` +
+`evc_members` from migration 001 (unchanged; no new table, column, constant or route). Digests only
+(SHA-256), at most one active token per member (unique key), rotation / revocation as ONE compare-and-set
+transaction (row lock + digest compare + guarded UPDATE + unique key; deadlock → concurrent change; lost
+COMMIT → unknown); least-privilege grants in `RUNTIME_GRANTS` (no DELETE, no UPDATE on `evc_members`).
+Nothing constructs it (packager rule set `qrStoreProblemsFor`). The customer QR screen and the staff
+lookup route are NOT built: they wait for owner decisions (QR lifetime, rotation, screenshots, what staff
+see, scan limits). A QR never grants a coffee: the redeem route re-checks everything. Greek note, open
+questions and developer notes: `docs/member-qr.md`.
+
 ## Known deployment blockers
 
 - Hosting PHP version, MySQL/MariaDB version and pdo_mysql availability.
