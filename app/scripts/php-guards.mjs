@@ -274,6 +274,154 @@ function migrationsSelfTest() {
   return bad;
 }
 
+// ---- STAGE-05A rule set: the staff redemption backend on real memberships (EVC_CLUB_REDEMPTION_SOURCE) ----------
+// 1. EVC_Club_Redemption_Backend is constructed exactly once, in EVC_Staff_Plugin::register_routes(), whose body starts
+//    with the staff gate `if (!EVC_Staff_Feature::enabled()) { return; }`; the construction is the true branch of
+//    `EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source())`
+//    (no test seam arguments) and register_routes() still constructs EVC_Unavailable_Redemption_Backend (the default).
+// 2. Its name appears only in the staff plugin and its own file; EVC_Approved_Coffee_Catalogue_Source only in the staff
+//    plugin and the catalogue file. EVC_Coffee_Catalog is constructed only in the catalogue file, inside catalogue().
+// 3. Only the catalogue file implements EVC_Redemption_Catalogue_Source and only the two backend files implement
+//    EVC_Redemption_Backend (no test catalogue, fake or extra backend can ship).
+// 4. EVC_Club_Redemption_Feature::is_enabled_value() is exactly `return $value === self::VALUE;` with
+//    `const VALUE = 'club_db_v1';`; no shipped file defines EVC_CLUB_REDEMPTION_SOURCE or EVC_CLUB_PAYMENT_PROVENANCE.
+// Every earlier rule set (STAGE-03D, STAGE-04A, and the packager's v2 / QR / lookup / member-sync string bans) is
+// unchanged and still applies to the same files.
+const STAFF_PLUGIN = "includes/staff/class-evc-staff-plugin.php";
+export const REDEMPTION_RULES = Object.freeze({
+  plugin: STAFF_PLUGIN,
+  backendFile: "includes/staff/class-evc-club-redemption-backend.php",
+  defaultBackendFile: "includes/staff/class-evc-redemption-backend.php",
+  catalogueFile: "includes/staff/class-evc-redemption-catalogue-source.php",
+  featureFile: "includes/staff/class-evc-club-redemption-feature.php",
+});
+const STAFF_GATE = ["{", "if", "(", "!", "EVC_Staff_Feature", "::", "enabled", "(", ")", ")", "{", "return", ";", "}"];
+const BACKEND_PREFIX = ["EVC_Club_Redemption_Feature", "::", "enabled", "(", ")", "?"];
+const BACKEND_ARGS = ["(", "new", "EVC_Approved_Coffee_Catalogue_Source", "(", ")", ")"];
+const matchAt = (tokens, at, seq) => seq.every((v, i) => { const tk = tokens[at + i]; return tk && tk.t !== "str" && same(tk.v, v); });
+
+export function redemptionProblemsFor(path, src, rules = REDEMPTION_RULES) {
+  const tokens = tokenize(src);
+  const bodies = functionBodies(tokens);
+  const problems = [];
+  const names = [
+    ["evc_club_redemption_backend", [rules.plugin, rules.backendFile]],
+    ["evc_approved_coffee_catalogue_source", [rules.plugin, rules.catalogueFile]],
+  ];
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id" || tk.t === "str") {
+      const v = bare(tk.v).toLowerCase();
+      for (const [name, files] of names) {
+        const hit = tk.t === "id" ? v === name || v.endsWith("\\" + name) : v.includes(name);
+        if (hit && !files.includes(path)) problems.push(`${path}: names ${name} (redemption allowlist)`);
+      }
+    }
+    if (tk.t === "id" && tk.v.toLowerCase() === "define" && tokens[k + 1]?.v === "(" && tokens[k + 2]?.t === "str" && ["EVC_CLUB_REDEMPTION_SOURCE", "EVC_CLUB_PAYMENT_PROVENANCE"].includes(tokens[k + 2].v.replace(/^\\+/, ""))) {
+      problems.push(`${path}: defines ${tokens[k + 2].v} (never in a shipped file)`);
+    }
+    if (tk.t === "id" && tk.v.toLowerCase() === "implements") {
+      for (let j = k + 1; j < tokens.length && tokens[j].v !== "{"; j++) {
+        if (tokens[j].t !== "id") continue;
+        if (same(tokens[j].v, "EVC_Redemption_Catalogue_Source") && path !== rules.catalogueFile) problems.push(`${path}: implements EVC_Redemption_Catalogue_Source`);
+        if (same(tokens[j].v, "EVC_Redemption_Backend") && ![rules.backendFile, rules.defaultBackendFile].includes(path)) problems.push(`${path}: implements EVC_Redemption_Backend`);
+      }
+    }
+  });
+  const built = constructions(tokens);
+  let backends = 0;
+  for (const c of built) {
+    if (same(c.name, "EVC_Coffee_Catalog") && !(path === rules.catalogueFile && inside(bodies, "catalogue", c.at))) problems.push(`${path}: EVC_Coffee_Catalog constructed outside the approved catalogue source`);
+    if (same(c.name, "EVC_Club_Redemption_Backend")) {
+      backends++;
+      const ok = path === rules.plugin && inside(bodies, "register_routes", c.at) && matchAt(tokens, c.at - BACKEND_PREFIX.length, BACKEND_PREFIX) && matchAt(tokens, c.at + 2, BACKEND_ARGS);
+      if (!ok) problems.push(`${path}: EVC_Club_Redemption_Backend constructed outside \`EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source())\` in register_routes()`);
+    }
+    if (same(c.name, "EVC_Approved_Coffee_Catalogue_Source")) {
+      const ok = path === rules.plugin && matchAt(tokens, c.at - 3, ["new", "EVC_Club_Redemption_Backend", "("]);
+      if (!ok) problems.push(`${path}: EVC_Approved_Coffee_Catalogue_Source constructed outside the backend construction`);
+    }
+  }
+  if (backends > 1) problems.push(`${path}: EVC_Club_Redemption_Backend constructed more than once`);
+  if (path === rules.plugin) {
+    if ((bodies.__count.register_routes ?? 0) !== 1) problems.push(`${path}: register_routes() must be defined exactly once`);
+    const b = bodies.register_routes;
+    if (!b || !matchAt(tokens, b.start, STAFF_GATE)) problems.push(`${path}: register_routes() does not start with if (!EVC_Staff_Feature::enabled()) { return; }`);
+    if (!built.some((c) => same(c.name, "EVC_Unavailable_Redemption_Backend") && inside(bodies, "register_routes", c.at))) problems.push(`${path}: register_routes() lost the default EVC_Unavailable_Redemption_Backend`);
+    if (backends !== 1) problems.push(`${path}: register_routes() must construct EVC_Club_Redemption_Backend exactly once (behind the opt-in)`);
+  }
+  if (path === rules.featureFile) {
+    const b = bodies.is_enabled_value;
+    if (!b || !matchAt(tokens, b.start, ["{", "return", "$value", "=", "=", "=", "self", "::", "VALUE", ";", "}"])) problems.push(`${path}: is_enabled_value() must be exactly return $value === self::VALUE;`);
+    const at = tokens.findIndex((tk, k) => tk.t === "id" && tk.v.toLowerCase() === "const" && tokens[k + 1]?.v === "VALUE");
+    if (at < 0 || tokens[at + 2]?.v !== "=" || tokens[at + 3]?.t !== "str" || tokens[at + 3].v !== "club_db_v1") problems.push(`${path}: const VALUE must be 'club_db_v1'`);
+  }
+  return problems;
+}
+
+const GOOD_STAFF_PLUGIN = `<?php
+final class EVC_Staff_Plugin {
+    public static function register_routes(): void {
+        if (!EVC_Staff_Feature::enabled()) {
+            return;
+        }
+        $backend = EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source()) : new EVC_Unavailable_Redemption_Backend();
+        (new EVC_Rest_Redeem_Controller($backend))->register_routes();
+    }
+}`;
+const GOOD_CATALOGUE = `<?php
+interface EVC_Redemption_Catalogue_Source { public function catalogue(): ?EVC_Coffee_Catalog; }
+final class EVC_Approved_Coffee_Catalogue_Source implements EVC_Redemption_Catalogue_Source {
+    const ITEMS = array('espresso' => 'Espresso');
+    public function catalogue(): ?EVC_Coffee_Catalog { return new EVC_Coffee_Catalog(self::ITEMS); }
+}`;
+const GOOD_FEATURE = `<?php
+final class EVC_Club_Redemption_Feature {
+    const CONSTANT = 'EVC_CLUB_REDEMPTION_SOURCE';
+    const VALUE = 'club_db_v1';
+    public static function is_enabled_value($value): bool {
+        return $value === self::VALUE;
+    }
+}`;
+
+function redemptionSelfTest() {
+  const bad = [];
+  const R = REDEMPTION_RULES;
+  const expect = (label, path, src, want) => {
+    const got = redemptionProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`redemption ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good staff plugin", R.plugin, GOOD_STAFF_PLUGIN, false);
+  expect("good catalogue source", R.catalogueFile, GOOD_CATALOGUE, false);
+  expect("good feature", R.featureFile, GOOD_FEATURE, false);
+  expect("backend file may name itself", R.backendFile, "<?php\nfinal class EVC_Club_Redemption_Backend implements EVC_Redemption_Backend { public static function constants() {} }", false);
+  expect("staff gate missing", R.plugin, GOOD_STAFF_PLUGIN.replace("if (!EVC_Staff_Feature::enabled()) {\n            return;\n        }", ""), true);
+  expect("staff gate negation dropped", R.plugin, GOOD_STAFF_PLUGIN.replace("if (!EVC_Staff_Feature", "if (EVC_Staff_Feature"), true);
+  expect("opt-in not checked", R.plugin, GOOD_STAFF_PLUGIN.replace("EVC_Club_Redemption_Feature::enabled() ? ", "true ? "), true);
+  expect("opt-in of another feature", R.plugin, GOOD_STAFF_PLUGIN.replace("EVC_Club_Redemption_Feature::enabled()", "EVC_Club_Migrations_Feature::enabled()"), true);
+  expect("default backend dropped", R.plugin, GOOD_STAFF_PLUGIN.replace(" : new EVC_Unavailable_Redemption_Backend()", " : null"), true);
+  expect("test seam passed in shipped code", R.plugin, GOOD_STAFF_PLUGIN.replace("new EVC_Approved_Coffee_Catalogue_Source())", "new EVC_Approved_Coffee_Catalogue_Source(), $env)"), true);
+  expect("another catalogue passed", R.plugin, GOOD_STAFF_PLUGIN.replace("new EVC_Approved_Coffee_Catalogue_Source()", "new EVC_Other_Catalogue()"), true);
+  expect("backend constructed in boot()", R.plugin, GOOD_STAFF_PLUGIN.replace("final class EVC_Staff_Plugin {", "final class EVC_Staff_Plugin {\n    public static function boot() { $b = EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source()) : null; }"), true);
+  expect("backend constructed twice", R.plugin, GOOD_STAFF_PLUGIN.replace("(new EVC_Rest_Redeem_Controller($backend))", "$x = EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source()) : 1;\n        (new EVC_Rest_Redeem_Controller($backend))"), true);
+  expect("backend constructed elsewhere", "includes/x.php", "<?php\n$b = EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source()) : null;", true);
+  expect("backend named in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_Club_Redemption_Backend';", true);
+  expect("backend with a leading backslash elsewhere", "includes/x.php", "<?php\n$b = new \\EVC_Club_Redemption_Backend($c);", true);
+  expect("catalogue source constructed alone", R.plugin, GOOD_STAFF_PLUGIN.replace("(new EVC_Rest_Redeem_Controller($backend))", "$c = new EVC_Approved_Coffee_Catalogue_Source();\n        (new EVC_Rest_Redeem_Controller($backend))"), true);
+  expect("coffee list built elsewhere", "includes/x.php", "<?php\n$c = new EVC_Coffee_Catalog(array('espresso' => 'E'));", true);
+  expect("coffee list built outside catalogue()", R.catalogueFile, GOOD_CATALOGUE.replace("const ITEMS", "public static function other() { return new EVC_Coffee_Catalog(array()); }\n    const ITEMS"), true);
+  expect("test catalogue implementation", "includes/x.php", "<?php\nfinal class EVC_Test_Coffee_Catalogue implements EVC_Redemption_Catalogue_Source { }", true);
+  expect("catalogue implementation listed second", "includes/x.php", "<?php\nfinal class X implements Countable, \\EVC_Redemption_Catalogue_Source { }", true);
+  expect("extra backend implementation", "includes/x.php", "<?php\nfinal class X implements EVC_Redemption_Backend { }", true);
+  expect("unavailable backend file may implement it", R.defaultBackendFile, "<?php\nfinal class EVC_Unavailable_Redemption_Backend implements EVC_Redemption_Backend { }", false);
+  expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_REDEMPTION_SOURCE', 'club_db_v1');", true);
+  expect("defines the provenance constant", R.plugin, GOOD_STAFF_PLUGIN.replace("final class", "define('EVC_CLUB_PAYMENT_PROVENANCE', 'club_db_v1');\nfinal class"), true);
+  expect("parser not exact", R.featureFile, GOOD_FEATURE.replace("return $value === self::VALUE;", "return strtolower(trim($value)) === self::VALUE;"), true);
+  expect("parser loose", R.featureFile, GOOD_FEATURE.replace("===", "=="), true);
+  expect("value changed", R.featureFile, GOOD_FEATURE.replace("const VALUE = 'club_db_v1';", "const VALUE = 'CLUB_DB_V1';"), true);
+  expect("comment mention is fine", "includes/x.php", "<?php\n// new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source())\n$x = 1;", false);
+  return bad;
+}
+
 // ---- self test: negative fixtures, run on every package --------------------------------------------
 const OPTS = {
   bootstrap: "includes/customer/class-evc-wc-completion-plugin.php",
@@ -342,5 +490,5 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest());
 }
