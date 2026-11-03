@@ -171,7 +171,7 @@ final class CommerceRedemptionTest extends EVC_WP_Test_Case {
 
     public function test_one_coffee_per_athens_day_across_midnight_and_the_autumn_dst_change(): void {
         // Paid run 2026-10-10 10:00:07Z .. 2026-11-10; the clocks go back on Sunday 2026-10-25 (04:00 EEST -> 03:00 EET).
-        list(, $member) = $this->paid_member(new DateTimeImmutable('2026-10-10T10:00:07Z'));
+        list(, $member, $period) = $this->paid_member(new DateTimeImmutable('2026-10-10T10:00:07Z'));
         $this->login_as($this->create_staff_user());
         $clock = new EVC_Fixed_Clock('2026-10-24T20:59:59Z');
         $this->with_clock($clock);
@@ -200,9 +200,18 @@ final class CommerceRedemptionTest extends EVC_WP_Test_Case {
 
         $this->assertSame(array('2026-10-24', '2026-10-25', '2026-10-26'), array_column($this->ledger($member), 'business_date'));
 
-        $clock->set('2026-11-10T10:00:07Z'); // the paid run's end: expired
-        $this->assertEnvelope($this->redeem($member), 409, 'membership_inactive');
-        $this->assertCount(3, $this->ledger($member));
+        // The recorded run is one Athens calendar month: 13:00:07 EEST on 10 October to 13:00:07 EET on
+        // 10 November = 11:00:07Z (one hour later in UTC across the DST change).
+        $this->assertSame('2026-11-10T11:00:07+00:00', $period->end_utc()->format(DATE_ATOM));
+        $clock->set('2026-11-10T11:00:06Z'); // the last paid second
+        $last = $this->redeem($member);
+        $this->assertSame(200, $last->get_status(), wp_json_encode($last->get_data()));
+        $this->assertSame('2026-11-10', $last->get_data()['business_date']);
+        $clock->set('2026-11-11T11:00:07Z'); // the next Athens day, after the paid run's end: expired
+        $expired = $this->redeem($member);
+        $this->assertEnvelope($expired, 409, 'membership_inactive');
+        $this->assertSame(array('status' => 'expired'), $expired->get_data()['error']['details']);
+        $this->assertCount(4, $this->ledger($member));
     }
 
     public function test_a_second_request_on_the_same_athens_day_is_already_redeemed(): void {
