@@ -1274,3 +1274,5 @@ The existing website developer replied explicitly:
 - The empty-catalogue gap (scan says active, redeem answers 503) is noted in the docs and left as is.
 
 **Open owner question:** whether the tablet may revoke a member's QR. It is still unanswered, so revocation stays admin-only.
+
+- CI on ad07eea (STAGE-05C round-3 review fixes): green. Foundation 18/18 (runs 41803814061 push, 41803819688 pull_request) and frontend 4/4 (runs 41803814135, 41803819701). No flake re-runs needed. The commerce hpos mutation step took about 70 minutes, inside its 120-minute limit.
