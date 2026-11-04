@@ -55,8 +55,9 @@ const BTN_SECONDARY = "min-h-12 rounded-xl border border-espresso/20 bg-surface 
 function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<CounterState, { screen: "scan" }>; camera: CameraEnv }) {
   const now = flow.clock();
   const canCamera = cameraSupported(camera);
-  const heading = useRef<HTMLHeadingElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  /** «Πληκτρολόγηση κωδικού»: only then the on-screen keyboard (inputMode text) for typing / pasting. */
+  const [keyboard, setKeyboard] = useState(false);
   const [code, setCode] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState<CameraFailure | null>(null);
@@ -74,17 +75,16 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
   // The camera never outlives this screen (lock, logout, «Πίσω» or a member found all unmount it).
   useEffect(() => () => camRun.current?.abort(), []);
 
-  // On arrival: with a camera, focus the heading (screen readers hear where they are); without one, the
-  // scanner field, so a hand scanner can type straight away.
+  /*
+   * Round 3 (review MINOR 4): the scanner field has focus WHENEVER the camera is not running (on arrival,
+   * after a lookup, after a wait, after «Κλείσιμο κάμερας»), so a USB / Bluetooth hand scanner works
+   * without a tap, even on a tablet that also has a camera. To keep the on-screen keyboard from covering
+   * the screen, the field is inputMode "none" (a hardware scanner or keyboard still types into it);
+   * «Πληκτρολόγηση κωδικού» switches to the normal keyboard. The field's label tells a screen reader
+   * where it is («Σαρωτής QR»).
+   */
   useEffect(() => {
-    (canCamera ? heading.current : input.current)?.focus();
-  }, [canCamera]);
-  // After a lookup or a wait ENDS (busy -> idle, blocked -> open), the field is ready for the next scan.
-  const wasBusy = useRef(false);
-  useEffect(() => {
-    const waiting = state.busy || blocked;
-    if (wasBusy.current && !waiting && !cameraOn) input.current?.focus();
-    wasBusy.current = waiting;
+    if (!state.busy && !blocked && !cameraOn) input.current?.focus();
   }, [state.busy, blocked, cameraOn]);
   // D9 wait: redraw every second so the countdown moves and the scan re-opens when Retry-After has passed.
   useEffect(() => {
@@ -112,7 +112,8 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
       );
     } catch (failure) {
       if (camRun.current === run) camRun.current = null;
-      if (failure === "aborted") return;
+      // Closed, locked or left first: whatever the camera answers now is not shown.
+      if (failure === "aborted" || run.signal.aborted) return;
       setCameraOn(false);
       setCameraError(failure === "denied" ? "denied" : "unavailable");
     }
@@ -129,9 +130,7 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
   const notice = state.notice ? noticeText(state.notice, now, state.blockedUntil) : null;
   return (
     <main className="mx-auto max-w-[560px] px-5 pt-8 pb-12 md:px-8 md:pt-12" data-evc-counter="scan">
-      <h1 ref={heading} tabIndex={-1} className="font-literata mb-1.5 text-[24px] font-semibold outline-none">
-        Σάρωση QR μέλους
-      </h1>
+      <h1 className="font-literata mb-1.5 text-[24px] font-semibold">Σάρωση QR μέλους</h1>
       <p className="mb-6 text-sm text-espresso/60">Ο πελάτης δείχνει τον κωδικό QR της κάρτας του από το κινητό του (ή στιγμιότυπο οθόνης).</p>
 
       {/* Two fixed live regions: good news is announced politely, problems at once. */}
@@ -171,7 +170,7 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
           Σαρωτής QR
         </label>
         <p id="evc-scan-help" className="mb-3 text-[12.5px] text-espresso/55">
-          Με σαρωτή χειρός: πατήστε στο πεδίο και σαρώστε τον κωδικό.
+          Με σαρωτή χειρός: σαρώστε τον κωδικό (το πεδίο είναι ήδη έτοιμο).
         </p>
         <input
           ref={input}
@@ -183,12 +182,25 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
-          inputMode="text"
+          inputMode={keyboard ? "text" : "none"}
           enterKeyHint="search"
           maxLength={256}
           disabled={state.busy || blocked}
           className="min-h-12 w-full rounded-xl border border-espresso/20 bg-white px-4 text-[15px]"
         />
+        {!keyboard && (
+          <button
+            type="button"
+            onClick={() => {
+              setKeyboard(true);
+              input.current?.focus();
+            }}
+            disabled={state.busy || blocked}
+            className={`${BTN_SECONDARY} mt-3 w-full`}
+          >
+            Πληκτρολόγηση κωδικού
+          </button>
+        )}
         <button type="submit" disabled={state.busy || blocked || code.trim() === ""} className={`${BTN_PRIMARY} mt-3 w-full`}>
           {state.busy ? "Αναζήτηση μέλους…" : blocked && state.blockedUntil !== null ? `Αναμονή ${countdown(state.blockedUntil, now)}` : "Αναζήτηση"}
         </button>

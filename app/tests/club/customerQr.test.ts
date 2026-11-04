@@ -377,6 +377,37 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
     assert.deepEqual(f2.getState(), { phase: "error" });
   });
 
+  it("MAJOR 1 race: sign-out while the new QR is still being written leaves NOTHING on the phone", async () => {
+    const { storage, keeper } = persisted();
+    let release: (v: QrIssue) => void = () => {};
+    const api: CustomerQrApi = { status: async () => ({ kind: "none" }), issue: () => new Promise<QrIssue>((r) => (release = r)) };
+    const flow = new MemberQrFlow(api, keeper);
+    const opening = flow.open(ME);
+    await new Promise((r) => setTimeout(r, 20));
+    release({ kind: "issued", token: TOKEN, issuedAt: ISSUED });
+    // Let show() start the write (it is now hashing on the thread pool), then tap «Αποσύνδεση».
+    for (let i = 0; i < 3; i++) await Promise.resolve();
+    const before = storage.writes.length;
+    await flow.forget();
+    assert.equal(storage.ours().length, 0, "nothing when sign-out resolves (CustomerApp navigates right then)");
+    await opening;
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(storage.ours().length, 0, "and nothing a moment later: the pending write never lands");
+    assert.ok(!storage.writes.slice(before).some((w) => w.startsWith("set ")), "no setItem after the forget started");
+    assert.equal(keeper.memory(), null);
+  });
+
+  it("a write started before forget(account) is void; a write started after it is kept", async () => {
+    const storage = new MapStorage();
+    const store = createStorageQrKeeper(storage as unknown as Storage, subtle)!;
+    const early = store.write(ME, ISSUED, TOKEN);
+    await store.forget(ME);
+    await early;
+    assert.equal(storage.ours().length, 0);
+    await store.write(ME, ISSUED2, TOKEN2);
+    assert.equal(await store.read(ME, ISSUED2), TOKEN2);
+  });
+
   it("an older reply never overwrites a newer open(); forget() drops memory and the phone's record", async () => {
     let release: (s: QrStatus) => void = () => {};
     const { storage, keeper } = persisted();

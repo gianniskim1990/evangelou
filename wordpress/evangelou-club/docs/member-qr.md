@@ -275,14 +275,47 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
   - **Fallback.** Without WebCrypto or a working `localStorage` (private mode, blocked, full), the QR stays
     in memory only.
   - The server never re-sends a token.
+  - **Sign-out race (round 3, review MAJOR 1).** A write computes two SHA-256 digests before `setItem`.
+    Every `forget()` / `forgetAll()` bumps an epoch the moment it is called, and a write re-checks that
+    epoch after its last await, in the same synchronous step as `setItem`. So no record can land after
+    sign-out has started, and logout awaits the wipe before WordPress signs out. Covered by a test of the
+    reviewer's reproduction (sign-out while the new QR is still being written) and mutants Q24–Q26.
+  - **A change of the `issued_at` format fails safe.** The record key includes the exact `issued_at`
+    string, so any change (time zone, precision) makes the stored record unreadable for that key, and it is
+    deleted on the next read. The member then sees «Νέο QR» or uses the screenshot; no wrong code is ever
+    shown.
+  - **The account hash is unsalted (a deliberate choice, round 3).** It only keeps the e-mail from being
+    readable at a glance. Anyone who can read this storage can also read the token itself, which is the
+    valuable part, and a per-device salt kept in the same store would be just as readable. So a salt would
+    add code without protecting anything; documented as low risk.
+  - **Residual risk, accepted by the owner («Ναι, να τον θυμάται»).** Any script running on the WordPress
+    origin can read `localStorage` and so the member's token: another plugin, the theme, or an XSS on any
+    page of the site. Such a token works at the counter like a screenshot, so the limits are the same:
+    - one free coffee per Athens day, enforced by the server;
+    - the staff check of the first name;
+    - «Νέο QR» or the administrator's revocation retires it.
+    It is NOT secret storage.
 - **Guard.** `app/scripts/storage-guard.mjs` runs in the packager on the customer bundle's real esbuild
   import graph (app sources and `node_modules`) and in `tests/club/storageGuard.test.ts`:
+  - the rules run on a normalised text (round 3): comments removed, `\uXXXX` / `\u{…}` / `\xXX` decoded,
+    `"local" + "Storage"` and `${"local"}Storage` folded, `x["cookie"]` read as `x.cookie`;
   - only `src/customer/qrStore.ts` may name a browser store, and only `localStorage`;
+  - `caches`, `.cookie` (any object: `d.cookie` too) and `navigator.storage` are refused in the app's own
+    sources. React's development build has a local `caches`, so these generic names are left to the
+    built-bundle check for `node_modules`;
+  - the packager also requires the BUILT, minified customer JS to contain `localStorage` exactly once (the
+    access in qrStore.ts; `EXPECTED_CUSTOMER_LOCAL_STORAGE`). The minifier folds escapes, concatenations
+    and constant brackets, so a bypass in any module changes the count and stops the package. It bans
+    `sessionStorage`, `indexedDB`, `document.cookie`, `.cookie`, `caches`, `navigator.storage`,
+    `cookieStore`, `openDatabase` and `CacheStorage` in that output;
   - every other file is refused for `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie`,
     Cache API, … (comments are ignored, strings count);
   - the built customer bundle still may not contain `sessionStorage`, `indexedDB` or `document.cookie`.
-  - Not covered statically: a store name built at run time from harmless pieces.
-  - Mutants Q12–Q22.
+  - **Not covered statically:** aliasing an object through a variable (`const n = navigator; n.storage`)
+    and a store name built from run-time values (`x[someVariable]`). The bundle-level count and bans
+    catch every form the minifier can resolve; nothing static can catch the rest, and review remains
+    the last net.
+  - Mutants Q12–Q22, Q27–Q30.
 - **The decision rules, as built:**
 
 | Server says | What the app does |
@@ -367,9 +400,18 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
     - Mutants C17–C19.
   - **Retry-After.** An explicit `0` is 0 (not 300). The scan screen redraws every second with a «4:59»
     countdown and re-opens by itself. Mutants C20–C22.
-  - **Focus.** The scanner field has focus on arrival when there is no camera, and again after a lookup or
-    a wait ends. autocomplete / autocorrect / autocapitalize / spellcheck are off. Two fixed live regions
-    (status, alert). Mutants C23–C24.
+  - **Focus (round 3, review MINOR 4).** With the jsQR fallback almost every tablet "has a camera", so
+    the scanner field now has focus WHENEVER the camera is not running: on arrival, after a lookup, after
+    a wait, after «Κλείσιμο κάμερας». A USB / Bluetooth hand scanner therefore works without a tap.
+    - The field is `inputmode="none"`, so focusing it does not open the on-screen keyboard over the
+      screen; a hardware scanner or keyboard still types into it.
+    - «Πληκτρολόγηση κωδικού» switches to the normal keyboard for typing or pasting.
+    - autocomplete / autocorrect / autocapitalize / spellcheck are off.
+    - Two fixed live regions (status, alert); the field's label («Σαρωτής QR») tells a screen reader
+      where it is.
+    - Mutants C23–C24.
+  - **After Close.** A camera that answers after «Κλείσιμο κάμερας», a lock or a screen change (granted
+    or refused) shows nothing and is stopped. The jsQR canvas is emptied on stop. Mutants C28–C30.
 - **Gating:** everything runs only while the session is ready AND `features.qr_lookup === true`. A status
   check that turns it off, a lock, an expiry or a 401 / 403 drops the member at once.
 

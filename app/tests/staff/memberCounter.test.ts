@@ -633,6 +633,16 @@ describe("STAGE-05D round 2: hand scanner text, Retry-After, camera fallback and
     assert.equal(s.tracks[0].stopped, true);
   });
 
+  it("a refusal that arrives after the abort is reported as aborted, not as denied", async () => {
+    const asked = deferred<MediaStream>();
+    const env: CameraEnv = { BarcodeDetector: class { async detect() { return []; } }, mediaDevices: { getUserMedia: () => asked.promise }, setInterval: () => 1, clearInterval: () => {} };
+    const run = new AbortController();
+    const started = startQrCamera(video(), () => {}, env, run.signal);
+    run.abort();
+    asked.reject(Object.assign(new Error("no"), { name: "NotAllowedError" }));
+    await assert.rejects(started, (x: unknown) => x === "aborted");
+  });
+
   it("aborting a running camera stops it", async () => {
     const s = stream();
     const env: CameraEnv = { BarcodeDetector: class { async detect() { return []; } }, mediaDevices: { getUserMedia: async () => s.media }, setInterval: () => 1, clearInterval: () => {} };
@@ -682,6 +692,7 @@ describe("STAGE-05D round 2: hand scanner text, Retry-After, camera fallback and
     assert.deepEqual(codes, [TOKEN]);
     assert.deepEqual(sizes[0], [DECODE_MAX_SIDE, 270], "downscaled to the longest side");
     assert.equal(s.tracks[0].stopped, true);
+    assert.deepEqual([canvas.width, canvas.height], [0, 0], "the last frame is dropped on stop()");
   });
 
   it("the real lazy decoder (jsQR) reads a member QR frame", async () => {
@@ -749,13 +760,42 @@ describe("STAGE-05D round 2: scan screen (DOM)", () => {
     const ctx = await readyCounter(true);
     await dom.render(createElement(StaffApp, { controller: ctx.controller, counter: ctx.flow, camera }));
     await dom.click(dom.document.querySelector('[data-evc-action="qr"]')!);
-    assert.equal(dom.document.activeElement?.textContent, "Σάρωση QR μέλους", "with a camera, focus on the heading");
+    assert.ok(dom.document.activeElement === dom.document.getElementById("evc-scan-code"), "even with a camera, the scanner field has focus (a USB scanner works without a tap)");
+    assert.equal(dom.document.getElementById("evc-scan-code")!.getAttribute("inputmode"), "none", "no on-screen keyboard over the screen");
     await dom.click(button("Άνοιγμα κάμερας"));
     await act(async () => ctx.controller.lock());
     assert.match(text(), /Η οθόνη κλειδώθηκε/);
     await act(async () => granted.resolve({ getTracks: () => tracks } as unknown as MediaStream));
     await act(async () => {});
     assert.equal(tracks[0].stopped, true, "no camera left running behind the lock screen");
+  });
+
+  it("a camera refused AFTER «Κλείσιμο κάμερας» shows no error; the field has focus again after Close", async () => {
+    for (const late of ["denied", "unavailable"] as const) {
+      await dom.reset();
+      const asked = deferred<MediaStream>();
+      const camera: CameraEnv = { BarcodeDetector: class { async detect() { return []; } }, mediaDevices: { getUserMedia: () => asked.promise }, setInterval: () => 1, clearInterval: () => {} };
+      const ctx = await readyCounter(true);
+      await dom.render(createElement(StaffApp, { controller: ctx.controller, counter: ctx.flow, camera }));
+      await dom.click(dom.document.querySelector('[data-evc-action="qr"]')!);
+      await dom.click(button("Άνοιγμα κάμερας"));
+      await dom.click(button("Κλείσιμο κάμερας"));
+      assert.ok(dom.document.activeElement === dom.document.getElementById("evc-scan-code"), "focus back on the field after Close");
+      await act(async () => asked.reject(late === "denied" ? Object.assign(new Error("no"), { name: "NotAllowedError" }) : new Error("busy")));
+      await act(async () => {});
+      assert.doesNotMatch(text(), /Δεν δόθηκε άδεια για την κάμερα|Η κάμερα δεν είναι διαθέσιμη/, `${late}: nothing to report after Close`);
+      button("Άνοιγμα κάμερας");
+    }
+  });
+
+  it("«Πληκτρολόγηση κωδικού» switches the field to the on-screen keyboard", async () => {
+    await mountApp(true);
+    await dom.click(dom.document.querySelector('[data-evc-action="qr"]')!);
+    const field = dom.document.getElementById("evc-scan-code") as HTMLInputElement;
+    assert.equal(field.getAttribute("inputmode"), "none");
+    await dom.click(button("Πληκτρολόγηση κωδικού"));
+    assert.equal(field.getAttribute("inputmode"), "text");
+    assert.ok(dom.document.activeElement === field);
   });
 
   it("«Κλείσιμο κάμερας» while the browser is still asking also stops the late stream", async () => {

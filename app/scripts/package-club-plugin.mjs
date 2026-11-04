@@ -37,8 +37,14 @@ const FORBIDDEN_CUSTOMER_BUNDLE_STRINGS = [
   "mockClubService", "createMockClubService", "DEMO-QR", "evc-staff-config", "/club-admin", "x-admin-password", "/api/orders", "/api/overrides",
   // STAGE-05D round 2: localStorage is allowed in ONE source file (src/customer/qrStore.ts, the member's
   // own QR; scripts/storage-guard.mjs checks the real import graph below); every other store stays banned.
-  "sessionStorage", "indexedDB", "document.cookie",
+  // Round 3: checked on the MINIFIED output, which folds escapes, "a" + "b" and x["y"] into plain names.
+  "sessionStorage", "indexedDB", "document.cookie", ".cookie", "caches", "navigator.storage", "cookieStore", "openDatabase", "CacheStorage",
 ];
+// Round 3 (review of 77a0e35, MAJOR 2): the built customer JS must contain `localStorage` EXACTLY this
+// often: the one access in src/customer/qrStore.ts (browserStorage()). Any other use (an escape, a
+// concatenation, a copy in another module) changes the count and stops the package. Changing qrStore's
+// access count means changing this number in the same reviewed change.
+const EXPECTED_CUSTOMER_LOCAL_STORAGE = 1;
 const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Bacs_Payment_Confirmation", "new EVC_Bacs_Payment_Finalizer", "new EVC_Bacs_Payment_Issuer", "class EVC_Hooked_Provenance_Store", "class EVC_Bacs_Intent_Fixture", "class EVC_Read_Only_Provenance_Store_Spy", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup", "class EVC_In_Memory_Prepared_Redemption_Store", "class EVC_Fake_Prep_Catalogue_Authority", "new EVC_Prepared_Redemption_Service", "implements EVC_Prep_Redemption_Store", "implements EVC_Prep_Catalogue_Authority", "class EVC_Fake_Club_Staff_Authorizer", "new EVC_Handoff_Service", "new EVC_Fulfillment_Read_Model", "implements EVC_Redemption_Fulfillment_Store", "class EVC_Fake_Redemption_History", "class EVC_Fake_Member_Context_Verifier", "new EVC_Usual_Coffee_Service", "implements EVC_Redemption_History_Source", "new EVC_Signed_Member_Context_Verifier", "class EVC_Fake_Qr_Token_Store", "class EVC_Fake_Member_Phone_Directory", "class EVC_Fake_Lookup_Rate_Limiter", "class EVC_Fake_Member_Identity_Store", "class EVC_Fake_Wp_Account_Directory", "class EVC_Fake_Member_Status_Policy", "class EVC_Fake_Qr_Delivery_Policy", "new EVC_Member_Account_Service", "new EVC_Member_Qr_Coordinator", "implements EVC_Member_Status_Policy", "implements EVC_Qr_Delivery_Policy", "class EVC_Contract_Vector_Builder", "EVC_Test_Redemption_Backend", "EVC_Test_Coffee_Catalogue", "fixtures/coffee-catalog.php", "new EVC_Rest_V2_Domain_Response", "register_rest_route(EVC_Rest_V2_Routes", "'EVC_Rest_V2_Security'", "EVC_Rest_V2_Security::filter_post_dispatch", "EVC_Test_V2_Harness", "EVC_Staff_Role_Upgrade_Planner::", "new EVC_Staff_Role_Upgrade_Approval", "EVC_Staff_Role_Versions::VERSION_OPTION"];
 const SILENCE = "<?php\n// Silence is golden.\n";
 
@@ -113,6 +119,11 @@ for (const f of files) {
     fail(`dev-only file shipped: ${f}`);
   }
   if (f.endsWith(".map")) fail(`source map shipped: ${f}`);
+}
+{
+  const customerJs = files.filter((x) => x.startsWith("customer-app/") && x.endsWith(".js"));
+  const count = customerJs.reduce((n, f) => n + readFileSync(join(out, f), "utf8").split("localStorage").length - 1, 0);
+  if (count !== EXPECTED_CUSTOMER_LOCAL_STORAGE) fail(`the built customer JS names localStorage ${count} time(s); expected exactly ${EXPECTED_CUSTOMER_LOCAL_STORAGE} (src/customer/qrStore.ts only)`);
 }
 for (const f of files.filter((x) => /\.(js|css)$/.test(x))) {
   const text = readFileSync(join(out, f), "utf8");

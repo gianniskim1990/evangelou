@@ -1349,3 +1349,20 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - All 50 C* / Q* mutants were re-run locally: all killed, peak 0.43 GB.
   - **Rule for future tests:** never pass DOM nodes as actual/expected to `assert.equal`, `assert.notEqual` or `assert.deepEqual`.
 - CI on 77a0e359 (STAGE-05D round 2 code, PR #39): green. Foundation pull_request run 41873126950 18/18; frontend pull_request 41873127251 4/4 (incl. both mutation shards of 325 and the isolated-build check with the new canary); frontend push 41873118887 4/4. No foundation push run was created for this SHA (the commit touched only app/tests and memory.md; foundation's path filter). The previous code SHA e628991 had foundation push 41852977222 green after one flake re-run.
+
+### STAGE-05D round 3: re-review of 77a0e35 (approve with changes) (2026-11-04)
+- **MAJOR 1, sign-out race.** `qrStore.ts` now has an epoch: `forget()` / `forgetAll()` bump it synchronously when called, and `write()` re-checks it after its last await, in the same synchronous step as `setItem`. No record can land after sign-out has started. The test reproduces the reviewer's `race.ts`. Mutants Q24–Q26.
+- **MAJOR 2, guard bypasses.**
+  - `storage-guard.mjs` normalises the source first: escapes decoded, string concatenation and template literals folded, `x["y"]` turned into `x.y`.
+  - New rules: `caches`, `.cookie` and `navigator.storage`. The generic names `caches` and `.cookie` are checked in app sources only, because React's development build has its own `caches`.
+  - Bypass fixtures were added.
+  - Packager: the built minified customer JS must contain `localStorage` exactly `EXPECTED_CUSTOMER_LOCAL_STORAGE = 1` times (verified by hand: a second access gives 2 and FAILS). Extra bundle bans: `.cookie`, `caches`, `navigator.storage`, `cookieStore`, `openDatabase`, `CacheStorage`.
+  - Aliasing (`const n = navigator; n.storage`) is documented as not statically catchable.
+  - Mutants Q27–Q30.
+- **Minors.**
+  - **Camera answers after abort.** These are now silent: `startQrCamera` throws "aborted" when the refusal comes after the abort, and the screen checks `run.signal.aborted`. Mutants C28–C29.
+  - **Scanner focus.** The scanner field has focus whenever the camera is not running, with `inputmode="none"` (no on-screen keyboard; a USB scanner still types) and a «Πληκτρολόγηση κωδικού» toggle. C23 and C24 were re-aimed.
+  - **Account hash.** It stays unsalted; documented as low risk, because a salt kept in the same store protects nothing from someone who can read the token anyway.
+  - **Residual risk.** Any script on the WordPress origin can read the localStorage token; documented, and accepted by the owner.
+- **Nits.** The canvas is emptied on stop (C30). An `issued_at` format change fails safe (the record is deleted); documented.
+- **Rule kept.** No DOM nodes in `assert.equal`, `assert.notEqual` or `assert.deepEqual`.

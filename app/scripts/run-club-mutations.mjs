@@ -1889,14 +1889,14 @@ const mutants = [
   {
     id: "C23-scanner-field-not-focused",
     file: "staff/member/CounterScreens.tsx",
-    search: "    (canCamera ? heading.current : input.current)?.focus();",
-    replace: "    heading.current?.focus();",
+    search: "    if (!state.busy && !blocked && !cameraOn) input.current?.focus();\n",
+    replace: "",
   },
   {
     id: "C24-no-refocus-after-a-lookup",
     file: "staff/member/CounterScreens.tsx",
-    search: "    if (wasBusy.current && !waiting && !cameraOn) input.current?.focus();\n",
-    replace: "",
+    search: "          inputMode={keyboard ? \"text\" : \"none\"}",
+    replace: "          inputMode=\"text\"",
   },
   {
     id: "C25-no-camera-without-barcodedetector",
@@ -1987,6 +1987,67 @@ const mutants = [
     file: "customer/qrEncode.ts",
     search: "    if (forced !== undefined && mask !== forced) continue;\n",
     replace: "",
+  },
+  // STAGE-05D round 3: sign-out race, guard bypasses, camera answers after Close, last frame.
+  {
+    id: "C28-error-shown-after-close",
+    file: "staff/member/CounterScreens.tsx",
+    search: "      if (failure === \"aborted\" || run.signal.aborted) return;\n",
+    replace: "",
+  },
+  {
+    id: "C29-late-refusal-reported-as-denied",
+    file: "staff/member/qrCamera.ts",
+    search: "    if (signal.aborted) throw \"aborted\" satisfies CameraFailure;\n",
+    replace: "",
+  },
+  {
+    id: "C30-last-frame-kept-after-stop",
+    file: "staff/member/qrCamera.ts",
+    search: "    for (const fn of onStops) fn();\n",
+    replace: "",
+  },
+  {
+    id: "Q24-write-lands-after-sign-out",
+    file: "customer/qrStore.ts",
+    search: "        if (mine !== epoch) return;\n",
+    replace: "",
+  },
+  {
+    id: "Q25-forget-does-not-void-pending-writes",
+    file: "customer/qrStore.ts",
+    search: "    async forget(account) {\n      epoch++;",
+    replace: "    async forget(account) {",
+  },
+  {
+    id: "Q26-forget-all-does-not-void-pending-writes",
+    file: "customer/qrStore.ts",
+    search: "    async forgetAll() {\n      epoch++;",
+    replace: "    async forgetAll() {",
+  },
+  {
+    id: "Q27-guard-escapes-not-decoded",
+    file: "../scripts/storage-guard.mjs",
+    search: "    .replace(/\\\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))\n",
+    replace: "",
+  },
+  {
+    id: "Q28-guard-concatenation-not-folded",
+    file: "../scripts/storage-guard.mjs",
+    search: "  for (let guard = 0; lit.test(code) && guard < 10000; guard++) code = code.replace(lit, (_, _q, a, _r, b) => `\"${a}${b}\"`);\n",
+    replace: "",
+  },
+  {
+    id: "Q29-guard-brackets-not-folded",
+    file: "../scripts/storage-guard.mjs",
+    search: "  code = code.replace(/\\[\\s*([\"'`])([A-Za-z_$][\\w$]*)\\1\\s*\\]/g, (_, _q, name) => `.${name}`);\n",
+    replace: "",
+  },
+  {
+    id: "Q30-generic-names-skipped-in-app-code",
+    file: "../scripts/storage-guard.mjs",
+    search: "    if (dependency && APP_ONLY_APIS.includes(api)) continue;",
+    replace: "    if (APP_ONLY_APIS.includes(api)) continue;",
   },
 ];
 

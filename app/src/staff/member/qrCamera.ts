@@ -89,7 +89,12 @@ function nativeReader(env: CameraEnv, video: HTMLVideoElement): Reader {
   return async () => (await detector.detect(video)).find((c) => typeof c.rawValue === "string" && c.rawValue !== "")?.rawValue ?? null;
 }
 
-function frameReader(decode: FrameDecoder, canvas: FrameCanvas, video: HTMLVideoElement): Reader {
+function frameReader(decode: FrameDecoder, canvas: FrameCanvas, video: HTMLVideoElement, onStop: (fn: () => void) => void): Reader {
+  // The last frame never outlives the camera: an empty canvas on stop().
+  onStop(() => {
+    canvas.width = 0;
+    canvas.height = 0;
+  });
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   return async () => {
     const w = video.videoWidth;
@@ -116,17 +121,20 @@ export async function startQrCamera(video: HTMLVideoElement, onCode: (code: stri
   try {
     stream = await env.mediaDevices!.getUserMedia({ video: { facingMode: "environment" }, audio: false });
   } catch (err) {
+    // Refused after the screen was already closed / locked: nothing to report any more.
+    if (signal.aborted) throw "aborted" satisfies CameraFailure;
     throw ((err as { name?: string } | null)?.name === "NotAllowedError" ? "denied" : "unavailable") satisfies CameraFailure;
   }
   const release = () => {
     for (const track of stream.getTracks()) track.stop();
   };
   let read: Reader;
+  const onStops: (() => void)[] = [];
   try {
     if (typeof env.BarcodeDetector === "function") read = nativeReader(env, video);
     else {
       const decode = await env.loadDecoder!();
-      read = frameReader(decode, env.createCanvas!(), video);
+      read = frameReader(decode, env.createCanvas!(), video, (fn) => onStops.push(fn));
     }
   } catch {
     release();
@@ -149,6 +157,7 @@ export async function startQrCamera(video: HTMLVideoElement, onCode: (code: stri
     if (timer !== null) env.clearInterval(timer);
     release();
     video.srcObject = null;
+    for (const fn of onStops) fn();
   };
   signal.addEventListener("abort", stop, { once: true });
   video.srcObject = stream;

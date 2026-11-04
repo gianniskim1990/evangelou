@@ -111,6 +111,15 @@ export function createStorageQrKeeper(storage: StorageLike | null = browserStora
     }
   };
 
+  /*
+   * Sign-out race (review of 77a0e35, MAJOR 1): write() awaits two SHA-256 digests before setItem, and
+   * forget() / forgetAll() delete at once. Without this, a write started before «Αποσύνδεση» could
+   * land AFTER the wipe and keep the token. Every forget / forgetAll bumps `epoch` synchronously when
+   * it is CALLED; a write captured the epoch when it was called and re-checks it after its last await,
+   * in the same synchronous step as setItem. So no setItem can happen once a forget has started.
+   */
+  let epoch = 0;
+
   return {
     async read(account, issuedAt) {
       try {
@@ -129,15 +138,20 @@ export function createStorageQrKeeper(storage: StorageLike | null = browserStora
     },
     async write(account, issuedAt, token) {
       if (!TOKEN_RE.test(token)) return;
+      const mine = epoch;
       try {
         const a = await accountHash(account);
+        const key = await recordKey(account, issuedAt);
+        // A forget / sign-out started while the digests were computed: this write is void.
+        if (mine !== epoch) return;
         prune(a, null);
-        storage.setItem(await recordKey(account, issuedAt), JSON.stringify({ v: 1, a, t: token } satisfies Record_));
+        storage.setItem(key, JSON.stringify({ v: 1, a, t: token } satisfies Record_));
       } catch {
         // not persisted (full, blocked): the QR is still shown from memory this visit
       }
     },
     async forget(account) {
+      epoch++;
       try {
         prune(await accountHash(account), null);
       } catch {
@@ -145,6 +159,7 @@ export function createStorageQrKeeper(storage: StorageLike | null = browserStora
       }
     },
     async forgetAll() {
+      epoch++;
       for (const k of ownKeys()) remove(k);
     },
   };
