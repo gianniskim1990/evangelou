@@ -96,7 +96,7 @@ export function CustomerApp({
   };
 
   const onCard = result?.kind === "ok" && (screen ?? (toLiveView(result.me, now()).state === "active" ? "card" : "dashboard")) === "card";
-  // Each time the card is opened, the QR is resolved again from GET /me/qr (docs/member-qr.md table).
+  // Each time the card is opened, the QR is resolved again from GET /me/qr (docs/member-qr.md rules).
   useEffect(() => {
     if (onCard) void qrFlow?.open();
   }, [onCard, qrFlow]);

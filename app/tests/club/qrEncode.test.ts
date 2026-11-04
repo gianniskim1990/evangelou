@@ -92,7 +92,7 @@ describe("member QR encoder (decoded by jsQR)", () => {
         assert.equal(a[y0][x0 + d], true, "finder top edge");
         assert.equal(a[y0 + 6][x0 + d], true, "finder bottom edge");
       }
-      assert.equal(a[y0 + 1][x0 + 1], false, "finder ring");
+      assert.equal(a[y0 + 1][x0 + 1], false, "finder light square");
       assert.equal(a[y0 + 3][x0 + 3], true, "finder centre");
     }
   });

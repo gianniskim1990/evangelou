@@ -12,7 +12,7 @@ import { createDom, type DomHarness } from "../staff/support/dom";
  * STAGE-05D: the member's own Club QR in the REAL customer app.
  * - qrApi: GET/POST evangelou-club-customer/v1/me/qr parsed strictly; the
  *   token only ever comes from a POST 200.
- * - MemberQrFlow: the decision table of docs/member-qr.md; a replacement
+ * - MemberQrFlow: the decision rules of docs/member-qr.md; a replacement
  *   only after an explicit confirmation (D6); 409 qr_exists handled.
  * - CustomerApp: the real QR in the approved pass; the sample stays when the
  *   route does not exist; nothing in browser storage, the token never as text.
@@ -161,7 +161,7 @@ function scripted(statuses: QrStatus[], issues: QrIssue[]) {
   return { api, calls };
 }
 
-describe("STAGE-05D member QR flow (docs/member-qr.md decision table)", () => {
+describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
   it("none: POST {} once and show the new QR, kept in memory only", async () => {
     const memory = createQrMemory();
     const { api, calls } = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);

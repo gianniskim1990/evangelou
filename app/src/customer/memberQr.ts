@@ -2,7 +2,7 @@ import type { CustomerQrApi, QrIssue, QrStatus } from "./qrApi";
 
 /*
  * STAGE-05D: what the member's card does with the Club QR (pure logic, no
- * DOM). It follows the decision table of wordpress/evangelou-club/docs/
+ * DOM). It follows the decision rules of wordpress/evangelou-club/docs/
  * member-qr.md ("How the customer app keeps the QR"):
  *
  *   server says                         the card
@@ -174,7 +174,7 @@ export class MemberQrFlow {
     const issued = await this.api.issue(true);
     if (mine !== this.generation) return;
     if (issued.kind === "issued") return this.show(issued);
-    // Another device changed it at the same moment: read the server again and follow the table.
+    // Another device changed it at the same moment: read the server again and follow the rules.
     if (issued.kind === "concurrent_change") return this.resolve(mine, 1);
     return this.set(failure(issued) ?? { phase: "error" });
   }

@@ -46,7 +46,7 @@ function body(state: MemberQrState, flow: MemberQrFlow, confirmRef: RefObject<HT
     case "shown":
       return (
         <div className="text-center">
-          <div className="inline-block rounded-[10px] bg-white p-1">
+          <div className="inline-block">
             <QrSvg text={state.token} size={196} />
           </div>
           <p className="t-small mt-3 text-[var(--ink-2)]">Ενεργός από τις {ATHENS_DATE.format(new Date(state.issuedAt))}. Μένει ίδιος μέχρι να ζητήσετε νέο. Μπορείτε να κρατήσετε στιγμιότυπο οθόνης.</p>
@@ -64,7 +64,7 @@ function body(state: MemberQrState, flow: MemberQrFlow, confirmRef: RefObject<HT
       );
     case "confirm_replace":
       return (
-        <div role="alertdialog" aria-labelledby="evc-qr-confirm-title" aria-describedby="evc-qr-confirm-text" className="mx-auto max-w-[32ch] py-4 text-center">
+        <div role="alertdialog" aria-labelledby="evc-qr-confirm-title" aria-describedby="evc-qr-confirm-text" className="mx-auto max-w-[30ch] py-4 text-center">
           <h2 id="evc-qr-confirm-title" ref={confirmRef} tabIndex={-1} className="t-title text-[var(--ink)]">Θέλετε νέο κωδικό QR;</h2>
           <p id="evc-qr-confirm-text" className="t-small mt-2 text-[var(--ink-2)]">
             Ο τωρινός κωδικός, και κάθε στιγμιότυπο οθόνης του, θα σταματήσει να ισχύει αμέσως, σε όλες τις συσκευές.
