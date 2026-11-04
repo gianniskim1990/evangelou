@@ -1369,3 +1369,23 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - CI on 5d8e1c67 (STAGE-05D round 3 code, PR #39): green.
   - Foundation: pull_request 41887526535 18/18; push 41887521755 18/18 after one re-run of the failed job. The failure was the known BacsConfirmationTest Athens-chain real-clock flake (`test_expiry_and_an_early_renewal_follow_the_athens_chain`, commerce PHP 7.4 / MariaDB / orders posts).
   - Frontend: pull_request 41887526558 4/4 and push 41887521605 4/4. Both mutation shards (335 mutants) and the isolated-build check passed.
+
+### STAGE-05D round 4: review of 5d8e1c6 (approve with changes, no majors) (2026-11-04)
+- **Guard.**
+  - `storage-guard.mjs` now normalises with esbuild `transformSync` (`minifySyntax`): a real parser, so comments are stripped correctly even next to a regex literal such as `/a\/*/`. It decodes escapes and folds concatenation, templates and brackets. It is resolved at call time (from the file, else `EVC_APP_DIR`) because the test runner bundles tests into a temp dir.
+  - It also folds `["a","b"].join("")`.
+  - New app-only names: `cookie` and `storage`, which catches destructuring from document / navigator. The allowed file may use `localStorage` and `storage`.
+  - A module that cannot be parsed is refused.
+  - Packager: `cookie` is banned outright in the built customer JS, a `{…storage…}=navigator` destructuring is banned, and `Storage` must also appear exactly once (this catches an array join).
+  - The docs' over-claims were fixed.
+- **Shared phone and other tabs.**
+  - The phone keeps at most one QR: a read deletes every OTHER record (any account), and a write replaces all records.
+  - A `storage` event that removes our key (another tab's sign-out or replace) drops the in-memory token and re-opens the flow.
+  - The memory layer has its own epoch, so a read still in flight never refills memory after a forget (reviewer's `race2`, now a 30-spin test).
+  - The persistent read's epoch check was removed as dead: `forgetAll` deletes synchronously.
+- **Counter.**
+  - Focus is never stolen: the field is refocused only from body, from inside the scan form, or from a detached element, with `preventScroll`.
+  - A finger or stylus tap on the field (`pointerType` other than mouse) switches to the text keyboard.
+  - The field is `aria-describedby="evc-scan-title evc-scan-help"`.
+  - A decoder load that fails after an abort reports "aborted".
+- **Mutants.** Frontend 335 → 346 (Q30–Q39 minus Q28/Q29, which were equivalent to the esbuild folding and are removed together with their dead regex folds; C31–C34; C23, Q21, Q22, Q27 re-aimed). Q33 first survived and was killed by a deterministic test using a fake phone read. The shards are 173 + 173. All 33 changed-line mutants killed locally, peak memory 0.43 GB.

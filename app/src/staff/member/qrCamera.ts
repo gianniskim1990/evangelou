@@ -138,7 +138,8 @@ export async function startQrCamera(video: HTMLVideoElement, onCode: (code: stri
     }
   } catch {
     release();
-    throw "unavailable" satisfies CameraFailure;
+    // Round 4: a decoder that fails to load after Close / lock is not an error to show.
+    throw (signal.aborted ? "aborted" : "unavailable") satisfies CameraFailure;
   }
   // Closed, locked or left while the browser was still asking (or the decoder was loading): never keep
   // the camera on. ONE check after every await, so no late path can skip it.

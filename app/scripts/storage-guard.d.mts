@@ -4,5 +4,5 @@ export const STORAGE_APIS: string[];
 export function stripComments(src: string): string;
 export function storageProblems(path: string, src: string): string[];
 export function storageSelfTest(): string[];
-export function normalizeSource(src: string): string;
+export function normalizeSource(src: string, path?: string): string | null;
 export const APP_ONLY_APIS: string[];

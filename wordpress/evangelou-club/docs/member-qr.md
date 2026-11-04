@@ -275,6 +275,14 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
   - **Fallback.** Without WebCrypto or a working `localStorage` (private mode, blocked, full), the QR stays
     in memory only.
   - The server never re-sends a token.
+  - **Shared phone and other tabs (round 4).**
+    - The phone keeps at most ONE QR. A read for an account (the sign-in) deletes every other record,
+      whatever its account, and a write replaces every record.
+    - A sign-out or replace in another tab of the same browser fires a `storage` event that removes our
+      key. This tab then drops its in-memory copy at once and asks the server again
+      (`onExternalChange`).
+    - The memory layer has its own epoch, so a read still in flight at sign-out never puts the token back
+      into memory (the reviewer's `race2`).
   - **Sign-out race (round 3, review MAJOR 1).** A write computes two SHA-256 digests before `setItem`.
     Every `forget()` / `forgetAll()` bumps an epoch the moment it is called, and a write re-checks that
     epoch after its last await, in the same synchronous step as `setItem`. So no record can land after
@@ -297,24 +305,33 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
     It is NOT secret storage.
 - **Guard.** `app/scripts/storage-guard.mjs` runs in the packager on the customer bundle's real esbuild
   import graph (app sources and `node_modules`) and in `tests/club/storageGuard.test.ts`:
-  - the rules run on a normalised text (round 3): comments removed, `\uXXXX` / `\u{…}` / `\xXX` decoded,
-    `"local" + "Storage"` and `${"local"}Storage` folded, `x["cookie"]` read as `x.cookie`;
-  - only `src/customer/qrStore.ts` may name a browser store, and only `localStorage`;
-  - `caches`, `.cookie` (any object: `d.cookie` too) and `navigator.storage` are refused in the app's own
-    sources. React's development build has a local `caches`, so these generic names are left to the
-    built-bundle check for `node_modules`;
-  - the packager also requires the BUILT, minified customer JS to contain `localStorage` exactly once (the
-    access in qrStore.ts; `EXPECTED_CUSTOMER_LOCAL_STORAGE`). The minifier folds escapes, concatenations
-    and constant brackets, so a bypass in any module changes the count and stops the package. It bans
-    `sessionStorage`, `indexedDB`, `document.cookie`, `.cookie`, `caches`, `navigator.storage`,
-    `cookieStore`, `openDatabase` and `CacheStorage` in that output;
-  - every other file is refused for `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie`,
-    Cache API, … (comments are ignored, strings count);
-  - the built customer bundle still may not contain `sessionStorage`, `indexedDB` or `document.cookie`.
-  - **Not covered statically:** aliasing an object through a variable (`const n = navigator; n.storage`)
-    and a store name built from run-time values (`x[someVariable]`). The bundle-level count and bans
-    catch every form the minifier can resolve; nothing static can catch the rest, and review remains
-    the last net.
+  - **Normalisation (rounds 3 and 4).** The rules run on a normalised text:
+    - esbuild parses the module and reprints it with `minifySyntax`. This is a real parser, so comments
+      are removed correctly, also next to a regex literal such as `/a\/*/`. The reprint decodes
+      `\uXXXX` / `\u{…}` / `\xXX` escapes, folds `"local" + "Storage"` and `${"local"}Storage`, and
+      prints `x["cookie"]` as `x.cookie`;
+    - then literal joins such as `["local", "Storage"].join("")` are folded (esbuild leaves joins alone);
+    - a module that cannot be parsed is refused (fail closed).
+  - **Rules.**
+    - Only `src/customer/qrStore.ts` may name a browser store: `localStorage`, plus its own generic
+      `storage` names (its variables, the `storage` event).
+    - In the app's own sources the names `caches`, `cookie`, `.cookie` and `storage` are refused
+      wherever they appear. This also covers destructuring (`const { cookie } = document`,
+      `const { storage } = navigator`) and an alias (`d.cookie`).
+    - React's development build has a local `caches`, so for `node_modules` these generic names are left
+      to the built-bundle checks. The specific APIs (`localStorage`, `sessionStorage`, `indexedDB`,
+      `document.cookie`, `navigator.storage`, …) are checked in `node_modules` too.
+  - **Built-bundle checks (packager).** The BUILT, minified customer JS must contain `localStorage` exactly
+    once and `Storage` exactly once (`EXPECTED_CUSTOMER_LOCAL_STORAGE`, the access in qrStore.ts).
+    - The minifier folds escapes, concatenations and constant brackets, so such a bypass in any module
+      changes a count. A name split into an array and joined changes the `Storage` count.
+    - It bans `cookie` (any occurrence: the bundle has none, and a destructuring keeps the word),
+      `sessionStorage`, `indexedDB`, `.cookie`, `caches`, `navigator.storage`, `cookieStore`,
+      `openDatabase` and `CacheStorage`, and a destructuring of `storage` out of `navigator`.
+  - **Not covered statically:**
+    - aliasing that is not a destructuring and uses a run-time key (`const n = navigator; n[k]`);
+    - a store name split so that no piece is `Storage` and joined at run time from non-literal parts.
+    - Review remains the last net.
   - Mutants Q12–Q22, Q27–Q30.
 - **The decision rules, as built:**
 
@@ -405,13 +422,20 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
     a wait, after «Κλείσιμο κάμερας». A USB / Bluetooth hand scanner therefore works without a tap.
     - The field is `inputmode="none"`, so focusing it does not open the on-screen keyboard over the
       screen; a hardware scanner or keyboard still types into it.
-    - «Πληκτρολόγηση κωδικού» switches to the normal keyboard for typing or pasting.
+    - «Πληκτρολόγηση κωδικού», or a finger or stylus tap on the field (round 4), switches to the normal
+      keyboard for typing or pasting.
+    - Round 4: focus is never stolen. The field takes focus back only when focus is on the body, inside
+      the scan form, or on an element that has just left the page. A staff member on «Πίσω στην αρχική»
+      keeps it there when a wait ends. `focus({ preventScroll: true })`.
+    - Round 4: the field is described by the screen title and its help (`aria-describedby="evc-scan-title
+      evc-scan-help"`), so a screen reader hears «Σάρωση QR μέλους» on arrival.
     - autocomplete / autocorrect / autocapitalize / spellcheck are off.
     - Two fixed live regions (status, alert); the field's label («Σαρωτής QR») tells a screen reader
       where it is.
     - Mutants C23–C24.
   - **After Close.** A camera that answers after «Κλείσιμο κάμερας», a lock or a screen change (granted
-    or refused) shows nothing and is stopped. The jsQR canvas is emptied on stop. Mutants C28–C30.
+    or refused) shows nothing and is stopped. So does a decoder whose chunk fails to load after Close
+    (round 4: "aborted", not "unavailable"). The jsQR canvas is emptied on stop. Mutants C28–C30.
 - **Gating:** everything runs only while the session is ready AND `features.qr_lookup === true`. A status
   check that turns it off, a lock, an expiry or a 401 / 403 drops the member at once.
 

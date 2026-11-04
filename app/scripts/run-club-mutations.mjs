@@ -1889,7 +1889,7 @@ const mutants = [
   {
     id: "C23-scanner-field-not-focused",
     file: "staff/member/CounterScreens.tsx",
-    search: "    if (!state.busy && !blocked && !cameraOn) input.current?.focus();\n",
+    search: "    if (field && free) field.focus({ preventScroll: true });\n",
     replace: "",
   },
   {
@@ -1973,13 +1973,13 @@ const mutants = [
   {
     id: "Q21-storage-allowed-everywhere",
     file: "../scripts/storage-guard.mjs",
-    search: "    const allowed = path === STORAGE_ALLOWED_FILE && STORAGE_ALLOWED_APIS.includes(api);",
+    search: "    const allowed = path === STORAGE_ALLOWED_FILE && ALLOWED_FILE_NAMES.includes(api);",
     replace: "    const allowed = true;",
   },
   {
     id: "Q22-any-store-in-the-allowed-file",
     file: "../scripts/storage-guard.mjs",
-    search: "path === STORAGE_ALLOWED_FILE && STORAGE_ALLOWED_APIS.includes(api)",
+    search: "path === STORAGE_ALLOWED_FILE && ALLOWED_FILE_NAMES.includes(api)",
     replace: "path === STORAGE_ALLOWED_FILE",
   },
   {
@@ -2028,26 +2028,93 @@ const mutants = [
   {
     id: "Q27-guard-escapes-not-decoded",
     file: "../scripts/storage-guard.mjs",
-    search: "    .replace(/\\\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))\n",
-    replace: "",
-  },
-  {
-    id: "Q28-guard-concatenation-not-folded",
-    file: "../scripts/storage-guard.mjs",
-    search: "  for (let guard = 0; lit.test(code) && guard < 10000; guard++) code = code.replace(lit, (_, _q, a, _r, b) => `\"${a}${b}\"`);\n",
-    replace: "",
-  },
-  {
-    id: "Q29-guard-brackets-not-folded",
-    file: "../scripts/storage-guard.mjs",
-    search: "  code = code.replace(/\\[\\s*([\"'`])([A-Za-z_$][\\w$]*)\\1\\s*\\]/g, (_, _q, name) => `.${name}`);\n",
-    replace: "",
+    search: "minifySyntax: true, legalComments",
+    replace: "minifySyntax: false, legalComments",
   },
   {
     id: "Q30-generic-names-skipped-in-app-code",
     file: "../scripts/storage-guard.mjs",
     search: "    if (dependency && APP_ONLY_APIS.includes(api)) continue;",
     replace: "    if (APP_ONLY_APIS.includes(api)) continue;",
+  },
+  // STAGE-05D round 4: shared phone / other tabs, guard destructuring and joins, focus, tap, title, decoder abort.
+  {
+    id: "Q31-sign-in-keeps-another-members-record",
+    file: "customer/qrStore.ts",
+    search: "        pruneOthers(want);",
+    replace: "        prune(a, want);",
+  },
+  {
+    id: "Q32-write-keeps-another-members-record",
+    file: "customer/qrStore.ts",
+    search: "        pruneOthers(null);\n        storage.setItem",
+    replace: "        prune(a, null);\n        storage.setItem",
+  },
+  {
+    id: "Q33-read-in-flight-refills-memory",
+    file: "customer/memberQr.ts",
+    search: "      if (mine !== epoch) return null;\n      if (kept",
+    replace: "      if (kept",
+  },
+  {
+    id: "Q34-other-tab-sign-out-keeps-memory",
+    file: "customer/memberQr.ts",
+    search: "    epoch++;\n    kept = null;\n    for (const l of external) l();",
+    replace: "    for (const l of external) l();",
+  },
+  {
+    id: "Q35-other-tab-change-not-re-read",
+    file: "customer/memberQr.ts",
+    search: "      if (p === \"shown\" || p === \"confirm_replace\") void this.open();\n",
+    replace: "",
+  },
+  {
+    id: "Q36-every-storage-event-drops-the-qr",
+    file: "customer/qrStore.ts",
+    search: "      if (key === null || (key.startsWith(QR_STORE_PREFIX) && newValue === null)) onRemoved();",
+    replace: "      onRemoved();",
+  },
+  {
+    id: "Q37-guard-join-not-folded",
+    file: "../scripts/storage-guard.mjs",
+    search: "  code = code.replace(/\\[((?:\\s*([\"'`])[^\"'`\\\\\\n]*\\2\\s*,?)+)\\]\\s*\\.\\s*join",
+    replace: "  code = code.replace(/NEVER((?:\\s*([\"'`])[^\"'`\\\\\\n]*\\2\\s*,?)+)\\]\\s*\\.\\s*join",
+  },
+  {
+    id: "Q38-guard-cookie-storage-names-allowed",
+    file: "../scripts/storage-guard.mjs",
+    search: "\"navigator.storage\", \"document.cookie\", \"cookie\", \"storage\"];",
+    replace: "\"navigator.storage\", \"document.cookie\"];",
+  },
+  {
+    id: "Q39-unparseable-module-passes",
+    file: "../scripts/storage-guard.mjs",
+    search: "  if (code === null) return [`${path}: cannot be parsed, so it cannot be checked for browser storage`];",
+    replace: "  if (code === null) return [];",
+  },
+  {
+    id: "C31-focus-stolen-after-a-wait",
+    file: "staff/member/CounterScreens.tsx",
+    search: "    const free = active === null || active === field?.ownerDocument.body || !active.isConnected || (field?.form?.contains(active) ?? false);",
+    replace: "    const free = true;",
+  },
+  {
+    id: "C32-tap-gives-no-keyboard",
+    file: "staff/member/CounterScreens.tsx",
+    search: "            if (e.pointerType !== \"mouse\") setKeyboard(true);\n",
+    replace: "",
+  },
+  {
+    id: "C33-field-not-described-by-the-title",
+    file: "staff/member/CounterScreens.tsx",
+    search: "          aria-describedby=\"evc-scan-title evc-scan-help\"",
+    replace: "          aria-describedby=\"evc-scan-help\"",
+  },
+  {
+    id: "C34-decoder-failure-after-close-reported",
+    file: "staff/member/qrCamera.ts",
+    search: "    throw (signal.aborted ? \"aborted\" : \"unavailable\") satisfies CameraFailure;",
+    replace: "    throw \"unavailable\" satisfies CameraFailure;",
   },
 ];
 

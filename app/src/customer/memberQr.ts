@@ -35,6 +35,8 @@ export interface QrKeeper {
   forget(account: string): Promise<void>;
   /** Deletes every record (sign-out, signed_out, route off). */
   forgetAll(): Promise<void>;
+  /** Round 4: another tab removed the phone's record (its sign-out or replace). */
+  onExternalChange?(listener: () => void): void;
 }
 
 interface Kept {
@@ -50,13 +52,27 @@ interface Kept {
  */
 export function createQrKeeper(persistent: QrKeeper | null = null): QrKeeper & { memory(): Kept | null } {
   let kept: Kept | null = null;
+  /** Bumped by every forget: a read still in flight then never puts a token back into memory. */
+  let epoch = 0;
+  const external = new Set<() => void>();
   const norm = (a: string) => a.trim().toLowerCase();
+  persistent?.onExternalChange?.(() => {
+    // Another tab signed out (or replaced the QR): drop this tab's copy at once, then tell the flow.
+    epoch++;
+    kept = null;
+    for (const l of external) l();
+  });
   return {
     memory: () => kept,
+    onExternalChange(listener) {
+      external.add(listener);
+    },
     async read(account, issuedAt) {
       const a = norm(account);
-      // The phone's store first: it deletes every record of the account but this exact one.
+      const mine = epoch;
+      // The phone's store first: it deletes every other record.
       const persisted = persistent ? await persistent.read(a, issuedAt) : null;
+      if (mine !== epoch) return null;
       if (kept && kept.account === a && kept.issuedAt === issuedAt) return kept.token;
       // An older QR of this account in memory is dead too.
       if (kept && kept.account === a) kept = null;
@@ -68,10 +84,12 @@ export function createQrKeeper(persistent: QrKeeper | null = null): QrKeeper & {
       if (persistent) await persistent.write(norm(account), issuedAt, token);
     },
     async forget(account) {
+      epoch++;
       if (kept?.account === norm(account)) kept = null;
       if (persistent) await persistent.forget(norm(account));
     },
     async forgetAll() {
+      epoch++;
       kept = null;
       if (persistent) await persistent.forgetAll();
     },
@@ -108,6 +126,11 @@ export class MemberQrFlow {
   constructor(api: CustomerQrApi, keeper: QrKeeper) {
     this.api = api;
     this.keeper = keeper;
+    // Round 4: another tab signed out or replaced the QR: never keep showing the old code here.
+    keeper.onExternalChange?.(() => {
+      const p = this.state.phase;
+      if (p === "shown" || p === "confirm_replace") void this.open();
+    });
   }
 
   getState = (): MemberQrState => this.state;

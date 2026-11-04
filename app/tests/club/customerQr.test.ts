@@ -4,7 +4,7 @@ import { createElement } from "react";
 import type { CustomerConfig } from "../../src/customer/config";
 import { CustomerApp } from "../../src/customer/CustomerApp";
 import { createCustomerApi, createNonceBox, type CustomerApi, type Me } from "../../src/customer/customerApi";
-import { MemberQrFlow, createQrKeeper } from "../../src/customer/memberQr";
+import { MemberQrFlow, createQrKeeper, type QrKeeper } from "../../src/customer/memberQr";
 import { QR_STORE_PREFIX, createStorageQrKeeper } from "../../src/customer/qrStore";
 import { createCustomerQrApi, parseQrIssued, parseQrStatus, type CustomerQrApi, type QrIssue, type QrStatus } from "../../src/customer/qrApi";
 import { createDom, type DomHarness } from "../staff/support/dom";
@@ -214,16 +214,24 @@ describe("STAGE-05D round 2: the phone's QR record (qrStore.ts)", () => {
     assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ["a", "t", "v"]);
     assert.equal(await store.read("eleni@example.org", ISSUED), TOKEN, "the e-mail is case-insensitive");
     assert.equal(await store.read(OTHER, ISSUED), null, "another account never reads it");
-    assert.equal(storage.ours().length, 1, "and never deletes it");
+    assert.equal(storage.ours().length, 0, "round 4, shared phone: another account's sign-in deletes it");
   });
 
   it("a different issued_at shows nothing and deletes the old record", async () => {
     const { storage, store } = persisted();
     await store.write(ME, ISSUED, TOKEN);
-    await store.write(OTHER, ISSUED, TOKEN2);
     assert.equal(await store.read(ME, ISSUED2), null);
-    assert.equal(storage.ours().length, 1, "only the other account's record is left");
-    assert.equal(await store.read(OTHER, ISSUED), TOKEN2);
+    assert.equal(storage.ours().length, 0);
+  });
+
+  it("round 4, shared phone: a QR shown for another account replaces every earlier member's record", async () => {
+    const { storage, store } = persisted();
+    await store.write(ME, ISSUED, TOKEN);
+    await store.write(OTHER, ISSUED2, TOKEN2);
+    assert.equal(storage.ours().length, 1, "at most one QR on the phone");
+    assert.equal(await store.read(ME, ISSUED), null, "the first member's token is gone");
+    assert.equal(await store.read(OTHER, ISSUED2), null, "(and that read, as a sign-in of the first member, removed the other one)");
+    assert.equal(storage.ours().length, 0);
   });
 
   it("a new record replaces the account's older one; forget / forgetAll; a tampered record is never shown", async () => {
@@ -299,7 +307,7 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
   });
 
   it("delete rules: signed_out, not_member, member_disabled, forbidden, route off and none", async () => {
-    for (const [kind, othersKept] of [["signed_out", 0], ["not_member", 1], ["member_disabled", 1], ["forbidden", 1], ["off", 0], ["none", 1]] as const) {
+    for (const [kind, othersKept] of [["signed_out", 0], ["not_member", 0], ["member_disabled", 0], ["forbidden", 0], ["off", 0], ["none", 0]] as const) {
       const { storage, keeper } = persisted();
       await keeper.write(OTHER, ISSUED, TOKEN2);
       await keeper.write(ME, ISSUED, TOKEN);
@@ -395,6 +403,77 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
     assert.equal(storage.ours().length, 0, "and nothing a moment later: the pending write never lands");
     assert.ok(!storage.writes.slice(before).some((w) => w.startsWith("set ")), "no setItem after the forget started");
     assert.equal(keeper.memory(), null);
+  });
+
+  it("race2 (review of 5d8e1c6): a read still in flight at sign-out never puts the token back into memory", async () => {
+    for (let spins = 0; spins < 30; spins++) {
+      const storage = new MapStorage();
+      await createStorageQrKeeper(storage as unknown as Storage, subtle)!.write(ME, ISSUED, TOKEN);
+      const keeper = createQrKeeper(createStorageQrKeeper(storage as unknown as Storage, subtle));
+      const flow = new MemberQrFlow({ status: async () => ({ kind: "active", issuedAt: ISSUED }), issue: async () => ({ kind: "error" }) }, keeper);
+      const opening = flow.open(ME);
+      for (let i = 0; i < spins; i++) await Promise.resolve();
+      await flow.forget();
+      await opening;
+      await new Promise((r) => setTimeout(r, 5));
+      assert.equal(keeper.memory(), null, `spins ${spins}: memory`);
+      assert.equal(storage.ours().length, 0, `spins ${spins}: phone`);
+      assert.notEqual(flow.getState().phase, "shown", `spins ${spins}: not shown`);
+    }
+  });
+
+  it("race2, deterministic: a phone read that resolves just before a sign-out never refills memory", async () => {
+    let resolveRead: (t: string | null) => void = () => {};
+    const persistent: QrKeeper = {
+      read: () => new Promise<string | null>((r) => (resolveRead = r)),
+      write: async () => {},
+      forget: async () => {},
+      forgetAll: async () => {},
+    };
+    const keeper = createQrKeeper(persistent);
+    const reading = keeper.read(ME, ISSUED);
+    resolveRead(TOKEN); // the phone answered with the token...
+    await keeper.forgetAll(); // ...and the sign-out runs before this tab's read continues
+    assert.equal(await reading, null, "the read is void");
+    assert.equal(keeper.memory(), null, "nothing came back into memory");
+  });
+
+  it("round 4: another tab's sign-out (its storage event) drops this tab's copy and asks the server again", async () => {
+    const storage = new MapStorage();
+    let fire: () => void = () => {};
+    const store = createStorageQrKeeper(storage as unknown as Storage, subtle, (onRemoved) => (fire = onRemoved))!;
+    const keeper = createQrKeeper(store);
+    const { api, calls } = scripted([{ kind: "none" }, { kind: "signed_out" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
+    const flow = new MemberQrFlow(api, keeper);
+    await flow.open(ME);
+    assert.equal(flow.getState().phase, "shown");
+    storage.map.clear(); // the other tab's forgetAll
+    fire();
+    assert.equal(keeper.memory(), null, "the in-memory copy is dropped at once");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(calls, ["GET", "POST {}", "GET"], "and the server is asked again");
+    assert.deepEqual(flow.getState(), { phase: "signed_out" });
+  });
+
+  it("round 4: the browser storage event filter: only our keys being removed (or a clear) count", () => {
+    let handler: ((e: Event) => void) | null = null;
+    const saved = globalThis.addEventListener;
+    (globalThis as unknown as { addEventListener: unknown }).addEventListener = (type: string, h: (e: Event) => void) => {
+      if (type === "storage") handler = h;
+    };
+    try {
+      let n = 0;
+      createStorageQrKeeper(new MapStorage() as unknown as Storage, subtle)!.onExternalChange!(() => n++);
+      assert.ok(handler);
+      const fire = (key: string | null, newValue: string | null) => handler!(Object.assign(new Event("storage"), { key, newValue }));
+      fire(`${QR_STORE_PREFIX}abc`, null);
+      fire(null, null);
+      fire(`${QR_STORE_PREFIX}abc`, "{}");
+      fire("someone-else", null);
+      assert.equal(n, 2);
+    } finally {
+      (globalThis as unknown as { addEventListener: unknown }).addEventListener = saved;
+    }
   });
 
   it("a write started before forget(account) is void; a write started after it is kept", async () => {

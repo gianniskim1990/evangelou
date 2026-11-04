@@ -83,8 +83,16 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
    * «Πληκτρολόγηση κωδικού» switches to the normal keyboard. The field's label tells a screen reader
    * where it is («Σαρωτής QR»).
    */
+  // Round 4 (review MINOR 2): never steal focus. Refocus ONLY when focus is nowhere (body), inside the scan
+  // form itself (the field or its «Αναζήτηση» button, so the next hand-scanner read lands in the field), or
+  // on an element that just left the page (e.g. the camera's «Κλείσιμο» button). A staff member who moved
+  // to «Πίσω στην αρχική» or «Πληκτρολόγηση» elsewhere keeps the focus there when a wait ends.
   useEffect(() => {
-    if (!state.busy && !blocked && !cameraOn) input.current?.focus();
+    if (state.busy || blocked || cameraOn) return;
+    const field = input.current;
+    const active = field?.ownerDocument.activeElement ?? null;
+    const free = active === null || active === field?.ownerDocument.body || !active.isConnected || (field?.form?.contains(active) ?? false);
+    if (field && free) field.focus({ preventScroll: true });
   }, [state.busy, blocked, cameraOn]);
   // D9 wait: redraw every second so the countdown moves and the scan re-opens when Retry-After has passed.
   useEffect(() => {
@@ -130,7 +138,9 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
   const notice = state.notice ? noticeText(state.notice, now, state.blockedUntil) : null;
   return (
     <main className="mx-auto max-w-[560px] px-5 pt-8 pb-12 md:px-8 md:pt-12" data-evc-counter="scan">
-      <h1 className="font-literata mb-1.5 text-[24px] font-semibold">Σάρωση QR μέλους</h1>
+      <h1 id="evc-scan-title" className="font-literata mb-1.5 text-[24px] font-semibold">
+        Σάρωση QR μέλους
+      </h1>
       <p className="mb-6 text-sm text-espresso/60">Ο πελάτης δείχνει τον κωδικό QR της κάρτας του από το κινητό του (ή στιγμιότυπο οθόνης).</p>
 
       {/* Two fixed live regions: good news is announced politely, problems at once. */}
@@ -175,7 +185,11 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
         <input
           ref={input}
           id="evc-scan-code"
-          aria-describedby="evc-scan-help"
+          aria-describedby="evc-scan-title evc-scan-help"
+          onPointerDown={(e) => {
+            // A finger or stylus on the field means "I want to type": switch to the on-screen keyboard.
+            if (e.pointerType !== "mouse") setKeyboard(true);
+          }}
           value={code}
           onChange={(e) => setCode(e.target.value)}
           autoComplete="off"

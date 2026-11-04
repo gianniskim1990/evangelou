@@ -633,6 +633,19 @@ describe("STAGE-05D round 2: hand scanner text, Retry-After, camera fallback and
     assert.equal(s.tracks[0].stopped, true);
   });
 
+  it("round 4: a decoder that fails to load after the abort is aborted, not unavailable", async () => {
+    const s = stream();
+    const loading = deferred<(d: Uint8ClampedArray, w: number, h: number) => string | null>();
+    const env: CameraEnv = { mediaDevices: { getUserMedia: async () => s.media }, loadDecoder: () => loading.promise, createCanvas: () => ({ width: 0, height: 0, getContext: () => null }), setInterval: () => 1, clearInterval: () => {} };
+    const run = new AbortController();
+    const started = startQrCamera(video(), () => {}, env, run.signal);
+    await flush();
+    run.abort();
+    loading.reject(new Error("chunk failed"));
+    await assert.rejects(started, (x: unknown) => x === "aborted");
+    assert.equal(s.tracks[0].stopped, true);
+  });
+
   it("a refusal that arrives after the abort is reported as aborted, not as denied", async () => {
     const asked = deferred<MediaStream>();
     const env: CameraEnv = { BarcodeDetector: class { async detect() { return []; } }, mediaDevices: { getUserMedia: () => asked.promise }, setInterval: () => 1, clearInterval: () => {} };
@@ -786,6 +799,41 @@ describe("STAGE-05D round 2: scan screen (DOM)", () => {
       assert.doesNotMatch(text(), /Δεν δόθηκε άδεια για την κάμερα|Η κάμερα δεν είναι διαθέσιμη/, `${late}: nothing to report after Close`);
       button("Άνοιγμα κάμερας");
     }
+  });
+
+  it("round 4: a wait that ends never steals focus from «Πίσω στην αρχική»", async () => {
+    let now = 1_000_000;
+    const timers = fakeTimers();
+    const ctx = await readyCounter(true, () => now, timers);
+    await dom.render(createElement(StaffApp, { controller: ctx.controller, counter: ctx.flow, camera: NO_CAMERA }));
+    ctx.members.lookupReplies = [{ kind: "rate_limited", retryAfterSeconds: 10 }];
+    await dom.click(dom.document.querySelector('[data-evc-action="qr"]')!);
+    await type(dom.document.getElementById("evc-scan-code") as HTMLInputElement, TOKEN);
+    await dom.click(button("Αναζήτηση"));
+    await act(async () => {});
+    const back = button("Πίσω στην αρχική");
+    await dom.focus(back);
+    now += 11_000;
+    await act(async () => timers.tick());
+    assert.match(text(), /Μπορείτε να σαρώσετε ξανά/);
+    assert.ok(dom.document.activeElement === back, "focus stays where the staff member put it");
+  });
+
+  it("round 4: a finger on the field opens the keyboard; the field is described by the screen title", async () => {
+    await mountApp(true);
+    await dom.click(dom.document.querySelector('[data-evc-action="qr"]')!);
+    const field = dom.document.getElementById("evc-scan-code") as HTMLInputElement;
+    assert.equal(field.getAttribute("aria-describedby"), "evc-scan-title evc-scan-help");
+    assert.equal(dom.document.getElementById("evc-scan-title")?.textContent?.trim(), "Σάρωση QR μέλους");
+    const tap = (pointerType: string) => act(async () => {
+      const e = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true });
+      Object.defineProperty(e, "pointerType", { value: pointerType });
+      field.dispatchEvent(e);
+    });
+    await tap("mouse");
+    assert.equal(field.getAttribute("inputmode"), "none", "a mouse click on a desk PC changes nothing");
+    await tap("touch");
+    assert.equal(field.getAttribute("inputmode"), "text", "a tap switches to the on-screen keyboard");
   });
 
   it("«Πληκτρολόγηση κωδικού» switches the field to the on-screen keyboard", async () => {
