@@ -2,12 +2,12 @@
 
 ## CURRENT STATE (keep this section current; update it at every task transition)
 
-- **As of 2026-11-03.** Stack tip `feat/evc-member-sync` (STAGE-05B, Draft PR, base `feat/evc-staff-redemption` = Draft PR #36 STAGE-05A, base `feat/evc-club-migrations` = Draft PR #35). Before it: `feat/evc-club-migrations` (STAGE-04A, code SHA `b0357be`, CI run 40475996174 18/18), `feat/evc-wc-completion` (Draft PR #34), `feat/evc-bacs-issuance` (Draft PR #33), … PR #31. None merged.
+- **As of 2026-11-03.** Stack tip `feat/evc-member-qr` (STAGE-05C, Draft PR, base `feat/evc-member-sync` = Draft PR #37 STAGE-05B, base `feat/evc-staff-redemption` = Draft PR #36 STAGE-05A, base `feat/evc-club-migrations` = Draft PR #35). Before it: `feat/evc-club-migrations` (STAGE-04A, code SHA `b0357be`, CI run 40475996174 18/18), `feat/evc-wc-completion` (Draft PR #34), `feat/evc-bacs-issuance` (Draft PR #33), … PR #31. None merged.
 - `main` @ `9024989` has DIVERGED from the stack (memory-only commits on main; no `wordpress/` folder on main). Any future merge needs a deliberate `memory.md` reconciliation.
 - Nothing of the Club is merged, deployed or active. Flags `EVC_CLUB_STAFF_ENABLED` / `EVC_CLUB_CUSTOMER_ENABLED` / `EVC_CLUB_WC_COMPLETION_ENABLED` / `EVC_CLUB_MIGRATIONS_ENABLED` / `EVC_CLUB_REDEMPTION_SOURCE` OFF; production redeem = 503. Owner approved (2026-10-27) applying migrations 001+002 on the STAGING Club DB only (performed by owner/technician; no result reported here yet).
-- **Last owner step:** D3 answered 2026-11-03 12:25 Athens («όλοι οι καφέδες ότι και να είναι») → v1 coffee list shipped in STAGE-05A.
+- **Last owner step:** 2026-11-04 QR decisions D6–D9 (question card, recommended option each time; relayed by the coordinator). Earlier: D3 coffee list 2026-11-03.
 - **Owner scope:** the owner does not operate WooCommerce or the site; the shop (and the technician) confirm bank transfers in WooCommerce. The plugin must read what WooCommerce records.
-- **Active task (2026-11-03):** STAGE-05B — Club member rows (`evc_members`) after a RECORDED payment confirmation, on branch `feat/evc-member-sync` (stacked on `feat/evc-staff-redemption`, Draft PR #36), development only, no new constant (exists only behind `EVC_CLUB_WC_COMPLETION_ENABLED`). Status: see the STAGE-05B entry. STAGE-05A (PR #36) awaits owner review. Next: QR / in-store onboarding — needs its own task + approval.
+- **Active task (2026-11-04):** STAGE-05C on branch `feat/evc-member-qr` (Draft PR #38, base `feat/evc-member-sync` = #37), development only. Owner answered the 5 QR questions (D6–D9, 2026-11-04, see the entry); review fixes of 419eae2 applied; customer QR route + staff scan route + administrator revocation + migration 003 built, all behind the EXISTING opt-ins (nothing new is on by default). Status: see «STAGE-05C part 2/3». Next: owner review of #36/#37/#38 → STAGE-05D (staff UI + customer app storage).
 - **Waiting on technician:** separate staging Club DB + migrations status report.
 
 ## STANDING WORKFLOW — Claude only (owner decision, 2026-10-26; supersedes the 2026-10-09 ChatGPT/Claude Code protocol below)
@@ -1185,3 +1185,113 @@ The existing website developer replied explicitly:
 - **Local:** wp-common ClubAccountDirectoryTest 6/6; MS10–MS13 + MS37 killed by assertion; mutant pattern preflight 707/707; packager real build. Commerce CI only.
 - **CI final (code SHA `477c7e2e18832557cd7c6c3b73649c331f8ffa95`):** PR run 41682777355 18/18 success (first attempt, incl. the commerce mutation step with MS15–MS36), frontend PR run 41682777364 4/4; push run 41682768363 attempt 1 = 17/18 (the pre-existing, untouched real-clock flake `BacsConfirmationTest::test_expiry_and_an_early_renewal_follow_the_athens_chain`, unverified→active when the confirmation lands on the add-on's minute; Confirmation without a member sync is unchanged), attempt 2 (failed job re-run) = 18/18. Draft PR #37. Nothing merged / deployed / enabled. Next: owner review of STAGE-05A (#36) + STAGE-05B (#37).
 
+## STAGE-05C — Club member QR token store; customer QR + staff lookup STOPPED for owner decisions (branch `feat/evc-member-qr`) — 2026-11-03
+- **Asked:** SQL QR token store on 001+002, customer QR (behind `EVC_CLUB_CUSTOMER_ENABLED` + `club_db_v1`), staff lookup route (member id + redeem eligibility, behind the staff flag + `EVC_CLUB_REDEMPTION_SOURCE`), all default OFF; STOP on any owner business decision.
+- **Schema check:** `evc_qr_tokens` (001) already has `token_hash` CHAR(64) (SHA-256 only), `status` active|revoked, `issued_at_utc`, `revoked_at_utc`, stored generated `active_member_id` with `uq_qr_tokens_one_active`, `uq_qr_tokens_hash`, FK to `evc_members`. No expiry column (an age limit would be computed from `issued_at_utc`). No rate-limit table exists in 001/002. → store buildable with NO migration.
+- **Built (definitions only, NOT wired):** `EVC_Sql_Qr_Token_Store` (`includes/class-evc-sql-qr-token-store.php`, the only shipped `EVC_Qr_Token_Store`, UI-04C interface): digests only (plaintext passed as a digest refused; lookups never return a digest); rotate / revoke = ONE RC transaction (`SELECT … FOR UPDATE` via the one-active key → `hash_equals` CAS → guarded UPDATE with affected rows = 1 → INSERT); duplicate key → rolled back (incl. the revocation); deadlock / lock wait → `EVC_Qr_Rotation_Conflict`; lost COMMIT → unknown; fail-closed row parsing; never locks `evc_members`; `RUNTIME_GRANTS` = SELECT on evc_members, SELECT/INSERT/UPDATE(status, revoked_at_utc) on evc_qr_tokens, no DELETE. Packager: string ban `implements EVC_Qr_Token_Store` replaced by rule set `qrStoreProblemsFor` (only that file + that class implements it; constructed NOWHERE, not even `new self`; named only in its own file; 18 fixtures); all other QR / lookup / v2 bans unchanged. Docs `docs/member-qr.md` (Greek owner note + questions + dev notes), README, member-lookup.md / staff-redemption.md notes.
+- **Tests:** integration `SqlQrTokenStoreTest` (20: reads, fail-closed rows, one active digest, stale/missing expectation, CAS revoke, collision rollback, unique-key backstop, invalid input, interleaved connection + waiting writer, deadlock, lost COMMIT before/after, least-privilege grants, UI-04C token + lookup services over SQL, frozen/expired/unverified card never redeems after a QR hit, one coffee per Athens day, multi-process race `tests/bin/qr-token-worker.php` 10×6). WP: no lookup/QR route with staff+redemption ON (`RedemptionSourceOnTest`) or customer ON (`CustomerMeTest`). Mutants QS1–QS10 (provenance-SQL runner, `command => qr`); the row lock alone and the affected-row check alone are documented EQUIVALENT (CAS + guarded UPDATE + unique key each stop a late writer).
+- **OWNER QUESTIONS (not built, need answers):** (1) QR lifetime: until the customer asks for a new one / X days / minutes (rotating). (2) When it rotates: only on «νέος QR», or each time the card opens. Hash-only storage means the plaintext exists only at issuance, so a QR shown again later must be kept on the device or rotated. (3) Should a screenshot work (a friend with a screenshot could take that day's coffee)? (4) What staff see after a scan: only active / not active / coffee taken today, or also the first name (the v1 API §4.1 had name + masked phone; reviewed UI-04C returns identity only). (5) Failed-scan limit per tablet + where counters live (no table in 001/002: a new migration, or WP object cache). Technician: a lookup secret (≥32 bytes) in wp-config for the reviewed lookup proof. Recommendation given: (1) until renewal/rotation by the customer, no age limit at launch; (2) rotate only on explicit request (and on staff request); (3) accept screenshots at launch (one coffee per Athens day limits the loss) and show staff the first name to deter sharing; (4) first name + state only; (5) e.g. 10 failed scans / 5 min per tablet, counters in a small new table (needs migration approval).
+
+- **CI:** first push `e6e4b2c`: frontend 4/4 (PR 41699674480, push 41699627219); foundation PR run 41699674877 timed out on engine php 8.2 / mysql:8.0 and push run 41699627392 also hit a pre-existing real-clock flake in the WP mutation baseline (`RestSessionTest::test_status_never_extends_the_inactivity_window`, `time() - 500` read on both sides of a second boundary; untouched). Cause of the timeout: `run-mutations.php` re-ran the new QR tests for every engine mutant → the class is `@group qr-store` and that runner excludes it (fix `419eae2`). **Final code SHA `419eae217d899a04b9063d606a7bf99cebdebe94`:** foundation PR run 41704786409 18/18, push run 41704778910 18/18, frontend PR run 41704786643 4/4 (no frontend push run: that commit changes no app/ path). Local: unit 1006/1006, integration 156/156 (MariaDB 10.11), wp-common/enabled/disabled/customer/redemption green, provenance-SQL mutants 38/38 incl. QS1–QS10. Draft PR #38 (base `feat/evc-member-sync`). Nothing merged / deployed / enabled. Next: owner answers to the 5 QR questions → STAGE-05C.2 (customer QR + staff lookup) → STAGE-05D (staff UI).
+
+## OWNER DECISIONS 2026-11-04 — Club QR (D6–D9; relayed by the coordinator from the owner's question card, recommended option each time)
+- **Numbering note:** these D6–D9 are the 2026-11-04 QR series. They are NOT the older 2026-10-10 labels (D6 manual-payment authority, D7 e-mail-optional, D8 QR delivery, D9 GDPR retention). The old «D8 QR delivery» is now answered by D6/D7 below; the old «D9 retention» stays OPEN.
+- **D6 lifetime / rotation:** «Ίδιος μέχρι να ζητηθεί νέος» — no age limit; changes only when the customer or staff ask for a new one; the device keeps it.
+- **D7 screenshots:** «Ναι, το δεχόμαστε» — a screenshot works; one coffee per Athens day limits any loss.
+- **D8 staff view:** «Μικρό όνομα + κατάσταση» — first name + active / not active / coffee already taken today; no phone, surname or other data.
+- **D9 failed scans:** «Ναι, ~10 αποτυχίες / 5 λεπτά», per tablet; small new Club DB table APPROVED as migration 003 behind EVC_CLUB_MIGRATIONS_ENABLED. Code only: applying 003 to staging / production needs the owner's separate go-ahead. Technician must add a ≥32-byte `EVC_CLUB_LOOKUP_KEY` in wp-config per environment.
+
+## STAGE-05C part 2/3 — review fixes + customer QR + staff scan + migration 003 (branch `feat/evc-member-qr`, Draft PR #38) — 2026-11-04
+- **Review fixes (independent review of 419eae2, no blocker):** (1) guard: the implementing declaration must be `class <ThatClass>` (enum / trait / interface / anonymous refused, fixtures); (2) dynamic construction (`new $x`, `new (…)`, `new self|static|parent|class`, Reflection*, newInstance*, class_alias, unserialize) refused in every QR file; strings with QR class-name fragments refused outside the QR files; the cross-file claim softened (run-time assembly from non-QR pieces outside the QR files is not caught statically); (3) "evc_members never locked" reworded: no explicit lock, but the INSERT's FK check takes a SHARED lock on the member row; chose `SET SESSION innodb_lock_wait_timeout = 5` on the QR connections (`EVC_Club_Qr_Services::prepare_connection`, tested); (4) defence-in-depth sentence corrected for revoke() (no unique-key help) + multi-process revoke-vs-rotate race (worker op revoke); (5) the waiting-writer test now really holds the row (FOR UPDATE + uncommitted replacement) in another connection; the writer (separate process) announces its next statement is the store call and must still be running 1.5 s later, then the holder commits and the writer loses (`test_a_writer_blocked_by_an_uncommitted_replacement_loses_after_the_commit`). CI FINDING: INNODB_TRX is not a usable proof on the MySQL 8 containers (it listed only the holder while the writer was blocked, runs 41780458400 / 41783240785), so the proof is the blocked process; (6) lost-COMMIT test issues first, then both faults for rotate AND revoke; (7) worker checks `database` is a string; fixture count corrected (`new parent` fixture added).
+- **Built (all default OFF: routes exist only with the existing constants):**
+  - migration `003_lookup_failures.sql` (`evc_lookup_failures`: limiter_key CHAR(64) sha256, window_start_utc, failures, updated_at_utc; PK (key, window); CHECKs) — picked up by the STAGE-04A runner; a 001+002 DB shows only 003 pending (tested);
+  - `EVC_Sql_Lookup_Rate_Limiter` (D9: counts only `session:` keys = per tablet; ≥10 failures in the fixed 300 s window → refuse; atomic INSERT … ON DUPLICATE KEY UPDATE; prune >1 day; grants SELECT/INSERT/UPDATE/DELETE on that table only);
+  - `EVC_Club_Qr_Services` (single construction site of store, limiter, key ring, context policy, token / lookup services, `EVC_Wp_Club_Staff_Authorizer` (answers ONLY evc_lookup_member / evc_manage_club), `EVC_No_Member_Phone_Directory`, `EVC_First_Issue_Only_Qr_Store` (a request without replace can never replace a QR another device just got));
+  - customer `GET|POST evangelou-club-customer/v1/me/qr` (`EVC_Customer_Qr_Backend` + `EVC_Rest_Me_Qr_Controller`, only inside `if (EVC_Customer_Qr_Backend::provenance_recorded())` after the customer gate): plaintext only at issue, `409 qr_exists` without replace, `replace: true` rotates; app storage for 05D documented (one module lifting the bundle's localStorage ban; bundle unchanged now);
+  - staff `POST evangelou-club/v1/members/lookup` (`EVC_Club_Lookup_Backend` + `EVC_Rest_Lookup_Controller`, only inside `if (EVC_Club_Redemption_Feature::enabled())` after the staff gate): first name + status from EXACTLY the 05A membership source + today's Athens ledger row; generic 404; 400 invalid_qr; 429 + Retry-After 300; needs schema ≥3 + EVC_CLUB_LOOKUP_KEY;
+  - administrator `POST /admin/members/qr/revoke {wp_user_id}` (evc_manage_club, never a staff-role account).
+  - Packager: rule set `qrProblemsFor` (51 fixtures) replaces the string bans on new EVC_Qr_Token_Service / EVC_Member_Lookup_Service / EVC_Lookup_Key_Ring and implements EVC_Qr_Token_Store / Member_Phone_Directory / Lookup_Rate_Limiter / Club_Staff_Authorizer; `new EVC_Signed_Member_Context_Verifier` and v2 bans unchanged. New error messages in EVC_Rest_Security::MESSAGES.
+- **Technical choices (not business):** lookup proof TTL 300 s (computed by the reviewed service, NOT returned by the v1 route, NOT used by v1 redeem → no effect today); key id `k1`; first name = WP first_name, else billing_first_name, ≤40 chars; phone lookup not offered.
+- **Open owner question (non-blocking):** should the shared tablet account also be allowed to revoke a member's QR? Built: administrators only (reviewed UI-04C rule).
+- **Tests / mutants:** see `docs/member-qr.md` (integration SqlQrTokenStoreTest 23, SqlLookupRateLimiterTest 9; WP StaffQrLookupTest 9, CustomerQrTest 6, + migrations/enabled updates; commerce CI-only StaffQrCommerceTest 3, CustomerQrCommerceTest 1; mutants QS11–QS12, LR1–LR7 (SQL runner), QL1–QL12, QC1–QC7 (WP runner, named killers)). Commerce suites can't run locally (plugin download 403 through the proxy).
+
+- **CI (STAGE-05C part 2/3):** rounds 80f0870 → a6e08ef → 043d89a → 7ab2a58 → 7388254 → 4861ef6.
+  - **Isolated-build check (frontend, run 41779672917).** The guard fixture label «key ring» made Tailwind emit `.ring` into the staff and ordering CSS. Tailwind v4 scans every file under app/, so bare utility words in scripts, docs or tests change the shipped CSS. Fixed in a6e08ef.
+  - **Lock-wait test.** The first version required LOCK WAIT in INNODB_TRX. On the CI MySQL 8 containers INNODB_TRX listed only the holder while the writer was blocked, so the test now uses process-based proof (see fix 5).
+  - **Engine job timeout.** The job hit its 25-min limit on a slow runner. The QR races are now capped at 10 rounds and the engine job has `timeout-minutes: 35`.
+  - **Known real-clock flake.** `BacsConfirmationTest::test_expiry_and_an_early_renewal_follow_the_athens_chain` failed in 80f0870 and 7388254, in wp-commerce jobs only. This test is untouched by this stage.
+  - Superseded runs were cancelled.
+  - **FINAL code SHA `4861ef6d890c873a0438f44ddb6096d7bd15ea18`:**
+    - foundation PR run 41790466099 18/18;
+    - foundation push run 41790459566 18/18;
+    - frontend PR run 41790466214 4/4 (no frontend push run: that commit touches no app/ path).
+  - **Local.** unit 1006; integration 168; wp suites green; SQL mutants 47/47; WP mutants 129/129; packager builds identical to base (staff-CrPA0l2H.js / staff-DtlY_JJO.css / customer-Deaj56e0.js).
+  - Draft PR #38. Nothing merged / deployed / enabled; 003 applied nowhere real.
+
+### STAGE-05C part 2/3 review fixes — 2026-11-04 (independent review of 4861ef6: no blocker)
+
+**MAJOR 1: the D9 limiter failed open.** `EVC_Member_Lookup_Service::failed()` answered `not_found` even when `record_failure()` threw, so a tablet could keep scanning with nothing counted.
+- Fix: `failed()` now answers `unavailable` (503) when the failure cannot be recorded. This also covers the invalid-phone and ambiguous paths, which now go through `failed()` too.
+- Tests:
+  - `MemberLookupTest::test_a_failure_that_cannot_be_counted_makes_the_lookup_unavailable` (unit; new fake flag `record_unavailable`);
+  - `SqlLookupRateLimiterTest::test_a_failure_that_cannot_be_written_makes_every_failed_scan_unavailable` (only the INSERT fails, 30 bad scans, all `unavailable`).
+- The test that only covered `allow()` was renamed `test_a_read_failure_in_allow_propagates`.
+- Mutants: L27 (membership runner) and LR8 (SQL runner).
+
+**MINOR 2: two revoke-route refusals were not re-checked.** The route refuses a staff-role account and an Application Password call, but the service re-checks only `evc_manage_club`, so these two refusals had no backstop. The earlier "equivalent mutant" note was wrong.
+- Test: `test_revocation_refuses_a_staff_role_administrator_and_an_application_password_call`.
+- Mutants: QL13 and QL14. The runner comment and the doc are corrected.
+
+**MINOR 3: guard gap for dynamic construction.**
+- `new $x`, `new (…)` and `new self|static|parent` are now banned in the staff and customer plugin files as well.
+- `EVC_Qr_Token_Service`, `EVC_Member_Lookup_Service` and `EVC_Lookup_Key_Ring` are added to `QR_NAMES`, allowlisted to `class-evc-member-lookup.php` and `class-evc-club-qr-services.php`.
+  - The lookup backend therefore now calls `EVC_Club_Qr_Services::is_lookup_secret()`; QL9 now targets that function.
+- 7 new fixtures (58 in total).
+- Lesson, again: fixture labels must not contain Tailwind utility words. "key ring" was renamed for the second time.
+
+**MINOR 4: a new login resets the count.** Logging in again gives a fresh session ref and so a fresh count of 10. Documented under D9 in `member-qr.md`: the ref is server-derived, and the reset is bounded only by the existing login throttle. No new cap was added.
+
+**MINOR 5: migration 003 must never be applied by accident.**
+- New constant `EVC_CLUB_MIGRATIONS_TARGET`, parsed by `EVC_Club_Migrations_Feature::target_version()` / `parse_target()`:
+  - undefined → 2;
+  - a positive int → itself;
+  - anything else → refusal `migrations_target_invalid`.
+- `EVC_Migrator::migrate(?int $up_to)` stops at the target. The service applies and offers apply only for pending versions at or below the target (`not_approved` lists the rest).
+- What the operator sees: the page shows 003 as «ΕΚΚΡΕΜΕΙ, ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ (δεν θα εφαρμοστεί)», with no button for it. The CLI marks it too.
+- `build()` and `wire()` take an optional `$target` test seam.
+- Tests:
+  - `ClubMigrationsTest`: 003 not approved by default; target 3 applies only 003; target 1 / 3 on a fresh database; invalid target refused;
+  - `MigratorTest`: upper bound.
+- Mutants MG37–MG42. The MG20 pattern was re-aimed with the same intent.
+- Greek warning added to `docs/club-db-migrations.md`. Why a wp-config constant: the page cannot change it, and the default is the safe value.
+
+**Nits fixed.**
+- The lookup body is compared on sorted keys.
+- Parallel scans can slightly exceed 10; this is documented.
+- The prune DELETE now has `ORDER BY window_start_utc`.
+- The first name shows only its first word, still at most 40 characters. QL6 is re-aimed to that (`test_only_the_first_word_of_the_first_name_and_any_key_order`).
+- `record_failure` reads the clock once.
+- The empty-catalogue gap (scan says active, redeem answers 503) is noted in the docs and left as is.
+
+**Open owner question:** whether the tablet may revoke a member's QR. It is still unanswered, so revocation stays admin-only.
+
+- CI on ad07eea (STAGE-05C round-3 review fixes): green. Foundation 18/18 (runs 41803814061 push, 41803819688 pull_request) and frontend 4/4 (runs 41803814135, 41803819701). No flake re-runs needed. The commerce hpos mutation step took about 70 minutes, inside its 120-minute limit.
+
+### STAGE-05C round 4: follow-ups from the re-review of ad07eea (2026-11-04)
+The re-review verdict was OK, with no Blocker or Major.
+- **D8 privacy:** `wordpress_first_name` now uses `preg_split('/\s+/u', …, -1, PREG_SPLIT_NO_EMPTY)`.
+  - A leading NBSP or other Unicode space no longer falls back to the whole name.
+  - Invalid UTF-8 (preg_split returns false) or an empty result skips that source: the next source is used, else null.
+  - The value is cut to 40 characters with `preg_match('/^.{1,40}/su')`, so the result is always valid UTF-8, even without mbstring.
+  - The DB refuses invalid UTF-8, so the test serves it through the `get_user_metadata` filter.
+  - Test `StaffQrLookupTest::test_a_leading_unicode_space_or_invalid_utf8_never_shows_the_whole_name`; QL6 re-aimed; QL15 and QL16 added.
+- **Docs honesty (D9):** `EVC_Login_Throttle` limits only FAILED password attempts. Successful re-logins are not limited, so anyone with the tablet password can log in again for about 10 more failures. This is now stated in `member-qr.md` and the limiter docblock. No cap was added; the coordinator is raising it with the owner.
+- **Docs:** a failed prune DELETE turns an already-counted failed scan into 503 (fail closed).
+- **Mutation runs this round:** SQL 48/48 killed; WordPress 139/139 killed, 0 invalid; sources restored each time.
+- **Migrator:** I chose the simpler option. `EVC_Migrator::migrate(int $up_to)` is now REQUIRED, so there is no call that applies everything. Test callers pass `PHP_INT_MAX` (25 call sites). MG38 and MG39 were re-aimed.
+- **Docs:** the exact guard-fixture count was dropped.
+- **Owner decisions, 2026-11-04, relayed by the coordinator during round 4:**
+  - (a) «Όχι, μένει έτσι»: successful tablet re-logins have no limit. This is documented as an accepted risk, with no code change.
+  - (b) «Όχι, μόνο ο διαχειριστής»: QR revocation stays administrator-only, and the tablet only scans. This closes the earlier open question (see the "Open owner question" lines above).
+  - Both are recorded in `member-qr.md` (decision rows D9α and D10, plus the revoke section), the README and the limiter docblock.
+- CI on 2741086 (round 4 plus the owner-decision docs): foundation 18/18 green, run 41815843926 (push). Frontend did not run because no app/ paths changed. No pull_request-event run was created for this SHA (GitHub returned 500 on the first push attempt). The superseded runs for 06cb78c were cancelled.

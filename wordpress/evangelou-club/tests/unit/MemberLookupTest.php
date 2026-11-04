@@ -430,6 +430,37 @@ final class MemberLookupTest extends TestCase {
         $this->assertSame(array(), $this->phones->queries);
     }
 
+    /** STAGE-05C review (MAJOR 1): a failure that cannot be COUNTED fails closed too, on every failure path. */
+    public function test_a_failure_that_cannot_be_counted_makes_the_lookup_unavailable(): void {
+        $token = $this->issue();
+        $this->limiter->record_unavailable = true;
+        $this->phones->numbers['+306912345678'] = array($this->ids['A'], $this->ids['B']);
+        foreach (array(
+            'unknown QR' => function () {
+                return $this->lookup()->by_qr(self::tablet(), EVC_Qr_Token::mint());
+            },
+            'malformed QR' => function () {
+                return $this->lookup()->by_qr(self::tablet(), 'not-a-qr');
+            },
+            'invalid phone' => function () {
+                return $this->lookup()->by_phone(self::tablet(), '123');
+            },
+            'unknown phone' => function () {
+                return $this->lookup()->by_phone(self::tablet(), '6900000009');
+            },
+            'ambiguous phone' => function () {
+                return $this->lookup()->by_phone(self::tablet(), '6912345678');
+            },
+        ) as $label => $call) {
+            $this->assertSame(EVC_Member_Lookup_Result::UNAVAILABLE, $call()->kind(), $label);
+        }
+        $this->assertSame(EVC_Member_Lookup_Result::FOUND, $this->lookup()->by_qr(self::tablet(), $token)->kind(), 'a found member records no failure');
+        $this->assertNotEmpty($this->reports);
+        foreach ($this->reports as $report) {
+            $this->assertSame(array('stage', 'exception'), array_keys($report));
+        }
+    }
+
     public function test_an_unavailable_store_fails_closed(): void {
         $token = $this->issue();
         $this->store->unavailable = true;

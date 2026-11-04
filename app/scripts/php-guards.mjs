@@ -560,6 +560,297 @@ function memberSyncSelfTest() {
   return bad;
 }
 
+// ---- STAGE-05C rule set: Club member QR (token store, customer QR, staff lookup) -------------------------------
+// Lifts the packager's blanket string bans on `new EVC_Qr_Token_Service`, `new EVC_Member_Lookup_Service`,
+// `new EVC_Lookup_Key_Ring`, `implements EVC_Qr_Token_Store`, `implements EVC_Member_Phone_Directory`,
+// `implements EVC_Lookup_Rate_Limiter` and `implements EVC_Club_Staff_Authorizer` at ONE site each:
+// 1. CONSTRUCTION: every QR piece is constructed only in includes/class-evc-club-qr-services.php, inside its
+//    named method (store / authorizer / token_service / lookup_service), at most once per method; the two
+//    backends only in their plugin's register_routes(), as the exact standalone statement
+//    `if (<gate>) { (new <Controller>(new <Backend>()))->register_routes(); }` (no test seam arguments), after
+//    the staff gate for the staff plugin. The gates are EVC_Club_Redemption_Feature::enabled() (staff) and
+//    EVC_Customer_Qr_Backend::provenance_recorded() (customer; its body must be exactly the provenance check).
+// 2. IMPLEMENTS: each interface is implemented only by its one class in its one file; the implementing
+//    declaration must be `class <ThatClass>` (not an enum / trait / interface / anonymous class); none of the
+//    interfaces is extended.
+// 3. NAMES: each piece's name (identifier or inside a string) appears only in its allowlisted files, and no
+//    shipped string outside them contains a piece of a QR class name (e.g. 'Qr_Token_Store'), so
+//    `new $cls` built from such a string is caught.
+// 4. NO DYNAMIC CONSTRUCTION in the QR files: `new $x`, `new (...)`, `new self|static|parent`, class_alias,
+//    Reflection*, newInstance*, unserialize are refused there; `new $x` / `new (...)` / `new self|static|parent`
+//    also in the staff and customer plugin files (review: `EVC_Customer_Qr_Backend::class` + `new $c`).
+//    EVC_Qr_Token_Service / EVC_Member_Lookup_Service / EVC_Lookup_Key_Ring are named only in the UI-04C file and
+//    the services file.
+// Not covered statically (documented): a class name assembled at run time from pieces that are not QR name
+// fragments, in a file outside the QR files. The bans on `new EVC_Signed_Member_Context_Verifier` and every
+// other v2 construction are unchanged.
+export const QR_RULES = Object.freeze({
+  storeFile: "includes/class-evc-sql-qr-token-store.php",
+  limiterFile: "includes/class-evc-sql-lookup-rate-limiter.php",
+  servicesFile: "includes/class-evc-club-qr-services.php",
+  lookupInterfaceFile: "includes/class-evc-member-lookup.php",
+  staffPlugin: "includes/staff/class-evc-staff-plugin.php",
+  lookupBackend: "includes/staff/class-evc-club-lookup-backend.php",
+  lookupController: "includes/staff/class-evc-rest-lookup-controller.php",
+  customerPlugin: "includes/customer/class-evc-customer-plugin.php",
+  customerBackend: "includes/customer/class-evc-customer-qr-backend.php",
+  customerController: "includes/customer/class-evc-rest-me-qr-controller.php",
+});
+
+const R5C = QR_RULES;
+// class => [file, method] of its ONE construction site
+const QR_SITES = [
+  ["EVC_Sql_Qr_Token_Store", R5C.servicesFile, "store"],
+  ["EVC_Wp_Club_Staff_Authorizer", R5C.servicesFile, "authorizer"],
+  ["EVC_Qr_Token_Service", R5C.servicesFile, "token_service"],
+  ["EVC_First_Issue_Only_Qr_Store", R5C.servicesFile, "token_service"],
+  ["EVC_Member_Lookup_Service", R5C.servicesFile, "lookup_service"],
+  ["EVC_Sql_Lookup_Rate_Limiter", R5C.servicesFile, "lookup_service"],
+  ["EVC_Lookup_Key_Ring", R5C.servicesFile, "lookup_service"],
+  ["EVC_Lookup_Context_Policy", R5C.servicesFile, "lookup_service"],
+  ["EVC_No_Member_Phone_Directory", R5C.servicesFile, "lookup_service"],
+  ["EVC_Club_Lookup_Backend", R5C.staffPlugin, "register_routes"],
+  ["EVC_Customer_Qr_Backend", R5C.customerPlugin, "register_routes"],
+];
+// lower-case name => files allowed to name it
+const QR_NAMES = [
+  ["evc_sql_qr_token_store", [R5C.storeFile, R5C.servicesFile]],
+  ["evc_sql_lookup_rate_limiter", [R5C.limiterFile, R5C.servicesFile]],
+  ["evc_club_qr_services", [R5C.servicesFile, R5C.lookupBackend, R5C.customerBackend]],
+  ["evc_wp_club_staff_authorizer", [R5C.servicesFile]],
+  ["evc_no_member_phone_directory", [R5C.servicesFile]],
+  ["evc_first_issue_only_qr_store", [R5C.servicesFile]],
+  ["evc_club_lookup_backend", [R5C.lookupBackend, R5C.lookupController, R5C.staffPlugin]],
+  ["evc_rest_lookup_controller", [R5C.lookupController, R5C.staffPlugin]],
+  ["evc_customer_qr_backend", [R5C.customerBackend, R5C.customerController, R5C.customerPlugin]],
+  ["evc_rest_me_qr_controller", [R5C.customerController, R5C.customerPlugin]],
+  // STAGE-05C review (MINOR 3): the reviewed UI-04C service / key classes too, so `X::class` + `new $c` cannot
+  // reach them from any other shipped file.
+  ["evc_qr_token_service", [R5C.lookupInterfaceFile, R5C.servicesFile]],
+  ["evc_member_lookup_service", [R5C.lookupInterfaceFile, R5C.servicesFile]],
+  ["evc_lookup_key_ring", [R5C.lookupInterfaceFile, R5C.servicesFile]],
+];
+// interface => [class, file]
+const QR_IMPLEMENTS = [
+  ["EVC_Qr_Token_Store", [["EVC_Sql_Qr_Token_Store", R5C.storeFile], ["EVC_First_Issue_Only_Qr_Store", R5C.servicesFile]]],
+  ["EVC_Lookup_Rate_Limiter", [["EVC_Sql_Lookup_Rate_Limiter", R5C.limiterFile]]],
+  ["EVC_Member_Phone_Directory", [["EVC_No_Member_Phone_Directory", R5C.servicesFile]]],
+  ["EVC_Club_Staff_Authorizer", [["EVC_Wp_Club_Staff_Authorizer", R5C.servicesFile]]],
+];
+// Fragments of QR class names that no shipped STRING may contain outside the QR files.
+const QR_FRAGMENTS = ["qr_token_store", "qr_token_service", "member_lookup_service", "lookup_rate_limiter", "lookup_key_ring", "club_qr_services", "club_lookup_backend", "customer_qr_backend", "staff_authorizer", "phone_directory"];
+const QR_FILES = [R5C.storeFile, R5C.limiterFile, R5C.servicesFile, R5C.lookupBackend, R5C.lookupController, R5C.customerBackend, R5C.customerController];
+// STAGE-05C review (MINOR 3): the two wiring plugins may name their backend, so they may not construct dynamically either.
+const QR_DYNAMIC_NEW_FILES = [...QR_FILES, R5C.staffPlugin, R5C.customerPlugin];
+const QR_GATES = {
+  [R5C.staffPlugin]: { gate: ["EVC_Club_Redemption_Feature", "::", "enabled", "(", ")"], controller: "EVC_Rest_Lookup_Controller", backend: "EVC_Club_Lookup_Backend" },
+  [R5C.customerPlugin]: { gate: ["EVC_Customer_Qr_Backend", "::", "provenance_recorded", "(", ")"], controller: "EVC_Rest_Me_Qr_Controller", backend: "EVC_Customer_Qr_Backend" },
+};
+const PROVENANCE_GATE_BODY = ["{", "return", "defined", "(", "'EVC_CLUB_PAYMENT_PROVENANCE'", ")", "&", "&", "constant", "(", "'EVC_CLUB_PAYMENT_PROVENANCE'", ")", "=", "=", "=", "self", "::", "PROVENANCE", ";", "}"];
+
+/** Nearest declaration keyword before token k: {kind, name, anonymous}. */
+function declarationBefore(tokens, k) {
+  for (let c = k - 1; c >= 0; c--) {
+    const tk = tokens[c];
+    if (tk.t !== "id") continue;
+    const v = tk.v.toLowerCase();
+    if (["class", "enum", "interface", "trait"].includes(v)) {
+      const prev = tokens[c - 1];
+      const anonymous = v === "class" && prev?.t === "id" && prev.v.toLowerCase() === "new";
+      const next = tokens[c + 1];
+      return { kind: v, name: next?.t === "id" ? next.v : "", anonymous };
+    }
+  }
+  return { kind: "", name: "", anonymous: false };
+}
+
+export function qrProblemsFor(path, src) {
+  const tokens = tokenize(src);
+  const bodies = functionBodies(tokens);
+  const problems = [];
+  const qrFile = QR_FILES.includes(path);
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id" || tk.t === "str") {
+      const v = bare(tk.v).toLowerCase();
+      for (const [name, files] of QR_NAMES) {
+        const hit = tk.t === "id" ? v === name || v.endsWith("\\" + name) : v.includes(name);
+        if (hit && !files.includes(path)) problems.push(`${path}: names ${name} (QR allowlist)`);
+      }
+      if (tk.t === "str" && !qrFile && path !== R5C.lookupInterfaceFile) {
+        for (const f of QR_FRAGMENTS) if (v.includes(f)) problems.push(`${path}: a string contains the QR name fragment '${f}'`);
+      }
+    }
+    if (tk.t === "id" && ["implements", "extends"].includes(tk.v.toLowerCase())) {
+      for (let j = k + 1; j < tokens.length && tokens[j].v !== "{"; j++) {
+        if (tokens[j].t !== "id") continue;
+        for (const [iface, owners] of QR_IMPLEMENTS) {
+          if (!same(tokens[j].v, iface)) continue;
+          if (tk.v.toLowerCase() === "extends") { problems.push(`${path}: extends ${iface}`); continue; }
+          const d = declarationBefore(tokens, k);
+          const ok = d.kind === "class" && !d.anonymous && owners.some(([cls, file]) => file === path && same(d.name, cls));
+          if (!ok) problems.push(`${path}: ${d.anonymous ? "anonymous class" : d.kind + " " + d.name} implements ${iface}`);
+        }
+      }
+    }
+    if (qrFile && tk.t === "id" && DANGEROUS.includes(tk.v.toLowerCase())) problems.push(`${path}: ${tk.v} in a QR file`);
+  });
+  const counts = {};
+  tokens.forEach((tk, k) => {
+    if (!(tk.t === "id" && tk.v.toLowerCase() === "new")) return;
+    const next = tokens[k + 1];
+    if (QR_DYNAMIC_NEW_FILES.includes(path) && (!next || next.t !== "id" || ["self", "static", "parent", "class"].includes(next.v.toLowerCase()))) {
+      problems.push(`${path}: dynamic or self construction (new ${next ? next.v : ""}) in a QR file`);
+    }
+  });
+  for (const c of constructions(tokens)) {
+    for (const [cls, file, fn] of QR_SITES) {
+      if (!same(c.name, cls)) continue;
+      const key = `${cls}@${fn}`;
+      counts[key] = (counts[key] ?? 0) + 1;
+      if (!(path === file && inside(bodies, fn, c.at))) problems.push(`${path}: ${cls} constructed outside ${file} ${fn}()`);
+    }
+  }
+  for (const [key, n] of Object.entries(counts)) if (n > 1) problems.push(`${path}: ${key} constructed more than once`);
+  if (path === R5C.servicesFile) {
+    for (const fn of ["store", "authorizer", "token_service", "lookup_service"]) {
+      if ((bodies.__count[fn] ?? 0) !== 1) problems.push(`${path}: ${fn}() must be defined exactly once`);
+    }
+  }
+  const g = QR_GATES[path];
+  if (g) {
+    const b = bodies.register_routes;
+    if ((bodies.__count.register_routes ?? 0) !== 1 || !b) problems.push(`${path}: register_routes() must be defined exactly once`);
+    else {
+      const stmt = ["if", "(", ...g.gate, ")", "{", "(", "new", g.controller, "(", "new", g.backend, "(", ")", ")", ")", "->", "register_routes", "(", ")", ";", "}"];
+      let found = 0;
+      for (let k = b.start; k < b.end; k++) {
+        if (matchAt(tokens, k, stmt) && [";", "{", "}"].includes(tokens[k - 1]?.v)) found++;
+      }
+      if (found !== 1) problems.push(`${path}: register_routes() must hold exactly one \`if (${g.gate.join("")}) { (new ${g.controller}(new ${g.backend}()))->register_routes(); }\``);
+      if (path === R5C.staffPlugin && !matchAt(tokens, b.start, STAFF_GATE)) problems.push(`${path}: register_routes() does not start with the staff gate`);
+    }
+  }
+  if (path === R5C.customerBackend) {
+    const b = bodies.provenance_recorded;
+    if ((bodies.__count.provenance_recorded ?? 0) !== 1 || !b || !PROVENANCE_GATE_BODY.every((v, i) => {
+      const tk = tokens[b.start + i];
+      return tk && (tk.t === "str" ? `'${tk.v}'` === v : same(tk.v, v) || tk.v === v);
+    })) problems.push(`${path}: provenance_recorded() must be exactly the EVC_CLUB_PAYMENT_PROVENANCE === self::PROVENANCE check`);
+    const at = tokens.findIndex((tk, k) => tk.t === "id" && tk.v.toLowerCase() === "const" && tokens[k + 1]?.v === "PROVENANCE");
+    if (at < 0 || tokens[at + 3]?.t !== "str" || tokens[at + 3].v !== "club_db_v1") problems.push(`${path}: const PROVENANCE must be 'club_db_v1'`);
+  }
+  return problems;
+}
+
+const GOOD_QR_STORE = "<?php\nfinal class EVC_Sql_Qr_Token_Store implements EVC_Qr_Token_Store { public function __construct(EVC_Club_Db $db) { $this->db = $db; } }";
+const GOOD_QR_SERVICES = `<?php
+final class EVC_Club_Qr_Services {
+    public static function store($db) { return new EVC_Sql_Qr_Token_Store($db); }
+    public static function authorizer() { return new EVC_Wp_Club_Staff_Authorizer(); }
+    public static function token_service($db, $c, $r, $f) { $s = self::store($db); return new EVC_Qr_Token_Service($f ? new EVC_First_Issue_Only_Qr_Store($s) : $s, self::authorizer(), $c, null, $r); }
+    public static function lookup_service($db, $k, $c, $r) { return new EVC_Member_Lookup_Service(self::store($db), new EVC_No_Member_Phone_Directory(), self::authorizer(), new EVC_Sql_Lookup_Rate_Limiter($db, $c), new EVC_Lookup_Key_Ring(array('k1' => $k), 'k1'), new EVC_Lookup_Context_Policy(300), $p, $c, 'member_lookup', null, $r); }
+}
+final class EVC_Wp_Club_Staff_Authorizer implements EVC_Club_Staff_Authorizer { }
+final class EVC_No_Member_Phone_Directory implements EVC_Member_Phone_Directory { }
+final class EVC_First_Issue_Only_Qr_Store implements EVC_Qr_Token_Store { }`;
+const GOOD_QR_STAFF_PLUGIN = GOOD_STAFF_PLUGIN.replace("(new EVC_Rest_Redeem_Controller($backend))->register_routes();", "(new EVC_Rest_Redeem_Controller($backend))->register_routes();\n        if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Lookup_Controller(new EVC_Club_Lookup_Backend()))->register_routes();\n        }");
+const GOOD_QR_CUSTOMER_PLUGIN = `<?php
+final class EVC_Customer_Plugin {
+    public static function register_routes(): void {
+        if (!EVC_Customer_Feature::enabled()) {
+            return;
+        }
+        (new EVC_Rest_Me_Controller(self::membership_adapter(), new EVC_System_Clock()))->register_routes();
+        if (EVC_Customer_Qr_Backend::provenance_recorded()) {
+            (new EVC_Rest_Me_Qr_Controller(new EVC_Customer_Qr_Backend()))->register_routes();
+        }
+    }
+}`;
+const GOOD_QR_CUSTOMER_BACKEND = `<?php
+final class EVC_Customer_Qr_Backend {
+    const PROVENANCE = 'club_db_v1';
+    public static function provenance_recorded(): bool {
+        return defined('EVC_CLUB_PAYMENT_PROVENANCE') && constant('EVC_CLUB_PAYMENT_PROVENANCE') === self::PROVENANCE;
+    }
+    public function issue($u) { return EVC_Club_Qr_Services::token_service($db, $c, $r, true); }
+}`;
+
+function qrSelfTest() {
+  const bad = [];
+  const expect = (label, path, src, want) => {
+    const got = qrProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`qr ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  const Q = QR_RULES;
+  expect("good store file", Q.storeFile, GOOD_QR_STORE, false);
+  expect("good services file", Q.servicesFile, GOOD_QR_SERVICES, false);
+  expect("good staff plugin", Q.staffPlugin, GOOD_QR_STAFF_PLUGIN, false);
+  expect("good customer plugin", Q.customerPlugin, GOOD_QR_CUSTOMER_PLUGIN, false);
+  expect("good customer backend", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND, false);
+  expect("interface definitions are fine", Q.lookupInterfaceFile, "<?php\ninterface EVC_Qr_Token_Store { }\nfinal class S { public function __construct(EVC_Qr_Token_Store $t) { } }\n$m = 'EVC_Qr_Token_Store';", false);
+  expect("comment mention is fine", "includes/x.php", "<?php\n// new EVC_Sql_Qr_Token_Store($db)\n$x = 1;", false);
+  // construction outside the one site
+  expect("store constructed elsewhere", "includes/x.php", "<?php\n$s = new EVC_Sql_Qr_Token_Store($db);", true);
+  expect("store constructed with a leading backslash", "includes/x.php", "<?php\n$s = new \\EVC_Sql_Qr_Token_Store($db);", true);
+  expect("store constructed upper-case over two lines", "includes/x.php", "<?php\n$s = NEW\n  EVC_SQL_QR_TOKEN_STORE($db);", true);
+  expect("store constructed in its own file", Q.storeFile, GOOD_QR_STORE.replace("{ public function", "{ public static function make($db) { return new EVC_Sql_Qr_Token_Store($db); } public function"), true);
+  expect("store constructed outside store()", Q.servicesFile, GOOD_QR_SERVICES.replace("public static function authorizer() {", "public static function authorizer() { $x = new EVC_Sql_Qr_Token_Store($db);"), true);
+  expect("store constructed twice in store()", Q.servicesFile, GOOD_QR_SERVICES.replace("{ return new EVC_Sql_Qr_Token_Store($db); }", "{ $a = new EVC_Sql_Qr_Token_Store($db); return new EVC_Sql_Qr_Token_Store($db); }"), true);
+  expect("token service constructed in a backend", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("return EVC_Club_Qr_Services::token_service($db, $c, $r, true);", "return new EVC_Qr_Token_Service($s, $a, $c);"), true);
+  expect("lookup service constructed elsewhere", "includes/x.php", "<?php\n$s = new EVC_Member_Lookup_Service($a, $b, $c, $d, $e, $f, $g, $h, 'x');", true);
+  expect("lookup keys constructed elsewhere", "includes/x.php", "<?php\n$k = new EVC_Lookup_Key_Ring(array('k1' => $s), 'k1');", true);
+  expect("store() defined twice", Q.servicesFile, GOOD_QR_SERVICES.replace("final class EVC_Club_Qr_Services {", "final class Y { public static function store() { return 1; } }\nfinal class EVC_Club_Qr_Services {"), true);
+  // dynamic construction in QR files
+  expect("new self in the store file", Q.storeFile, GOOD_QR_STORE.replace("{ public function", "{ public static function make($db) { return new self($db); } public function"), true);
+  expect("new static in the store file", Q.storeFile, GOOD_QR_STORE.replace("{ public function", "{ public static function make($db) { return new static($db); } public function"), true);
+  expect("new parent in the store file", Q.storeFile, GOOD_QR_STORE.replace("{ public function", "{ public static function make($db) { return new parent($db); } public function"), true);
+  expect("new $c from self::class in the store file", Q.storeFile, GOOD_QR_STORE.replace("{ public function", "{ public static function make($db) { $c = self::class; return new $c($db); } public function"), true);
+  expect("new (expr) in the services file", Q.servicesFile, GOOD_QR_SERVICES.replace("public static function authorizer() {", "public static function authorizer() { $x = new ('A' . 'B')();"), true);
+  expect("ReflectionClass in the store file", Q.storeFile, GOOD_QR_STORE.replace("{ public function", "{ public static function make($db) { return (new ReflectionClass(self::class))->newInstance($db); } public function"), true);
+  expect("class_alias in a backend", Q.lookupBackend, "<?php\nclass_alias('EVC_Club_Lookup_Backend', 'B');", true);
+  // names and fragments elsewhere
+  expect("store named elsewhere (type hint)", "includes/x.php", "<?php\nfunction f(EVC_Sql_Qr_Token_Store $s) { return $s; }", true);
+  expect("store named in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_Sql_Qr_Token_Store'; $s = new $c($db);", true);
+  expect("name fragment in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_Sql_' . 'Qr_Token_Store'; $s = new $c($db);", true);
+  expect("service fragment in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_' . 'Member_Lookup_Service';", true);
+  expect("class_alias elsewhere", "includes/x.php", "<?php\nclass_alias('EVC_Sql_Qr_Token_Store', 'S');", true);
+  expect("services named outside the backends", "includes/x.php", "<?php\n$s = EVC_Club_Qr_Services::store($db);", true);
+  // implements
+  expect("another store implementation", "includes/x.php", "<?php\nfinal class X implements EVC_Qr_Token_Store { }", true);
+  expect("store implementation listed second", "includes/x.php", "<?php\nfinal class X implements Countable, \\EVC_Qr_Token_Store { }", true);
+  expect("store interface extended", "includes/x.php", "<?php\ninterface X extends EVC_Qr_Token_Store { }", true);
+  expect("second implementation in the store file", Q.storeFile, GOOD_QR_STORE + "\nfinal class Z implements EVC_Qr_Token_Store { }", true);
+  expect("anonymous implementation in the store file", Q.storeFile, GOOD_QR_STORE + "\n$x = new class implements EVC_Qr_Token_Store { };", true);
+  expect("enum implementation in the store file", Q.storeFile, GOOD_QR_STORE + "\nenum E implements EVC_Qr_Token_Store { case A; }", true);
+  expect("enum named like the store", Q.storeFile, "<?php\nenum EVC_Sql_Qr_Token_Store implements EVC_Qr_Token_Store { case A; }", true);
+  expect("interface extending the store interface in the store file", Q.storeFile, GOOD_QR_STORE + "\ninterface I extends EVC_Qr_Token_Store { }", true);
+  expect("trait in the store file", Q.storeFile, GOOD_QR_STORE + "\ntrait T { }\nfinal class W implements EVC_Qr_Token_Store { use T; }", true);
+  expect("another rate limiter", "includes/x.php", "<?php\nfinal class X implements EVC_Lookup_Rate_Limiter { }", true);
+  expect("another phone directory", Q.servicesFile, GOOD_QR_SERVICES + "\nfinal class P implements EVC_Member_Phone_Directory { }", true);
+  expect("another staff authorizer", "includes/x.php", "<?php\nfinal class X implements EVC_Club_Staff_Authorizer { }", true);
+  // wiring
+  const SP = Q.staffPlugin;
+  expect("staff lookup gate dropped", SP, GOOD_QR_STAFF_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Lookup_Controller(new EVC_Club_Lookup_Backend()))->register_routes();\n        }", "(new EVC_Rest_Lookup_Controller(new EVC_Club_Lookup_Backend()))->register_routes();"), true);
+  expect("staff lookup gate widened", SP, GOOD_QR_STAFF_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Lookup", "if (EVC_Club_Redemption_Feature::enabled() || true) {\n            (new EVC_Rest_Lookup"), true);
+  expect("staff lookup gate negated", SP, GOOD_QR_STAFF_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Lookup", "if (!EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Lookup"), true);
+  expect("staff lookup backend with a test seam", SP, GOOD_QR_STAFF_PLUGIN.replace("new EVC_Club_Lookup_Backend()", "new EVC_Club_Lookup_Backend($env)"), true);
+  expect("staff lookup backend constructed in boot()", SP, GOOD_QR_STAFF_PLUGIN.replace("final class EVC_Staff_Plugin {", "final class EVC_Staff_Plugin {\n    public static function boot() { $b = new EVC_Club_Lookup_Backend(); }"), true);
+  expect("customer QR gate dropped", Q.customerPlugin, GOOD_QR_CUSTOMER_PLUGIN.replace("if (EVC_Customer_Qr_Backend::provenance_recorded()) {\n            (new EVC_Rest_Me_Qr_Controller(new EVC_Customer_Qr_Backend()))->register_routes();\n        }", "(new EVC_Rest_Me_Qr_Controller(new EVC_Customer_Qr_Backend()))->register_routes();"), true);
+  expect("customer QR gate of another check", Q.customerPlugin, GOOD_QR_CUSTOMER_PLUGIN.replace("EVC_Customer_Qr_Backend::provenance_recorded()", "EVC_Customer_Feature::enabled()"), true);
+  expect("customer provenance gate loosened", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("=== self::PROVENANCE", "== self::PROVENANCE"), true);
+  expect("customer provenance gate always true", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("return defined('EVC_CLUB_PAYMENT_PROVENANCE') &&", "return true ||"), true);
+  // review MINOR 3: ::class + new $c
+  expect("customer backend via ::class and new $c in the customer plugin", Q.customerPlugin, GOOD_QR_CUSTOMER_PLUGIN.replace("        (new EVC_Rest_Me_Controller(", "        $c = EVC_Customer_Qr_Backend::class;\n        $b = new $c();\n        (new EVC_Rest_Me_Controller("), true);
+  expect("lookup backend via ::class and new $c in the staff plugin", Q.staffPlugin, GOOD_QR_STAFF_PLUGIN.replace("        (new EVC_Rest_Redeem_Controller($backend))->register_routes();", "        $c = EVC_Club_Lookup_Backend::class;\n        $b = new $c();\n        (new EVC_Rest_Redeem_Controller($backend))->register_routes();"), true);
+  expect("new (expr) in the staff plugin", Q.staffPlugin, GOOD_QR_STAFF_PLUGIN.replace("        (new EVC_Rest_Redeem_Controller($backend))->register_routes();", "        $b = new ('EVC_' . $x)();\n        (new EVC_Rest_Redeem_Controller($backend))->register_routes();"), true);
+  expect("token service via ::class elsewhere", "includes/x.php", "<?php\n$c = EVC_Qr_Token_Service::class;\n$s = new $c($a, $b, $d);", true);
+  expect("lookup service via ::class elsewhere", "includes/x.php", "<?php\n$c = EVC_Member_Lookup_Service::class;\n$s = new $c($a);", true);
+  expect("lookup keys via ::class elsewhere", "includes/x.php", "<?php\n$c = EVC_Lookup_Key_Ring::class;\n$k = new $c(array(), 'k1');", true);
+  expect("lookup key constant read in a backend", Q.lookupBackend, "<?php\n$n = EVC_Lookup_Key_Ring::MIN_SECRET_BYTES;", true);
+  expect("customer provenance value changed", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("const PROVENANCE = 'club_db_v1';", "const PROVENANCE = 'CLUB_DB_V1';"), true);
+  return bad;
+}
+
 // ---- self test: negative fixtures, run on every package --------------------------------------------
 const OPTS = {
   bootstrap: "includes/customer/class-evc-wc-completion-plugin.php",
@@ -628,5 +919,5 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest());
 }

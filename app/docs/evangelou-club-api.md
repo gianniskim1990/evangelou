@@ -109,6 +109,14 @@ taken from the session, never from the body; path ids only from the URL.
 
 ### 4.1 `POST /members/lookup`
 
+> **STAGE-05C (implemented, opt-in, NOT active):** the implemented route accepts ONLY
+> `{"method":"qr","qr_token":…}` (phone → `400 invalid_request`) and answers the owner-approved minimum
+> (D8, 2026-11-04): `200 {"member":{"member_id","first_name"},"status":"active"|"used_today"|"inactive"}`,
+> `400 invalid_qr`, `404 member_not_found` (one answer for unknown / replaced / revoked / disabled),
+> `429 rate_limited` (D9, `Retry-After: 300`), `503 server_error`. The richer body below (display name,
+> masked phone, membership dates, benefits) is the earlier proposal and is NOT what the server sends.
+> Details: `wordpress/evangelou-club/docs/member-qr.md`.
+
 Phone numbers are **never** put in a URL. The body carries exactly one
 method; both or neither is `400 invalid_request`.
 
@@ -507,6 +515,15 @@ caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
   public `inactive` bucket; its reason and diagnostics are not exposed.
 - Status header corrected: session endpoints and a fail-closed (503) redeem
   route exist behind the feature flag; member lookup does not.
+
+**STAGE-05C (2026-11-04):**
+
+- `POST /members/lookup` implemented behind `EVC_CLUB_REDEMPTION_SOURCE` (see the §4.1 note): QR only,
+  minimum body per owner decision D8. The React adapter's lookup mapper still expects the earlier
+  proposal and must be updated in STAGE-05D before the staff UI is wired.
+- New: `POST /admin/members/qr/revoke` (administrators) and the customer namespace's `GET|POST /me/qr`.
+- New error codes: `invalid_qr` (now sent), `not_a_member`, `member_disabled`, `qr_exists`,
+  `concurrent_change`.
 
 ## 16. Demo-only shortcuts (deliberate)
 

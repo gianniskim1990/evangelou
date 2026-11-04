@@ -34,6 +34,8 @@ function evc_test_commerce_site(string $dir): void {
     define('EVC_CLUB_DB_NAME', 'evc_test_commerce_club');
     define('EVC_CLUB_DB_USER', (string) (getenv('EVC_TEST_DB_USER') ?: 'root'));
     define('EVC_CLUB_DB_PASSWORD', (string) getenv('EVC_TEST_DB_PASSWORD'));
+    // STAGE-05C: the lookup-proof secret (test-only value; a real site keeps its own >= 32 bytes in wp-config).
+    define('EVC_CLUB_LOOKUP_KEY', 'evc-test-only-lookup-key-0123456789abcdef');
 
     // Loaded like normal plugins, before the Club plugin (priority 10).
     tests_add_filter('muplugins_loaded', function () use ($dir) {
@@ -75,7 +77,7 @@ function evc_test_commerce_site(string $dir): void {
     tests_add_filter('init', 'evc_test_commerce_configure', 6);
 }
 
-/** (Re)creates the disposable Club database and applies the plugin's own migrations (001, 002). */
+/** (Re)creates the disposable Club database and applies the plugin's own migrations (001, 002, 003). */
 function evc_test_commerce_club_db(): void {
     $config = EVC_Db_Config::from_constants();
     if (!in_array(EVC_CLUB_DB_HOST, array('127.0.0.1', 'localhost', '::1'), true) || strpos($config->database(), 'evc_test_') !== 0) {
@@ -85,7 +87,7 @@ function evc_test_commerce_club_db(): void {
     $admin = new PDO(sprintf('mysql:host=%s;port=%d;charset=utf8mb4', EVC_CLUB_DB_HOST, EVC_CLUB_DB_PORT), EVC_CLUB_DB_USER, EVC_CLUB_DB_PASSWORD, array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
     $admin->exec('DROP DATABASE IF EXISTS `' . $config->database() . '`');
     $admin->exec('CREATE DATABASE `' . $config->database() . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
-    (new EVC_Migrator(EVC_Club_Db::connect($config), dirname(__DIR__, 3) . '/database'))->migrate();
+    (new EVC_Migrator(EVC_Club_Db::connect($config), dirname(__DIR__, 3) . '/database'))->migrate(PHP_INT_MAX);
 }
 
 /** The staging configuration as verified on 2026-10-23 (fresh test database, fixed ids). */

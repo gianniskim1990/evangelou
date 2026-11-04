@@ -723,7 +723,7 @@ See `docs/staff-role-upgrade.md`.
 ## Migration procedure (isolated environments only)
 
 1. Take and verify a backup of the target Club database.
-2. Run `EVC_Migrator::migrate()` with the DDL user. It verifies every applied
+2. Run `EVC_Migrator::migrate($target)` (the target is required) with the DDL user. It verifies every applied
    migration's checksum, rejects missing/out-of-order files, holds a named
    lock, applies pending files in order and records version + checksum.
 3. DDL auto-commits in MySQL/MariaDB: a failed migration may leave partial
@@ -819,6 +819,37 @@ latest recorded paid period is still running and who have no row yet. Database u
 decide (one row per WordPress user); a row grants nothing by itself (the redeem route still decides
 from recorded provenance); staff / privileged accounts never become members. Greek operator note and
 developer notes: `docs/club-members.md`.
+
+## Club member QR: customer QR, staff scan, failed-scan limit (STAGE-05C — constant-gated, NOT active anywhere)
+
+Owner decisions 2026-11-04: D6 a QR has no age limit and changes only when the customer (or an
+administrator) asks; D7 screenshots work; D8 staff see first name + status only; D9 about 10 failed
+scans per 5 minutes per tablet, counted in the new migration **003** (`evc_lookup_failures`; code
+approved, applying it anywhere real needs separate approval). The migrations page applies only up to
+`EVC_CLUB_MIGRATIONS_TARGET` (undefined = 2), so 003 is shown as "pending, not approved" and is never
+applied until the technician sets the target to 3 after the owner's go-ahead.
+Owner decisions 2026-11-04 (later): successful tablet re-logins stay unlimited, so each new login
+gives about 10 more failed scans («Όχι, μένει έτσι», an accepted risk, no code); QR revocation stays
+administrator-only and the tablet only scans («Όχι, μόνο ο διαχειριστής»).
+
+- **Customer:** `GET|POST evangelou-club-customer/v1/me/qr`, only with `EVC_CLUB_CUSTOMER_ENABLED` AND
+  `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`. A member gets one QR; a second request without
+  `replace: true` is `409 qr_exists`. The plaintext is returned ONLY at issue (digests are stored); the app
+  keeps it.
+- **Staff:** `POST evangelou-club/v1/members/lookup` → `{member:{member_id, first_name}, status:
+  active|used_today|inactive}`, one generic 404 for unknown / replaced / revoked / disabled. Only with
+  everything the STAGE-05A redeem route needs, plus migration 003 and the new wp-config secret
+  `EVC_CLUB_LOOKUP_KEY` (≥ 32 bytes, technician, per environment). The status comes from the redeem
+  route's own membership source; the redeem route still re-checks at the counter.
+- **Administrator:** `POST evangelou-club/v1/admin/members/qr/revoke {wp_user_id}` (`evc_manage_club`,
+  never the shared tablet account) retires a customer's QR (lost phone).
+- **Store:** `EVC_Sql_Qr_Token_Store` over 001, as a compare-and-set in one transaction. **Limiter:**
+  `EVC_Sql_Lookup_Rate_Limiter` over 003, with atomic increments per tablet session; a failure that
+  cannot be recorded makes the scan `unavailable` (fail closed). **Single
+  construction site:** `EVC_Club_Qr_Services`; the backends are wired only behind their opt-ins
+  (packager rule set `qrProblemsFor`).
+
+Greek operator note and developer notes: `docs/member-qr.md`.
 
 ## Known deployment blockers
 

@@ -31,6 +31,9 @@ require_once $evc_customer . 'class-evc-wc-completion-recovery.php';
 require_once $evc_customer . 'class-evc-wc-completion-plugin.php';
 require_once $evc_customer . 'class-evc-customer-rest-security.php';
 require_once $evc_customer . 'class-evc-rest-me-controller.php';
+// STAGE-05C: the customer's own QR (route only with EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1').
+require_once $evc_customer . 'class-evc-customer-qr-backend.php';
+require_once $evc_customer . 'class-evc-rest-me-qr-controller.php';
 require_once $evc_customer . 'class-evc-customer-shell.php';
 require_once $evc_customer . 'class-evc-customer-plugin.php';
 unset($evc_customer);

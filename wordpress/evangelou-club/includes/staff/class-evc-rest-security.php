@@ -43,6 +43,12 @@ final class EVC_Rest_Security {
         'forbidden' => 'Δεν επιτρέπεται.',
         'rate_limited' => 'Πολλά αιτήματα. Δοκιμάστε αργότερα.',
         'server_error' => 'Προσωρινό σφάλμα. Δοκιμάστε ξανά.',
+        // STAGE-05C (QR).
+        'invalid_qr' => 'Ο κωδικός δεν είναι QR του Club.',
+        'not_a_member' => 'Δεν υπάρχει ακόμα κάρτα μέλους.',
+        'member_disabled' => 'Η κάρτα μέλους δεν είναι διαθέσιμη.',
+        'qr_exists' => 'Υπάρχει ήδη QR. Ζητήστε νέο μόνο αν χάθηκε.',
+        'concurrent_change' => 'Το QR άλλαξε μόλις τώρα. Ανανεώστε τη σελίδα.',
     );
 
     public static function register_hooks(): void {

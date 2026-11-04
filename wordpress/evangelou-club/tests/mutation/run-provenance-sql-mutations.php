@@ -36,7 +36,13 @@ $commands = array(
     'provenance' => $phpunit,
     'members' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
         '--filter', '/SqlMemberIdentityStoreTest/', '--exclude-group', 'concurrency'),
+    // STAGE-05C: mutants with 'command' => 'qr' run the QR token store tests instead.
+    'qr' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
+        '--filter', '/(SqlQrTokenStoreTest|SqlLookupRateLimiterTest)/', '--exclude-group', 'concurrency'),
 );
+$qr = 'includes/class-evc-sql-qr-token-store.php';
+$limiter = 'includes/class-evc-sql-lookup-rate-limiter.php';
+$services = 'includes/class-evc-club-qr-services.php';
 
 $mutants = array(
     // ---- schema backstops ---------------------------------------------------
@@ -116,6 +122,60 @@ $mutants = array(
     array('id' => 'MS5-status-change-silently-accepted', 'file' => $members, 'command' => 'members',
         'search' => "        throw new LogicException('Account status changes need a status version and status events (not in migration 001).');",
         'replace' => '        return;'),
+    // ---- STAGE-05C: the SQL QR token store (evc_qr_tokens, migration 001) ---------------------------
+    // Run against SqlQrTokenStoreTest only (sequential tests; the multi-process race test is proven in
+    // every CI engine job). Not listed (equivalent by design, documented in docs/member-qr.md): removing
+    // the row lock alone or the affected-row check alone. For rotate() the digest compare, the guarded
+    // UPDATE and the unique key each still refuse a late writer; for revoke() (no INSERT, so the unique
+    // key does not help) the digest compare and the guarded UPDATE still do, proven by the multi-process
+    // revoke-versus-rotate race (CI engine jobs).
+    array('id' => 'QS1-second-active-token-key-dropped', 'file' => 'database/001_initial.sql', 'command' => 'qr',
+        'search' => "  UNIQUE KEY uq_qr_tokens_one_active (active_member_id),\n", 'replace' => ''),
+    array('id' => 'QS2-stale-digest-accepted', 'file' => $qr, 'command' => 'qr',
+        'search' => "        if (!hash_equals(\$current, \$expected_active_hash)) {", 'replace' => '        if (false) {'),
+    array('id' => 'QS3-none-versus-active-mismatch-ignored', 'file' => $qr, 'command' => 'qr',
+        'search' => "            if (\$current !== \$expected_active_hash) {", 'replace' => '            if (false) {'),
+    array('id' => 'QS4-rotation-outside-one-transaction', 'file' => $qr, 'command' => 'qr',
+        'search' => "            \$this->db->transactional(\$work);", 'replace' => '            $work($this->db);'),
+    array('id' => 'QS5-deadlock-not-a-concurrent-change', 'file' => $qr, 'command' => 'qr',
+        'search' => "            throw new EVC_Qr_Rotation_Conflict('A concurrent QR token change won.');", 'replace' => '            throw $e;'),
+    array('id' => 'QS6-revocation-does-not-revoke', 'file' => $qr, 'command' => 'qr',
+        'search' => "\"UPDATE evc_qr_tokens SET status = 'revoked', revoked_at_utc = ?", 'replace' => "\"UPDATE evc_qr_tokens SET status = status, revoked_at_utc = ?"),
+    array('id' => 'QS7-malformed-token-row-accepted', 'file' => $qr, 'command' => 'qr',
+        'search' => "            && ((\$status === 'active' && \$revoked === null)", 'replace' => "            && ((\$status === 'active')"),
+    array('id' => 'QS8-malformed-member-row-accepted', 'file' => $qr, 'command' => 'qr',
+        'search' => "            || !EVC_Member_Id::is_valid_format(\$public_id) || !in_array(\$status, self::MEMBER_STATUSES, true)) {",
+        'replace' => "            || !in_array(\$status, self::MEMBER_STATUSES, true)) {"),
+    array('id' => 'QS9-lookup-returns-the-digest', 'file' => $qr, 'command' => 'qr',
+        'search' => "        return array('member_id' => \$member_id, 'status' => \$status, 'issued_at_utc' => \$issued, 'revoked_at_utc' => \$revoked);",
+        'replace' => "        return array('member_id' => \$member_id, 'status' => \$status, 'issued_at_utc' => \$issued, 'revoked_at_utc' => \$revoked, 'token_hash' => \$token_hash);"),
+    array('id' => 'QS10-plaintext-accepted-as-a-digest', 'file' => $qr, 'command' => 'qr',
+        'search' => "            || !preg_match(self::HASH_PATTERN, \$new_hash) || !preg_match(self::INSTANT_PATTERN, \$now_utc)) {",
+        'replace' => "            || !preg_match(self::INSTANT_PATTERN, \$now_utc)) {"),
+    // STAGE-05C part 2/3: the first-issuance decorator, the connection's lock wait, and the D9 limiter (003).
+    array('id' => 'QS11-first-issuance-may-replace', 'file' => $services, 'command' => 'qr',
+        'search' => "        return null;\n    }\n\n    public function rotate(int \$member_id, ?string \$expected_active_hash, string \$new_hash, string \$now_utc): void {\n        \$this->inner->rotate(\$member_id, null, \$new_hash, \$now_utc);",
+        'replace' => "        return \$this->inner->active_token_hash(\$member_id);\n    }\n\n    public function rotate(int \$member_id, ?string \$expected_active_hash, string \$new_hash, string \$now_utc): void {\n        \$this->inner->rotate(\$member_id, \$expected_active_hash, \$new_hash, \$now_utc);"),
+    array('id' => 'QS12-long-lock-wait', 'file' => $services, 'command' => 'qr',
+        'search' => '    const LOCK_WAIT_SECONDS = 5;', 'replace' => '    const LOCK_WAIT_SECONDS = 50;'),
+    array('id' => 'LR1-eleventh-failure-still-allowed', 'file' => $limiter, 'command' => 'qr',
+        'search' => "(int) \$row['failures'] >= self::MAX_FAILURES", 'replace' => "(int) \$row['failures'] > self::MAX_FAILURES"),
+    array('id' => 'LR2-shared-account-key-counted', 'file' => $limiter, 'command' => 'qr',
+        'search' => "if (is_string(\$key) && strpos(\$key, self::COUNTED_PREFIX) === 0 && strlen(\$key) > strlen(self::COUNTED_PREFIX)) {", 'replace' => 'if (is_string($key)) {'),
+    array('id' => 'LR3-window-not-aligned', 'file' => $limiter, 'command' => 'qr',
+        'search' => "return gmdate('Y-m-d H:i:s', \$t - (\$t % self::WINDOW_SECONDS)) . '.000000';", 'replace' => "return gmdate('Y-m-d H:i:s', \$t) . '.000000';"),
+    array('id' => 'LR4-no-session-key-allowed', 'file' => $limiter, 'command' => 'qr',
+        'search' => "        if (\$counted === array()) {\n            return false;", 'replace' => "        if (\$counted === array()) {\n            return true;"),
+    array('id' => 'LR5-old-rows-never-pruned', 'file' => $limiter, 'command' => 'qr',
+        'search' => "        \$cutoff = \$at->getTimestamp() - self::RETENTION_SECONDS;", 'replace' => "        \$cutoff = 0;"),
+    array('id' => 'LR6-counter-key-not-unique', 'file' => 'database/003_lookup_failures.sql', 'command' => 'qr',
+        'search' => "  PRIMARY KEY (limiter_key, window_start_utc),\n", 'replace' => "  KEY ix_lookup_failures_key (limiter_key, window_start_utc),\n"),
+    // STAGE-05C review (MAJOR 1): an uncountable failure must make the lookup unavailable (integration killer).
+    array('id' => 'LR8-uncounted-failure-answered-normally', 'file' => 'includes/class-evc-member-lookup.php', 'command' => 'qr',
+        'search' => "            \$this->report(\$e);\n            return EVC_Member_Lookup_Result::of(EVC_Member_Lookup_Result::UNAVAILABLE);\n        }\n        return EVC_Member_Lookup_Result::of(\$kind);",
+        'replace' => "            \$this->report(\$e);\n        }\n        return EVC_Member_Lookup_Result::of(\$kind);"),
+    array('id' => 'LR7-raw-session-ref-stored', 'file' => $limiter, 'command' => 'qr',
+        'search' => "                \$out[] = hash('sha256', self::DOMAIN . \$action . '|' . \$key);", 'replace' => "                \$out[] = substr(str_pad(\$key, 64, '0'), 0, 64);"),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -146,6 +206,10 @@ $baseline = evc_run_suite($phpunit);
 if ($baseline === 0) {
     echo "Baseline (unmutated) member identity store run...\n";
     $baseline = evc_run_suite($commands['members']);
+}
+if ($baseline === 0) {
+    echo "Baseline (unmutated) QR token store run...\n";
+    $baseline = evc_run_suite($commands['qr']);
 }
 if ($baseline !== 0) {
     fwrite(STDERR, "ABORT: baseline suite is not green (exit $baseline); mutation results would be meaningless.\n");

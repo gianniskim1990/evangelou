@@ -40,6 +40,10 @@ final class EVC_Staff_Plugin {
         $backend = EVC_Club_Redemption_Feature::enabled() ? new EVC_Club_Redemption_Backend(new EVC_Approved_Coffee_Catalogue_Source()) : new EVC_Unavailable_Redemption_Backend();
         (new EVC_Rest_Redeem_Controller($backend))->register_routes();
         (new EVC_Rest_Session_Controller())->register_routes();
+        // STAGE-05C: QR scan + administrator QR revocation exist ONLY with the same opt-in (packager-enforced).
+        if (EVC_Club_Redemption_Feature::enabled()) {
+            (new EVC_Rest_Lookup_Controller(new EVC_Club_Lookup_Backend()))->register_routes();
+        }
     }
 
     public static function activate(): void {

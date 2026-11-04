@@ -42,7 +42,7 @@ final class ClubRedemptionBackendTest extends EVC_WP_Test_Case {
                     copy(EVC_Test_Database::migrations_dir() . '/' . $file, $dir . '/' . $file);
                 }
             }
-            (new EVC_Migrator($db->connect(), $dir))->migrate();
+            (new EVC_Migrator($db->connect(), $dir))->migrate(PHP_INT_MAX);
         }
         return $db;
     }
@@ -117,6 +117,15 @@ final class ClubRedemptionBackendTest extends EVC_WP_Test_Case {
         $response = $this->rest('POST', $this->redeem_route(EVC_Member_Id::mint()), array('request_id' => self::uuid4(), 'coffee_code' => 'espresso'), $this->nonce());
         $this->assertEnvelope($response, 503, 'server_error');
         $this->assertSame(array('error' => array('code' => 'server_error', 'message' => EVC_Rest_Security::MESSAGES['server_error'])), $response->get_data());
+    }
+
+    /** STAGE-05C: without EVC_CLUB_REDEMPTION_SOURCE the QR scan / revocation routes do not exist at all. */
+    public function test_without_the_constant_no_qr_route_is_registered(): void {
+        $routes = array_keys(rest_get_server()->get_routes());
+        $this->assertNotContains('/' . EVC_Rest_Security::NAMESPACE_V1 . EVC_Rest_Lookup_Controller::LOOKUP_ROUTE, $routes);
+        $this->assertNotContains('/' . EVC_Rest_Security::NAMESPACE_V1 . EVC_Rest_Lookup_Controller::REVOKE_ROUTE, $routes);
+        $this->login_as($this->create_staff_user());
+        $this->assertSame(404, $this->rest('POST', '/' . EVC_Rest_Security::NAMESPACE_V1 . '/members/lookup', array('method' => 'qr', 'qr_token' => EVC_Qr_Token::mint()), $this->nonce())->get_status());
     }
 
     public function test_only_the_exact_string_enables_the_constant(): void {

@@ -1434,6 +1434,13 @@ $mutants = array(
         'replace' => '                if ($member !== null) {',
     ),
     array(
+        // STAGE-05C review (MAJOR 1): an uncountable failure answered normally = scanning without limit.
+        'id' => 'L27-uncounted-failure-answered-normally',
+        'file' => 'includes/class-evc-member-lookup.php',
+        'search' => '            $this->report($e);' . "\n" . '            return EVC_Member_Lookup_Result::of(EVC_Member_Lookup_Result::UNAVAILABLE);' . "\n" . '        }' . "\n" . '        return EVC_Member_Lookup_Result::of($kind);',
+        'replace' => '            $this->report($e);' . "\n" . '        }' . "\n" . '        return EVC_Member_Lookup_Result::of($kind);',
+    ),
+    array(
         'id' => 'L26-lookup-claims-entitlement',
         'file' => 'includes/class-evc-member-lookup.php',
         'search' => '    public function grants_entitlement(): bool {' . "\n" . '        return false;',

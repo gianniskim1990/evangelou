@@ -187,6 +187,8 @@ final class EVC_Fake_Lookup_Rate_Limiter implements EVC_Lookup_Rate_Limiter {
     public $max_failures;
     /** @var bool */
     public $unavailable = false;
+    /** @var bool STAGE-05C review: only record_failure() fails (allow() still works) */
+    public $record_unavailable = false;
     /** @var array<string,int> */
     public $attempts = array();
     /** @var array<string,int> */
@@ -216,7 +218,7 @@ final class EVC_Fake_Lookup_Rate_Limiter implements EVC_Lookup_Rate_Limiter {
     }
 
     public function record_failure(array $keys, string $action): void {
-        if ($this->unavailable) {
+        if ($this->unavailable || $this->record_unavailable) {
             throw new RuntimeException('rate limiter down');
         }
         foreach ($keys as $key) {

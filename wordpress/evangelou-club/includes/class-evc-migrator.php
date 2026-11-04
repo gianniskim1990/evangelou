@@ -71,10 +71,12 @@ final class EVC_Migrator {
     }
 
     /**
-     * Verifies applied migrations against disk and applies pending ones.
+     * Verifies applied migrations against disk and applies pending ones up to and including $up_to.
+     * The target is required (STAGE-05C review): there is no call that applies "everything"; the page /
+     * command pass the approved target (EVC_CLUB_MIGRATIONS_TARGET) and later files stay pending.
      * @return int[] Versions applied by this call (empty when up to date).
      */
-    public function migrate(): array {
+    public function migrate(int $up_to): array {
         $this->ensure_bookkeeping_table();
         $this->acquire_lock();
         try {
@@ -86,6 +88,9 @@ final class EVC_Migrator {
             foreach ($available as $version => $migration) {
                 if (isset($applied[$version])) {
                     continue;
+                }
+                if ($version > $up_to) {
+                    break;
                 }
                 $this->apply($version, $migration);
                 $done[] = $version;

@@ -14,7 +14,7 @@ import { execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MEMBER_SYNC_RULES, MIGRATIONS_RULES, REDEMPTION_RULES, memberSyncProblemsFor, problemsFor, redemptionProblemsFor, selfTest } from "./php-guards.mjs";
+import { MEMBER_SYNC_RULES, MIGRATIONS_RULES, QR_RULES, REDEMPTION_RULES, memberSyncProblemsFor, problemsFor, qrProblemsFor, redemptionProblemsFor, selfTest } from "./php-guards.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginSrc = join(appDir, "..", "wordpress", "evangelou-club");
@@ -36,7 +36,7 @@ const FORBIDDEN_CUSTOMER_BUNDLE_STRINGS = [
   "mockClubService", "createMockClubService", "DEMO-QR", "evc-staff-config", "/club-admin", "x-admin-password", "/api/orders", "/api/overrides",
   "localStorage", "sessionStorage",
 ];
-const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Bacs_Payment_Confirmation", "new EVC_Bacs_Payment_Finalizer", "new EVC_Bacs_Payment_Issuer", "class EVC_Hooked_Provenance_Store", "class EVC_Bacs_Intent_Fixture", "class EVC_Read_Only_Provenance_Store_Spy", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup", "class EVC_In_Memory_Prepared_Redemption_Store", "class EVC_Fake_Prep_Catalogue_Authority", "new EVC_Prepared_Redemption_Service", "implements EVC_Prep_Redemption_Store", "implements EVC_Prep_Catalogue_Authority", "class EVC_Fake_Club_Staff_Authorizer", "new EVC_Handoff_Service", "new EVC_Fulfillment_Read_Model", "implements EVC_Redemption_Fulfillment_Store", "implements EVC_Club_Staff_Authorizer", "class EVC_Fake_Redemption_History", "class EVC_Fake_Member_Context_Verifier", "new EVC_Usual_Coffee_Service", "implements EVC_Redemption_History_Source", "new EVC_Signed_Member_Context_Verifier", "new EVC_Member_Lookup_Service", "new EVC_Qr_Token_Service", "new EVC_Lookup_Key_Ring", "implements EVC_Qr_Token_Store", "implements EVC_Member_Phone_Directory", "implements EVC_Lookup_Rate_Limiter", "class EVC_Fake_Qr_Token_Store", "class EVC_Fake_Member_Phone_Directory", "class EVC_Fake_Lookup_Rate_Limiter", "class EVC_Fake_Member_Identity_Store", "class EVC_Fake_Wp_Account_Directory", "class EVC_Fake_Member_Status_Policy", "class EVC_Fake_Qr_Delivery_Policy", "new EVC_Member_Account_Service", "new EVC_Member_Qr_Coordinator", "implements EVC_Member_Status_Policy", "implements EVC_Qr_Delivery_Policy", "class EVC_Contract_Vector_Builder", "EVC_Test_Redemption_Backend", "EVC_Test_Coffee_Catalogue", "fixtures/coffee-catalog.php", "new EVC_Rest_V2_Domain_Response", "register_rest_route(EVC_Rest_V2_Routes", "'EVC_Rest_V2_Security'", "EVC_Rest_V2_Security::filter_post_dispatch", "EVC_Test_V2_Harness", "EVC_Staff_Role_Upgrade_Planner::", "new EVC_Staff_Role_Upgrade_Approval", "EVC_Staff_Role_Versions::VERSION_OPTION"];
+const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Bacs_Payment_Confirmation", "new EVC_Bacs_Payment_Finalizer", "new EVC_Bacs_Payment_Issuer", "class EVC_Hooked_Provenance_Store", "class EVC_Bacs_Intent_Fixture", "class EVC_Read_Only_Provenance_Store_Spy", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup", "class EVC_In_Memory_Prepared_Redemption_Store", "class EVC_Fake_Prep_Catalogue_Authority", "new EVC_Prepared_Redemption_Service", "implements EVC_Prep_Redemption_Store", "implements EVC_Prep_Catalogue_Authority", "class EVC_Fake_Club_Staff_Authorizer", "new EVC_Handoff_Service", "new EVC_Fulfillment_Read_Model", "implements EVC_Redemption_Fulfillment_Store", "class EVC_Fake_Redemption_History", "class EVC_Fake_Member_Context_Verifier", "new EVC_Usual_Coffee_Service", "implements EVC_Redemption_History_Source", "new EVC_Signed_Member_Context_Verifier", "class EVC_Fake_Qr_Token_Store", "class EVC_Fake_Member_Phone_Directory", "class EVC_Fake_Lookup_Rate_Limiter", "class EVC_Fake_Member_Identity_Store", "class EVC_Fake_Wp_Account_Directory", "class EVC_Fake_Member_Status_Policy", "class EVC_Fake_Qr_Delivery_Policy", "new EVC_Member_Account_Service", "new EVC_Member_Qr_Coordinator", "implements EVC_Member_Status_Policy", "implements EVC_Qr_Delivery_Policy", "class EVC_Contract_Vector_Builder", "EVC_Test_Redemption_Backend", "EVC_Test_Coffee_Catalogue", "fixtures/coffee-catalog.php", "new EVC_Rest_V2_Domain_Response", "register_rest_route(EVC_Rest_V2_Routes", "'EVC_Rest_V2_Security'", "EVC_Rest_V2_Security::filter_post_dispatch", "EVC_Test_V2_Harness", "EVC_Staff_Role_Upgrade_Planner::", "new EVC_Staff_Role_Upgrade_Approval", "EVC_Staff_Role_Versions::VERSION_OPTION"];
 const SILENCE = "<?php\n// Silence is golden.\n";
 
 function fail(message) {
@@ -165,6 +165,7 @@ let sawBootstrap = false;
 let sawMigrationsBootstrap = false;
 const sawRedemption = new Set();
 const sawMemberSync = new Set();
+const sawQr = new Set();
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
   const path = f.replace(/\\/g, "/");
@@ -190,7 +191,13 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   for (const problem of memberSyncProblemsFor(path, text)) {
     fail(problem);
   }
+  // STAGE-05C: the QR pieces only at their one construction site, behind the customer / staff opt-ins.
+  if (Object.values(QR_RULES).includes(path)) sawQr.add(path);
+  for (const problem of qrProblemsFor(path, text)) {
+    fail(problem);
+  }
 }
+if (sawQr.size !== Object.values(QR_RULES).length) fail("a STAGE-05C QR file is missing from the package");
 if (!sawBootstrap) fail("the STAGE-03D bootstrap file is missing from the package");
 if (!sawMigrationsBootstrap) fail("the STAGE-04A migrations bootstrap file is missing from the package");
 if (sawMemberSync.size !== 3) fail("a STAGE-05B member-sync file (sync, SQL store or core) is missing from the package");

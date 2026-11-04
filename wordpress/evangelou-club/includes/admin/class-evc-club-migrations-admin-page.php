@@ -193,7 +193,9 @@ final class EVC_Club_Migrations_Admin_Page {
         if ($status['pending']) {
             $h .= '<ul class="evc-club-db-pending">';
             foreach ($status['pending'] as $row) {
-                $h .= '<li>' . esc_html(sprintf('%03d', $row['version']) . ' — ' . $row['name']) . '</li>';
+                $blocked = in_array((int) $row['version'], $status['not_approved'], true);
+                $h .= '<li data-approved="' . ($blocked ? 'no' : 'yes') . '">' . esc_html(sprintf('%03d', $row['version']) . ' — ' . $row['name'])
+                    . ($blocked ? ' — <strong>' . esc_html('ΕΚΚΡΕΜΕΙ, ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ (δεν θα εφαρμοστεί)') . '</strong>' : '') . '</li>';
             }
             $h .= '</ul>';
         } else {
@@ -207,6 +209,11 @@ final class EVC_Club_Migrations_Admin_Page {
             $h .= '<input type="hidden" name="' . esc_attr(self::FIELD_ACTION) . '" value="' . esc_attr(self::ACTION_APPLY) . '">';
             $h .= '<p><label>' . esc_html('Λέξη επιβεβαίωσης:') . ' <input type="text" name="' . esc_attr(self::FIELD_CONFIRM) . '" autocomplete="off" required></label></p>';
             $h .= '<p><button type="submit" class="button button-primary">' . esc_html('Εφαρμογή εκκρεμών μεταβάσεων') . '</button></p></form>';
+        } elseif ($status['inspected'] && $status['refusals'] === array() && $status['not_approved'] !== array()) {
+            foreach ($status['not_approved'] as $version) {
+                $h .= '<p class="evc-club-db-not-approved">' . esc_html(EVC_Club_Migrations_Service::message('not_approved', array('version' => $version))) . '</p>';
+            }
+            $h .= '<p>' . esc_html('Οι εγκεκριμένες μεταβάσεις έχουν εφαρμοστεί.') . '</p>';
         } elseif ($status['inspected'] && $status['refusals'] === array()) {
             $h .= '<p>' . esc_html('Η βάση του Club είναι ενημερωμένη.') . '</p>';
         } else {

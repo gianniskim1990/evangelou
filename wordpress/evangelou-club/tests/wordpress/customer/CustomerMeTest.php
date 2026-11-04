@@ -188,4 +188,14 @@ final class CustomerMeTest extends EVC_WP_Test_Case {
         $r = $this->rest('POST', self::ME, array('user_id' => 1), $this->nonce());
         $this->assertSame(404, $r->get_status(), 'no write method exists');
     }
+
+    /** STAGE-05C: the SQL QR token store exists as a definition only; no customer QR route is wired. */
+    public function test_no_qr_route_is_registered(): void {
+        foreach (array_keys(rest_get_server()->get_routes()) as $route) {
+            if (strpos($route, '/' . EVC_Customer_Rest_Security::NAMESPACE_V1) === 0) {
+                $this->assertDoesNotMatchRegularExpression('/qr|token|lookup/i', $route);
+            }
+        }
+        $this->assertSame(404, $this->rest('GET', '/' . EVC_Customer_Rest_Security::NAMESPACE_V1 . '/me/qr')->get_status());
+    }
 }

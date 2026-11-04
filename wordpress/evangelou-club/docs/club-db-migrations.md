@@ -15,6 +15,20 @@ database.** Running it on staging or production needs the owner's explicit appro
 
 - `001` — βασικοί πίνακες (μέλη, κωδικοί QR, εξαργυρώσεις, ημερολόγιο ελέγχου)
 - `002` — πίνακες πληρωμών του Club
+- `003` — μετρητές αποτυχημένων σαρώσεων QR ανά tablet (STAGE-05C, απόφαση D9). Ο ιδιοκτήτης ενέκρινε
+  τον **κώδικα**· η εφαρμογή του στο staging ή στην παραγωγή χρειάζεται **ξεχωριστή** έγκρισή του.
+
+> **ΠΡΟΣΟΧΗ — ΜΕΤΑΒΑΣΗ 003**
+>
+> Η σελίδα εφαρμόζει **μόνο** τις εγκεκριμένες μεταβάσεις, μέχρι τον αριθμό
+> `EVC_CLUB_MIGRATIONS_TARGET` στο `wp-config.php`. **Αν η σταθερά δεν υπάρχει, ο αριθμός είναι 2**,
+> άρα το `003` εμφανίζεται ως «ΕΚΚΡΕΜΕΙ, ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ (δεν θα εφαρμοστεί)», δεν υπάρχει κουμπί
+> για αυτό και καμία εντολή δεν το εφαρμόζει.
+>
+> **Μην προσθέσετε** `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` πριν δώσει ο ιδιοκτήτης **γραπτή
+> έγκριση για τη συγκεκριμένη βάση** (πρώτα staging, μετά παραγωγή). Πριν από την εφαρμογή:
+> αντίγραφο ασφαλείας. Μετά την εφαρμογή η σταθερά μπορεί να μείνει. Αν γραφτεί λάθος (π.χ. `'3'` με
+> εισαγωγικά ή `0`), η σελίδα **αρνείται** κάθε εφαρμογή («migrations_target_invalid»).
 
 Η σελίδα **Εργαλεία → «Evangelou Club — Βάση δεδομένων»** δείχνει σε ποια κατάσταση είναι η βάση και,
 όταν όλα είναι εντάξει, εφαρμόζει τις μεταβάσεις που λείπουν. Δεν διαγράφει και δεν αλλάζει τίποτα
@@ -47,10 +61,14 @@ database.** Running it on staging or production needs the owner's explicit appro
 
 1. Ανοίξτε **Εργαλεία → Evangelou Club — Βάση δεδομένων**.
 2. Δείτε την ενότητα «Έλεγχοι ασφαλείας». Όλες οι γραμμές πρέπει να λένε **«Εντάξει»**.
-3. Στις «Εκκρεμείς μεταβάσεις» θα δείτε π.χ. `001 — initial` και `002 — payment_provenance`.
+3. Στις «Εκκρεμείς μεταβάσεις» θα δείτε π.χ. `001 — initial`, `002 — payment_provenance` και
+   `003 — lookup_failures — ΕΚΚΡΕΜΕΙ, ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ` (το 003 δεν εφαρμόζεται χωρίς
+   `EVC_CLUB_MIGRATIONS_TARGET` = 3).
 4. Γράψτε τη λέξη **ΕΦΑΡΜΟΓΗ** (κεφαλαία, χωρίς τόνο) στο πεδίο και πατήστε
    **«Εφαρμογή εκκρεμών μεταβάσεων»**.
-5. Πρέπει να δείτε: «Η βάση του Club ενημερώθηκε. Εφαρμόστηκαν οι μεταβάσεις: 001, 002.» και
+5. Πρέπει να δείτε: «Η βάση του Club ενημερώθηκε. Εφαρμόστηκαν οι μεταβάσεις: 001, 002.» (ή μόνο
+   όσες έλειπαν· με εγκεκριμένο στόχο 3, π.χ. «003») και, όσο το 003 δεν έχει εγκριθεί, «Οι
+   εγκεκριμένες μεταβάσεις έχουν εφαρμοστεί.» αντί για
    «Η βάση του Club είναι ενημερωμένη.» Οι μεταβάσεις φαίνονται πλέον στις «Εφαρμοσμένες» με
    «Ίδιο (εντάξει)».
 6. Αν το ξαναπατήσετε, δεν γίνεται τίποτα («Δεν υπάρχει καμία εκκρεμής μετάβαση»). Η ανανέωση της
@@ -143,7 +161,7 @@ wp evc-club migrations apply --yes
   (POST/redirect/GET). The notice travels in the per-user transient `evc_club_migrations_result_<id>`
   (5 minutes), shown once and deleted. The render callback never acts on a POST.
 - **Lock:** `GET_LOCK(CONCAT('evc_migrations_', SHA1(DATABASE())), 0)` taken first (no wait →
-  `lock_busy`) and held across inspection + `EVC_Migrator::migrate()`. GET_LOCK is re-entrant per
+  `lock_busy`) and held across inspection + `EVC_Migrator::migrate($target)`. GET_LOCK is re-entrant per
   connection on MySQL ≥ 5.7 / MariaDB ≥ 10.0.2, so the migrator's own lock nests inside it.
 - **Separation checks** (`inspect()`, all read-only; any failure refuses):
   - configured name (exact, case-sensitive) + normalised host equal to `DB_NAME` + `DB_HOST` →
