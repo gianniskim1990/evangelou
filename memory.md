@@ -1348,3 +1348,4 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - **Fix:** in `memberCounter.test.ts` and `customerQr.test.ts`, DOM-node comparisons now use `assert.ok(a === b, message)`, which never inspects. C13 now peaks at 0.36 GB (baseline 0.37 GB).
   - All 50 C* / Q* mutants were re-run locally: all killed, peak 0.43 GB.
   - **Rule for future tests:** never pass DOM nodes as actual/expected to `assert.equal`, `assert.notEqual` or `assert.deepEqual`.
+- CI on 77a0e359 (STAGE-05D round 2 code, PR #39): green. Foundation pull_request run 41873126950 18/18; frontend pull_request 41873127251 4/4 (incl. both mutation shards of 325 and the isolated-build check with the new canary); frontend push 41873118887 4/4. No foundation push run was created for this SHA (the commit touched only app/tests and memory.md; foundation's path filter). The previous code SHA e628991 had foundation push 41852977222 green after one flake re-run.
