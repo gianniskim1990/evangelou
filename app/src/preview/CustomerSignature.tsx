@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CLUB_RULES, COFFEES, greekDate, type PreviewMembershipState } from "./previewData";
 import type { CustomerScreen } from "./screens";
 import { paymentAction, sampleCustomerView, type CustomerActions, type CustomerMembershipState, type CustomerView } from "./customerView";
@@ -108,7 +109,20 @@ export function MemberPass(props: PassProps) {
 }
 
 /** The approved pass for a given view; imports no sample data (used directly by the STAGE-01 live app). */
-export function MemberPassView({ go, view, actions }: { go: (screen: CustomerScreen) => void; view: CustomerView; actions?: CustomerActions }) {
+export function MemberPassView({
+  go,
+  view,
+  actions,
+  qr,
+  qrNote,
+}: {
+  go: (screen: CustomerScreen) => void;
+  view: CustomerView;
+  actions?: CustomerActions;
+  /** STAGE-05D (live app only): the member's real QR panel in place of the sample code. */
+  qr?: ReactNode;
+  qrNote?: string;
+}) {
   const { state, today, member } = view;
   const line = todayLine(state, view.coffeeUsedToday, view.clubData === "unavailable");
   const pay = paymentAction(view, actions);
@@ -124,7 +138,7 @@ export function MemberPassView({ go, view, actions }: { go: (screen: CustomerScr
 
       <main className="mx-auto grid max-w-[1080px] grid-cols-[minmax(0,1fr)] gap-y-12 px-5 pb-16 md:px-10 lg:grid-cols-[400px_minmax(0,1fr)] lg:gap-x-24 lg:pt-4">
         <div className="[perspective:1200px]">
-          <article className="pass-arrive pass-sheen relative mx-auto max-w-[400px] overflow-hidden rounded-[22px] bg-[var(--roast-2)] shadow-[0_40px_80px_-40px_rgba(0,0,0,0.75)] ring-1 ring-[var(--brass-soft)]" aria-label="Κάρτα μέλους Evangelou Club (δείγμα)">
+          <article className="pass-arrive pass-sheen relative mx-auto max-w-[400px] overflow-hidden rounded-[22px] bg-[var(--roast-2)] shadow-[0_40px_80px_-40px_rgba(0,0,0,0.75)] ring-1 ring-[var(--brass-soft)]" aria-label={qr ? "Κάρτα μέλους Evangelou Club" : "Κάρτα μέλους Evangelou Club (δείγμα)"}>
             <WingLines className="pointer-events-none absolute -top-3 -right-4 h-[148px] text-[var(--brass)] opacity-40" />
             <div className="relative px-6 pt-6 pb-7">
               <div className="flex items-center gap-3">
@@ -145,9 +159,7 @@ export function MemberPassView({ go, view, actions }: { go: (screen: CustomerScr
               <span className="absolute top-0 -left-3 h-6 w-6 -translate-y-1/2 rounded-full bg-[var(--roast)]" aria-hidden="true" />
               <span className="absolute top-0 -right-3 h-6 w-6 -translate-y-1/2 rounded-full bg-[var(--roast)]" aria-hidden="true" />
               <span className="absolute inset-x-6 top-0 border-t border-dashed border-[var(--rule-strong)]" aria-hidden="true" />
-              <div className="flex justify-center">
-                <PassQr seed={11} size={188} muted={state !== "active"} />
-              </div>
+              <div className="flex justify-center">{qr ?? <PassQr seed={11} size={188} muted={state !== "active"} />}</div>
               <div className="t-small t-num mt-5 flex items-baseline justify-between gap-4 text-[var(--ink-2)]">
                 <span>{untilLine(view)}</span>
                 {state === "active" && <span className="font-semibold text-[var(--ink)]">{daysLeftWord(view.daysLeft)}</span>}
@@ -177,7 +189,7 @@ export function MemberPassView({ go, view, actions }: { go: (screen: CustomerScr
               {pay.label}
             </Btn>
           )}
-          <PreviewNote dark className="mt-10">{view.live ? "Ο κωδικός QR δεν είναι ακόμη ενεργός: δεν σαρώνεται και δεν εξαργυρώνεται." : "Ο κωδικός είναι δείγμα: δεν αντιστοιχεί σε μέλος, δεν σαρώνεται και δεν εξαργυρώνεται."}</PreviewNote>
+          <PreviewNote dark className="mt-10">{qrNote ?? (view.live ? "Ο κωδικός QR δεν είναι ακόμη ενεργός: δεν σαρώνεται και δεν εξαργυρώνεται." : "Ο κωδικός είναι δείγμα: δεν αντιστοιχεί σε μέλος, δεν σαρώνεται και δεν εξαργυρώνεται.")}</PreviewNote>
         </section>
       </main>
     </div>

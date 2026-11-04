@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { MemberPassView } from "../preview/CustomerSignature";
 import { Dashboard, History, MemberChrome, Profile, Today } from "../preview/CustomerPreview";
 import type { CustomerActions } from "../preview/customerView";
@@ -7,11 +7,15 @@ import type { CustomerScreen } from "../preview/screens";
 import type { CustomerConfig } from "./config";
 import type { CustomerApi, MeResult } from "./customerApi";
 import { toLiveView } from "./liveView";
+import type { MemberQrFlow, MemberQrState } from "./memberQr";
+import { MemberQrPanel } from "./MemberQrPanel";
 
 /*
  * STAGE-01 REAL customer app (served by WordPress at /club-member/, flag-gated).
  * The member area is the approved UI-02 customer screens, fed by the
- * protected GET /me. The QR stays the approved non-redeemable sample.
+ * protected GET /me. STAGE-05D: when the server's QR route exists
+ * (GET /me/qr is not 404) the card shows the member's real Club QR
+ * (MemberQrPanel / memberQr.ts); otherwise the approved non-redeemable sample.
  * Signed out, not a customer, membership source unavailable and errors get
  * their own plain pages: nothing is ever shown as paid unless /me says so.
  */
@@ -36,8 +40,25 @@ function StatusPage({ title, lede, children }: { title: string; lede: string; ch
   );
 }
 
-export function CustomerApp({ config, api, now = () => Date.now(), navigate }: { config: CustomerConfig; api: CustomerApi; now?: () => number; navigate: Navigate }) {
+const NO_QR: MemberQrState = { phase: "off" };
+const noSubscribe = () => () => {};
+
+export function CustomerApp({
+  config,
+  api,
+  now = () => Date.now(),
+  navigate,
+  qrFlow,
+}: {
+  config: CustomerConfig;
+  api: CustomerApi;
+  now?: () => number;
+  navigate: Navigate;
+  /** STAGE-05D: the member's real QR (absent = always the sample code). */
+  qrFlow?: MemberQrFlow;
+}) {
   const [result, setResult] = useState<MeResult | null>(null);
+  const qrState = useSyncExternalStore(qrFlow?.subscribe ?? noSubscribe, qrFlow?.getState ?? (() => NO_QR));
   const [screen, setScreen] = useState<MemberScreen | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const navigated = useRef(false);
@@ -69,7 +90,16 @@ export function CustomerApp({ config, api, now = () => Date.now(), navigate }: {
     window.scrollTo?.({ top: 0 });
   }, [screen, result]);
 
-  const signOut = () => navigate(config.logoutUrl);
+  const signOut = () => {
+    qrFlow?.forget();
+    navigate(config.logoutUrl);
+  };
+
+  const onCard = result?.kind === "ok" && (screen ?? (toLiveView(result.me, now()).state === "active" ? "card" : "dashboard")) === "card";
+  // Each time the card is opened, the QR is resolved again from GET /me/qr (docs/member-qr.md table).
+  useEffect(() => {
+    if (onCard) void qrFlow?.open();
+  }, [onCard, qrFlow]);
 
   let body: ReactNode;
   if (result === null) {
@@ -109,7 +139,14 @@ export function CustomerApp({ config, api, now = () => Date.now(), navigate }: {
     const actions: CustomerActions = { signOut };
     body =
       current === "card" ? (
-        <MemberPassView go={go} view={view} actions={actions} />
+        <MemberPassView
+          go={go}
+          view={view}
+          actions={actions}
+          {...(qrFlow && qrState.phase !== "off"
+            ? { qr: <MemberQrPanel flow={qrFlow} />, qrNote: "Δείξτε τον κωδικό στο ταμείο. Το προσωπικό βλέπει μόνο το μικρό σας όνομα και αν δικαιούστε καφέ σήμερα." }
+            : {})}
+        />
       ) : (
         <MemberChrome screen={current} go={go}>
           {current === "dashboard" && <Dashboard view={view} go={go} actions={actions} />}

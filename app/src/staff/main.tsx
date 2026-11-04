@@ -6,6 +6,9 @@ import { IdleLock, installIdleLock } from "./idleLock";
 import { createStaffApi } from "./staffApi";
 import { ConfigErrorScreen, StaffApp } from "./StaffApp";
 import { StaffController } from "./staffController";
+import { CounterFlow } from "./member/counterFlow";
+import { createMemberApi } from "./member/memberApi";
+import { browserCameraEnv } from "./member/qrCamera";
 
 // REAL staff entrypoint, served only by the WordPress plugin at /club-admin/.
 // It never imports the ordering app, the ordering admin or any demo/mock module.
@@ -35,8 +38,9 @@ if (!parsed.ok) {
   );
 } else {
   const config = parsed.config;
+  const staffApi = createStaffApi(config);
   const controller = new StaffController({
-    api: createStaffApi(config),
+    api: staffApi,
     config,
     navigate: (url) => window.location.assign(url),
     storage: safeSessionStorage(),
@@ -63,9 +67,13 @@ if (!parsed.ok) {
     if (document.visibilityState === "visible" && !idle.check()) void controller.refreshStatus();
   });
 
+  // STAGE-05D: the counter (QR scan + free coffee). Constructing it sends nothing; StaffApp shows it only
+  // while GET /session reports features.qr_lookup === true.
+  const counter = new CounterFlow({ controller, api: createMemberApi(staffApi, config.restBase) });
+
   root.render(
     <StrictMode>
-      <StaffApp controller={controller} />
+      <StaffApp controller={controller} counter={counter} camera={browserCameraEnv()} />
     </StrictMode>,
   );
   void controller.boot();

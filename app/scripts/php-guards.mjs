@@ -595,6 +595,8 @@ export const QR_RULES = Object.freeze({
   customerPlugin: "includes/customer/class-evc-customer-plugin.php",
   customerBackend: "includes/customer/class-evc-customer-qr-backend.php",
   customerController: "includes/customer/class-evc-rest-me-qr-controller.php",
+  // STAGE-05D: GET /session asks EVC_Rest_Lookup_Controller::lookup_ready() for features.qr_lookup.
+  sessionController: "includes/staff/class-evc-rest-session-controller.php",
 });
 
 const R5C = QR_RULES;
@@ -621,7 +623,7 @@ const QR_NAMES = [
   ["evc_no_member_phone_directory", [R5C.servicesFile]],
   ["evc_first_issue_only_qr_store", [R5C.servicesFile]],
   ["evc_club_lookup_backend", [R5C.lookupBackend, R5C.lookupController, R5C.staffPlugin]],
-  ["evc_rest_lookup_controller", [R5C.lookupController, R5C.staffPlugin]],
+  ["evc_rest_lookup_controller", [R5C.lookupController, R5C.staffPlugin, R5C.sessionController]],
   ["evc_customer_qr_backend", [R5C.customerBackend, R5C.customerController, R5C.customerPlugin]],
   ["evc_rest_me_qr_controller", [R5C.customerController, R5C.customerPlugin]],
   // STAGE-05C review (MINOR 3): the reviewed UI-04C service / key classes too, so `X::class` + `new $c` cannot
@@ -847,6 +849,10 @@ function qrSelfTest() {
   expect("lookup service via ::class elsewhere", "includes/x.php", "<?php\n$c = EVC_Member_Lookup_Service::class;\n$s = new $c($a);", true);
   expect("lookup keys via ::class elsewhere", "includes/x.php", "<?php\n$c = EVC_Lookup_Key_Ring::class;\n$k = new $c(array(), 'k1');", true);
   expect("lookup key constant read in a backend", Q.lookupBackend, "<?php\n$n = EVC_Lookup_Key_Ring::MIN_SECRET_BYTES;", true);
+  // STAGE-05D: the session controller may ask the lookup controller whether the QR lookup is ready, nothing else may.
+  expect("session controller asks lookup_ready()", Q.sessionController, "<?php\nfinal class EVC_Rest_Session_Controller { public function status() { $qr = EVC_Rest_Lookup_Controller::lookup_ready(); } }", false);
+  expect("another file asks lookup_ready()", "includes/staff/class-evc-staff-shell.php", "<?php\n$qr = EVC_Rest_Lookup_Controller::lookup_ready();", true);
+  expect("session controller builds the lookup backend", Q.sessionController, "<?php\n$b = new EVC_Club_Lookup_Backend();", true);
   expect("customer provenance value changed", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("const PROVENANCE = 'club_db_v1';", "const PROVENANCE = 'CLUB_DB_V1';"), true);
   return bad;
 }

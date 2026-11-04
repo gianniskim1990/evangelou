@@ -164,6 +164,89 @@ final class StaffQrLookupTest extends EVC_WP_Test_Case {
         $this->assertSame(200, $this->scan($token)->get_status());
     }
 
+    // ---- STAGE-05D: GET /session features.qr_lookup ------------------------------------------------
+
+    private function session_features(): array {
+        $r = $this->rest('GET', '/evangelou-club/v1/session', null, $this->nonce());
+        $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+        return $r->get_data()['features'];
+    }
+
+    public function test_the_session_reports_qr_lookup_only_when_every_gate_is_ready(): void {
+        $this->login_as($this->create_staff_user());
+        $off = array('qr_lookup' => false, 'phone_lookup' => false, 'coffee_redemption' => false, 'history' => false);
+        $on = array('qr_lookup' => true, 'phone_lookup' => false, 'coffee_redemption' => true, 'history' => false);
+
+        // The shipped wiring: the routes exist (opt-in on) but nothing else is configured; nothing is logged.
+        $file = tempnam(sys_get_temp_dir(), 'evc-qr-log-');
+        $previous = ini_get('error_log');
+        ini_set('error_log', $file);
+        $this->assertSame($off, $this->session_features(), 'shipped wiring without the other pieces');
+        ini_set('error_log', (string) $previous);
+        $this->assertSame('', (string) file_get_contents($file), 'a session check never logs');
+        @unlink($file);
+
+        $this->use_backend();
+        $this->assertSame($on, $this->session_features(), 'every gate passes');
+
+        $base = $this->environment();
+        foreach (array(
+            EVC_Club_Lookup_Backend::REASON_STAFF => array('staff' => 1),
+            EVC_Club_Lookup_Backend::REASON_REDEMPTION => array('redemption' => 'CLUB_DB_V1'),
+            EVC_Club_Lookup_Backend::REASON_COMMERCE => array('commerce' => null),
+            EVC_Club_Lookup_Backend::REASON_PROVENANCE => array('provenance' => true),
+            EVC_Club_Lookup_Backend::REASON_DB_CONFIG => array('db' => null),
+            EVC_Club_Lookup_Backend::REASON_KEY => array('lookup_key' => str_repeat('k', 31)),
+        ) as $reason => $override) {
+            $this->connects = 0;
+            $this->log = array();
+            $backend = $this->use_backend(array_merge($base, $override));
+            $this->assertSame($off, $this->session_features(), $reason);
+            $this->assertSame($reason, $backend->last_reason(), $reason);
+            $this->assertSame(0, $this->connects, $reason . ': no connection');
+            $this->assertSame(array(), $this->log, $reason . ': not logged');
+        }
+
+        $this->connects = 0;
+        $backend = $this->use_backend($this->environment($this->database(array('001_initial.sql', '002_payment_provenance.sql'))->config()));
+        $this->assertSame($off, $this->session_features(), 'migration 003 not applied');
+        $this->assertSame(EVC_Club_Lookup_Backend::REASON_SCHEMA, $backend->last_reason());
+        $this->assertSame(1, $this->connects, 'the schema is really read');
+
+        $backend = new EVC_Club_Lookup_Backend(
+            function () use ($base) {
+                return $base;
+            },
+            function () {
+                throw new RuntimeException('down');
+            },
+            $this->clock,
+            function (string $line) {
+                $this->log[] = $line;
+            }
+        );
+        (new EVC_Rest_Lookup_Controller($backend))->register_routes(true);
+        $this->log = array();
+        $this->assertSame($off, $this->session_features(), 'Club DB unreachable');
+        $this->assertSame(EVC_Club_Lookup_Backend::REASON_CONNECT, $backend->last_reason());
+        $this->assertSame(array(), $this->log);
+
+        $this->use_backend();
+        $this->assertSame($on, $this->session_features(), 'ready again');
+        $this->assertSame(array(), $this->log, 'a ready check logs nothing either');
+    }
+
+    public function test_a_ready_check_reads_no_member_data_and_a_lookup_still_logs_its_refusal(): void {
+        $this->login_as($this->create_staff_user());
+        $backend = $this->use_backend(array_merge($this->environment(), array('lookup_key' => null)));
+        $this->assertFalse($backend->ready());
+        $this->assertSame(array(), $this->log, 'ready() is quiet');
+        $this->assertEnvelope($this->scan(EVC_Qr_Token::mint()), 503, 'server_error');
+        $this->assertSame(array('Evangelou Club: staff QR unavailable (lookup_key_missing).'), $this->log, 'the lookup itself still logs');
+        $this->assertTrue($this->use_backend()->ready());
+        $this->assertSame(0, (int) $this->db()->fetch_one('SELECT COUNT(*) AS n FROM evc_lookup_failures')['n'], 'nothing is counted');
+    }
+
     // ---- gates (no connection before the last one) -------------------------------------------------
 
     public function test_every_missing_piece_is_unavailable_without_a_connection(): void {

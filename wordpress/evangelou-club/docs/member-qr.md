@@ -36,6 +36,38 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
    WordPress μπορεί επίσης να ακυρώσει τον QR ενός πελάτη (με τον αριθμό χρήστη WordPress). Ο κοινός
    λογαριασμός του ταμείου **δεν** μπορεί.
 
+### Οι οθόνες (STAGE-05D)
+
+- **Tablet του ταμείου.** Το κουμπί «Σάρωση QR μέλους» εμφανίζεται **μόνο** όταν ο διακομιστής λέει ότι
+  η σάρωση είναι πραγματικά έτοιμη, δηλαδή ότι ισχύουν όλα όσα γράφει το «Πώς ενεργοποιείται» παρακάτω,
+  μαζί με τη μετάβαση 003. Μέχρι τότε η οθόνη είναι όπως πριν, με όλες τις λειτουργίες απενεργοποιημένες.
+  1. Ο υπάλληλος σαρώνει τον κωδικό, με την κάμερα του tablet ή με σαρωτή χειρός.
+  2. Βλέπει **μόνο** το μικρό όνομα και την κατάσταση: «Ενεργό μέλος · δικαιούται καφέ σήμερα», «Ο
+     σημερινός καφές έχει ήδη δοθεί» ή «Η συνδρομή δεν είναι ενεργή».
+  3. Για ενεργό μέλος διαλέγει τον καφέ από τη λίστα v1, όπου υπάρχει και το «Άλλος καφές».
+  4. Πατά «Καταχώρηση καφέ».
+
+  Αν δεν επιβεβαιωθεί η καταχώρηση, το «Δοκιμή ξανά» στέλνει **το ίδιο** αίτημα, οπότε δεν μπορεί να
+  γραφτεί δεύτερος καφές. Το tablet **δεν** ακυρώνει ποτέ QR.
+- **Κάμερα.** Η κάμερα χρησιμοποιεί τη λειτουργία ανάγνωσης QR του ίδιου του browser. Στον Chrome
+  (Android tablet) υπάρχει. Στο Safari (iPad) **δεν** υπάρχει, οπότε εκεί δουλεύει μόνο ο σαρωτής χειρός.
+- **Κινητό του πελάτη.**
+  - Η κάρτα δείχνει τον πραγματικό QR του μέλους.
+  - Ο QR μένει ίδιος μέχρι να πατήσει ο πελάτης «Νέο QR». Πριν αλλάξει, η εφαρμογή ρωτά ξεκάθαρα:
+    «Θέλετε νέο κωδικό QR; Ο τωρινός κωδικός, και κάθε στιγμιότυπο οθόνης του, θα σταματήσει να ισχύει
+    αμέσως, σε όλες τις συσκευές.»
+  - Στιγμιότυπο οθόνης επιτρέπεται.
+  - Ο κωδικός κρατιέται **μόνο** στη μνήμη της σελίδας και ποτέ στο κινητό, όπως ορίστηκε για αυτό το
+    βήμα. Έτσι, αν ο πελάτης κλείσει και ξανανοίξει την κάρτα, η εφαρμογή λέει «Ο κωδικός σας δεν
+    φαίνεται σε αυτή τη συσκευή» και του προτείνει να χρησιμοποιήσει το στιγμιότυπο οθόνης ή να πατήσει
+    «Νέο QR».
+
+**Ανοιχτά ερωτήματα (χρειάζονται απόφαση):**
+1. Να κρατά το κινητό τον QR ανάμεσα στις επισκέψεις; Αν ναι, πρέπει να αποφασιστεί πού: στην
+   αποθήκευση του browser του κινητού (κάτι που σήμερα απαγορεύεται) ή με άλλο τρόπο.
+2. Ποια συσκευή θα έχει το ταμείο; Αν είναι iPad, χρειάζεται σαρωτής χειρός ή μια επιπλέον βιβλιοθήκη
+   ανάγνωσης QR.
+
 ### Πώς ενεργοποιείται (ΜΟΝΟ με έγκριση του ιδιοκτήτη, πρώτα στο staging)
 
 - **QR πελάτη:** `EVC_CLUB_CUSTOMER_ENABLED = true` **και** `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`
@@ -199,21 +231,32 @@ GET never returns a token.
 - Customer accounts only (`EVC_Customer_Auth`).
 - Responses are no-store.
 
-**How the customer app keeps the QR (for 05D, not changed here).** The customer bundle
-(`app/src/customer/`) is unchanged in this stage; the packager still forbids `localStorage` in it.
-05D should:
-- add ONE module (e.g. `src/customer/qrStorage.ts`) that lifts that ban for itself only;
-- store `{token, issued_at}` under one key per signed-in account (e.g.
-  `evc-club-qr:v1:<hash of the user id from the bootstrap>`), wrapping every access in try/catch;
-- clear it on sign-out;
-- on each open, `GET /me/qr`, then:
+**The customer app (STAGE-05D).** The QR is drawn by `app/src/customer/qrEncode.ts`, a small encoder
+with no dependency: byte mode, level M, versions 1–10, and a Club token is version 4. The test
+`tests/club/qrEncode.test.ts` checks every output against an independent decoder (jsQR, a
+devDependency only).
+- **Client and flow.**
+  - The client is `qrApi.ts`. Its replies are strict, and only a POST 200 carries the token.
+  - The flow is `memberQr.ts` (`MemberQrFlow`) and the screen is `MemberQrPanel.tsx`.
+  - The client and `/me` share one in-memory nonce (`createNonceBox`).
+- **Where the plaintext lives:** in memory only (`createQrMemory()`), and it is cleared at sign-out. The
+  coordinator kept `localStorage` forbidden for this stage. The packager ban on `localStorage` /
+  `sessionStorage` in the customer bundle is unchanged, and `customerLiveIsolation.test.ts` greps the QR
+  modules for every browser store.
+- **Consequence.** After a reload, `GET /me/qr` says `active` while nothing is kept, so the card offers
+  «Νέο QR» (with the confirmation) and points to the screenshot (D7). Keeping the QR between visits is an
+  **open decision**: which store to use, and whether a single module may lift the ban.
+- **The table, as built:**
 
 | Server says | What the app does |
 |---|---|
-| `active` with the same `issued_at` | Show the stored QR. |
-| `none` | `POST {}`. |
-| `active` with nothing (or a different `issued_at`) stored on this device | Offer «Νέο QR» → `POST {"replace": true}`. |
-| `not_member` | Explain that the card appears after the payment is confirmed. |
+| `active` with the same `issued_at` kept in this page | Show the kept QR. |
+| `none` | `POST {}`; a `409 qr_exists` (another device was first) → "created elsewhere" + «Νέο QR». |
+| `active` with nothing (or an older QR) kept | Forget the old one, explain, offer «Νέο QR» → confirmation → `POST {"replace": true}`. |
+| `not_member` / `member_disabled` | Explain; no code. |
+| `404` (no route: the provenance gate is off) | The approved sample card, unchanged. |
+| `409 concurrent_change` | `GET` again once, then follow the table; twice in a row → error. |
+| `503` (including an unknown COMMIT) / error | «Δοκιμάστε ξανά» starts again from `GET` (never a silent replace). |
 
 ### Staff routes (`evangelou-club/v1`)
 
@@ -246,6 +289,45 @@ GET never returns a token.
 - **The lookup proof:** the reviewed service computes its proof, but the v1 route does not return it
   and the v1 redeem route does not need it. Its TTL (300 s, `EVC_Club_Qr_Services`) therefore has no
   effect today; decide it with v2 prepared redemption.
+
+**The staff app (STAGE-05D).** `app/src/staff/member/`:
+- **Pieces.**
+  - `memberApi.ts` holds the lookup client. It uses the staff transport (in-memory nonce) and a 10 s bound,
+    and parses the D8 body strictly (exact keys, `mem_` + 32 hex, a first name of 1–40 characters or
+    `null`). The same file holds the reviewed v1 redeem client (`restClubService`) on that transport.
+  - `counterFlow.ts` holds the flow and `CounterScreens.tsx` the screens.
+  - The old §4.1 proposal mapper in `restClubService` is removed: lookups through it are refused without a
+    request.
+- **Mapping.**
+  - `404 member_not_found` → "not found", but only WITH the envelope; a bare 404 is `invalid_response`.
+  - `400 invalid_qr` → "not a Club QR".
+  - `429` → the scan stays closed until `Retry-After` has passed (header, then `details`, else 300 s).
+  - `5xx` → unavailable.
+  - `401` / `403` → the controller ends the session.
+- **Screens.**
+  - The first name and the three statuses only.
+  - A coffee picker with exactly the v1 catalogue (`coffeeCatalogue.ts`, including «Άλλος καφές»). A test
+    reads the PHP `ITEMS` and requires the same codes, labels and order.
+  - One `request_id` per intent (`RedemptionIntentTracker`): «Δοκιμή ξανά» resends it, and the coffee is
+    locked while the outcome is unknown.
+  - No revoke UI (D10).
+- **Camera:** `BarcodeDetector` when the browser has it; otherwise the hand-scanner / paste field only.
+- **Gating:** everything runs only while the session is ready AND `features.qr_lookup === true`. A status
+  check that turns it off, a lock, an expiry or a 401 / 403 drops the member at once.
+
+**`GET /session` `features.qr_lookup` (STAGE-05D).**
+- `EVC_Rest_Lookup_Controller::lookup_ready()` is true only when the lookup routes were registered in this
+  request (so `EVC_CLUB_REDEMPTION_SOURCE` is on) AND `EVC_Club_Lookup_Backend::ready()` passes every gate
+  of `lookup()` now: staff flag, redemption source, commerce config, provenance, DB config, lookup key of
+  at least 32 bytes, a real connection, and schema `MAX(version) >= 3`.
+- `ready()` reads no member, token or name and counts nothing.
+- It is quiet: a refusal is kept in `last_reason()` but not logged, because the status check runs at every
+  tablet start and tab return.
+- `coffee_redemption` reports the same value, because the lookup gates include all of the redeem route's.
+- Any error → `false`. The cost is one Club DB connection per status check while the constants are set.
+- Tests in `StaffQrLookupTest`: the shipped wiring → false with nothing logged; every gate; schema 2; DB
+  down; ready again. Mutants QL17–QL22.
+- The shell's bootstrap `features` stays all `false`; the app uses the `/session` answer.
 
 **`POST /admin/members/qr/revoke`** (D6). Users with `evc_manage_club` (administrators). Body
 `{"wp_user_id": int}`. The route itself refuses, BEFORE the service:
@@ -354,13 +436,14 @@ appears. The staff answer carries the first name only (D8).
 - `MigratorTest` / `SqlProvenanceStoreTest` updated for 003.
 
 **WordPress.**
-- `StaffQrLookupTest` (wp-redemption, 12):
+- `StaffQrLookupTest` (wp-redemption, 14):
   - shipped wiring → 503; auth; every gate without connection;
   - the D8 body, first word only, any key order;
   - a leading NBSP or other Unicode space, or invalid UTF-8, never shows the whole name (null instead);
   - inactive / used_today / Athens midnight; byte-identical not-found;
   - D9; the authorizer;
   - D6 revocation; staff-role administrator and Application Password refused.
+  - `GET /session` features.qr_lookup only when every gate is ready; the ready check is quiet and reads nothing.
 - `CustomerQrTest` (wp-customer, 6).
 - `ClubRedemptionBackendTest::test_without_the_constant_no_qr_route_is_registered` (wp-enabled).
 - `ClubMigrationsTest` (003 not approved by default; target 3 / 1 / invalid).
@@ -375,7 +458,7 @@ appears. The staff answer carries the first name only (D8).
 - SQL runner: QS1–QS12, LR1–LR8.
 - Membership runner: L27 (uncounted failure).
 - WP runner, each with named killer tests:
-  - QL1–QL16 (modes enabled / redemption);
+  - QL1–QL22 (modes enabled / redemption; QL17–QL22: the session flag);
   - QC1–QC7 (mode customer);
   - MG37–MG42 (migration target).
 - Equivalent, not listed:
@@ -386,8 +469,7 @@ appears. The staff answer carries the first name only (D8).
 
 ### Not done here
 
-- The staff UI wiring (STAGE-05D).
-- Changes to the customer bundle (05D: the storage module above).
+- Keeping the customer's QR between visits (open decision, see above).
+- A QR decoder for browsers without `BarcodeDetector` (open decision: the counter device).
 - Phone lookup; v2 prepared redemption.
 - Applying 003 anywhere real.
-- `GET /session` still reports `features.qr_lookup: false` (05D).

@@ -4,7 +4,6 @@ import {
   createRestClubService,
   mapErrorDetails,
   mapErrorResponse,
-  mapLookupResponse,
   mapRedeemResponse,
 } from "../../src/club/restClubService";
 import { ClubApiError, type ClubErrorCode, type RedeemBenefitRequest } from "../../src/club/types";
@@ -193,28 +192,12 @@ describe("restClubService redeem: error mapping", () => {
 });
 
 describe("restClubService lookup and catalogue", () => {
-  it("maps a lookup response to domain types", async () => {
+  it("STAGE-05D: the old §4.1 proposal mapper is gone; lookups through this adapter are refused and send nothing", async () => {
     const fetchImpl = fakeFetch(() => json(200, LOOKUP_OK));
-    const result = await createRestClubService({ fetchImpl }).findMemberByPhone("6900000001");
-    assert.deepEqual(result, {
-      member: { id: REQ.memberId, name: "Μαρία", phoneMasked: "69••••••01", status: "active", validUntil: "2026-10-15T23:59:59+03:00" },
-      benefit: { state: "available", businessDate: "2026-10-09", redeemedAt: null, coffeeCode: null },
-    });
-    assert.deepEqual(JSON.parse(String(fetchImpl.calls[0].init.body)), { method: "phone", phone: "6900000001" });
-    assert.ok(!fetchImpl.calls[0].url.includes("6900000001"), "phone never in the URL");
-  });
-
-  it("404 member_not_found becomes { member: null }; other failures propagate", async () => {
-    const notFound = fakeFetch(() => apiError(404, "member_not_found"));
-    assert.deepEqual(await createRestClubService({ fetchImpl: notFound }).findMemberByQrToken("evc_x"), { member: null, benefit: null });
-    const bare404 = fakeFetch(() => text(404, "nope"));
-    assert.equal((await rejection(createRestClubService({ fetchImpl: bare404 }).findMemberByQrToken("evc_x"))).code, "invalid_response");
-  });
-
-  it("rejects lookup DTOs with unknown statuses or naive dates", () => {
-    assert.throws(() => mapLookupResponse({ ...LOOKUP_OK, membership: { ...LOOKUP_OK.membership, status: "gold" } }), ClubApiError);
-    assert.throws(() => mapLookupResponse({ ...LOOKUP_OK, membership: { ...LOOKUP_OK.membership, valid_until: "2026-10-15" } }), ClubApiError);
-    assert.throws(() => mapLookupResponse(null), ClubApiError);
+    const service = createRestClubService({ fetchImpl });
+    assert.equal((await rejection(service.findMemberByPhone("6900000001"))).code, "invalid_request");
+    assert.equal((await rejection(service.findMemberByQrToken("evc_x"))).code, "invalid_request");
+    assert.equal(fetchImpl.calls.length, 0, "the real lookup is src/staff/member/memberApi.ts");
   });
 
   it("maps the coffee catalogue", async () => {

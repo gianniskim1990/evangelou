@@ -69,6 +69,18 @@ describe("staff bundle isolation (real import graph)", () => {
     }
   });
 
+  it("STAGE-05D: the counter is in the staff bundle with no revoke, no customer code and no persistent storage", async () => {
+    const { inputs, output } = await bundle("src/staff/main.tsx");
+    for (const m of ["src/staff/member/counterFlow.ts", "src/staff/member/memberApi.ts", "src/staff/member/coffeeCatalogue.ts", "src/staff/member/CounterScreens.tsx", "src/club/restClubService.ts"]) {
+      assert.ok(inputs.some((p) => p.endsWith(m)), `the staff bundle includes ${m}`);
+    }
+    assert.equal(inputs.find((p) => p.includes("src/customer/")), undefined, "no customer module");
+    assert.ok(output.includes("/members/lookup"), "sanity: the lookup route");
+    for (const needle of ["/admin/members/qr/revoke", "qr/revoke", "localStorage", "indexedDB"]) assert.ok(!output.includes(needle), `staff bundle must not contain ${needle}`);
+    const own = await bundle("src/staff/member/counterFlow.ts");
+    for (const needle of ["sessionStorage", "localStorage", "indexedDB", "document.cookie", "console."]) assert.ok(!own.output.includes(needle), `counter flow must not use ${needle}`);
+  });
+
   it("the UI-03D.D recovery state machine is not wired into any shipped entry", async () => {
     for (const entry of ["src/staff/main.tsx", "src/main.tsx"]) {
       const { inputs, output } = await bundle(entry);

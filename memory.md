@@ -1295,3 +1295,20 @@ The re-review verdict was OK, with no Blocker or Major.
   - (b) «Όχι, μόνο ο διαχειριστής»: QR revocation stays administrator-only, and the tablet only scans. This closes the earlier open question (see the "Open owner question" lines above).
   - Both are recorded in `member-qr.md` (decision rows D9α and D10, plus the revoke section), the README and the limiter docblock.
 - CI on 2741086 (round 4 plus the owner-decision docs): foundation 18/18 green, run 41815843926 (push). Frontend did not run because no app/ paths changed. No pull_request-event run was created for this SHA (GitHub returned 500 on the first push attempt). The superseded runs for 06cb78c were cancelled.
+
+### STAGE-05D: staff counter + member QR UI (2026-11-04)
+Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing is merged, deployed or enabled.
+- **Staff (`app/src/staff/member/`).** Shown ONLY while the session is ready AND `GET /session` `features.qr_lookup === true`.
+  - Pieces: `memberApi.ts` (strict D8 parser; 404 is "not found" only with the envelope; 429 → wait for Retry-After; 5xx → unavailable; 401/403 end the session; v1 redeem through `restClubService` on the staff transport), `counterFlow.ts` and `CounterScreens.tsx`.
+  - Behaviour: one request_id per intent, and the coffee is locked while the outcome is unknown. `coffeeCatalogue.ts` = the PHP v1 list, including `other_coffee` «Άλλος καφές»; a test reads the PHP `ITEMS`. No revoke (D10).
+  - Camera: `BarcodeDetector` when the browser has it; otherwise the hand-scanner / paste field.
+  - The old `mapLookupResponse` (the §4.1 proposal) was removed from `restClubService`.
+- **Session flag (PHP).**
+  - `EVC_Rest_Lookup_Controller::lookup_ready()` = routes registered + `EVC_Club_Lookup_Backend::ready()`: all 8 gates (incl. key ≥ 32 bytes, a real connect, schema ≥ 3), quiet (no log), reads nothing.
+  - `qr_lookup` and `coffee_redemption` report it. The guard allows only the session controller to name `EVC_Rest_Lookup_Controller` (plus 3 fixtures).
+  - Mutants QL17–QL22.
+- **Customer (`app/src/customer/`).**
+  - Pieces: `qrEncode.ts` (own QR encoder, byte mode, level M, v1–10; the test decodes with jsQR as a devDependency), `qrApi.ts` (strict GET/POST /me/qr, nonce shared with /me via `createNonceBox`), `memberQr.ts` (the member-qr.md table) and `MemberQrPanel.tsx` («Νέο QR» → Greek confirmation → `replace: true`; 409 qr_exists → "created elsewhere"). A 404 on GET → the sample card, unchanged.
+  - **The plaintext is kept in memory only**: the coordinator said "localStorage stays forbidden", which conflicts with the old member-qr.md design (one module lifting the ban). After a reload the card offers «Νέο QR» or the screenshot.
+- **Open decisions reported:** (1) keep the customer QR between visits (which store?); (2) the counter device (iPad Safari has no BarcodeDetector → hand scanner or a decoder library).
+- **Frontend mutants:** 275 → 299 (C1–C13, Q1–Q11; S4 re-aimed to `nonceBox.get()`). The shard timeout was raised 30 → 45 min (shards took about 21 min for 138).
