@@ -158,8 +158,13 @@ lock-wait bounds any wait.
 - Proven with real separate processes in CI:
   - `test_simultaneous_writers_…` (first issuance and rotation);
   - `test_simultaneous_revoke_and_rotate_…` (exactly one winner);
-  - `test_a_writer_blocked_on_the_row_lock_…`: a real lock wait, observed in `INNODB_TRX` as
-    `LOCK WAIT` before the holder commits; the waiter then loses.
+  - `test_a_writer_racing_an_uncommitted_replacement_…`: another connection really holds the row and
+    has replaced it, uncommitted, while a writer in a separate process starts. On MariaDB the writer
+    normally waits (seen as `LOCK WAIT` in `INNODB_TRX`) and loses after the commit. On MySQL 8.0 / 8.4
+    (CI) the locking read answers at once without the uncommitted change, so the writer sees "no active
+    row", the compare-and-set fails and it loses before the commit, having written nothing. A
+    first-issuance writer on MySQL in that state would reach the INSERT, and the one-active unique key
+    then waits for and refuses it. The outcome is the same on both engines.
 
 ### Customer route (`evangelou-club-customer/v1/me/qr`)
 
@@ -279,7 +284,8 @@ appears. The staff answer carries the first name only (D8).
 
 **Integration.**
 - `SqlQrTokenStoreTest` (23):
-  - real lock wait, lost COMMIT for rotate AND revoke;
+  - a writer racing an uncommitted replacement (waits on MariaDB, refused at once on MySQL), lost
+    COMMIT for rotate AND revoke;
   - revoke-vs-rotate and writer races (multi-process);
   - first-issuance decorator;
   - 5 s lock wait;

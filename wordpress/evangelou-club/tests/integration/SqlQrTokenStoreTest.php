@@ -296,11 +296,17 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
     }
 
     /**
-     * A REAL lock wait: another connection holds the active row (FOR UPDATE) and has already replaced
-     * it, uncommitted; a writer in a separate process is started and observed in LOCK WAIT; only then
-     * does the holder commit. The waiter must re-read the committed state and lose.
+     * Another connection holds the member's active row (FOR UPDATE) and has already replaced it,
+     * UNCOMMITTED; a writer expecting the old digest starts in a separate process while that
+     * transaction is open. The engines differ, and both are safe:
+     *  - MariaDB normally makes the writer WAIT (observed as LOCK WAIT in INNODB_TRX); after the commit
+     *    it re-reads the committed state and loses;
+     *  - MySQL 8.0 / 8.4 (READ COMMITTED) answer the locking read at once without the uncommitted
+     *    change (CI: no LOCK WAIT, transactions [RUNNING]); "no active row" differs from the expected
+     *    digest, so the writer loses BEFORE the commit, having written nothing.
+     * Either way: a conflict, no token from the writer, exactly the holder's token active.
      */
-    public function test_a_writer_blocked_on_the_row_lock_sees_the_committed_winner_and_loses(): void {
+    public function test_a_writer_racing_an_uncommitted_replacement_loses_whether_it_waits_or_not(): void {
         $id = $this->member_id($this->create_member(7001));
         $first = self::hash();
         $this->store()->rotate($id, null, $first, self::NOW);
@@ -338,8 +344,8 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
         fclose($pipes[2]);
         $closed = proc_close($proc);
         $this->assertSame(0, $exit ?? $closed, 'worker stderr: ' . $err . ' stdout: ' . $out);
-        $this->assertTrue($waiting, 'the second writer really waited on the row lock; worker: ' . trim((string) $out) . ' ' . trim((string) $err) . '; transactions: ' . json_encode($seen));
-        $this->assertSame('conflict', json_decode(trim((string) $out), true)['outcome'] ?? null, 'worker output: ' . $out);
+        $this->assertTrue($waiting || $exit !== null, 'the writer either waited on the row lock or answered while the replacement was uncommitted; transactions: ' . json_encode($seen));
+        $this->assertSame('conflict', json_decode(trim((string) $out), true)['outcome'] ?? null, 'worker output: ' . $out . ' ' . $err . ($waiting ? ' (waited)' : ' (answered before the commit)'));
         $this->assertSame(1, $this->active_count($id));
         $this->assertSame($winner, $this->store()->active_token_hash($id));
     }
