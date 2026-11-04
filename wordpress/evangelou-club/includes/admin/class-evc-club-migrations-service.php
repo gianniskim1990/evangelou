@@ -47,6 +47,7 @@ final class EVC_Club_Migrations_Service {
     const MIGRATION_FILES_INVALID = 'migration_files_invalid';
     const INSPECTION_FAILED = 'inspection_failed';
     const LOCK_BUSY = 'lock_busy';
+    const TARGET_INVALID = 'migrations_target_invalid';
 
     // Apply results.
     const RESULT_APPLIED = 'applied';
@@ -56,7 +57,7 @@ final class EVC_Club_Migrations_Service {
 
     /** Display checks => the refusal codes that fail them. */
     const CHECKS = array(
-        'config' => array(self::CONFIG_MISSING, self::CONFIG_INVALID),
+        'config' => array(self::CONFIG_MISSING, self::CONFIG_INVALID, self::TARGET_INVALID),
         'connection' => array(self::CONNECTION_FAILED),
         'separate_from_wordpress' => array(self::SAME_DATABASE, self::WORDPRESS_IDENTITY_UNKNOWN),
         'no_wordpress_tables' => array(self::WORDPRESS_TABLES_PRESENT, self::WORDPRESS_PREFIX_AMBIGUOUS),
@@ -81,6 +82,8 @@ final class EVC_Club_Migrations_Service {
     private $log;
     /** @var callable(): DateTimeImmutable */
     private $now;
+    /** @var callable(): ?int */
+    private $target;
 
     /**
      * @param callable(): ?EVC_Db_Config $config null = constants missing; a throw = invalid
@@ -90,8 +93,9 @@ final class EVC_Club_Migrations_Service {
      * @param callable(): ?array $wordpress_server the WordPress connection's ['h' => @@hostname, 'p' => @@port, 'd' => DATABASE()]
      * @param callable(string): void $log minimal, secret-free lines (error_log in production)
      * @param callable(): DateTimeImmutable $now
+     * @param callable(): ?int $target the highest version that may be applied (null = invalid configuration)
      */
-    public function __construct(callable $config, callable $connect, callable $migrator, array $wordpress, callable $wordpress_server, EVC_Audit_Log $audit, callable $log, callable $now) {
+    public function __construct(callable $config, callable $connect, callable $migrator, array $wordpress, callable $wordpress_server, EVC_Audit_Log $audit, callable $log, callable $now, callable $target) {
         EVC_Club_Migrations_Feature::assert_constructible(__CLASS__);
         $this->config = $config;
         $this->connect = $connect;
@@ -105,6 +109,7 @@ final class EVC_Club_Migrations_Service {
         $this->audit = $audit;
         $this->log = $log;
         $this->now = $now;
+        $this->target = $target;
     }
 
     /**
@@ -190,6 +195,10 @@ final class EVC_Club_Migrations_Service {
                 return 'Τα αρχεία μεταβάσεων του plugin δεν είναι σωστά (λάθος όνομα ή διπλός αριθμός). Εγκαταστήστε ξανά το plugin. Δεν έγινε καμία αλλαγή.';
             case self::INSPECTION_FAILED:
                 return 'Ο έλεγχος της βάσης του Club δεν ολοκληρώθηκε (σφάλμα βάσης). Δεν έγινε καμία αλλαγή.';
+            case self::TARGET_INVALID:
+                return 'Η σταθερά EVC_CLUB_MIGRATIONS_TARGET στο wp-config.php δεν είναι θετικός ακέραιος (π.χ. 3, χωρίς εισαγωγικά). Ζητήστε από τον τεχνικό να τη διορθώσει ή να την αφαιρέσει. Δεν έγινε καμία αλλαγή.';
+            case 'not_approved':
+                return 'Η μετάβαση ' . $version . ' υπάρχει στο plugin αλλά ΔΕΝ έχει εγκριθεί για αυτή τη βάση και δεν θα εφαρμοστεί. Εφαρμόζεται μόνο όταν ο ιδιοκτήτης το εγκρίνει και ο τεχνικός ορίσει EVC_CLUB_MIGRATIONS_TARGET.';
             case self::LOCK_BUSY:
                 return 'Αυτή τη στιγμή τρέχει ήδη μια άλλη εφαρμογή μεταβάσεων. Περιμένετε λίγα λεπτά και δοκιμάστε ξανά. Δεν έγινε καμία αλλαγή.';
             case self::RESULT_APPLIED:
@@ -235,6 +244,8 @@ final class EVC_Club_Migrations_Service {
             'inspected' => false,
             'applied' => array(),
             'pending' => array(),
+            'not_approved' => array(),
+            'target' => null,
             'refusals' => array(),
         );
     }
@@ -255,11 +266,28 @@ final class EVC_Club_Migrations_Service {
             }
         }
         $report['checks'] = $checks;
-        $report['can_apply'] = $report['inspected'] && $report['refusals'] === array() && $report['pending'] !== array();
+        $report['can_apply'] = $report['inspected'] && $report['refusals'] === array() && self::approved_pending($report) !== array();
         return $report;
     }
 
+    /** Pending migrations at or below the approved target (the only ones apply() may run). */
+    private static function approved_pending(array $report): array {
+        $target = $report['target'];
+        return array_values(array_filter($report['pending'], function ($row) use ($target) {
+            return is_int($target) && (int) $row['version'] <= $target;
+        }));
+    }
+
     private function load_config(array &$report): ?EVC_Db_Config {
+        try {
+            $target = ($this->target)();
+        } catch (Throwable $e) {
+            $target = null;
+        }
+        $report['target'] = is_int($target) && $target >= 1 ? $target : null;
+        if ($report['target'] === null) {
+            $report['refusals'][] = self::TARGET_INVALID;
+        }
         try {
             $config = ($this->config)();
         } catch (Throwable $e) {
@@ -406,6 +434,9 @@ final class EVC_Club_Migrations_Service {
                     $report['refusals'][] = self::DRIFT;
                 }
                 $report['pending'][] = array('version' => $version, 'name' => $file['name']);
+                if (!is_int($report['target']) || $version > $report['target']) {
+                    $report['not_approved'][] = $version;
+                }
             }
             foreach ($club_tables as $table) {
                 if (!in_array($table, $expected, true)) {
@@ -479,7 +510,8 @@ final class EVC_Club_Migrations_Service {
             if ($report['refusals'] !== array() || !$report['inspected']) {
                 return $outcome;
             }
-            if ($report['pending'] === array()) {
+            $approved = self::approved_pending($report);
+            if ($approved === array()) {
                 $outcome['result'] = self::RESULT_NOTHING_PENDING;
                 return $outcome;
             }
@@ -487,7 +519,7 @@ final class EVC_Club_Migrations_Service {
                 return (int) $row['version'];
             }, $report['applied']);
             try {
-                $outcome['versions'] = array_map('intval', ($this->migrator)($db)->migrate());
+                $outcome['versions'] = array_map('intval', ($this->migrator)($db)->migrate($report['target']));
                 $outcome['result'] = self::RESULT_APPLIED;
             } catch (Throwable $e) {
                 $outcome['result'] = self::RESULT_FAILED;
@@ -497,7 +529,7 @@ final class EVC_Club_Migrations_Service {
                     $outcome['state_unknown'] = true;
                 } else {
                     $outcome['versions'] = array_values(array_diff($now_applied, $before));
-                    foreach ($report['pending'] as $pending) {
+                    foreach ($approved as $pending) {
                         if (!in_array((int) $pending['version'], $now_applied, true)) {
                             $outcome['failed_version'] = (int) $pending['version'];
                             break;

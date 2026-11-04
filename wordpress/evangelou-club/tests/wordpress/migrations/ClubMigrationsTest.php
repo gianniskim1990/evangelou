@@ -71,7 +71,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
     }
 
     /** @return array{service:EVC_Club_Migrations_Service,page:EVC_Club_Migrations_Admin_Page,cli:EVC_Club_Migrations_Cli} */
-    private function parts(?EVC_Db_Config $config = null, ?array $wordpress = null, ?callable $wordpress_server = null, ?string $directory = null, ?callable $connect = null): array {
+    private function parts(?EVC_Db_Config $config = null, ?array $wordpress = null, ?callable $wordpress_server = null, ?string $directory = null, ?callable $connect = null, ?callable $target = null): array {
         $config = $config ?? $this->config();
         return EVC_Club_Migrations_Plugin::build(
             function () use ($config) {
@@ -98,7 +98,8 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
             ),
             $wordpress,
             $wordpress_server,
-            $directory
+            $directory,
+            $target
         );
     }
 
@@ -201,7 +202,8 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertSame(array(1, 2, 3), (new EVC_Migrator($this->club->connect(), EVC_Test_Database::migrations_dir()))->migrate());
     }
 
-    private const ALL_TABLES = array('evc_audit_events', 'evc_lookup_failures', 'evc_members', 'evc_pay_aliases', 'evc_pay_correction_heads', 'evc_pay_corrections', 'evc_pay_member_heads', 'evc_pay_movements', 'evc_pay_periods', 'evc_qr_tokens', 'evc_redemptions', 'evc_schema_migrations');
+    /** The tables of the APPROVED target (default EVC_CLUB_MIGRATIONS_TARGET = 2: 001 + 002). */
+    private const ALL_TABLES = array('evc_audit_events', 'evc_members', 'evc_pay_aliases', 'evc_pay_correction_heads', 'evc_pay_corrections', 'evc_pay_member_heads', 'evc_pay_movements', 'evc_pay_periods', 'evc_qr_tokens', 'evc_redemptions', 'evc_schema_migrations');
 
     /** No connection secret (user, password, host, full database name) in $text. */
     private function assert_no_secrets(string $text, string $where): void {
@@ -371,15 +373,14 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
     public function test_fresh_database_applies_001_then_002_with_checksums_and_an_audit_event(): void {
         $admin = $this->admin();
         $html = $this->render($this->parts()['page'], $this->apply_post('  ' . EVC_Club_Migrations_Service::CONFIRM_WORD . ' '));
-        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 001, 002, 003.', $html);
+        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 001, 002.', $html);
         $this->assertStringContainsString('καταγράφηκε στο ημερολόγιο ελέγχου', $html);
-        $this->assertStringContainsString('Η βάση του Club είναι ενημερωμένη.', $html);
+        $this->assertStringContainsString('Οι εγκεκριμένες μεταβάσεις έχουν εφαρμοστεί.', $html, '003 stays pending, not approved');
         $this->assertSame(self::ALL_TABLES, $this->tables());
 
         $rows = $this->recorded();
-        $this->assertSame(array('1', '2', '3'), array_map('strval', array_column($rows, 'version')));
-        $this->assertSame(array('initial', 'payment_provenance', 'lookup_failures'), array_column($rows, 'name'));
-        $this->assertSame(EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/003_lookup_failures.sql'), $rows[2]['checksum']);
+        $this->assertSame(array('1', '2'), array_map('strval', array_column($rows, 'version')), 'the default target (2) never applies 003');
+        $this->assertSame(array('initial', 'payment_provenance'), array_column($rows, 'name'));
         $this->assertSame(EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/001_initial.sql'), $rows[0]['checksum']);
         $this->assertSame(EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/002_payment_provenance.sql'), $rows[1]['checksum']);
         $this->assertLessThanOrEqual($rows[1]['applied_at_utc'], $rows[0]['applied_at_utc']);
@@ -388,9 +389,9 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertCount(1, $audit);
         $this->assertSame('applied', $audit[0]['outcome']);
         $this->assertSame((string) $admin, (string) $audit[0]['staff_wp_user_id']);
-        $this->assertSame(array('channel' => 'admin', 'versions' => '001, 002, 003'), json_decode($audit[0]['details_json'], true));
+        $this->assertSame(array('channel' => 'admin', 'versions' => '001, 002'), json_decode($audit[0]['details_json'], true));
 
-        $this->assertSame(array(sprintf('Evangelou Club: Club DB migrations apply via admin by user #%d: result=applied versions=001,002,003 audit=written', $admin)), $this->log);
+        $this->assertSame(array(sprintf('Evangelou Club: Club DB migrations apply via admin by user #%d: result=applied versions=001,002 audit=written', $admin)), $this->log);
         // The (nested) migration lock is fully released afterwards.
         $this->assertSame('1', (string) EVC_Test_Database::admin_pdo()->query("SELECT GET_LOCK(CONCAT('" . EVC_Migrator::LOCK_PREFIX . "', SHA1('" . $this->club->name() . "')), 0)")->fetchColumn());
         $this->assertSame(admin_url('tools.php?page=evc-club-db'), $this->redirected_to);
@@ -418,16 +419,16 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $status = $parts['service']->status();
         $this->assertSame(array(), $status['refusals']);
         $this->assertSame(array(array('version' => 2, 'name' => 'payment_provenance'), array('version' => 3, 'name' => 'lookup_failures')), $status['pending']);
+        $this->assertSame(array(3), $status['not_approved']);
         $html = $this->render($parts['page'], $this->apply_post());
-        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 002, 003.', $html);
+        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 002.', $html);
         $this->assertSame(self::ALL_TABLES, $this->tables());
         $audit = $this->audit_rows();
         $this->assertCount(1, $audit);
-        $this->assertSame('002, 003', json_decode($audit[0]['details_json'], true)['versions']);
+        $this->assertSame('002', json_decode($audit[0]['details_json'], true)['versions']);
     }
 
-    /** STAGE-05C: a Club DB that already has 001 + 002 (the approved staging state) gets ONLY 003, nothing else changes. */
-    public function test_a_database_with_001_and_002_gets_only_003(): void {
+    private function migrate_001_and_002(): array {
         $dir = sys_get_temp_dir() . '/evc_mig_partial_' . bin2hex(random_bytes(5));
         mkdir($dir);
         foreach (array('001_initial.sql', '002_payment_provenance.sql') as $file) {
@@ -435,20 +436,89 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         }
         $this->temp_dirs[] = $dir;
         $this->assertSame(array(1, 2), (new EVC_Migrator($this->club->connect(), $dir))->migrate());
-        $before = $this->recorded();
+        return $this->recorded();
+    }
+
+    /**
+     * STAGE-05C review (MINOR 5): the owner approved the CODE of 003 only. With EVC_CLUB_MIGRATIONS_TARGET
+     * undefined (target 2), a 001 + 002 database shows 003 as pending but NOT approved, offers no apply
+     * button, and an apply request (form or CLI) changes nothing.
+     */
+    public function test_by_default_migration_003_is_shown_as_not_approved_and_never_applied(): void {
+        $this->assertFalse(defined('EVC_CLUB_MIGRATIONS_TARGET'));
+        $this->assertSame(2, EVC_Club_Migrations_Feature::target_version());
+        $before = $this->migrate_001_and_002();
         $this->admin();
         $parts = $this->parts();
         $status = $parts['service']->status();
         $this->assertSame(array(), $status['refusals']);
+        $this->assertSame(2, $status['target']);
         $this->assertSame(array(array('version' => 3, 'name' => 'lookup_failures')), $status['pending']);
+        $this->assertSame(array(3), $status['not_approved']);
+        $this->assertFalse($status['can_apply']);
+        $html = $this->render($parts['page']);
+        $this->assertStringContainsString('003 — lookup_failures — <strong>ΕΚΚΡΕΜΕΙ, ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ (δεν θα εφαρμοστεί)</strong>', $html);
+        $this->assertStringContainsString('data-approved="no"', $html);
+        $this->assertStringNotContainsString('<form', $html, 'no apply button for an unapproved migration');
+        $this->assertStringContainsString('ΔΕΝ έχει εγκριθεί', $html);
+
+        $after_post = $this->render($parts['page'], $this->apply_post());
+        $this->assertStringContainsString('Δεν υπάρχει καμία εκκρεμής μετάβαση', $after_post);
+        $this->assertSame($before, $this->recorded(), 'nothing applied');
+        $this->assertNotContains('evc_lookup_failures', $this->tables());
+        $this->assertSame(array(), $this->audit_rows(), 'nothing pending (approved) writes no audit row');
+
+        $parts['cli']->status(array(), array());
+        $this->assertStringContainsString('Εκκρεμής 003 lookup_failures (ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ: δεν θα εφαρμοστεί)', implode("\n", $this->cli_out));
+        $parts['cli']->apply(array(), array('yes' => true));
+        $this->assertSame($before, $this->recorded(), 'the CLI does not apply it either');
+    }
+
+    /** Only when the technician sets the target to 3 (after the owner's go-ahead) is 003 applied, alone. */
+    public function test_with_target_3_a_database_with_001_and_002_gets_only_003(): void {
+        $before = $this->migrate_001_and_002();
+        $this->admin();
+        $parts = $this->parts(null, null, null, null, null, function () {
+            return 3;
+        });
+        $status = $parts['service']->status();
+        $this->assertSame(array(), $status['not_approved']);
+        $this->assertTrue($status['can_apply']);
         $html = $this->render($parts['page'], $this->apply_post());
         $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 003.', $html);
-        $this->assertSame(self::ALL_TABLES, $this->tables());
+        $this->assertContains('evc_lookup_failures', $this->tables());
         $after = $this->recorded();
         $this->assertSame($before, array_slice($after, 0, 2), '001 and 002 untouched');
         $this->assertSame(EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/003_lookup_failures.sql'), $after[2]['checksum']);
         $this->assertSame('003', json_decode($this->audit_rows()[0]['details_json'], true)['versions']);
-        $this->assertSame(array(), $parts['service']->status()['pending']);
+    }
+
+    public function test_a_fresh_database_with_target_3_gets_all_three_and_target_1_only_001(): void {
+        $this->admin();
+        $this->render($this->parts(null, null, null, null, null, function () {
+            return 1;
+        })['page'], $this->apply_post());
+        $this->assertSame(array('1'), array_map('strval', array_column($this->recorded(), 'version')));
+        $html = $this->render($this->parts(null, null, null, null, null, function () {
+            return 3;
+        })['page'], $this->apply_post());
+        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 002, 003.', $html);
+    }
+
+    public function test_an_invalid_target_is_refused_and_nothing_is_created(): void {
+        foreach (array("'3' (string)" => '3', 'zero' => 0, 'true' => true, 'null' => null) as $label => $value) {
+            $this->assertNull(EVC_Club_Migrations_Feature::parse_target($value, true), $label);
+        }
+        $this->assertSame(3, EVC_Club_Migrations_Feature::parse_target(3, true));
+        $this->assertSame(2, EVC_Club_Migrations_Feature::parse_target(null, false));
+        $this->admin();
+        $parts = $this->parts(null, null, null, null, null, function () {
+            return null;
+        });
+        $this->assertSame(array(EVC_Club_Migrations_Service::TARGET_INVALID), $parts['service']->status()['refusals']);
+        $html = $this->refused_apply($parts['page'], EVC_Club_Migrations_Service::TARGET_INVALID);
+        $this->assertStringContainsString('EVC_CLUB_MIGRATIONS_TARGET', $html);
+        $this->assertSame(array(), $this->tables());
     }
 
     public function test_lock_held_by_another_connection_is_refused(): void {
@@ -667,7 +737,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
 
         $this->cli_out = array();
         $cli->apply(array(), array('yes' => true));
-        $this->assertSame(array('success: Η βάση του Club ενημερώθηκε. Εφαρμόστηκαν οι μεταβάσεις: 001, 002, 003. Η ενέργεια καταγράφηκε στο ημερολόγιο ελέγχου του Club.'), $this->cli_out);
+        $this->assertSame(array('success: Η βάση του Club ενημερώθηκε. Εφαρμόστηκαν οι μεταβάσεις: 001, 002. Η ενέργεια καταγράφηκε στο ημερολόγιο ελέγχου του Club.'), $this->cli_out);
         $this->assertSame(self::ALL_TABLES, $this->tables());
         $audit = $this->audit_rows();
         $this->assertSame('cli', json_decode($audit[0]['details_json'], true)['channel']);
@@ -679,7 +749,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertSame(array('line: Δεν υπάρχει καμία εκκρεμής μετάβαση. Δεν έγινε καμία αλλαγή.'), $this->cli_out);
         $this->cli_out = array();
         $cli->status(array(), array());
-        $this->assertStringContainsString('success: Η βάση του Club είναι ενημερωμένη.', end($this->cli_out));
+        $this->assertStringContainsString('success: Οι εγκεκριμένες μεταβάσεις έχουν εφαρμοστεί· οι υπόλοιπες δεν έχουν εγκριθεί.', end($this->cli_out));
     }
 
     public function test_cli_refuses_with_the_same_checks(): void {
@@ -780,7 +850,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertSame(admin_url('tools.php?page=evc-club-db'), $this->redirected_to);
         $this->assertIsArray(get_transient(EVC_Club_Migrations_Admin_Page::RESULT_TRANSIENT . $id));
         $first = $this->render_raw($page);
-        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 001, 002, 003.', $first);
+        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 001, 002.', $first);
         $this->assertFalse(get_transient(EVC_Club_Migrations_Admin_Page::RESULT_TRANSIENT . $id));
         $refresh = $this->render_raw($page);
         $this->assertStringNotContainsString('evc-club-db-result', $refresh);

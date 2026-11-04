@@ -577,7 +577,10 @@ function memberSyncSelfTest() {
 //    shipped string outside them contains a piece of a QR class name (e.g. 'Qr_Token_Store'), so
 //    `new $cls` built from such a string is caught.
 // 4. NO DYNAMIC CONSTRUCTION in the QR files: `new $x`, `new (...)`, `new self|static|parent`, class_alias,
-//    Reflection*, newInstance*, unserialize are refused there.
+//    Reflection*, newInstance*, unserialize are refused there; `new $x` / `new (...)` / `new self|static|parent`
+//    also in the staff and customer plugin files (review: `EVC_Customer_Qr_Backend::class` + `new $c`).
+//    EVC_Qr_Token_Service / EVC_Member_Lookup_Service / EVC_Lookup_Key_Ring are named only in the UI-04C file and
+//    the services file.
 // Not covered statically (documented): a class name assembled at run time from pieces that are not QR name
 // fragments, in a file outside the QR files. The bans on `new EVC_Signed_Member_Context_Verifier` and every
 // other v2 construction are unchanged.
@@ -621,6 +624,11 @@ const QR_NAMES = [
   ["evc_rest_lookup_controller", [R5C.lookupController, R5C.staffPlugin]],
   ["evc_customer_qr_backend", [R5C.customerBackend, R5C.customerController, R5C.customerPlugin]],
   ["evc_rest_me_qr_controller", [R5C.customerController, R5C.customerPlugin]],
+  // STAGE-05C review (MINOR 3): the reviewed UI-04C service / key classes too, so `X::class` + `new $c` cannot
+  // reach them from any other shipped file.
+  ["evc_qr_token_service", [R5C.lookupInterfaceFile, R5C.servicesFile]],
+  ["evc_member_lookup_service", [R5C.lookupInterfaceFile, R5C.servicesFile]],
+  ["evc_lookup_key_ring", [R5C.lookupInterfaceFile, R5C.servicesFile]],
 ];
 // interface => [class, file]
 const QR_IMPLEMENTS = [
@@ -632,6 +640,8 @@ const QR_IMPLEMENTS = [
 // Fragments of QR class names that no shipped STRING may contain outside the QR files.
 const QR_FRAGMENTS = ["qr_token_store", "qr_token_service", "member_lookup_service", "lookup_rate_limiter", "lookup_key_ring", "club_qr_services", "club_lookup_backend", "customer_qr_backend", "staff_authorizer", "phone_directory"];
 const QR_FILES = [R5C.storeFile, R5C.limiterFile, R5C.servicesFile, R5C.lookupBackend, R5C.lookupController, R5C.customerBackend, R5C.customerController];
+// STAGE-05C review (MINOR 3): the two wiring plugins may name their backend, so they may not construct dynamically either.
+const QR_DYNAMIC_NEW_FILES = [...QR_FILES, R5C.staffPlugin, R5C.customerPlugin];
 const QR_GATES = {
   [R5C.staffPlugin]: { gate: ["EVC_Club_Redemption_Feature", "::", "enabled", "(", ")"], controller: "EVC_Rest_Lookup_Controller", backend: "EVC_Club_Lookup_Backend" },
   [R5C.customerPlugin]: { gate: ["EVC_Customer_Qr_Backend", "::", "provenance_recorded", "(", ")"], controller: "EVC_Rest_Me_Qr_Controller", backend: "EVC_Customer_Qr_Backend" },
@@ -688,7 +698,7 @@ export function qrProblemsFor(path, src) {
   tokens.forEach((tk, k) => {
     if (!(tk.t === "id" && tk.v.toLowerCase() === "new")) return;
     const next = tokens[k + 1];
-    if (qrFile && (!next || next.t !== "id" || ["self", "static", "parent", "class"].includes(next.v.toLowerCase()))) {
+    if (QR_DYNAMIC_NEW_FILES.includes(path) && (!next || next.t !== "id" || ["self", "static", "parent", "class"].includes(next.v.toLowerCase()))) {
       problems.push(`${path}: dynamic or self construction (new ${next ? next.v : ""}) in a QR file`);
     }
   });
@@ -829,6 +839,14 @@ function qrSelfTest() {
   expect("customer QR gate of another check", Q.customerPlugin, GOOD_QR_CUSTOMER_PLUGIN.replace("EVC_Customer_Qr_Backend::provenance_recorded()", "EVC_Customer_Feature::enabled()"), true);
   expect("customer provenance gate loosened", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("=== self::PROVENANCE", "== self::PROVENANCE"), true);
   expect("customer provenance gate always true", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("return defined('EVC_CLUB_PAYMENT_PROVENANCE') &&", "return true ||"), true);
+  // review MINOR 3: ::class + new $c
+  expect("customer backend via ::class and new $c in the customer plugin", Q.customerPlugin, GOOD_QR_CUSTOMER_PLUGIN.replace("        (new EVC_Rest_Me_Controller(", "        $c = EVC_Customer_Qr_Backend::class;\n        $b = new $c();\n        (new EVC_Rest_Me_Controller("), true);
+  expect("lookup backend via ::class and new $c in the staff plugin", Q.staffPlugin, GOOD_QR_STAFF_PLUGIN.replace("        (new EVC_Rest_Redeem_Controller($backend))->register_routes();", "        $c = EVC_Club_Lookup_Backend::class;\n        $b = new $c();\n        (new EVC_Rest_Redeem_Controller($backend))->register_routes();"), true);
+  expect("new (expr) in the staff plugin", Q.staffPlugin, GOOD_QR_STAFF_PLUGIN.replace("        (new EVC_Rest_Redeem_Controller($backend))->register_routes();", "        $b = new ('EVC_' . $x)();\n        (new EVC_Rest_Redeem_Controller($backend))->register_routes();"), true);
+  expect("token service via ::class elsewhere", "includes/x.php", "<?php\n$c = EVC_Qr_Token_Service::class;\n$s = new $c($a, $b, $d);", true);
+  expect("lookup service via ::class elsewhere", "includes/x.php", "<?php\n$c = EVC_Member_Lookup_Service::class;\n$s = new $c($a);", true);
+  expect("lookup keys via ::class elsewhere", "includes/x.php", "<?php\n$c = EVC_Lookup_Key_Ring::class;\n$k = new $c(array(), 'k1');", true);
+  expect("lookup key constant read in a backend", Q.lookupBackend, "<?php\n$n = EVC_Lookup_Key_Ring::MIN_SECRET_BYTES;", true);
   expect("customer provenance value changed", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("const PROVENANCE = 'club_db_v1';", "const PROVENANCE = 'CLUB_DB_V1';"), true);
   return bad;
 }

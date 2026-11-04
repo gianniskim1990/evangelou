@@ -674,8 +674,7 @@ final class EVC_Member_Lookup_Service {
         $extra = $canonical === null ? array() : array('phone:' . EVC_Phone_Canonical::pseudonym($this->keys, $canonical));
         return $this->guarded($actor, self::ACTION_PHONE, $extra, function (array $keys) use ($actor, $canonical): EVC_Member_Lookup_Result {
             if ($canonical === null) {
-                $this->failed($keys, self::ACTION_PHONE);
-                return EVC_Member_Lookup_Result::of(EVC_Member_Lookup_Result::INVALID_PHONE);
+                return $this->failed($keys, self::ACTION_PHONE, EVC_Member_Lookup_Result::INVALID_PHONE);
             }
             $members = array();
             foreach (array_unique($this->phones->member_ids_for_phone($canonical)) as $id) {
@@ -689,8 +688,7 @@ final class EVC_Member_Lookup_Service {
             }
             if (count($members) > 1) {
                 // Never pick one and never list them: identify by QR instead.
-                $this->failed($keys, self::ACTION_PHONE);
-                return EVC_Member_Lookup_Result::of(EVC_Member_Lookup_Result::AMBIGUOUS);
+                return $this->failed($keys, self::ACTION_PHONE, EVC_Member_Lookup_Result::AMBIGUOUS);
             }
             return $this->found($actor, $members[0]['member_public_id'], EVC_Clock::to_utc($this->clock->now()));
         });
@@ -721,13 +719,19 @@ final class EVC_Member_Lookup_Service {
         }
     }
 
-    private function failed(array $keys, string $action): EVC_Member_Lookup_Result {
+    /**
+     * Counts one failed lookup, then answers $kind. FAIL CLOSED (STAGE-05C review): if the failure
+     * cannot be counted (limiter store down, missing grant, lock timeout, broken table), the answer is
+     * `unavailable`, never the normal answer, so an uncountable failure can never be retried without limit.
+     */
+    private function failed(array $keys, string $action, string $kind = EVC_Member_Lookup_Result::NOT_FOUND): EVC_Member_Lookup_Result {
         try {
             $this->limiter->record_failure($keys, $action);
         } catch (Throwable $e) {
             $this->report($e);
+            return EVC_Member_Lookup_Result::of(EVC_Member_Lookup_Result::UNAVAILABLE);
         }
-        return EVC_Member_Lookup_Result::of(EVC_Member_Lookup_Result::NOT_FOUND);
+        return EVC_Member_Lookup_Result::of($kind);
     }
 
     private function found(EVC_Staff_Actor $actor, string $member_public_id, DateTimeImmutable $now): EVC_Member_Lookup_Result {

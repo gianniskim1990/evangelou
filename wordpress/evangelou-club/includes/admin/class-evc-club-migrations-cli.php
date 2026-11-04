@@ -53,6 +53,8 @@ final class EVC_Club_Migrations_Cli {
             return;
         } elseif ($report['can_apply']) {
             ($this->io['line'])('Μπορεί να γίνει εφαρμογή: wp evc-club migrations apply --yes');
+        } elseif ($report['not_approved'] !== array()) {
+            ($this->io['success'])('Οι εγκεκριμένες μεταβάσεις έχουν εφαρμοστεί· οι υπόλοιπες δεν έχουν εγκριθεί.');
         } else {
             ($this->io['success'])('Η βάση του Club είναι ενημερωμένη.');
         }
@@ -111,7 +113,8 @@ final class EVC_Club_Migrations_Cli {
             $line(sprintf('Εφαρμοσμένη %03d %s (%s) αρχείο: %s', $row['version'], $row['name'], $row['applied_at'], $row['checksum_ok'] ? 'ίδιο' : 'ΔΙΑΦΟΡΕΤΙΚΟ'));
         }
         foreach ($report['pending'] as $row) {
-            $line(sprintf('Εκκρεμής %03d %s', $row['version'], $row['name']));
+            $blocked = in_array((int) $row['version'], $report['not_approved'], true);
+            $line(sprintf('Εκκρεμής %03d %s', $row['version'], $row['name']) . ($blocked ? ' (ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ: δεν θα εφαρμοστεί)' : ''));
         }
     }
 }

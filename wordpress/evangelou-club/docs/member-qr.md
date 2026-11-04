@@ -99,7 +99,7 @@ its last config check:
 Any failure → 503. Both connections run `SET SESSION innodb_lock_wait_timeout = 5`
 (`EVC_Club_Qr_Services::prepare_connection`), like the 05A / 05B paths.
 
-### Packager guard (`app/scripts/php-guards.mjs`, `qrProblemsFor` + `qrSelfTest`, 51 fixtures)
+### Packager guard (`app/scripts/php-guards.mjs`, `qrProblemsFor` + `qrSelfTest`, 58 fixtures)
 
 The guard replaces the blanket string bans on:
 - `new EVC_Qr_Token_Service`, `new EVC_Member_Lookup_Service`, `new EVC_Lookup_Key_Ring`;
@@ -116,11 +116,15 @@ It enforces these rules:
 - **Implementations:** each interface is implemented only by its own `class` (no enum, trait,
   interface or anonymous class), and no shipped interface extends one.
 - **Names:** each QR class name, as an identifier or inside a string, appears only in its
-  allowlisted files.
+  allowlisted files. This includes the reviewed `EVC_Qr_Token_Service`, `EVC_Member_Lookup_Service` and
+  `EVC_Lookup_Key_Ring`, which only `class-evc-member-lookup.php` and the services file may name. So
+  `X::class` followed by `new $c` cannot reach them from any other shipped file.
 - **Name fragments:** no other shipped string may contain a QR class-name fragment
   (`qr_token_store`, `member_lookup_service`, …).
 - **No dynamic construction in the QR files:** `new $x`, `new (…)`, `new self|static|parent|class`,
-  `class_alias`, `Reflection*`, `newInstance*` and `unserialize` are refused.
+  `class_alias`, `Reflection*`, `newInstance*` and `unserialize` are refused. `new $x`, `new (…)` and
+  `new self|static|parent` are also refused in the staff and customer plugin files, which may name
+  their backend (review: `EVC_Customer_Qr_Backend::class` + `new $c`).
 
 Not covered statically: a class name assembled at run time, outside the QR files, from pieces that are
 not QR name fragments. The `new EVC_Signed_Member_Context_Verifier` ban and every v2 ban are unchanged.
@@ -229,14 +233,23 @@ GET never returns a token.
   - `denial_reason(now) !== null` → `inactive`. This covers frozen, refunded, cancelled, expired (the
     exclusive end), unverified, pending and none.
   - Otherwise, a ledger row for today's Athens day → `used_today`; else `active`.
-- **First name:** WP `first_name`, else WooCommerce `billing_first_name`, else `null`; at most
-  40 characters.
+- **First name (D8 «μικρό όνομα»):** the FIRST WORD of WP `first_name`, else of WooCommerce
+  `billing_first_name`, else `null`; at most 40 characters. Body keys may come in any order.
+- **Known gap, left as is (review):** the scan does not look at the coffee catalogue. If the approved
+  catalogue were ever empty, the scan would still say `active` while the redeem route answers 503
+  (`coffee_catalogue_unavailable`). The shipped v1 catalogue is never empty.
 - **The lookup proof:** the reviewed service computes its proof, but the v1 route does not return it
   and the v1 redeem route does not need it. Its TTL (300 s, `EVC_Club_Qr_Services`) therefore has no
   effect today; decide it with v2 prepared redemption.
 
-**`POST /admin/members/qr/revoke`** (D6). Users with `evc_manage_club` (administrators). Never an
-account carrying the Club staff role; cookie session + own nonce check. Body `{"wp_user_id": int}`.
+**`POST /admin/members/qr/revoke`** (D6). Users with `evc_manage_club` (administrators). Body
+`{"wp_user_id": int}`. The route itself refuses, BEFORE the service:
+- any account that carries the Club staff role, even an administrator (403);
+- an Application Password request (401);
+- a request without a cookie session and a valid `wp_rest` nonce (401).
+
+These route checks are NOT repeated by the service, so each one has its own test and mutant (QL13,
+QL14).
 
 | Status | Body / code |
 |---|---|
@@ -244,8 +257,8 @@ account carrying the Club staff role; cookie session + own nonce check. Body `{"
 | 404 | `member_not_found` |
 | 409 | `concurrent_change` |
 
-The service's administrator path re-checks `evc_manage_club` through `EVC_Wp_Club_Staff_Authorizer`,
-which answers ONLY `evc_lookup_member` and `evc_manage_club` (any other capability, e.g. the v2
+Only the capability itself is re-checked: the service's administrator path re-checks `evc_manage_club`
+through `EVC_Wp_Club_Staff_Authorizer`, which answers ONLY `evc_lookup_member` and `evc_manage_club` (any other capability, e.g. the v2
 hand-off ones, is false even if the user has it).
 
 ### Failed-scan limit (D9, migration 003 `evc_lookup_failures`)
@@ -258,20 +271,53 @@ hand-off ones, is false even if the user has it).
 **The window.**
 - Fixed 300 s windows aligned to the epoch.
 - `allow()` refuses while the current window holds ≥ 10 failures. Across a window boundary up to 19
-  can happen in 5 minutes ("about 10", as decided).
+  can happen in 5 minutes. Scans of the same tablet running IN PARALLEL can each pass `allow()` before
+  either records its failure, so a burst may exceed 10 by the number of parallel scans. This is the
+  "about 10" the owner decided.
 - Successes are not counted.
+- **A new login is a fresh count.** The session ref is derived on the server from the WordPress
+  session token (`EVC_Staff_Session::session_ref`), so logging the tablet in again starts a new
+  count of 10. No extra cap was added (that would be a new business rule). How often this can happen
+  is bounded only by the existing staff login throttle (`EVC_Login_Throttle`).
 
 **Writes and storage.**
 - `record_failure()` is one atomic `INSERT … ON DUPLICATE KEY UPDATE failures = failures + 1` per key.
-- It then prunes ≤ 50 rows older than 1 day.
+- It reads the clock once, then prunes ≤ 50 rows older than 1 day, oldest first
+  (`ORDER BY window_start_utc`).
 - Stored key: `sha256("evc-lookup-limit-v1|<action>|session:<ref>")`. No token, id or name is stored.
-- Any database error makes the lookup `unavailable`.
+- **Fail closed, both ways (review MAJOR 1).** A read error in `allow()` makes the lookup
+  `unavailable`. So does an error while RECORDING a failure (missing grant, lock timeout, broken
+  table): `EVC_Member_Lookup_Service::failed()` then answers `unavailable` instead of `not_found`, so
+  an uncountable failure can never be retried without limit. Tests:
+  - `SqlLookupRateLimiterTest::test_a_failure_that_cannot_be_written_makes_every_failed_scan_unavailable`
+    (only the INSERT fails: 30 bad scans, all `unavailable`);
+  - `MemberLookupTest::test_a_failure_that_cannot_be_counted_makes_the_lookup_unavailable`.
+  - Mutants L27 and LR8.
 
 **Migration 003.**
 - Plain `CREATE TABLE` (fails loudly on a differently shaped table).
 - Applied only through `EVC_Migrator` / the STAGE-04A page behind `EVC_CLUB_MIGRATIONS_ENABLED`, whose
   separation checks also verify it (`created_tables()` reads its `CREATE TABLE`).
-- A 001 + 002 database shows only 003 pending: `ClubMigrationsTest::test_a_database_with_001_and_002_gets_only_003`.
+- **Never applied by accident (review MINOR 5).** The page and the command apply only up to
+  `EVC_CLUB_MIGRATIONS_TARGET`:
+  - undefined → **2**, so 003 is shown as «ΕΚΚΡΕΜΕΙ, ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ», there is no apply button for
+    it, and an apply request (form or CLI) changes nothing;
+  - a positive integer (exact type) → that version;
+  - anything else → refusal `migrations_target_invalid`.
+
+  The technician sets `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` ONLY after the owner's go-ahead.
+  `EVC_Migrator::migrate($up_to)` stops at the target.
+- Tests in `ClubMigrationsTest`:
+  - `test_by_default_migration_003_is_shown_as_not_approved_and_never_applied`;
+  - `…with_target_3_a_database_with_001_and_002_gets_only_003`;
+  - `…fresh_database_with_target_3_…_target_1_only_001`;
+  - `…invalid_target_is_refused…`;
+  - `MigratorTest::test_an_upper_bound_…`.
+- Mutants MG37–MG42.
+- **Why a constant rather than another mechanism.** It is set by the technician in `wp-config.php`,
+  the same place as every other Club switch. The administrator page cannot change it, and its default
+  is the safe one. A separate "approve 003" button would put the owner's approval inside the same
+  one-click page whose accidental use is the risk.
 
 ### Logs and personal data
 
@@ -289,21 +335,24 @@ appears. The staff answer carries the first name only (D8).
   - least-privilege grants;
   - the services over SQL;
   - frozen / expired cards never redeem.
-- `SqlLookupRateLimiterTest` (9):
+- `SqlLookupRateLimiterTest` (10):
   - 10 → block, per tablet / action;
   - window end; no session key; nothing personal stored;
-  - prune; failure propagation; grants;
+  - prune; failure propagation in `allow()`; an INSERT-only failure → unavailable; grants;
   - the lookup service over SQL;
   - multi-process increments.
 - `MigratorTest` / `SqlProvenanceStoreTest` updated for 003.
 
 **WordPress.**
-- `StaffQrLookupTest` (wp-redemption, 9): shipped wiring → 503; auth; every gate without connection;
-  the D8 body; inactive / used_today / Athens midnight; byte-identical not-found; D9; the authorizer;
-  D6 revocation.
+- `StaffQrLookupTest` (wp-redemption, 11):
+  - shipped wiring → 503; auth; every gate without connection;
+  - the D8 body, first word only, any key order;
+  - inactive / used_today / Athens midnight; byte-identical not-found;
+  - D9; the authorizer;
+  - D6 revocation; staff-role administrator and Application Password refused.
 - `CustomerQrTest` (wp-customer, 6).
 - `ClubRedemptionBackendTest::test_without_the_constant_no_qr_route_is_registered` (wp-enabled).
-- `ClubMigrationsTest` (003; 001 + 002 → only 003).
+- `ClubMigrationsTest` (003 not approved by default; target 3 / 1 / invalid).
 
 **Commerce (CI only).**
 - `StaffQrCommerceTest` (wp-commerce-redeem): admin completion → member → QR → scan active + first name
@@ -312,14 +361,17 @@ appears. The staff answer carries the first name only (D8).
 - `CustomerQrCommerceTest` (wp-commerce): the shipped customer route with the real constants.
 
 **Mutants.**
-- SQL runner: QS1–QS12, LR1–LR7.
-- WP runner: QL1–QL12 (modes enabled / redemption) and QC1–QC7 (mode customer), each with named
-  killer tests.
+- SQL runner: QS1–QS12, LR1–LR8.
+- Membership runner: L27 (uncounted failure).
+- WP runner, each with named killer tests:
+  - QL1–QL14 (modes enabled / redemption);
+  - QC1–QC7 (mode customer);
+  - MG37–MG42 (migration target).
 - Equivalent, not listed:
   - the lock-only and row-count-only store mutants (see above);
   - the backend's second disabled-member check (the service already refuses);
-  - the revoke route's own staff-role / `evc_manage_club` check, because the service re-checks
-    `evc_manage_club` through the authorizer (whose allowlist QL11 covers).
+  - the revoke route's own `evc_manage_club` test alone, because the service re-checks the capability
+    (the staff-role and Application Password refusals are NOT re-checked: QL13, QL14).
 
 ### Not done here
 

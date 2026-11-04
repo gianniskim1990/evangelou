@@ -825,7 +825,9 @@ developer notes: `docs/club-members.md`.
 Owner decisions 2026-11-04: D6 a QR has no age limit and changes only when the customer (or an
 administrator) asks; D7 screenshots work; D8 staff see first name + status only; D9 about 10 failed
 scans per 5 minutes per tablet, counted in the new migration **003** (`evc_lookup_failures`; code
-approved, applying it anywhere real needs separate approval).
+approved, applying it anywhere real needs separate approval). The migrations page applies only up to
+`EVC_CLUB_MIGRATIONS_TARGET` (undefined = 2), so 003 is shown as "pending, not approved" and is never
+applied until the technician sets the target to 3 after the owner's go-ahead.
 
 - **Customer:** `GET|POST evangelou-club-customer/v1/me/qr`, only with `EVC_CLUB_CUSTOMER_ENABLED` AND
   `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`. A member gets one QR; a second request without
@@ -839,7 +841,8 @@ approved, applying it anywhere real needs separate approval).
 - **Administrator:** `POST evangelou-club/v1/admin/members/qr/revoke {wp_user_id}` (`evc_manage_club`,
   never the shared tablet account) retires a customer's QR (lost phone).
 - **Store:** `EVC_Sql_Qr_Token_Store` over 001, as a compare-and-set in one transaction. **Limiter:**
-  `EVC_Sql_Lookup_Rate_Limiter` over 003, with atomic increments per tablet session. **Single
+  `EVC_Sql_Lookup_Rate_Limiter` over 003, with atomic increments per tablet session; a failure that
+  cannot be recorded makes the scan `unavailable` (fail closed). **Single
   construction site:** `EVC_Club_Qr_Services`; the backends are wired only behind their opt-ins
   (packager rule set `qrProblemsFor`).
 

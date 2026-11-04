@@ -12,7 +12,11 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *
  * - Fixed windows of WINDOW_SECONDS aligned to the epoch. allow() refuses while the current window
  *   of any session key already holds MAX_FAILURES or more failures (so at most about 10 per window;
- *   across a window boundary up to 2 × 10 - 1 in 5 minutes is possible: "about 10", as decided).
+ *   across a window boundary up to 2 × 10 - 1 in 5 minutes is possible, and scans of the SAME tablet
+ *   running in parallel can each pass allow() before either records its failure, so a burst may exceed
+ *   10 by the number of parallel scans: "about 10", as decided).
+ * - A new WordPress login gives a new session ref (server-derived, EVC_Staff_Session::session_ref) and
+ *   so a fresh count; how often that can happen is bounded only by the existing staff login throttle.
  *   Successful scans are not counted (the decision limits failures only); allow() consumes nothing.
  * - record_failure() is one atomic INSERT ... ON DUPLICATE KEY UPDATE per key (no read-then-write),
  *   then prunes at most PRUNE_LIMIT rows older than RETENTION_SECONDS.
@@ -49,7 +53,7 @@ final class EVC_Sql_Lookup_Rate_Limiter implements EVC_Lookup_Rate_Limiter {
         if ($counted === array()) {
             return false;
         }
-        $window = $this->window();
+        $window = self::window_of($this->now());
         foreach ($counted as $key) {
             $row = $this->db->fetch_one(
                 'SELECT failures FROM evc_lookup_failures WHERE limiter_key = ? AND window_start_utc = ?',
@@ -64,8 +68,9 @@ final class EVC_Sql_Lookup_Rate_Limiter implements EVC_Lookup_Rate_Limiter {
 
     public function record_failure(array $keys, string $action): void {
         $counted = self::counted($keys, $action);
-        $window = $this->window();
-        $now = $this->now()->format('Y-m-d H:i:s.u');
+        $at = $this->now(); // read the clock ONCE: window, timestamp and prune cutoff agree
+        $window = self::window_of($at);
+        $now = $at->format('Y-m-d H:i:s.u');
         foreach ($counted as $key) {
             $this->db->execute(
                 'INSERT INTO evc_lookup_failures (limiter_key, window_start_utc, failures, updated_at_utc) VALUES (?, ?, 1, ?)'
@@ -73,9 +78,9 @@ final class EVC_Sql_Lookup_Rate_Limiter implements EVC_Lookup_Rate_Limiter {
                 array($key, $window, $now, $now)
             );
         }
-        $cutoff = $this->now()->getTimestamp() - self::RETENTION_SECONDS;
+        $cutoff = $at->getTimestamp() - self::RETENTION_SECONDS;
         $this->db->execute(
-            'DELETE FROM evc_lookup_failures WHERE window_start_utc < ? LIMIT ' . self::PRUNE_LIMIT,
+            'DELETE FROM evc_lookup_failures WHERE window_start_utc < ? ORDER BY window_start_utc LIMIT ' . self::PRUNE_LIMIT,
             array(gmdate('Y-m-d H:i:s', $cutoff) . '.000000')
         );
     }
@@ -95,8 +100,8 @@ final class EVC_Sql_Lookup_Rate_Limiter implements EVC_Lookup_Rate_Limiter {
         return EVC_Clock::to_utc($this->clock->now());
     }
 
-    private function window(): string {
-        $t = $this->now()->getTimestamp();
+    private static function window_of(DateTimeImmutable $at): string {
+        $t = $at->getTimestamp();
         return gmdate('Y-m-d H:i:s', $t - ($t % self::WINDOW_SECONDS)) . '.000000';
     }
 }

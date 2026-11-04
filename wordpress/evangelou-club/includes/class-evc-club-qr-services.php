@@ -33,7 +33,12 @@ final class EVC_Club_Qr_Services {
             return null;
         }
         $secret = constant(self::LOOKUP_KEY_CONSTANT);
-        return is_string($secret) && strlen($secret) >= EVC_Lookup_Key_Ring::MIN_SECRET_BYTES ? $secret : null;
+        return self::is_lookup_secret($secret) ? $secret : null;
+    }
+
+    /** @param mixed $secret a usable lookup-proof secret: a string of at least 32 bytes */
+    public static function is_lookup_secret($secret): bool {
+        return is_string($secret) && strlen($secret) >= EVC_Lookup_Key_Ring::MIN_SECRET_BYTES;
     }
 
     /** Sets the short session lock wait on a connection used by the QR paths. */

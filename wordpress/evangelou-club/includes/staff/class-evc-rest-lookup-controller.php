@@ -57,7 +57,9 @@ final class EVC_Rest_Lookup_Controller {
         }
         try {
             $body = $request->get_json_params();
-            if (!is_array($body) || array_keys($body) !== array('method', 'qr_token') || $body['method'] !== 'qr' || !is_string($body['qr_token'])
+            $keys = is_array($body) ? array_keys($body) : array();
+            sort($keys);
+            if (!is_array($body) || $keys !== array('method', 'qr_token') || $body['method'] !== 'qr' || !is_string($body['qr_token'])
                 || strlen($body['qr_token']) > 256) {
                 return EVC_Rest_Security::error_response('invalid_request', 400);
             }

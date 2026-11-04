@@ -107,11 +107,45 @@ final class SqlLookupRateLimiterTest extends EVC_Db_Test_Case {
         $this->assertContains(str_repeat('b', 64), $keys, 'within one day: kept');
     }
 
-    public function test_a_database_failure_propagates_so_the_service_fails_closed(): void {
+    public function test_a_read_failure_in_allow_propagates(): void {
         $pdo = $this->database->faulty_pdo();
         $pdo->fail_prepare_matching = '/evc_lookup_failures/';
         $this->expectException(EVC_Db_Exception::class);
         $this->limiter(new EVC_Club_Db($pdo))->allow(self::keys(), 'qr_lookup');
+    }
+
+    /**
+     * STAGE-05C review (MAJOR 1): only the INSERT of a failure fails (missing grant, lock timeout,
+     * broken table) while allow() still reads fine. Every failed scan must answer `unavailable`, never
+     * `not_found`, so a tablet can never scan without limit while failures are not being counted.
+     */
+    public function test_a_failure_that_cannot_be_written_makes_every_failed_scan_unavailable(): void {
+        $public = $this->create_member(7001);
+        $id = (int) $this->db->fetch_one('SELECT id FROM evc_members WHERE member_public_id = ?', array($public))['id'];
+        $token = EVC_Qr_Token::mint();
+        (new EVC_Sql_Qr_Token_Store($this->db))->rotate($id, null, EVC_Qr_Token::digest($token), '2026-11-04 09:00:00.000000');
+        $pdo = $this->database->faulty_pdo();
+        $pdo->fail_prepare_matching = '/^INSERT INTO evc_lookup_failures/';
+        $db = new EVC_Club_Db($pdo);
+        $authorizer = new EVC_Fake_Club_Staff_Authorizer();
+        $authorizer->grants[self::STAFF] = array(EVC_Member_Lookup_Service::CAPABILITY);
+        $service = new EVC_Member_Lookup_Service(
+            new EVC_Sql_Qr_Token_Store($db),
+            new EVC_Fake_Member_Phone_Directory(),
+            $authorizer,
+            new EVC_Sql_Lookup_Rate_Limiter($db, $this->clock),
+            new EVC_Lookup_Key_Ring(array('k1' => str_repeat("\x03", 32)), 'k1'),
+            new EVC_Lookup_Context_Policy(300),
+            EVC_Qr_Token_Policy::without_expiry(),
+            $this->clock,
+            'member_lookup'
+        );
+        $tablet = new EVC_Staff_Actor(self::STAFF, self::TABLET_1);
+        for ($i = 0; $i < 30; $i++) {
+            $this->assertSame(EVC_Member_Lookup_Result::UNAVAILABLE, $service->by_qr($tablet, $i % 2 === 0 ? EVC_Qr_Token::mint() : 'not a qr')->kind(), "failed scan $i");
+        }
+        $this->assertSame(0, $this->count_rows('evc_lookup_failures'));
+        $this->assertSame(EVC_Member_Lookup_Result::FOUND, $service->by_qr($tablet, $token)->kind(), 'a valid QR still works (nothing to count)');
     }
 
     public function test_the_least_privilege_grants_are_enough(): void {

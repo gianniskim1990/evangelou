@@ -211,6 +211,18 @@ final class StaffQrLookupTest extends EVC_WP_Test_Case {
         $this->assertStringNotContainsString($token, $json);
     }
 
+    public function test_only_the_first_word_of_the_first_name_and_any_key_order(): void {
+        $this->use_backend();
+        list($user, $public, $token) = $this->member_with_qr('  Μαρία   Ελένη ');
+        $this->adapter->set($user, EVC_Mock_Membership_Adapter::active_until('2026-12-01T10:00:00Z'));
+        $this->login_as($this->create_staff_user());
+        $r = $this->rest('POST', self::LOOKUP, array('qr_token' => $token, 'method' => 'qr'), $this->nonce());
+        $this->assertSame(200, $r->get_status(), 'key order does not matter');
+        $this->assertSame(array('member_id' => $public, 'first_name' => 'Μαρία'), $r->get_data()['member'], 'D8 «μικρό όνομα»: the first word only');
+        list(, , $long) = $this->member_with_qr(str_repeat('Α', 60));
+        $this->assertSame(40, mb_strlen($this->scan($long)->get_data()['member']['first_name']));
+    }
+
     public function test_frozen_expired_and_unverified_cards_are_not_active_and_todays_coffee_shows_as_taken(): void {
         $this->use_backend();
         list($user, $public, $token) = $this->member_with_qr();
@@ -310,6 +322,30 @@ final class StaffQrLookupTest extends EVC_WP_Test_Case {
     }
 
     // ---- D6 administrator revocation ---------------------------------------------------------------------
+
+    /**
+     * STAGE-05C review (MINOR 2): the route's own refusals are NOT re-checked by the service's
+     * authorizer (an administrator who also carries the Club staff role does hold evc_manage_club), so
+     * each one is tested on its own.
+     */
+    public function test_revocation_refuses_a_staff_role_administrator_and_an_application_password_call(): void {
+        $this->use_backend();
+        list($user, , $token) = $this->member_with_qr();
+        $mixed = $this->create_user_with_role('administrator');
+        (new WP_User($mixed))->add_role(EVC_Staff_Role::ROLE);
+        $this->assertTrue(user_can($mixed, EVC_Staff_Role::CAP_MANAGE), 'the service authorizer alone would allow it');
+        $this->login_as($mixed);
+        $this->assertEnvelope($this->rest('POST', self::REVOKE, array('wp_user_id' => $user), $this->nonce()), 403, 'forbidden');
+
+        $admin = $this->create_user_with_role('administrator');
+        $this->login_as($admin);
+        do_action('application_password_did_authenticate', new WP_User($admin), array('uuid' => 'test-only'));
+        $this->assertEnvelope($this->rest('POST', self::REVOKE, array('wp_user_id' => $user), $this->nonce()), 401, 'unauthorized');
+
+        $store = new EVC_Sql_Qr_Token_Store($this->db());
+        $member = $store->find_member_by_wp_user($user);
+        $this->assertSame(EVC_Qr_Token::digest($token), $store->active_token_hash($member['id']), 'nothing was revoked');
+    }
 
     public function test_an_administrator_revokes_a_customers_qr_and_the_old_qr_stops_working(): void {
         $this->use_backend();

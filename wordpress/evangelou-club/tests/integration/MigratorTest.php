@@ -78,6 +78,17 @@ final class MigratorTest extends EVC_Db_Test_Case {
         );
     }
 
+    /** STAGE-05C review (MINOR 5): an upper bound keeps later migrations pending (the page passes the approved target). */
+    public function test_an_upper_bound_applies_only_up_to_the_target_and_later_files_stay_pending(): void {
+        $migrator = new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir());
+        $this->assertSame(array(1, 2), $migrator->migrate(2));
+        $this->assertSame(array(1, 2), array_keys($migrator->applied()));
+        $this->assertArrayNotHasKey('evc_lookup_failures', $this->tables());
+        $this->assertSame(array(), $migrator->migrate(2));
+        $this->assertSame(array(3), $migrator->migrate(3));
+        $this->assertArrayHasKey('evc_lookup_failures', $this->tables());
+    }
+
     public function test_repeat_migration_is_a_no_op(): void {
         $migrator = new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir());
         $migrator->migrate();

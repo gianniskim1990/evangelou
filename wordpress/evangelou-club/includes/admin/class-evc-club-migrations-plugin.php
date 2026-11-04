@@ -48,13 +48,14 @@ final class EVC_Club_Migrations_Plugin {
      * @param array{name:string,host:string,prefix:string}|null $wordpress default: DB_NAME, DB_HOST, $wpdb->base_prefix
      * @param callable(): ?array|null $wordpress_server default: the WordPress connection's @@hostname / @@port / DATABASE()
      * @param string|null $directory default: the shipped database/ directory (tests point it elsewhere)
+     * @param callable(): ?int|null $target default: EVC_Club_Migrations_Feature::target_version() (undefined = 2)
      * @return array{service:EVC_Club_Migrations_Service,page:EVC_Club_Migrations_Admin_Page,cli:EVC_Club_Migrations_Cli}
      */
-    public static function build(?callable $config = null, ?callable $connect = null, ?callable $log = null, ?array $io = null, ?array $wordpress = null, ?callable $wordpress_server = null, ?string $directory = null): array {
-        return self::wire($config, $connect, $log, $io, $wordpress, $wordpress_server, $directory);
+    public static function build(?callable $config = null, ?callable $connect = null, ?callable $log = null, ?array $io = null, ?array $wordpress = null, ?callable $wordpress_server = null, ?string $directory = null, ?callable $target = null): array {
+        return self::wire($config, $connect, $log, $io, $wordpress, $wordpress_server, $directory, $target);
     }
 
-    private static function wire(?callable $config, ?callable $connect, ?callable $log, ?array $io, ?array $wordpress, ?callable $wordpress_server, ?string $directory): array {
+    private static function wire(?callable $config, ?callable $connect, ?callable $log, ?array $io, ?array $wordpress, ?callable $wordpress_server, ?string $directory, ?callable $target): array {
         global $wpdb;
         $directory = $directory ?? dirname(__DIR__, 2) . '/database';
         $service = new EVC_Club_Migrations_Service(
@@ -82,7 +83,8 @@ final class EVC_Club_Migrations_Plugin {
             },
             function () {
                 return new DateTimeImmutable('now', new DateTimeZone('UTC'));
-            }
+            },
+            $target ?? array('EVC_Club_Migrations_Feature', 'target_version')
         );
         $io = $io ?? array(
             'line' => function (string $text) {

@@ -167,9 +167,13 @@ $mutants = array(
     array('id' => 'LR4-no-session-key-allowed', 'file' => $limiter, 'command' => 'qr',
         'search' => "        if (\$counted === array()) {\n            return false;", 'replace' => "        if (\$counted === array()) {\n            return true;"),
     array('id' => 'LR5-old-rows-never-pruned', 'file' => $limiter, 'command' => 'qr',
-        'search' => "        \$cutoff = \$this->now()->getTimestamp() - self::RETENTION_SECONDS;", 'replace' => "        \$cutoff = 0;"),
+        'search' => "        \$cutoff = \$at->getTimestamp() - self::RETENTION_SECONDS;", 'replace' => "        \$cutoff = 0;"),
     array('id' => 'LR6-counter-key-not-unique', 'file' => 'database/003_lookup_failures.sql', 'command' => 'qr',
         'search' => "  PRIMARY KEY (limiter_key, window_start_utc),\n", 'replace' => "  KEY ix_lookup_failures_key (limiter_key, window_start_utc),\n"),
+    // STAGE-05C review (MAJOR 1): an uncountable failure must make the lookup unavailable (integration killer).
+    array('id' => 'LR8-uncounted-failure-answered-normally', 'file' => 'includes/class-evc-member-lookup.php', 'command' => 'qr',
+        'search' => "            \$this->report(\$e);\n            return EVC_Member_Lookup_Result::of(EVC_Member_Lookup_Result::UNAVAILABLE);\n        }\n        return EVC_Member_Lookup_Result::of(\$kind);",
+        'replace' => "            \$this->report(\$e);\n        }\n        return EVC_Member_Lookup_Result::of(\$kind);"),
     array('id' => 'LR7-raw-session-ref-stored', 'file' => $limiter, 'command' => 'qr',
         'search' => "                \$out[] = hash('sha256', self::DOMAIN . \$action . '|' . \$key);", 'replace' => "                \$out[] = substr(str_pad(\$key, 64, '0'), 0, 64);"),
 );

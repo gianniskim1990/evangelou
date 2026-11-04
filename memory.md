@@ -1227,3 +1227,50 @@ The existing website developer replied explicitly:
     - frontend PR run 41790466214 4/4 (no frontend push run: that commit touches no app/ path).
   - **Local.** unit 1006; integration 168; wp suites green; SQL mutants 47/47; WP mutants 129/129; packager builds identical to base (staff-CrPA0l2H.js / staff-DtlY_JJO.css / customer-Deaj56e0.js).
   - Draft PR #38. Nothing merged / deployed / enabled; 003 applied nowhere real.
+
+### STAGE-05C part 2/3 review fixes — 2026-11-04 (independent review of 4861ef6: no blocker)
+
+**MAJOR 1: the D9 limiter failed open.** `EVC_Member_Lookup_Service::failed()` answered `not_found` even when `record_failure()` threw, so a tablet could keep scanning with nothing counted.
+- Fix: `failed()` now answers `unavailable` (503) when the failure cannot be recorded. This also covers the invalid-phone and ambiguous paths, which now go through `failed()` too.
+- Tests:
+  - `MemberLookupTest::test_a_failure_that_cannot_be_counted_makes_the_lookup_unavailable` (unit; new fake flag `record_unavailable`);
+  - `SqlLookupRateLimiterTest::test_a_failure_that_cannot_be_written_makes_every_failed_scan_unavailable` (only the INSERT fails, 30 bad scans, all `unavailable`).
+- The test that only covered `allow()` was renamed `test_a_read_failure_in_allow_propagates`.
+- Mutants: L27 (membership runner) and LR8 (SQL runner).
+
+**MINOR 2: two revoke-route refusals were not re-checked.** The route refuses a staff-role account and an Application Password call, but the service re-checks only `evc_manage_club`, so these two refusals had no backstop. The earlier "equivalent mutant" note was wrong.
+- Test: `test_revocation_refuses_a_staff_role_administrator_and_an_application_password_call`.
+- Mutants: QL13 and QL14. The runner comment and the doc are corrected.
+
+**MINOR 3: guard gap for dynamic construction.**
+- `new $x`, `new (…)` and `new self|static|parent` are now banned in the staff and customer plugin files as well.
+- `EVC_Qr_Token_Service`, `EVC_Member_Lookup_Service` and `EVC_Lookup_Key_Ring` are added to `QR_NAMES`, allowlisted to `class-evc-member-lookup.php` and `class-evc-club-qr-services.php`.
+  - The lookup backend therefore now calls `EVC_Club_Qr_Services::is_lookup_secret()`; QL9 now targets that function.
+- 7 new fixtures (58 in total).
+- Lesson, again: fixture labels must not contain Tailwind utility words. "key ring" was renamed for the second time.
+
+**MINOR 4: a new login resets the count.** Logging in again gives a fresh session ref and so a fresh count of 10. Documented under D9 in `member-qr.md`: the ref is server-derived, and the reset is bounded only by the existing login throttle. No new cap was added.
+
+**MINOR 5: migration 003 must never be applied by accident.**
+- New constant `EVC_CLUB_MIGRATIONS_TARGET`, parsed by `EVC_Club_Migrations_Feature::target_version()` / `parse_target()`:
+  - undefined → 2;
+  - a positive int → itself;
+  - anything else → refusal `migrations_target_invalid`.
+- `EVC_Migrator::migrate(?int $up_to)` stops at the target. The service applies and offers apply only for pending versions at or below the target (`not_approved` lists the rest).
+- What the operator sees: the page shows 003 as «ΕΚΚΡΕΜΕΙ, ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ (δεν θα εφαρμοστεί)», with no button for it. The CLI marks it too.
+- `build()` and `wire()` take an optional `$target` test seam.
+- Tests:
+  - `ClubMigrationsTest`: 003 not approved by default; target 3 applies only 003; target 1 / 3 on a fresh database; invalid target refused;
+  - `MigratorTest`: upper bound.
+- Mutants MG37–MG42. The MG20 pattern was re-aimed with the same intent.
+- Greek warning added to `docs/club-db-migrations.md`. Why a wp-config constant: the page cannot change it, and the default is the safe value.
+
+**Nits fixed.**
+- The lookup body is compared on sorted keys.
+- Parallel scans can slightly exceed 10; this is documented.
+- The prune DELETE now has `ORDER BY window_start_utc`.
+- The first name shows only its first word, still at most 40 characters. QL6 is re-aimed to that (`test_only_the_first_word_of_the_first_name_and_any_key_order`).
+- `record_failure` reads the clock once.
+- The empty-catalogue gap (scan says active, redeem answers 503) is noted in the docs and left as is.
+
+**Open owner question:** whether the tablet may revoke a member's QR. It is still unanswered, so revocation stays admin-only.
