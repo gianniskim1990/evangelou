@@ -1366,3 +1366,6 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - **Residual risk.** Any script on the WordPress origin can read the localStorage token; documented, and accepted by the owner.
 - **Nits.** The canvas is emptied on stop (C30). An `issued_at` format change fails safe (the record is deleted); documented.
 - **Rule kept.** No DOM nodes in `assert.equal`, `assert.notEqual` or `assert.deepEqual`.
+- CI on 5d8e1c67 (STAGE-05D round 3 code, PR #39): green.
+  - Foundation: pull_request 41887526535 18/18; push 41887521755 18/18 after one re-run of the failed job. The failure was the known BacsConfirmationTest Athens-chain real-clock flake (`test_expiry_and_an_early_renewal_follow_the_athens_chain`, commerce PHP 7.4 / MariaDB / orders posts).
+  - Frontend: pull_request 41887526558 4/4 and push 41887521605 4/4. Both mutation shards (335 mutants) and the isolated-build check passed.
