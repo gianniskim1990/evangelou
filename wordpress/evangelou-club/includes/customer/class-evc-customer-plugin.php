@@ -31,6 +31,10 @@ final class EVC_Customer_Plugin {
             return;
         }
         (new EVC_Rest_Me_Controller(self::membership_adapter(), new EVC_System_Clock()))->register_routes();
+        // STAGE-05C: the customer's own QR exists ONLY with the Club's recorded payments (packager-enforced).
+        if (EVC_Customer_Qr_Backend::provenance_recorded()) {
+            (new EVC_Rest_Me_Qr_Controller(new EVC_Customer_Qr_Backend()))->register_routes();
+        }
     }
 
     /** The configured real source, or the always-unavailable one (the default). */

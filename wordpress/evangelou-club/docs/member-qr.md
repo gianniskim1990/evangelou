@@ -1,127 +1,327 @@
-# QR μέλους: αποθήκη κωδικών στη βάση του Club (STAGE-05C)
+# QR μέλους: QR του πελάτη και σάρωση στο ταμείο (STAGE-05C)
 
-**Κατάσταση:** ανάπτυξη μόνο. ΔΕΝ είναι ενεργό πουθενά και **δεν συνδέεται με τίποτα**. Δεν
-υπάρχει νέα σταθερά, νέα σελίδα, νέα διαδρομή REST ή νέος πίνακας. Το plugin συμπεριφέρεται ακριβώς
-όπως πριν.
+**Κατάσταση:** ανάπτυξη μόνο. ΔΕΝ είναι ενεργό πουθενά. Χωρίς τις σταθερές που ήδη υπάρχουν για το
+Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρομές **δεν υπάρχουν καν** και το plugin συμπεριφέρεται
+ακριβώς όπως πριν.
 
 ## Για τον τεχνικό / τον ιδιοκτήτη (ελληνικά)
 
-### Τι προστέθηκε
+### Αποφάσεις ιδιοκτήτη (2026-11-04)
 
-Μόνο το «ντουλάπι» όπου θα φυλάσσονται οι κωδικοί QR των μελών, στον πίνακα `evc_qr_tokens` που
-υπάρχει ήδη από τη μετάβαση 001 (καμία νέα μετάβαση):
+| | Απόφαση |
+|---|---|
+| **D6** διάρκεια / αλλαγή | «Ίδιος μέχρι να ζητηθεί νέος». Ο QR δεν λήγει. Αλλάζει μόνο όταν ο πελάτης πατήσει «νέο QR» ή όταν ο διαχειριστής ακυρώσει τον παλιό. Το κινητό τον κρατά. |
+| **D7** στιγμιότυπο οθόνης | «Ναι, το δεχόμαστε». Μια φωτογραφία οθόνης του QR δουλεύει. Ο ένας καφές ανά ημέρα Αθήνας περιορίζει κάθε απώλεια. |
+| **D8** τι βλέπει το ταμείο | «Μικρό όνομα + κατάσταση»: «ενεργό», «όχι ενεργό» ή «ο καφές πάρθηκε σήμερα». Ποτέ επώνυμο, τηλέφωνο, e-mail ή άλλα στοιχεία. |
+| **D9** λάθος σαρώσεις | Περίπου **10 αποτυχίες ανά 5 λεπτά, ανά tablet**. Ο μετρητής ζει σε έναν νέο μικρό πίνακα (μετάβαση 003). Εγκρίθηκε ο **κώδικας**. Η εφαρμογή του 003 στο staging/παραγωγή χρειάζεται **ξεχωριστή** έγκριση. |
 
-- Ο κωδικός QR είναι ένας τυχαίος αριθμός χωρίς όνομα, τηλέφωνο ή e-mail.
-- Στη βάση **δεν** γράφεται ποτέ ο ίδιος ο κωδικός, μόνο ένα «αποτύπωμά» του (SHA-256). Αν κάποιος
-  δει τη βάση, δεν μπορεί να φτιάξει από εκεί έναν QR που δουλεύει.
-- Κάθε μέλος έχει το πολύ **έναν** ενεργό QR. Όταν βγαίνει νέος, ο παλιός ακυρώνεται στην ίδια
-  κίνηση. Αν δύο συσκευές ζητήσουν νέο QR την ίδια στιγμή, κερδίζει μία· η άλλη δεν παίρνει QR.
-- Ένας QR **δεν δίνει μόνος του καφέ**. Λέει μόνο «ποιο μέλος είναι αυτό». Ο δωρεάν καφές
-  ελέγχεται πάντα ξανά από το ταμείο (πληρωμένη και καταγεγραμμένη συνδρομή, μία φορά ανά ημέρα
-  Αθήνας, ακύρωση / επιστροφή χρημάτων = παγωμένη κάρτα). Αυτό ελέγχεται με τεστ.
+### Τι κάνει
 
-### Τι ΔΕΝ έγινε ακόμα και γιατί
+1. **Ο πελάτης** (με αριθμό μέλους, δηλαδή με καταγεγραμμένη πληρωμή, STAGE-05B) ανοίγει την κάρτα του
+   και παίρνει **έναν** QR. Αν τον ξαναζητήσει, παίρνει την απάντηση «υπάρχει ήδη QR» και ο QR **δεν**
+   αλλάζει. Μόνο με «νέο QR» αλλάζει, και τότε ο παλιός σταματά αμέσως να δουλεύει.
+2. Στη βάση **δεν** γράφεται ποτέ ο ίδιος ο QR, μόνο ένα «αποτύπωμά» του. Γι' αυτό ο QR δίνεται στο
+   κινητό **μόνο τη στιγμή που δημιουργείται** και το κινητό τον κρατά.
+3. **Το ταμείο** σαρώνει τον QR και βλέπει το μικρό όνομα και την κατάσταση. Ο QR **δεν δίνει μόνος του
+   καφέ**: όταν ο υπάλληλος πατήσει «Δωρεάν καφές», ο έλεγχος γίνεται ξανά από την αρχή (πληρωμένη και
+   καταγεγραμμένη συνδρομή, ένας καφές ανά ημέρα Αθήνας, ακύρωση / επιστροφή χρημάτων = παγωμένη κάρτα).
+   Παγωμένη ή ληγμένη κάρτα φαίνεται «όχι ενεργή».
+4. Ένας άγνωστος, αντικατεστημένος ή ακυρωμένος QR δίνει **την ίδια** απάντηση «δεν βρέθηκε μέλος». Το
+   ταμείο δεν μαθαίνει ποτέ αν ένας κωδικός υπήρξε κάποτε.
+5. Μετά από **10 αποτυχημένες σαρώσεις σε 5 λεπτά**, **αυτό** το tablet περιμένει ως το τέλος του
+   5λεπτου. Τα άλλα tablets δουλεύουν κανονικά.
+6. **Χαμένο κινητό:** ο πελάτης συνδέεται από το νέο κινητό και πατά «νέο QR». Ο **διαχειριστής** του
+   WordPress μπορεί επίσης να ακυρώσει τον QR ενός πελάτη (με τον αριθμό χρήστη WordPress). Ο κοινός
+   λογαριασμός του ταμείου **δεν** μπορεί.
 
-Η οθόνη QR του πελάτη και η σάρωση από το ταμείο **δεν** φτιάχτηκαν, γιατί χρειάζονται πρώτα
-αποφάσεις του ιδιοκτήτη (βλ. «Ερωτήσεις προς τον ιδιοκτήτη» παρακάτω): πόσο ισχύει ένας QR, αν
-αλλάζει, αν μια φωτογραφία οθόνης (screenshot) του QR πρέπει να δουλεύει, και τι βλέπει ο υπάλληλος
-για τον πελάτη.
+### Πώς ενεργοποιείται (ΜΟΝΟ με έγκριση του ιδιοκτήτη, πρώτα στο staging)
 
-### Δικαιώματα στη βάση (όταν ενεργοποιηθεί, όχι τώρα)
+- **QR πελάτη:** `EVC_CLUB_CUSTOMER_ENABLED = true` **και** `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`
+  (+ `EVC_CLUB_DB_*`). Η βάση του Club πρέπει να έχει τουλάχιστον τις μεταβάσεις 001 + 002.
+- **Σάρωση στο ταμείο:** ό,τι ήδη χρειάζεται ο δωρεάν καφές (STAGE-05A: `EVC_CLUB_STAFF_ENABLED`,
+  `EVC_CLUB_REDEMPTION_SOURCE = 'club_db_v1'`, πηγή συνδρομών, `EVC_CLUB_PAYMENT_PROVENANCE`, `EVC_CLUB_DB_*`)
+  **και** τη μετάβαση **003** **και** ένα νέο μυστικό στο `wp-config.php`:
 
-Ο χρήστης της βάσης του Club θα χρειάζεται: `SELECT` στο `evc_members`, και `SELECT` / `INSERT` /
-`UPDATE` (στήλες `status`, `revoked_at_utc`) στο `evc_qr_tokens`. Ποτέ `DELETE`.
+      define('EVC_CLUB_LOOKUP_KEY', '...τουλάχιστον 32 τυχαίοι χαρακτήρες...');
 
-### Ερωτήσεις προς τον ιδιοκτήτη (ανοιχτές)
+  Το βάζει **ο τεχνικός**, ένα διαφορετικό για κάθε περιβάλλον (staging ≠ παραγωγή). Δεν μπαίνει ποτέ
+  σε git, e-mail ή chat. Π.χ. `php -r "echo bin2hex(random_bytes(32));"` (64 χαρακτήρες). Αν λείπει
+  ή είναι μικρότερο από 32 bytes, η σάρωση απαντά «η υπηρεσία δεν είναι διαθέσιμη».
 
-1. **Πόσο ισχύει ένας QR;** (α) μέχρι να ζητήσει ο πελάτης νέο ή να τον ακυρώσει το κατάστημα·
-   (β) Χ ημέρες· (γ) λίγα λεπτά (κωδικός που αλλάζει συνεχώς στην οθόνη).
-2. **Αλλάζει ο QR;** Μόνο όταν το ζητήσει ο πελάτης («νέος QR» στο προφίλ), ή κάθε φορά που ανοίγει
-   την κάρτα;
-3. **Να δουλεύει μια φωτογραφία οθόνης του QR;** Αν ναι, ένας φίλος του μέλους με τη φωτογραφία θα
-   μπορεί να πάρει τον καφέ της ημέρας στη θέση του.
-4. **Τι βλέπει ο υπάλληλος μετά τη σάρωση;** Μόνο «ενεργό / όχι ενεργό / ο καφές πάρθηκε σήμερα», ή
-   και το μικρό όνομα του πελάτη (για να επιβεβαιώσει ότι είναι ο ίδιος);
-5. **Όριο λάθος σαρώσεων** (π.χ. πόσες αποτυχημένες σαρώσεις ανά λεπτό από ένα tablet πριν σταματήσει
-   προσωρινά). Τεχνικά χρειάζεται και ένας μυστικός κωδικός στο `wp-config.php` από τον τεχνικό.
+### Δικαιώματα στη βάση του Club (όταν ενεργοποιηθεί)
+
+| Πίνακας | Δικαιώματα |
+|---|---|
+| `evc_members` | `SELECT` |
+| `evc_qr_tokens` | `SELECT`, `INSERT`, `UPDATE (status, revoked_at_utc)`. Ποτέ `DELETE`. |
+| `evc_lookup_failures` (003) | `SELECT`, `INSERT`, `UPDATE`, `DELETE` (μόνο για καθαρισμό γραμμών πάνω από μίας ημέρας) |
+
+### Τι βλέπει ο τεχνικός στο αρχείο σφαλμάτων
+
+Μία γραμμή χωρίς κωδικούς, ονόματα ή QR, π.χ.
+
+    Evangelou Club: staff QR unavailable (lookup_key_missing).
+    Evangelou Club: customer QR unavailable (club_db_schema_too_old).
+
+| Αιτία | Τι κάνετε |
+|---|---|
+| `lookup_key_missing` | Λείπει ή είναι μικρό το `EVC_CLUB_LOOKUP_KEY`. |
+| `club_db_schema_too_old` | Ταμείο: δεν εφαρμόστηκε το 003. Πελάτης: λείπουν 001 + 002. |
+| `payment_provenance_not_recorded` | Λείπει ή είναι λάθος το `EVC_CLUB_PAYMENT_PROVENANCE`. |
+| άλλες (`staff_flag_off`, `redemption_source_off`, `commerce_source_not_configured`, `club_db_not_configured`, `club_db_unavailable`) | Όπως στο `docs/staff-redemption.md`. |
+
+### Ανοιχτό ερώτημα (δεν εμποδίζει)
+
+Να μπορεί και ο **κοινός λογαριασμός του ταμείου** να ακυρώνει QR (π.χ. όταν ο υπάλληλος βλέπει ότι
+κάποιος δείχνει φωτογραφία άλλου); Σήμερα μόνο ο διαχειριστής (ασφαλέστερο, σύμφωνα με τον
+εγκεκριμένο σχεδιασμό UI-04C).
 
 ---
 
 ## Developer notes (English)
 
-**Scope (development only).** `EVC_Sql_Qr_Token_Store` (`includes/class-evc-sql-qr-token-store.php`),
-the only shipped `EVC_Qr_Token_Store` (the UI-04C interface in `includes/class-evc-member-lookup.php`),
-over `evc_qr_tokens` + `evc_members` from migration 001 (unchanged; no new table, column or
-migration). Built and tested only. The customer QR route and the staff lookup route were NOT built:
-they need owner decisions (token lifetime, rotation trigger, screenshot policy, what staff see,
-lookup rate limits) and a server secret for the reviewed lookup proof / phone pseudonyms; see
-`docs/member-lookup.md` "Open decisions". No construction site exists.
+### Pieces and gates
 
-**Storage.** Digests only: `token_hash` = `EVC_Qr_Token::digest()` (SHA-256 hex of
-`evc_` + 48 hex). The store accepts only 64-hex digests (a plaintext token passed as a digest is
-`InvalidArgumentException`, mutant QS10) and never returns a digest from a lookup:
-`find_token_by_hash()` answers `{member_id, status, issued_at_utc, revoked_at_utc}`;
-`active_token_hash()` is used only by `EVC_Qr_Token_Service` for its compare-and-set and is never
-returned to a caller. The hash-only design means the plaintext exists only at issuance
-(`EVC_Qr_Token_Result::issued`, "returned ONCE"); a customer screen that shows the QR again later
-must therefore either keep it on the device or rotate, which is exactly the open owner decision.
+| Piece | File | Constructed (packager rule set `qrProblemsFor`) |
+|---|---|---|
+| `EVC_Sql_Qr_Token_Store` (UI-04C `EVC_Qr_Token_Store`, 001) | `includes/class-evc-sql-qr-token-store.php` | only `EVC_Club_Qr_Services::store()` |
+| `EVC_Sql_Lookup_Rate_Limiter` (UI-04C `EVC_Lookup_Rate_Limiter`, 003) | `includes/class-evc-sql-lookup-rate-limiter.php` | only `EVC_Club_Qr_Services::lookup_service()` |
+| `EVC_Club_Qr_Services` + `EVC_Wp_Club_Staff_Authorizer`, `EVC_No_Member_Phone_Directory`, `EVC_First_Issue_Only_Qr_Store` | `includes/class-evc-club-qr-services.php` | the one site for `EVC_Qr_Token_Service`, `EVC_Member_Lookup_Service`, `EVC_Lookup_Key_Ring`, `EVC_Lookup_Context_Policy` |
+| `EVC_Customer_Qr_Backend` + `EVC_Rest_Me_Qr_Controller` | `includes/customer/` | only `EVC_Customer_Plugin::register_routes()` inside `if (EVC_Customer_Qr_Backend::provenance_recorded()) { … }` (after the customer flag gate) |
+| `EVC_Club_Lookup_Backend` + `EVC_Rest_Lookup_Controller` | `includes/staff/` | only `EVC_Staff_Plugin::register_routes()` inside `if (EVC_Club_Redemption_Feature::enabled()) { … }` (after the staff gate) |
 
-**Rotation / revocation (one READ COMMITTED transaction each).**
-1. `SELECT token_hash FROM evc_qr_tokens WHERE active_member_id = ? FOR UPDATE` (the unique key on the
-   stored generated column, so at most one row);
-2. compare with the expected digest (`hash_equals`; none vs some is a mismatch) → else
-   `EVC_Qr_Rotation_Conflict`;
-3. `UPDATE ... SET status = 'revoked', revoked_at_utc = ? WHERE active_member_id = ? AND token_hash = ?
-   AND status = 'active'`, affected rows must be exactly 1;
-4. (rotate) `INSERT` the new active row.
+Each backend re-checks everything per request before reading, and opens no Club DB connection before
+its last config check:
+- **Customer:** customer flag `true` → provenance `'club_db_v1'` → `EVC_Db_Config` → connect → schema `>= 2`.
+- **Staff:** staff flag → `EVC_CLUB_REDEMPTION_SOURCE` → commerce config → provenance → `EVC_Db_Config`
+  → `EVC_CLUB_LOOKUP_KEY` `>= 32` bytes → connect → schema `>= 3`.
 
-Outcomes: a mismatch → `EVC_Qr_Rotation_Conflict`; a duplicate on `uq_qr_tokens_hash` or
-`uq_qr_tokens_one_active` (a concurrent first issuance) → `EVC_Db_Duplicate_Key_Exception`, rolled
-back (the revocation too); deadlock / lock-wait timeout → rolled back and reported as
-`EVC_Qr_Rotation_Conflict` (a concurrent writer; the service answers `concurrent_change`, no token);
-lost COMMIT → `EVC_Db_Commit_Unknown_Exception` (`outcome_unknown`, the service never returns that
-token; recovery = issue again). `evc_members` is never locked, so no UPDATE grant on it is needed.
-Defence in depth, documented as equivalent mutants: the row lock, the affected-row check, the digest
-compare and the unique key each stop a late writer on their own, so removing only the lock or only
-the row-count check is not observable; the compare (QS2/QS3) and the key (QS1) are.
+Any failure → 503. Both connections run `SET SESSION innodb_lock_wait_timeout = 5`
+(`EVC_Club_Qr_Services::prepare_connection`), like the 05A / 05B paths.
 
-**Reads fail closed.** A member row that is not exactly well-formed, or a token row whose status and
-`revoked_at_utc` disagree (active with a time, revoked without one), throws
-`UnexpectedValueException` (the services turn it into `server_error` / `unavailable`).
+### Packager guard (`app/scripts/php-guards.mjs`, `qrProblemsFor` + `qrSelfTest`, 51 fixtures)
 
-**Business rules unchanged.** A QR is a lookup handle only (`grants_entitlement()` false). Tested on a
-real database: a member found by QR whose card is cancelled / refunded / ends exactly now (exclusive
-end) / unverified still gets `membership_inactive` from `EVC_Redemption_Service`; after one coffee, a
-second scan + redeem the same Athens day is `benefit_already_redeemed`; rotated, revoked, too-old
-(injected `EVC_Qr_Token_Policy`, none approved) and disabled-member tokens are `not_found`.
+The guard replaces the blanket string bans on:
+- `new EVC_Qr_Token_Service`, `new EVC_Member_Lookup_Service`, `new EVC_Lookup_Key_Ring`;
+- `implements EVC_Qr_Token_Store | EVC_Member_Phone_Directory | EVC_Lookup_Rate_Limiter | EVC_Club_Staff_Authorizer`.
 
-**Logs.** The store logs nothing. The services report stage + exception class only (UI-04C).
+It enforces these rules:
+- **One site per class:** each class is constructed only at its single site, at most once there.
+- **Exact wiring:** the two backends are wired by the exact standalone statement
+  `if (<gate>) { (new <Controller>(new <Backend>())) ->register_routes(); }`, with no test-seam
+  arguments.
+- **Exact customer gate:** the body of `provenance_recorded()` must be exactly
+  `return defined('EVC_CLUB_PAYMENT_PROVENANCE') && constant('EVC_CLUB_PAYMENT_PROVENANCE') === self::PROVENANCE;`
+  with `PROVENANCE = 'club_db_v1'`.
+- **Implementations:** each interface is implemented only by its own `class` (no enum, trait,
+  interface or anonymous class), and no shipped interface extends one.
+- **Names:** each QR class name, as an identifier or inside a string, appears only in its
+  allowlisted files.
+- **Name fragments:** no other shipped string may contain a QR class-name fragment
+  (`qr_token_store`, `member_lookup_service`, …).
+- **No dynamic construction in the QR files:** `new $x`, `new (…)`, `new self|static|parent|class`,
+  `class_alias`, `Reflection*`, `newInstance*` and `unserialize` are refused.
 
-**Gating / packager (`app/scripts/php-guards.mjs`, STAGE-05C rule set `qrStoreProblemsFor` + 18
-fixtures).** The blanket string ban on `implements EVC_Qr_Token_Store` is replaced by: only the
-store file implements it, and only the class `EVC_Sql_Qr_Token_Store` (no second or anonymous
-class, no interface extends it); `EVC_Sql_Qr_Token_Store` is constructed nowhere (not in its own file,
-no `new self|static|parent` there) and is named only in its own file. Every other QR / lookup / v2
-ban is unchanged (`new EVC_Qr_Token_Service`, `new EVC_Member_Lookup_Service`,
-`new EVC_Lookup_Key_Ring`, `new EVC_Signed_Member_Context_Verifier`, the phone directory and rate
-limiter implementations, the fakes). The package fails if the store file is missing.
+Not covered statically: a class name assembled at run time, outside the QR files, from pieces that are
+not QR name fragments. The `new EVC_Signed_Member_Context_Verifier` ban and every v2 ban are unchanged.
 
-**Tests.** Integration (local MariaDB 10.11 + CI engines): `SqlQrTokenStoreTest` (20): reads and
-fail-closed rows; first issuance + rotation keep one active digest and no plaintext; stale / missing
-expectations change nothing; CAS revocation; a digest collision rolls back the revocation too; the
-unique key alone refuses a second active row; invalid input before SQL; another connection rotating
-in between, and a writer behind a committed winner, lose; deadlock → conflict, rolled back; lost
-COMMIT before / after; every operation under exactly `RUNTIME_GRANTS` (DELETE, digest / member
-changes and other tables refused); the UI-04C token service (member self only, disabled member, concurrent
-rotation → `concurrent_change` without token) and lookup service (rotated / revoked / expired /
-disabled → `not_found`, identity-only result) over the SQL store; frozen / expired cards never
-redeem; a multi-process race (`tests/bin/qr-token-worker.php`, 10 rounds × 6 workers, first
-issuance and rotation) leaves exactly one active row and exactly one winner. WordPress:
-`RedemptionSourceOnTest::test_no_lookup_or_qr_route_is_registered` (staff + redemption ON) and
-`CustomerMeTest::test_no_qr_route_is_registered` (customer ON). Mutants QS1–QS10 in
-`tests/mutation/run-provenance-sql-mutations.php` (`'command' => 'qr'`). The test class is `@group qr-store`, excluded from the engine
-mutation runner `run-mutations.php` (none of its mutants touch this store; with it, the mysql:8.0
-engine job exceeded its 25-minute timeout).
+### Token store (`evc_qr_tokens`, 001 unchanged)
 
-**Not done (needs owner decisions first).** Customer QR route / screen, staff lookup route, rate
-limiter, phone directory, lookup keys and TTL, staff UI wiring (STAGE-05D).
+**Storage.** Digests only. The store refuses a plaintext token passed as a digest (mutant QS10) and
+never returns a digest from a lookup. `find_member_by_wp_user()` was added for the backends; it is not
+part of the UI-04C interface.
+
+**rotate() and revoke().** Each is ONE READ COMMITTED transaction:
+1. `SELECT token_hash … WHERE active_member_id = ? FOR UPDATE` on the one-active key.
+2. A `hash_equals` compare-and-set against the expected digest (none vs. some counts as a mismatch).
+3. A guarded UPDATE: `… WHERE active_member_id = ? AND token_hash = ? AND status = 'active'`,
+   which must affect exactly 1 row.
+4. rotate() only: the INSERT of the new row.
+
+**Failure outcomes.**
+- A duplicate key rolls back, including the revocation.
+- A deadlock or lock-wait timeout → `EVC_Qr_Rotation_Conflict`.
+- A lost COMMIT → `EVC_Db_Commit_Unknown_Exception`.
+
+**Locks.** The store never takes an explicit lock on `evc_members`. The FK check on the INSERT does
+take a **shared** lock on the member row for the rest of the transaction; only a concurrent writer of
+that member row could wait on it, and nothing shipped writes member rows on this path. The 5 s session
+lock-wait bounds any wait.
+
+**Defence in depth.**
+- For **rotate()**, any one of these stops a late writer on its own: the row lock, the digest compare,
+  the guarded UPDATE and the unique key.
+- For **revoke()**, which has no INSERT so the unique key does not apply, the row lock, the digest
+  compare and the guarded UPDATE each stop it.
+- Removing only the lock, or only the row-count check, is therefore not observable (equivalent mutants,
+  not listed).
+- Proven with real separate processes in CI:
+  - `test_simultaneous_writers_…` (first issuance and rotation);
+  - `test_simultaneous_revoke_and_rotate_…` (exactly one winner);
+  - `test_a_writer_blocked_on_the_row_lock_…`: a real lock wait, observed in `INNODB_TRX` as
+    `LOCK WAIT` before the holder commits; the waiter then loses.
+
+### Customer route (`evangelou-club-customer/v1/me/qr`)
+
+**GET** → `{"result":"ok","qr":{"state":…}}`. The possible states:
+- `active`, with `issued_at` in Athens RFC 3339;
+- `none`;
+- `not_member`;
+- `member_disabled`.
+
+GET never returns a token.
+
+**POST**, with body `{}` or `{"replace": bool}` (anything else → 400):
+
+| Answer | Meaning |
+|---|---|
+| 200 with `token` + `issued_at` | The ONLY time the plaintext leaves the server. |
+| 409 `qr_exists` | A QR is active and `replace` was not `true`; nothing changes (D6). |
+| 409 `concurrent_change` | Another device wrote first. |
+| 404 `not_a_member` | No member row. |
+| 403 `member_disabled` | The member is disabled. |
+| 503 | Unavailable, including an unknown COMMIT outcome (recovery: POST `replace: true`). |
+
+**Rules.**
+- Without `replace`, the service runs over `EVC_First_Issue_Only_Qr_Store`, so its rotation is
+  `expected = null`. The store's compare-and-set then refuses if another device just got a QR: a request
+  that did not ask to replace never replaces.
+- The member is always `get_current_user_id()` (`member_self`).
+- Customer accounts only (`EVC_Customer_Auth`).
+- Responses are no-store.
+
+**How the customer app keeps the QR (for 05D, not changed here).** The customer bundle
+(`app/src/customer/`) is unchanged in this stage; the packager still forbids `localStorage` in it.
+05D should:
+- add ONE module (e.g. `src/customer/qrStorage.ts`) that lifts that ban for itself only;
+- store `{token, issued_at}` under one key per signed-in account (e.g.
+  `evc-club-qr:v1:<hash of the user id from the bootstrap>`), wrapping every access in try/catch;
+- clear it on sign-out;
+- on each open, `GET /me/qr`, then:
+
+| Server says | What the app does |
+|---|---|
+| `active` with the same `issued_at` | Show the stored QR. |
+| `none` | `POST {}`. |
+| `active` with nothing (or a different `issued_at`) stored on this device | Offer «Νέο QR» → `POST {"replace": true}`. |
+| `not_member` | Explain that the card appears after the payment is confirmed. |
+
+### Staff routes (`evangelou-club/v1`)
+
+**`POST /members/lookup`** (shared staff account, `evc_lookup_member`). Body
+`{"method":"qr","qr_token":…}`; phone lookup is not offered (400 `invalid_request`).
+
+| Status | Body / code |
+|---|---|
+| 200 | `{"member":{"member_id","first_name"},"status":"active"\|"used_today"\|"inactive"}` |
+| 400 | `invalid_qr` (counted as a failure) |
+| 404 | `member_not_found`: one byte-identical answer for unknown, replaced, revoked and disabled-member tokens |
+| 429 | `rate_limited`, `details.retry_after_seconds = 300`, `Retry-After: 300` |
+| 503 | unavailable |
+
+- **Identity:** the reviewed `EVC_Member_Lookup_Service` (capability + session ref before any read;
+  limiter before any read, failing closed; `EVC_Qr_Token_Policy::without_expiry()` per D6).
+- **Status:** decided by `EVC_Club_Lookup_Backend` from EXACTLY the 05A redeem route's membership
+  source (WooCommerce / PMPro read-only + the Club's recorded provenance, no fallback):
+  - `denial_reason(now) !== null` → `inactive`. This covers frozen, refunded, cancelled, expired (the
+    exclusive end), unverified, pending and none.
+  - Otherwise, a ledger row for today's Athens day → `used_today`; else `active`.
+- **First name:** WP `first_name`, else WooCommerce `billing_first_name`, else `null`; at most
+  40 characters.
+- **The lookup proof:** the reviewed service computes its proof, but the v1 route does not return it
+  and the v1 redeem route does not need it. Its TTL (300 s, `EVC_Club_Qr_Services`) therefore has no
+  effect today; decide it with v2 prepared redemption.
+
+**`POST /admin/members/qr/revoke`** (D6). Users with `evc_manage_club` (administrators). Never an
+account carrying the Club staff role; cookie session + own nonce check. Body `{"wp_user_id": int}`.
+
+| Status | Body / code |
+|---|---|
+| 200 | `{"revoked":true\|false}` |
+| 404 | `member_not_found` |
+| 409 | `concurrent_change` |
+
+The service's administrator path re-checks `evc_manage_club` through `EVC_Wp_Club_Staff_Authorizer`,
+which answers ONLY `evc_lookup_member` and `evc_manage_club` (any other capability, e.g. the v2
+hand-off ones, is false even if the user has it).
+
+### Failed-scan limit (D9, migration 003 `evc_lookup_failures`)
+
+**What is counted.**
+- Only `session:<session_ref>` keys are counted, i.e. one tablet session. The shared account's
+  `actor:` key is ignored, so one tablet never blocks the others.
+- A call without a session key is refused.
+
+**The window.**
+- Fixed 300 s windows aligned to the epoch.
+- `allow()` refuses while the current window holds ≥ 10 failures. Across a window boundary up to 19
+  can happen in 5 minutes ("about 10", as decided).
+- Successes are not counted.
+
+**Writes and storage.**
+- `record_failure()` is one atomic `INSERT … ON DUPLICATE KEY UPDATE failures = failures + 1` per key.
+- It then prunes ≤ 50 rows older than 1 day.
+- Stored key: `sha256("evc-lookup-limit-v1|<action>|session:<ref>")`. No token, id or name is stored.
+- Any database error makes the lookup `unavailable`.
+
+**Migration 003.**
+- Plain `CREATE TABLE` (fails loudly on a differently shaped table).
+- Applied only through `EVC_Migrator` / the STAGE-04A page behind `EVC_CLUB_MIGRATIONS_ENABLED`, whose
+  separation checks also verify it (`created_tables()` reads its `CREATE TABLE`).
+- A 001 + 002 database shows only 003 pending: `ClubMigrationsTest::test_a_database_with_001_and_002_gets_only_003`.
+
+### Logs and personal data
+
+Logs carry fixed reasons, stages and exception classes only; tests assert that no token, secret or name
+appears. The staff answer carries the first name only (D8).
+
+### Tests and mutants
+
+**Integration.**
+- `SqlQrTokenStoreTest` (23):
+  - real lock wait, lost COMMIT for rotate AND revoke;
+  - revoke-vs-rotate and writer races (multi-process);
+  - first-issuance decorator;
+  - 5 s lock wait;
+  - least-privilege grants;
+  - the services over SQL;
+  - frozen / expired cards never redeem.
+- `SqlLookupRateLimiterTest` (9):
+  - 10 → block, per tablet / action;
+  - window end; no session key; nothing personal stored;
+  - prune; failure propagation; grants;
+  - the lookup service over SQL;
+  - multi-process increments.
+- `MigratorTest` / `SqlProvenanceStoreTest` updated for 003.
+
+**WordPress.**
+- `StaffQrLookupTest` (wp-redemption, 9): shipped wiring → 503; auth; every gate without connection;
+  the D8 body; inactive / used_today / Athens midnight; byte-identical not-found; D9; the authorizer;
+  D6 revocation.
+- `CustomerQrTest` (wp-customer, 6).
+- `ClubRedemptionBackendTest::test_without_the_constant_no_qr_route_is_registered` (wp-enabled).
+- `ClubMigrationsTest` (003; 001 + 002 → only 003).
+
+**Commerce (CI only).**
+- `StaffQrCommerceTest` (wp-commerce-redeem): admin completion → member → QR → scan active + first name
+  → redeem → used_today → Athens midnight → cancellation → inactive + redeem 409; an unpaid member scans
+  inactive.
+- `CustomerQrCommerceTest` (wp-commerce): the shipped customer route with the real constants.
+
+**Mutants.**
+- SQL runner: QS1–QS12, LR1–LR7.
+- WP runner: QL1–QL12 (modes enabled / redemption) and QC1–QC7 (mode customer), each with named
+  killer tests.
+- Equivalent, not listed:
+  - the lock-only and row-count-only store mutants (see above);
+  - the backend's second disabled-member check (the service already refuses);
+  - the revoke route's own staff-role / `evc_manage_club` check, because the service re-checks
+    `evc_manage_club` through the authorizer (whose allowlist QL11 covers).
+
+### Not done here
+
+- The staff UI wiring (STAGE-05D).
+- Changes to the customer bundle (05D: the storage module above).
+- Phone lookup; v2 prepared redemption.
+- Applying 003 anywhere real.
+- `GET /session` still reports `features.qr_lookup: false` (05D).

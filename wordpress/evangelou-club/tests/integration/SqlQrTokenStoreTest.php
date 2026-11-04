@@ -295,26 +295,42 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
         $this->store()->rotate($other, null, self::hash(), self::NOW);
     }
 
-    public function test_a_waiting_writer_sees_the_committed_winner_and_loses(): void {
+    /**
+     * A REAL lock wait: another connection holds the active row (FOR UPDATE) and has already replaced
+     * it, uncommitted; a writer in a separate process is started and observed in LOCK WAIT; only then
+     * does the holder commit. The waiter must re-read the committed state and lose.
+     */
+    public function test_a_writer_blocked_on_the_row_lock_sees_the_committed_winner_and_loses(): void {
         $id = $this->member_id($this->create_member(7001));
         $first = self::hash();
         $this->store()->rotate($id, null, $first, self::NOW);
-        $holder = $this->database->connect();
+        $holder = EVC_Test_Database::admin_pdo();
+        $holder->exec('USE `' . $this->database->name() . '`');
+        $holder->exec('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
         $winner = self::hash();
-        // The other connection holds the row lock; this connection's FOR UPDATE would wait, so the
-        // winner commits first (serial here) and the waiter must re-read the committed state.
-        $holder->transactional(function (EVC_Club_Db $db) use ($id, $first, $winner) {
-            $db->fetch_all('SELECT token_hash FROM evc_qr_tokens WHERE active_member_id = ? FOR UPDATE', array($id));
-            $db->execute("UPDATE evc_qr_tokens SET status = 'revoked', revoked_at_utc = ? WHERE active_member_id = ? AND token_hash = ?", array(self::LATER, $id, $first));
-            $db->insert("INSERT INTO evc_qr_tokens (member_id, token_hash, status, issued_at_utc) VALUES (?, ?, 'active', ?)", array($id, $winner, self::LATER));
-        });
-        try {
-            $this->store()->rotate($id, $first, self::hash(), self::LATER);
-            $this->fail('a writer expecting the replaced digest must lose');
-        } catch (EVC_Qr_Rotation_Conflict $e) {
-            $this->assertSame(1, $this->active_count($id));
-            $this->assertSame($winner, $this->store()->active_token_hash($id));
+        $holder->beginTransaction();
+        $holder->prepare('SELECT token_hash FROM evc_qr_tokens WHERE active_member_id = ? FOR UPDATE')->execute(array($id));
+        $holder->prepare("UPDATE evc_qr_tokens SET status = 'revoked', revoked_at_utc = ? WHERE active_member_id = ? AND token_hash = ?")->execute(array(self::LATER, $id, $first));
+        $holder->prepare("INSERT INTO evc_qr_tokens (member_id, token_hash, status, issued_at_utc) VALUES (?, ?, 'active', ?)")->execute(array($id, $winner, self::LATER));
+        $job = array('database' => $this->database->name(), 'op' => 'rotate', 'member_id' => $id, 'expected' => $first, 'new_hash' => self::hash(), 'start_at' => 0);
+        $proc = proc_open(array(PHP_BINARY, dirname(__DIR__) . '/bin/qr-token-worker.php', json_encode($job)), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
+        $this->assertIsResource($proc);
+        $observer = EVC_Test_Database::admin_pdo();
+        $waiting = false;
+        for ($i = 0; $i < 200 && !$waiting; $i++) {
+            usleep(50000);
+            $waiting = (int) $observer->query("SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT'")->fetchColumn() > 0;
         }
+        $holder->commit();
+        $out = stream_get_contents($pipes[1]);
+        $err = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $this->assertSame(0, proc_close($proc), 'worker stderr: ' . $err);
+        $this->assertTrue($waiting, 'the second writer really waited on the row lock');
+        $this->assertSame('conflict', json_decode(trim((string) $out), true)['outcome'] ?? null, 'worker output: ' . $out);
+        $this->assertSame(1, $this->active_count($id));
+        $this->assertSame($winner, $this->store()->active_token_hash($id));
     }
 
     public function test_a_deadlock_is_a_concurrent_change_and_rolls_back(): void {
@@ -333,10 +349,13 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
         }
     }
 
-    public function test_a_lost_commit_is_reported_unknown_either_way(): void {
+    public function test_a_lost_commit_is_reported_unknown_either_way_for_rotation_and_revocation(): void {
         $id = $this->member_id($this->create_member(7001));
+        $this->store()->rotate($id, null, self::hash(), self::NOW);
         foreach (array('fail_commit_before' => false, 'fail_commit_after' => true) as $fault => $committed) {
+            // Rotation: revoke + insert in the lost transaction.
             $expected = $this->store()->active_token_hash($id);
+            $this->assertNotNull($expected);
             $new = self::hash();
             $pdo = $this->database->faulty_pdo();
             $pdo->$fault = true;
@@ -346,8 +365,23 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
             } catch (EVC_Db_Commit_Unknown_Exception $e) {
                 $this->assertSame(2013, $e->driver_code(), $fault);
             }
-            $this->assertSame($committed ? $new : $expected, $this->store()->active_token_hash($id), $fault);
-            $this->assertLessThanOrEqual(1, $this->active_count($id));
+            $this->assertSame($committed ? $new : $expected, $this->store()->active_token_hash($id), $fault . ' rotate');
+            $this->assertSame($committed ? 'revoked' : 'active', $this->store()->find_token_by_hash($expected)['status'], $fault . ' rotate: the old row');
+            $this->assertSame(1, $this->active_count($id), $fault);
+            // Revocation in the lost transaction.
+            $active = $this->store()->active_token_hash($id);
+            $pdo = $this->database->faulty_pdo();
+            $pdo->$fault = true;
+            try {
+                $this->store(new EVC_Club_Db($pdo))->revoke($id, $active, self::LATER);
+                $this->fail('expected commit outcome unknown');
+            } catch (EVC_Db_Commit_Unknown_Exception $e) {
+                $this->assertSame(2013, $e->driver_code(), $fault);
+            }
+            $this->assertSame($committed ? null : $active, $this->store()->active_token_hash($id), $fault . ' revoke');
+            if ($committed) {
+                $this->store()->rotate($id, null, self::hash(), self::LATER);
+            }
         }
     }
 
@@ -413,6 +447,31 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
         $this->assertSame(EVC_Member_Lookup_Result::NOT_FOUND, $lookup->by_qr(self::tablet(), $second->token())->kind(), 'revoked');
         $this->assertSame(array(), $this->service_reports);
         $this->assertStringNotContainsString('evc_', json_encode($this->token_rows()));
+    }
+
+    public function test_a_first_issuance_never_replaces_a_token_another_device_just_received(): void {
+        $public = $this->create_member(7001);
+        $first_only = EVC_Club_Qr_Services::token_service($this->db, $this->clock, function () {
+        }, true);
+        $issued = $first_only->issue(EVC_Qr_Issuance_Requester::member_self(7001), $public);
+        $this->assertSame(EVC_Qr_Token_Result::ISSUED, $issued->kind(), 'no token yet: a first one is issued');
+        $active = $this->store()->active_token_hash($this->member_id($public));
+        $again = $first_only->issue(EVC_Qr_Issuance_Requester::member_self(7001), $public);
+        $this->assertSame(EVC_Qr_Token_Result::CONCURRENT_CHANGE, $again->kind());
+        $this->assertNull($again->token());
+        $this->assertSame($active, $this->store()->active_token_hash($this->member_id($public)), 'the existing QR is untouched');
+        $replace = EVC_Club_Qr_Services::token_service($this->db, $this->clock, function () {
+        }, false)->issue(EVC_Qr_Issuance_Requester::member_self(7001), $public);
+        $this->assertSame(EVC_Qr_Token_Result::ISSUED, $replace->kind(), 'an explicit replacement rotates');
+        $this->assertSame(EVC_Qr_Token::digest($replace->token()), $this->store()->active_token_hash($this->member_id($public)));
+        $this->assertSame(array('id' => $this->member_id($public), 'member_public_id' => $public, 'wp_user_id' => 7001, 'status' => 'enabled'), $this->store()->find_member_by_wp_user(7001));
+        $this->assertNull($this->store()->find_member_by_wp_user(7002));
+        $this->assertNull($this->store()->find_member_by_wp_user(0));
+    }
+
+    public function test_the_qr_connection_gives_up_row_lock_waits_after_five_seconds(): void {
+        EVC_Club_Qr_Services::prepare_connection($this->db);
+        $this->assertSame('5', (string) $this->db->fetch_one('SELECT @@SESSION.innodb_lock_wait_timeout AS t')['t']);
     }
 
     public function test_another_customer_or_a_disabled_member_never_gets_a_token(): void {
@@ -494,7 +553,7 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
             $hashes = array();
             for ($w = 0; $w < $workers; $w++) {
                 $hashes[$w] = self::hash();
-                $job = array('database' => $this->database->name(), 'member_id' => $id, 'expected' => $expected, 'new_hash' => $hashes[$w], 'start_at' => $start_at);
+                $job = array('database' => $this->database->name(), 'op' => 'rotate', 'member_id' => $id, 'expected' => $expected, 'new_hash' => $hashes[$w], 'start_at' => $start_at);
                 $proc = proc_open(array(PHP_BINARY, dirname(__DIR__) . '/bin/qr-token-worker.php', json_encode($job)), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
                 $this->assertIsResource($proc);
                 $running[$w] = array($proc, $pipes);
@@ -520,6 +579,60 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
             $this->assertSame(1, $this->active_count($id), $label);
             $this->assertSame($hashes[$winners[0]], $this->store()->active_token_hash($id), $label);
             $this->assertCount($expected === null ? 1 : 2, $this->token_rows($id), $label . ': no token from a losing worker');
+        }
+    }
+
+    /**
+     * Revoke-versus-rotate in separate processes from the SAME expected digest (the unique key does
+     * not cover revoke(): only the row lock, the digest compare and the guarded UPDATE decide).
+     * Exactly one worker wins; the result is either one new active token (a rotation won) or none
+     * (a revocation won), and no losing rotation ever leaves a row behind.
+     *
+     * @group concurrency
+     */
+    public function test_simultaneous_revoke_and_rotate_in_separate_processes_have_exactly_one_winner(): void {
+        $rounds = max(1, (int) (getenv('EVC_CONCURRENCY_ROUNDS') ?: 10));
+        $workers = max(2, (int) (getenv('EVC_CONCURRENCY_WORKERS') ?: 6));
+        for ($round = 0; $round < $rounds; $round++) {
+            $id = $this->member_id($this->create_member(9500 + $round));
+            $expected = self::hash();
+            $this->store()->rotate($id, null, $expected, self::NOW);
+            $start_at = microtime(true) + 1.0;
+            $running = array();
+            $jobs = array();
+            for ($w = 0; $w < $workers; $w++) {
+                $jobs[$w] = array('database' => $this->database->name(), 'op' => $w % 2 === 0 ? 'revoke' : 'rotate', 'member_id' => $id, 'expected' => $expected, 'new_hash' => self::hash(), 'start_at' => $start_at);
+                $proc = proc_open(array(PHP_BINARY, dirname(__DIR__) . '/bin/qr-token-worker.php', json_encode($jobs[$w])), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
+                $this->assertIsResource($proc);
+                $running[$w] = array($proc, $pipes);
+            }
+            $outcomes = array();
+            foreach ($running as $w => $entry) {
+                list($proc, $pipes) = $entry;
+                $out = stream_get_contents($pipes[1]);
+                $err = stream_get_contents($pipes[2]);
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                $this->assertSame(0, proc_close($proc), 'worker stderr: ' . $err);
+                $outcomes[$w] = json_decode(trim((string) $out), true)['outcome'] ?? 'bad:' . $out;
+            }
+            $label = "round $round: " . implode(',', $outcomes);
+            $winners = array_keys(array_filter($outcomes, function ($o) {
+                return $o === 'rotated' || $o === 'revoked';
+            }));
+            $this->assertCount(1, $winners, $label);
+            foreach ($outcomes as $outcome) {
+                $this->assertContains($outcome, array('rotated', 'revoked', 'conflict', 'duplicate'), $label);
+            }
+            $winner = $winners[0];
+            $this->assertSame('revoked', $this->store()->find_token_by_hash($expected)['status'], $label);
+            if ($jobs[$winner]['op'] === 'rotate') {
+                $this->assertSame($jobs[$winner]['new_hash'], $this->store()->active_token_hash($id), $label);
+                $this->assertCount(2, $this->token_rows($id), $label);
+            } else {
+                $this->assertNull($this->store()->active_token_hash($id), $label);
+                $this->assertCount(1, $this->token_rows($id), $label);
+            }
         }
     }
 }

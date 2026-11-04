@@ -119,6 +119,15 @@ final class ClubRedemptionBackendTest extends EVC_WP_Test_Case {
         $this->assertSame(array('error' => array('code' => 'server_error', 'message' => EVC_Rest_Security::MESSAGES['server_error'])), $response->get_data());
     }
 
+    /** STAGE-05C: without EVC_CLUB_REDEMPTION_SOURCE the QR scan / revocation routes do not exist at all. */
+    public function test_without_the_constant_no_qr_route_is_registered(): void {
+        $routes = array_keys(rest_get_server()->get_routes());
+        $this->assertNotContains('/' . EVC_Rest_Security::NAMESPACE_V1 . EVC_Rest_Lookup_Controller::LOOKUP_ROUTE, $routes);
+        $this->assertNotContains('/' . EVC_Rest_Security::NAMESPACE_V1 . EVC_Rest_Lookup_Controller::REVOKE_ROUTE, $routes);
+        $this->login_as($this->create_staff_user());
+        $this->assertSame(404, $this->rest('POST', '/' . EVC_Rest_Security::NAMESPACE_V1 . '/members/lookup', array('method' => 'qr', 'qr_token' => EVC_Qr_Token::mint()), $this->nonce())->get_status());
+    }
+
     public function test_only_the_exact_string_enables_the_constant(): void {
         $this->assertTrue(EVC_Club_Redemption_Feature::is_enabled_value('club_db_v1'));
         foreach (array(true, 1, '1', 'true', 'CLUB_DB_V1', 'Club_Db_V1', ' club_db_v1', 'club_db_v1 ', "club_db_v1\n", 'club_db_v2', 'pmpro_woocommerce_bacs_v1', '', null, false, array('club_db_v1')) as $value) {

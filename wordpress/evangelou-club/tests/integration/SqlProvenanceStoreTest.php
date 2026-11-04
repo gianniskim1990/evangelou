@@ -103,7 +103,7 @@ final class SqlProvenanceStoreTest extends EVC_Db_Test_Case {
 
     public function test_migration_002_is_recorded_and_creates_the_six_tables(): void {
         $applied = (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->applied();
-        $this->assertSame(array(1, 2), array_keys($applied));
+        $this->assertSame(array(1, 2, 3), array_keys($applied));
         $this->assertSame('payment_provenance', $applied[2]['name']);
         foreach (self::TABLES as $table) {
             $this->assertSame(0, $this->count_rows($table), $table);

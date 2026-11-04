@@ -38,9 +38,11 @@ $commands = array(
         '--filter', '/SqlMemberIdentityStoreTest/', '--exclude-group', 'concurrency'),
     // STAGE-05C: mutants with 'command' => 'qr' run the QR token store tests instead.
     'qr' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
-        '--filter', '/SqlQrTokenStoreTest/', '--exclude-group', 'concurrency'),
+        '--filter', '/(SqlQrTokenStoreTest|SqlLookupRateLimiterTest)/', '--exclude-group', 'concurrency'),
 );
 $qr = 'includes/class-evc-sql-qr-token-store.php';
+$limiter = 'includes/class-evc-sql-lookup-rate-limiter.php';
+$services = 'includes/class-evc-club-qr-services.php';
 
 $mutants = array(
     // ---- schema backstops ---------------------------------------------------
@@ -123,8 +125,10 @@ $mutants = array(
     // ---- STAGE-05C: the SQL QR token store (evc_qr_tokens, migration 001) ---------------------------
     // Run against SqlQrTokenStoreTest only (sequential tests; the multi-process race test is proven in
     // every CI engine job). Not listed (equivalent by design, documented in docs/member-qr.md): removing
-    // the row lock alone or the affected-row check alone, because the digest compare-and-set, the guarded
-    // UPDATE and the unique key each still refuse the late writer.
+    // the row lock alone or the affected-row check alone. For rotate() the digest compare, the guarded
+    // UPDATE and the unique key each still refuse a late writer; for revoke() (no INSERT, so the unique
+    // key does not help) the digest compare and the guarded UPDATE still do, proven by the multi-process
+    // revoke-versus-rotate race (CI engine jobs).
     array('id' => 'QS1-second-active-token-key-dropped', 'file' => 'database/001_initial.sql', 'command' => 'qr',
         'search' => "  UNIQUE KEY uq_qr_tokens_one_active (active_member_id),\n", 'replace' => ''),
     array('id' => 'QS2-stale-digest-accepted', 'file' => $qr, 'command' => 'qr',
@@ -148,6 +152,26 @@ $mutants = array(
     array('id' => 'QS10-plaintext-accepted-as-a-digest', 'file' => $qr, 'command' => 'qr',
         'search' => "            || !preg_match(self::HASH_PATTERN, \$new_hash) || !preg_match(self::INSTANT_PATTERN, \$now_utc)) {",
         'replace' => "            || !preg_match(self::INSTANT_PATTERN, \$now_utc)) {"),
+    // STAGE-05C part 2/3: the first-issuance decorator, the connection's lock wait, and the D9 limiter (003).
+    array('id' => 'QS11-first-issuance-may-replace', 'file' => $services, 'command' => 'qr',
+        'search' => "        return null;\n    }\n\n    public function rotate(int \$member_id, ?string \$expected_active_hash, string \$new_hash, string \$now_utc): void {\n        \$this->inner->rotate(\$member_id, null, \$new_hash, \$now_utc);",
+        'replace' => "        return \$this->inner->active_token_hash(\$member_id);\n    }\n\n    public function rotate(int \$member_id, ?string \$expected_active_hash, string \$new_hash, string \$now_utc): void {\n        \$this->inner->rotate(\$member_id, \$expected_active_hash, \$new_hash, \$now_utc);"),
+    array('id' => 'QS12-long-lock-wait', 'file' => $services, 'command' => 'qr',
+        'search' => '    const LOCK_WAIT_SECONDS = 5;', 'replace' => '    const LOCK_WAIT_SECONDS = 50;'),
+    array('id' => 'LR1-eleventh-failure-still-allowed', 'file' => $limiter, 'command' => 'qr',
+        'search' => "(int) \$row['failures'] >= self::MAX_FAILURES", 'replace' => "(int) \$row['failures'] > self::MAX_FAILURES"),
+    array('id' => 'LR2-shared-account-key-counted', 'file' => $limiter, 'command' => 'qr',
+        'search' => "if (is_string(\$key) && strpos(\$key, self::COUNTED_PREFIX) === 0 && strlen(\$key) > strlen(self::COUNTED_PREFIX)) {", 'replace' => 'if (is_string($key)) {'),
+    array('id' => 'LR3-window-not-aligned', 'file' => $limiter, 'command' => 'qr',
+        'search' => "return gmdate('Y-m-d H:i:s', \$t - (\$t % self::WINDOW_SECONDS)) . '.000000';", 'replace' => "return gmdate('Y-m-d H:i:s', \$t) . '.000000';"),
+    array('id' => 'LR4-no-session-key-allowed', 'file' => $limiter, 'command' => 'qr',
+        'search' => "        if (\$counted === array()) {\n            return false;", 'replace' => "        if (\$counted === array()) {\n            return true;"),
+    array('id' => 'LR5-old-rows-never-pruned', 'file' => $limiter, 'command' => 'qr',
+        'search' => "        \$cutoff = \$this->now()->getTimestamp() - self::RETENTION_SECONDS;", 'replace' => "        \$cutoff = 0;"),
+    array('id' => 'LR6-counter-key-not-unique', 'file' => 'database/003_lookup_failures.sql', 'command' => 'qr',
+        'search' => "  PRIMARY KEY (limiter_key, window_start_utc),\n", 'replace' => "  KEY ix_lookup_failures_key (limiter_key, window_start_utc),\n"),
+    array('id' => 'LR7-raw-session-ref-stored', 'file' => $limiter, 'command' => 'qr',
+        'search' => "                \$out[] = hash('sha256', self::DOMAIN . \$action . '|' . \$key);", 'replace' => "                \$out[] = substr(str_pad(\$key, 64, '0'), 0, 64);"),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */

@@ -1,19 +1,21 @@
 <?php
 /**
- * STAGE-05C: one QR token rotation in its OWN PHP process and DB connection, for
+ * STAGE-05C: one QR token rotation or revocation (job op) in its OWN PHP process and DB connection, for
  * tests/integration/SqlQrTokenStoreTest.php. DB host/user/password come from the inherited
  * EVC_TEST_DB_* environment (never argv); argv carries only the JSON job (database, member row
- * id, expected digest or null, new digest, barrier). Prints one JSON line: rotated | conflict |
- * duplicate | unknown | error:<class>. Never a token (the job carries digests only).
+ * id, expected digest or null, new digest, barrier). Prints one JSON line: rotated | revoked | conflict |
+ * duplicate | unknown | failed (op fail: one failed-scan increment, migration 003) | error:<class>. Never a token (the job carries digests only).
  */
 define('EVC_STANDALONE_TEST', true);
 date_default_timezone_set('Pacific/Kiritimati');
 
 require dirname(__DIR__, 2) . '/includes/bootstrap.php';
+require dirname(__DIR__) . '/support/class-evc-fixed-clock.php';
 
 $job = json_decode($argv[1], true);
 $host = (string) getenv('EVC_TEST_DB_HOST');
-if (!in_array($host, array('127.0.0.1', 'localhost', '::1'), true) || strpos($job['database'], 'evc_test_') !== 0) {
+if (!is_array($job) || !is_string($job['database'] ?? null) || !in_array($host, array('127.0.0.1', 'localhost', '::1'), true) || strpos($job['database'], 'evc_test_') !== 0
+    || !in_array($job['op'] ?? null, array('rotate', 'revoke', 'fail'), true)) {
     fwrite(STDERR, "Refusing non-test database.\n");
     exit(2);
 }
@@ -32,8 +34,17 @@ while (microtime(true) < (float) $job['start_at']) {
     usleep(200);
 }
 try {
-    $store->rotate((int) $job['member_id'], $job['expected'], (string) $job['new_hash'], '2026-11-03 10:00:00.000000');
-    $outcome = 'rotated';
+    if ($job['op'] === 'fail') {
+        // STAGE-05C D9: one failed scan of one tablet session (fixed clock: one window).
+        (new EVC_Sql_Lookup_Rate_Limiter($db, new EVC_Fixed_Clock('2026-11-04T10:00:10Z')))->record_failure(array('session:' . (string) $job['session']), 'qr_lookup');
+        $outcome = 'failed';
+    } elseif ($job['op'] === 'revoke') {
+        $store->revoke((int) $job['member_id'], (string) $job['expected'], '2026-11-03 10:00:00.000000');
+        $outcome = 'revoked';
+    } else {
+        $store->rotate((int) $job['member_id'], $job['expected'], (string) $job['new_hash'], '2026-11-03 10:00:00.000000');
+        $outcome = 'rotated';
+    }
 } catch (EVC_Qr_Rotation_Conflict $e) {
     $outcome = 'conflict';
 } catch (EVC_Db_Duplicate_Key_Exception $e) {

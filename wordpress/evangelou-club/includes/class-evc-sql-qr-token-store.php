@@ -4,9 +4,9 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
 /**
  * STAGE-05C: QR tokens in `evc_qr_tokens` (migration 001, unchanged; no new table or column).
  *
- * The ONLY shipped EVC_Qr_Token_Store (UI-04C interface). Definitions only: nothing shipped
- * constructs it (the packager forbids constructing it anywhere until an owner-approved QR
- * issuance / lookup step names one construction site).
+ * The ONLY shipped EVC_Qr_Token_Store (UI-04C interface). Constructed at exactly ONE site,
+ * EVC_Club_Qr_Services::store() (packager rule set qrProblemsFor), which only the customer QR
+ * backend and the staff lookup backend reach, each behind its own opt-in.
  *
  * - Tokens are stored ONLY as SHA-256 digests (`token_hash`); this class never receives,
  *   stores, returns or logs a plaintext token. A digest is never returned by a lookup
@@ -22,8 +22,13 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *   (EVC_Db_Duplicate_Key_Exception, rolled back). A deadlock or lock-wait timeout means a
  *   concurrent writer: rolled back and reported as EVC_Qr_Rotation_Conflict (no token is
  *   issued; the caller may simply try again). A lost COMMIT is EVC_Db_Commit_Unknown_Exception.
- * - It never locks `evc_members`, so the runtime user needs only SELECT on `evc_members` and
- *   SELECT / INSERT / UPDATE (status, revoked_at_utc) on `evc_qr_tokens`; never DELETE.
+ * - It never takes an explicit lock on `evc_members` (no FOR UPDATE / FOR SHARE there), so the runtime
+ *   user needs only SELECT on `evc_members` and SELECT / INSERT / UPDATE (status, revoked_at_utc) on
+ *   `evc_qr_tokens`; never DELETE. InnoDB's foreign-key check on the INSERT does take a SHARED lock on
+ *   the member's `evc_members` row for the rest of the transaction; only a concurrent writer of that
+ *   member row could wait on it (nothing shipped updates member rows). The shipped wiring
+ *   (EVC_Club_Qr_Services) sets `SESSION innodb_lock_wait_timeout = 5` on the connection, like the
+ *   STAGE-05A / 05B paths, so any row-lock wait here gives up after 5 s (→ EVC_Qr_Rotation_Conflict).
  * - A stored row that is not exactly well-formed is an error (fail closed), never accepted.
  */
 final class EVC_Sql_Qr_Token_Store implements EVC_Qr_Token_Store {
@@ -50,6 +55,17 @@ final class EVC_Sql_Qr_Token_Store implements EVC_Qr_Token_Store {
         return self::member_row($this->db->fetch_one(
             'SELECT id, member_public_id, wp_user_id, status FROM evc_members WHERE member_public_id = ?',
             array($member_public_id)
+        ));
+    }
+
+    /** The member row of a WordPress user (not part of the UI-04C interface; used by the QR backends). */
+    public function find_member_by_wp_user(int $wp_user_id): ?array {
+        if ($wp_user_id < 1) {
+            return null;
+        }
+        return self::member_row($this->db->fetch_one(
+            'SELECT id, member_public_id, wp_user_id, status FROM evc_members WHERE wp_user_id = ?',
+            array($wp_user_id)
         ));
     }
 

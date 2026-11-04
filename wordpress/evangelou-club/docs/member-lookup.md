@@ -127,9 +127,12 @@ default**. The lifetime is an **open owner decision**; tests inject 300 s.
 
 ## Future SQL requirements (NOT implemented; migration authorisation required)
 
-> **STAGE-05C update:** the `evc_qr_tokens` part below is now implemented, on migration 001 with no
-> new migration, as `EVC_Sql_Qr_Token_Store` (definitions only, constructed nowhere; see
-> `docs/member-qr.md`). The rate limiter and phone directory are still not implemented.
+> **STAGE-05C update:** implemented and wired behind the existing opt-ins (see `docs/member-qr.md`):
+> the `evc_qr_tokens` store (`EVC_Sql_Qr_Token_Store`, migration 001 unchanged) and the rate limiter
+> (`EVC_Sql_Lookup_Rate_Limiter`, owner decision D9, new migration 003 `evc_lookup_failures`). Phone
+> lookup is not offered (always-empty directory). Owner decisions 2026-11-04 close "token max age" (D6:
+> none) and "rate limits" (D9: ~10 failures / 5 min / tablet); "who administers tokens" = `evc_manage_club`
+> holders (administrators), as designed here.
 
 **`evc_qr_tokens` (migration 001) already has** `uq_qr_tokens_hash` and
 `uq_qr_tokens_one_active` (a stored generated column).
