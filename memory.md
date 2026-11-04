@@ -1215,3 +1215,15 @@ The existing website developer replied explicitly:
 - **Open owner question (non-blocking):** should the shared tablet account also be allowed to revoke a member's QR? Built: administrators only (reviewed UI-04C rule).
 - **Tests / mutants:** see `docs/member-qr.md` (integration SqlQrTokenStoreTest 23, SqlLookupRateLimiterTest 9; WP StaffQrLookupTest 9, CustomerQrTest 6, + migrations/enabled updates; commerce CI-only StaffQrCommerceTest 3, CustomerQrCommerceTest 1; mutants QS11–QS12, LR1–LR7 (SQL runner), QL1–QL12, QC1–QC7 (WP runner, named killers)). Commerce suites can't run locally (plugin download 403 through the proxy).
 
+- **CI (STAGE-05C part 2/3):** rounds 80f0870 → a6e08ef → 043d89a → 7ab2a58 → 7388254 → 4861ef6.
+  - **Isolated-build check (frontend, run 41779672917).** The guard fixture label «key ring» made Tailwind emit `.ring` into the staff and ordering CSS. Tailwind v4 scans every file under app/, so bare utility words in scripts, docs or tests change the shipped CSS. Fixed in a6e08ef.
+  - **Lock-wait test.** The first version required LOCK WAIT in INNODB_TRX. On the CI MySQL 8 containers INNODB_TRX listed only the holder while the writer was blocked, so the test now uses process-based proof (see fix 5).
+  - **Engine job timeout.** The job hit its 25-min limit on a slow runner. The QR races are now capped at 10 rounds and the engine job has `timeout-minutes: 35`.
+  - **Known real-clock flake.** `BacsConfirmationTest::test_expiry_and_an_early_renewal_follow_the_athens_chain` failed in 80f0870 and 7388254, in wp-commerce jobs only. This test is untouched by this stage.
+  - Superseded runs were cancelled.
+  - **FINAL code SHA `4861ef6d890c873a0438f44ddb6096d7bd15ea18`:**
+    - foundation PR run 41790466099 18/18;
+    - foundation push run 41790459566 18/18;
+    - frontend PR run 41790466214 4/4 (no frontend push run: that commit touches no app/ path).
+  - **Local.** unit 1006; integration 168; wp suites green; SQL mutants 47/47; WP mutants 129/129; packager builds identical to base (staff-CrPA0l2H.js / staff-DtlY_JJO.css / customer-Deaj56e0.js).
+  - Draft PR #38. Nothing merged / deployed / enabled; 003 applied nowhere real.
