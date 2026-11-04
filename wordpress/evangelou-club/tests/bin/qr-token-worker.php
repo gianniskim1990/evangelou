@@ -33,6 +33,11 @@ $store = new EVC_Sql_Qr_Token_Store($db);
 while (microtime(true) < (float) $job['start_at']) {
     usleep(200);
 }
+if (!empty($job['announce'])) {
+    // Lets a test know the next statement is the store call (connected, bootstrapped, nothing pending).
+    echo json_encode(array('ready' => true)), "\n";
+    fflush(STDOUT);
+}
 try {
     if ($job['op'] === 'fail') {
         // STAGE-05C D9: one failed scan of one tablet session (fixed clock: one window).

@@ -158,13 +158,11 @@ lock-wait bounds any wait.
 - Proven with real separate processes in CI:
   - `test_simultaneous_writers_…` (first issuance and rotation);
   - `test_simultaneous_revoke_and_rotate_…` (exactly one winner);
-  - `test_a_writer_racing_an_uncommitted_replacement_…`: another connection really holds the row and
-    has replaced it, uncommitted, while a writer in a separate process starts. On MariaDB the writer
-    normally waits (seen as `LOCK WAIT` in `INNODB_TRX`) and loses after the commit. On MySQL 8.0 / 8.4
-    (CI) the locking read answers at once without the uncommitted change, so the writer sees "no active
-    row", the compare-and-set fails and it loses before the commit, having written nothing. A
-    first-issuance writer on MySQL in that state would reach the INSERT, and the one-active unique key
-    then waits for and refuses it. The outcome is the same on both engines.
+  - `test_a_writer_blocked_by_an_uncommitted_replacement_…`: another connection really holds the row
+    and has replaced it, uncommitted. A writer in a separate process announces that its next statement
+    is the store call and is still blocked 1.5 s later. After the commit it re-reads and loses.
+    `INNODB_TRX` is not the proof: on the CI MySQL 8 containers it listed only the holder while the
+    writer was blocked.
 
 ### Customer route (`evangelou-club-customer/v1/me/qr`)
 
@@ -284,8 +282,7 @@ appears. The staff answer carries the first name only (D8).
 
 **Integration.**
 - `SqlQrTokenStoreTest` (23):
-  - a writer racing an uncommitted replacement (waits on MariaDB, refused at once on MySQL), lost
-    COMMIT for rotate AND revoke;
+  - a writer really blocked by an uncommitted replacement, lost COMMIT for rotate AND revoke;
   - revoke-vs-rotate and writer races (multi-process);
   - first-issuance decorator;
   - 5 s lock wait;

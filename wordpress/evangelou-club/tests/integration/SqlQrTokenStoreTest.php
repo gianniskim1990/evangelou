@@ -296,17 +296,15 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
     }
 
     /**
-     * Another connection holds the member's active row (FOR UPDATE) and has already replaced it,
-     * UNCOMMITTED; a writer expecting the old digest starts in a separate process while that
-     * transaction is open. The engines differ, and both are safe:
-     *  - MariaDB normally makes the writer WAIT (observed as LOCK WAIT in INNODB_TRX); after the commit
-     *    it re-reads the committed state and loses;
-     *  - MySQL 8.0 / 8.4 (READ COMMITTED) answer the locking read at once without the uncommitted
-     *    change (CI: no LOCK WAIT, transactions [RUNNING]); "no active row" differs from the expected
-     *    digest, so the writer loses BEFORE the commit, having written nothing.
-     * Either way: a conflict, no token from the writer, exactly the holder's token active.
+     * A REAL wait: another connection holds the member's active row (FOR UPDATE) and has already
+     * replaced it, UNCOMMITTED; a writer expecting the old digest is started in a separate process,
+     * announces that its next statement is the store call, and must still be running 1.5 s later
+     * (unblocked it finishes in milliseconds). Only then does the holder commit; the writer re-reads the
+     * committed state and loses: a conflict, no token from it, exactly the holder's token active.
+     * INNODB_TRX is not used as the proof: on the CI MySQL 8 containers it listed only the holder while
+     * the writer was blocked (CI runs 41780458400 / 41783240785); it is kept in the failure message.
      */
-    public function test_a_writer_racing_an_uncommitted_replacement_loses_whether_it_waits_or_not(): void {
+    public function test_a_writer_blocked_by_an_uncommitted_replacement_loses_after_the_commit(): void {
         $id = $this->member_id($this->create_member(7001));
         $first = self::hash();
         $this->store()->rotate($id, null, $first, self::NOW);
@@ -318,34 +316,26 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
         $holder->prepare('SELECT token_hash FROM evc_qr_tokens WHERE active_member_id = ? FOR UPDATE')->execute(array($id));
         $holder->prepare("UPDATE evc_qr_tokens SET status = 'revoked', revoked_at_utc = ? WHERE active_member_id = ? AND token_hash = ?")->execute(array(self::LATER, $id, $first));
         $holder->prepare("INSERT INTO evc_qr_tokens (member_id, token_hash, status, issued_at_utc) VALUES (?, ?, 'active', ?)")->execute(array($id, $winner, self::LATER));
-        $job = array('database' => $this->database->name(), 'op' => 'rotate', 'member_id' => $id, 'expected' => $first, 'new_hash' => self::hash(), 'start_at' => 0);
+        $job = array('database' => $this->database->name(), 'op' => 'rotate', 'member_id' => $id, 'expected' => $first, 'new_hash' => self::hash(), 'start_at' => 0, 'announce' => true);
         $proc = proc_open(array(PHP_BINARY, dirname(__DIR__) . '/bin/qr-token-worker.php', json_encode($job)), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
         $this->assertIsResource($proc);
+        $ready = fgets($pipes[1]);
+        $this->assertSame(array('ready' => true), json_decode((string) $ready, true), 'worker did not start: ' . $ready);
+        // From here the worker only runs rotate(): unblocked it finishes in milliseconds.
+        usleep(1500000);
+        $status = proc_get_status($proc);
+        $blocked = $status['running'];
         $observer = EVC_Test_Database::admin_pdo();
-        $waiting = false;
-        $seen = array();
-        $exit = null;
-        for ($i = 0; $i < 400 && !$waiting; $i++) {
-            usleep(50000);
-            $seen = $observer->query('SELECT trx_state, trx_query FROM information_schema.INNODB_TRX')->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($seen as $trx) {
-                $waiting = $waiting || $trx['trx_state'] === 'LOCK WAIT';
-            }
-            $status = proc_get_status($proc);
-            if (!$waiting && !$status['running']) {
-                $exit = $status['exitcode']; // proc_close() would no longer know it
-                break;
-            }
-        }
+        $seen = $observer->query('SELECT trx_state FROM information_schema.INNODB_TRX')->fetchAll(PDO::FETCH_COLUMN);
         $holder->commit();
         $out = stream_get_contents($pipes[1]);
         $err = stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
         $closed = proc_close($proc);
-        $this->assertSame(0, $exit ?? $closed, 'worker stderr: ' . $err . ' stdout: ' . $out);
-        $this->assertTrue($waiting || $exit !== null, 'the writer either waited on the row lock or answered while the replacement was uncommitted; transactions: ' . json_encode($seen));
-        $this->assertSame('conflict', json_decode(trim((string) $out), true)['outcome'] ?? null, 'worker output: ' . $out . ' ' . $err . ($waiting ? ' (waited)' : ' (answered before the commit)'));
+        $this->assertSame(0, $blocked ? $closed : $status['exitcode'], 'worker stderr: ' . $err . ' stdout: ' . $out);
+        $this->assertTrue($blocked, 'the writer must wait for the uncommitted replacement; worker: ' . $out . ' trx: ' . json_encode($seen));
+        $this->assertSame('conflict', json_decode(trim((string) $out), true)['outcome'] ?? null, 'worker output: ' . $out . ' ' . $err . ($blocked ? ' (blocked until the commit)' : ' (answered before the commit)') . ' trx: ' . json_encode($seen));
         $this->assertSame(1, $this->active_count($id));
         $this->assertSame($winner, $this->store()->active_token_hash($id));
     }
