@@ -47,8 +47,11 @@ final class EVC_Rest_Session_Controller {
             return EVC_Rest_Security::error_response('unauthorized', 401);
         }
         // STAGE-05D: QR lookup (and with it the coffee redemption the scan leads to) is reported only when
-        // its route exists AND every gate passes now. The lookup gates include all of the redeem route's
-        // (same constants, same Club DB, schema 3 >= 2), so the same answer is used for both.
+        // its route exists AND every gate passes now. The lookup gates include the redeem route's
+        // constants, Club DB and schema (3 >= 2), but NOT its catalogue check (REASON_CATALOGUE,
+        // coffee_catalogue_unavailable): the shipped catalogue is the fixed approved list and is never
+        // empty, so the same answer is used for both (the empty-catalogue gap is documented in
+        // docs/member-qr.md; the redeem route still refuses with 503 if it ever were empty).
         $qr = EVC_Rest_Lookup_Controller::lookup_ready();
         return new WP_REST_Response(array(
             'authenticated' => true,

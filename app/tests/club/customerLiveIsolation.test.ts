@@ -54,7 +54,8 @@ describe("STAGE-01 customer app: bundle isolation", () => {
     for (const forbidden of [/src\/customerPreview\//, /src\/club\//, /src\/staff\//, /src\/main\.tsx$/, /src\/App\.tsx$/, /src\/admin\//, /Context\.tsx$/, /src\/preview\/ClubPreviewApp\.tsx$/, /src\/preview\/(Staff|Management)/]) {
       assert.equal(inputs.find((p) => forbidden.test(p)), undefined, `customer app must not include ${forbidden}`);
     }
-    for (const api of ["localStorage", "sessionStorage", "indexedDB", "XMLHttpRequest", "sendBeacon", "WebSocket", "getUserMedia"]) {
+    // STAGE-05D round 2: localStorage only through src/customer/qrStore.ts (tests/club/storageGuard.test.ts).
+    for (const api of ["sessionStorage", "indexedDB", "document.cookie", "XMLHttpRequest", "sendBeacon", "WebSocket", "getUserMedia"]) {
       assert.ok(!output.includes(api), `customer app must not use ${api}`);
     }
   });
@@ -72,7 +73,7 @@ describe("STAGE-01 customer app: bundle isolation", () => {
   });
 
   it("only GET /me is ever requested, and only by the client module", () => {
-    const sources = ["src/customer/CustomerApp.tsx", "src/customer/liveView.ts", "src/customer/config.ts", "src/customer/main.tsx", "src/customer/memberQr.ts", "src/customer/MemberQrPanel.tsx", "src/customer/qrEncode.ts"].map((f) => readFileSync(join(appDir, f), "utf8"));
+    const sources = ["src/customer/CustomerApp.tsx", "src/customer/liveView.ts", "src/customer/config.ts", "src/customer/main.tsx", "src/customer/memberQr.ts", "src/customer/MemberQrPanel.tsx", "src/customer/qrEncode.ts", "src/customer/qrStore.ts"].map((f) => readFileSync(join(appDir, f), "utf8"));
     for (const s of sources) assert.ok(!/\bfetch\(/.test(s), "no direct fetch outside customerApi.ts");
     const client = readFileSync(join(appDir, "src/customer/customerApi.ts"), "utf8");
     assert.match(client, /method: "GET"/);

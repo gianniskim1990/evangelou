@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { COUNTER_COFFEES } from "./coffeeCatalogue";
-import type { CounterFlow, CounterState, ScanNotice } from "./counterFlow";
-import { cameraSupported, startQrCamera, type CameraEnv, type CameraFailure, type CameraSession } from "./qrCamera";
+import { countdown, type CounterFlow, type CounterState, type ScanNotice } from "./counterFlow";
+import { cameraSupported, startQrCamera, type CameraEnv, type CameraFailure } from "./qrCamera";
 
 /*
  * STAGE-05D: the real counter screens (Greek). Shown by StaffApp ONLY while
@@ -19,24 +19,25 @@ const STATUS_TEXT = {
 
 const STATUS_DOT = { active: "bg-[#2f7d4f]", used_today: "bg-bronze", inactive: "bg-maroon" } as const;
 
-function noticeText(n: ScanNotice, now: number, blockedUntil: number | null): string {
+/** The notice and whether it is good news (status region) or a problem (alert region). */
+function noticeText(n: ScanNotice, now: number, blockedUntil: number | null): { text: string; good: boolean } {
   switch (n.kind) {
     case "recorded":
-      return `Ο καφές καταχωρήθηκε${n.firstName ? ` για ${n.firstName}` : ""}: ${n.coffeeLabel}.`;
+      return { text: `Ο καφές καταχωρήθηκε: ${n.coffeeLabel}${n.firstName ? ` · ${n.firstName}` : ""}`, good: true };
     case "not_found":
-      return "Δεν βρέθηκε μέλος με αυτόν τον κωδικό. Ο πελάτης μπορεί να έχει ζητήσει νέο QR: ας ανοίξει ξανά την κάρτα του.";
+      return { text: "Δεν βρέθηκε μέλος με αυτόν τον κωδικό. Ο πελάτης μπορεί να έχει ζητήσει νέο QR: ας ανοίξει ξανά την κάρτα του.", good: false };
     case "invalid_qr":
-      return "Αυτός δεν είναι κωδικός QR του Club.";
-    case "rate_limited": {
-      const minutes = blockedUntil === null ? 5 : Math.max(1, Math.ceil((blockedUntil - now) / 60_000));
-      return `Πολλές αποτυχημένες σαρώσεις από αυτό το tablet. Περιμένετε περίπου ${minutes} ${minutes === 1 ? "λεπτό" : "λεπτά"} και δοκιμάστε ξανά.`;
-    }
+      return { text: "Αυτός δεν είναι κωδικός QR του Club. Σαρώστε ξανά τον κωδικό της κάρτας μέλους.", good: false };
+    case "rate_limited":
+      return blockedUntil !== null && now < blockedUntil
+        ? { text: `Πολλές αποτυχημένες σαρώσεις από αυτό το tablet. Δοκιμάστε ξανά σε ${countdown(blockedUntil, now)}.`, good: false }
+        : { text: "Μπορείτε να σαρώσετε ξανά.", good: true };
     case "unavailable":
-      return "Η υπηρεσία μελών δεν είναι διαθέσιμη αυτή τη στιγμή. Δεν δίνεται καφές μέχρι να επιβεβαιωθεί το μέλος.";
+      return { text: "Η υπηρεσία μελών δεν είναι διαθέσιμη αυτή τη στιγμή. Δεν δίνεται καφές μέχρι να επιβεβαιωθεί το μέλος.", good: false };
     case "offline":
-      return "Δεν υπάρχει σύνδεση με τον διακομιστή. Ελέγξτε το δίκτυο και δοκιμάστε ξανά.";
+      return { text: "Δεν υπάρχει σύνδεση με τον διακομιστή. Ελέγξτε το δίκτυο και δοκιμάστε ξανά.", good: false };
     case "error":
-      return "Μη αναμενόμενη απάντηση. Δοκιμάστε ξανά.";
+      return { text: "Μη αναμενόμενη απάντηση. Δοκιμάστε ξανά.", good: false };
   }
 }
 
@@ -52,39 +53,66 @@ const BTN_PRIMARY = "min-h-12 rounded-xl border-none bg-bronze-dark px-6 py-3.5 
 const BTN_SECONDARY = "min-h-12 rounded-xl border border-espresso/20 bg-surface px-5 py-3 text-sm font-semibold";
 
 function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<CounterState, { screen: "scan" }>; camera: CameraEnv }) {
-  const now = () => flow.clock();
-  const heading = useFocusHeading("scan");
+  const now = flow.clock();
+  const canCamera = cameraSupported(camera);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const input = useRef<HTMLInputElement>(null);
   const [code, setCode] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState<CameraFailure | null>(null);
+  const [, redraw] = useState(0);
   const video = useRef<HTMLVideoElement>(null);
-  const session = useRef<CameraSession | null>(null);
-  const blocked = state.blockedUntil !== null && now() < state.blockedUntil;
-  const canCamera = cameraSupported(camera);
+  /** The ONE running (or starting) camera: aborting it stops the stream, even one still being granted. */
+  const camRun = useRef<AbortController | null>(null);
+  const blocked = state.blockedUntil !== null && now < state.blockedUntil;
 
   const stopCamera = () => {
-    session.current?.stop();
-    session.current = null;
+    camRun.current?.abort();
+    camRun.current = null;
     setCameraOn(false);
   };
   // The camera never outlives this screen (lock, logout, «Πίσω» or a member found all unmount it).
-  useEffect(() => () => session.current?.stop(), []);
+  useEffect(() => () => camRun.current?.abort(), []);
+
+  // On arrival: with a camera, focus the heading (screen readers hear where they are); without one, the
+  // scanner field, so a hand scanner can type straight away.
+  useEffect(() => {
+    (canCamera ? heading.current : input.current)?.focus();
+  }, [canCamera]);
+  // After a lookup or a wait ENDS (busy -> idle, blocked -> open), the field is ready for the next scan.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    const waiting = state.busy || blocked;
+    if (wasBusy.current && !waiting && !cameraOn) input.current?.focus();
+    wasBusy.current = waiting;
+  }, [state.busy, blocked, cameraOn]);
+  // D9 wait: redraw every second so the countdown moves and the scan re-opens when Retry-After has passed.
+  useEffect(() => {
+    if (!blocked) return;
+    const id = flow.timers.setInterval(() => redraw((n) => n + 1), 1000);
+    return () => flow.timers.clearInterval(id);
+  }, [blocked, flow]);
 
   const openCamera = async () => {
-    if (!video.current || blocked) return;
+    if (!video.current || blocked || camRun.current) return;
+    const run = new AbortController();
+    camRun.current = run;
     setCameraError(null);
     setCameraOn(true);
     try {
-      session.current = await startQrCamera(
+      await startQrCamera(
         video.current,
         (read) => {
-          session.current = null;
+          if (camRun.current === run) camRun.current = null;
           setCameraOn(false);
           void flow.submitScan(read);
         },
         camera,
+        run.signal,
       );
     } catch (failure) {
+      if (camRun.current === run) camRun.current = null;
+      if (failure === "aborted") return;
       setCameraOn(false);
       setCameraError(failure === "denied" ? "denied" : "unavailable");
     }
@@ -98,7 +126,7 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
     if (value.trim() !== "") void flow.submitScan(value);
   };
 
-  const success = state.notice?.kind === "recorded";
+  const notice = state.notice ? noticeText(state.notice, now, state.blockedUntil) : null;
   return (
     <main className="mx-auto max-w-[560px] px-5 pt-8 pb-12 md:px-8 md:pt-12" data-evc-counter="scan">
       <h1 ref={heading} tabIndex={-1} className="font-literata mb-1.5 text-[24px] font-semibold outline-none">
@@ -106,10 +134,17 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
       </h1>
       <p className="mb-6 text-sm text-espresso/60">Ο πελάτης δείχνει τον κωδικό QR της κάρτας του από το κινητό του (ή στιγμιότυπο οθόνης).</p>
 
-      <div role={success ? "status" : "alert"} aria-live={success ? "polite" : "assertive"} className="min-h-6">
-        {state.notice && (
-          <p className={`mb-5 rounded-xl px-4 py-3 text-[14px] ${success ? "bg-[#2f7d4f]/10 text-espresso" : "bg-maroon/10 text-maroon"}`}>
-            {noticeText(state.notice, now(), state.blockedUntil)}
+      {/* Two fixed live regions: good news is announced politely, problems at once. */}
+      <div role="status" aria-live="polite" className="min-h-0">
+        {notice?.good && <p className="mb-5 rounded-xl bg-[#2f7d4f]/10 px-4 py-3 text-[14px] text-espresso">{notice.text}</p>}
+      </div>
+      <div role="alert" aria-live="assertive" className="min-h-0">
+        {notice && !notice.good && <p className="mb-5 rounded-xl bg-maroon/10 px-4 py-3 text-[14px] text-maroon">{notice.text}</p>}
+        {cameraError && (
+          <p className="mb-5 rounded-xl bg-maroon/10 px-4 py-3 text-[14px] text-maroon">
+            {cameraError === "denied"
+              ? "Δεν δόθηκε άδεια για την κάμερα. Επιτρέψτε την κάμερα στις ρυθμίσεις του προγράμματος περιήγησης ή χρησιμοποιήστε τον σαρωτή."
+              : "Η κάμερα δεν είναι διαθέσιμη. Χρησιμοποιήστε τον σαρωτή."}
           </p>
         )}
       </div>
@@ -128,11 +163,6 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
               Άνοιγμα κάμερας
             </button>
           )}
-          {cameraError && (
-            <p role="alert" className="mt-2 text-[13px] text-maroon">
-              {cameraError === "denied" ? "Δεν δόθηκε άδεια για την κάμερα. Επιτρέψτε την κάμερα στις ρυθμίσεις του browser ή χρησιμοποιήστε τον σαρωτή." : "Η κάμερα δεν είναι διαθέσιμη. Χρησιμοποιήστε τον σαρωτή."}
-            </p>
-          )}
         </section>
       )}
 
@@ -144,19 +174,23 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
           Με σαρωτή χειρός: πατήστε στο πεδίο και σαρώστε τον κωδικό.
         </p>
         <input
+          ref={input}
           id="evc-scan-code"
           aria-describedby="evc-scan-help"
           value={code}
           onChange={(e) => setCode(e.target.value)}
           autoComplete="off"
+          autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
+          inputMode="text"
+          enterKeyHint="search"
           maxLength={256}
           disabled={state.busy || blocked}
           className="min-h-12 w-full rounded-xl border border-espresso/20 bg-white px-4 text-[15px]"
         />
         <button type="submit" disabled={state.busy || blocked || code.trim() === ""} className={`${BTN_PRIMARY} mt-3 w-full`}>
-          {state.busy ? "Αναζήτηση μέλους…" : "Αναζήτηση"}
+          {state.busy ? "Αναζήτηση μέλους…" : blocked && state.blockedUntil !== null ? `Αναμονή ${countdown(state.blockedUntil, now)}` : "Αναζήτηση"}
         </button>
       </form>
 
@@ -182,11 +216,9 @@ function Member({ flow, state }: { flow: CounterFlow; state: Extract<CounterStat
         {STATUS_TEXT[state.status]}
       </p>
 
-      {state.message && (
-        <p role="alert" className="mb-5 rounded-xl bg-maroon/10 px-4 py-3 text-[14px] text-maroon">
-          {state.message}
-        </p>
-      )}
+      <div role="alert" aria-live="assertive" className="min-h-0">
+        {state.message && <p className="mb-5 rounded-xl bg-maroon/10 px-4 py-3 text-[14px] text-maroon">{state.message}</p>}
+      </div>
 
       {state.status === "active" && (
         <form

@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@upstash/redis": "^1.38.4",
+    "jsqr": "1.4.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -35,7 +36,6 @@
     "@vitejs/plugin-react": "^6.1.0",
     "esbuild": "^0.28.2",
     "jsdom": "^30.1.3",
-    "jsqr": "1.4.0",
     "oxlint": "^1.79.0",
     "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3",

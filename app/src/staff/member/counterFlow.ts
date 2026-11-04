@@ -33,15 +33,28 @@ export type ScanNotice =
 
 export type RedeemPhase = "idle" | "busy" | "retry";
 
+/** m:ss until `until` (rounded up to the second): the D9 wait shown on the scan screen. */
+export function countdown(until: number, now: number): string {
+  const total = Math.max(0, Math.ceil((until - now) / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export type CounterState =
   | { screen: "home" }
   | { screen: "scan"; busy: boolean; notice: ScanNotice | null; blockedUntil: number | null }
   | { screen: "member"; member: FoundMember; status: MemberStatus; coffee: string | null; redeem: RedeemPhase; message: string | null };
 
+export interface CounterTimers {
+  setInterval(fn: () => void, ms: number): unknown;
+  clearInterval(id: unknown): void;
+}
+
 export interface CounterFlowDeps {
   controller: Pick<StaffController, "runProtected" | "subscribe" | "getState">;
   api: MemberApi;
   now?: () => number;
+  /** The screens' one-second redraw during the D9 wait (injected in tests). */
+  timers?: CounterTimers;
   tracker?: RedemptionIntentTracker;
 }
 
@@ -54,6 +67,7 @@ export class CounterFlow {
   private readonly listeners = new Set<() => void>();
   private readonly deps: CounterFlowDeps;
   private readonly now: () => number;
+  readonly timers: CounterTimers;
   private readonly tracker: RedemptionIntentTracker;
   private blockedUntil: number | null = null;
   /** Bumped by every screen change: a reply for an older screen is ignored. */
@@ -63,6 +77,7 @@ export class CounterFlow {
   constructor(deps: CounterFlowDeps) {
     this.deps = deps;
     this.now = deps.now ?? (() => Date.now());
+    this.timers = deps.timers ?? { setInterval: (fn, ms) => globalThis.setInterval(fn, ms), clearInterval: (id) => globalThis.clearInterval(id as ReturnType<typeof setInterval>) };
     this.tracker = deps.tracker ?? new RedemptionIntentTracker();
     // Fail closed: the moment the session is not ready, the member is gone.
     // The same when a status check says the QR lookup is no longer ready.
@@ -139,7 +154,11 @@ export class CounterFlow {
     if (result.status === "stale" || result.status === "auth_lost") return;
     if (result.status === "error") {
       const kind = result.error instanceof StaffApiError ? result.error.kind : "invalid_response";
-      if (kind === "aborted") return;
+      // Aborted by a newer screen state: never leave the scan stuck on «Αναζήτηση…».
+      if (kind === "aborted") {
+        this.patch({ ...s, busy: false, notice: null });
+        return;
+      }
       this.patch({ screen: "scan", busy: false, notice: { kind: kind === "network" || kind === "timeout" ? "offline" : "error" }, blockedUntil: null });
       return;
     }
@@ -152,7 +171,8 @@ export class CounterFlow {
         this.go({ screen: "member", member: outcome.member, status: outcome.status, coffee: null, redeem: "idle", message: null });
         return;
       case "rate_limited":
-        this.blockedUntil = this.now() + outcome.retryAfterSeconds * 1000;
+        // Retry-After: 0 means "now": nothing to wait for.
+        this.blockedUntil = outcome.retryAfterSeconds > 0 ? this.now() + outcome.retryAfterSeconds * 1000 : null;
         this.patch({ screen: "scan", busy: false, notice: { kind: "rate_limited" }, blockedUntil: this.blockedUntil });
         return;
       default:

@@ -208,10 +208,14 @@ final class StaffQrLookupTest extends EVC_WP_Test_Case {
         }
 
         $this->connects = 0;
+        $this->log = array();
         $backend = $this->use_backend($this->environment($this->database(array('001_initial.sql', '002_payment_provenance.sql'))->config()));
         $this->assertSame($off, $this->session_features(), 'migration 003 not applied');
         $this->assertSame(EVC_Club_Lookup_Backend::REASON_SCHEMA, $backend->last_reason());
         $this->assertSame(1, $this->connects, 'the schema is really read');
+        $this->assertSame(array('Evangelou Club: staff QR not ready (club_db_schema_too_old).'), $this->log, 'a real outage is logged once');
+        $this->assertSame($off, $this->session_features());
+        $this->assertCount(1, $this->log, 'throttled: not again within READY_LOG_SECONDS');
 
         $backend = new EVC_Club_Lookup_Backend(
             function () use ($base) {
@@ -229,7 +233,14 @@ final class StaffQrLookupTest extends EVC_WP_Test_Case {
         $this->log = array();
         $this->assertSame($off, $this->session_features(), 'Club DB unreachable');
         $this->assertSame(EVC_Club_Lookup_Backend::REASON_CONNECT, $backend->last_reason());
-        $this->assertSame(array(), $this->log);
+        $this->assertSame(array('Evangelou Club: staff QR not ready (club_db_unavailable, RuntimeException).'), $this->log, 'logged once, the exception class only');
+        $this->assertSame($off, $this->session_features());
+        $this->assertSame($off, $this->session_features());
+        $this->assertCount(1, $this->log, 'throttled');
+        delete_transient('evc_club_qr_ready_logged_club_db_unavailable');
+        $this->session_features();
+        $this->assertCount(2, $this->log, 'after the window: logged again');
+        $this->log = array();
 
         $this->use_backend();
         $this->assertSame($on, $this->session_features(), 'ready again');

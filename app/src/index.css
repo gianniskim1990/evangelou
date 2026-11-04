@@ -1,4 +1,8 @@
-@import "tailwindcss";
+/* STAGE-05D round 2: Tailwind scans ONLY the shipped sources (src/ and the HTML entry pages), never
+ * docs, tests, scripts or fixtures, so a word in a test or a doc can no longer change the shipped CSS. */
+@import "tailwindcss" source(none);
+@source "./";
+@source "../*.html";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

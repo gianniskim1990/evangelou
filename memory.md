@@ -1313,3 +1313,31 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **Open decisions reported:** (1) keep the customer QR between visits (which store?); (2) the counter device (iPad Safari has no BarcodeDetector → hand scanner or a decoder library).
 - **Frontend mutants:** 275 → 299 (C1–C13, Q1–Q11; S4 re-aimed to `nonceBox.get()`). The shard timeout was raised 30 → 45 min (shards took about 21 min for 138).
 - CI on e4244186 (STAGE-05D code, Draft PR #39): green. Foundation 18/18 (runs 41831022507 push, 41831030657 pull_request) and frontend 4/4 (runs 41831022377 push, 41831030864 pull_request; the PR run includes the isolated-build check). The superseded runs for 99abf09 were cancelled; that commit had added Tailwind candidates (`table`, `ring`, `p-1`, `max-w-[32ch]`), which e424418 removed.
+
+### STAGE-05D round 2: review of e424418 (approve with changes) + owner decisions (2026-11-04)
+- **Owner decision (a)** «Ναι, να τον θυμάται»: the customer's phone remembers the member QR.
+  - **Store.** `app/src/customer/qrStore.ts` is the ONLY customer file allowed to use browser storage. It uses `localStorage` (allowed "if simpler" than IndexedDB: synchronous, no dependency, testable in jsdom).
+  - **Key and value.** The key is `evc-club-qr:v1:` + SHA-256(account|issued_at); the value is {v, a: SHA-256(account), t: token}.
+  - **Shown** only for the issued_at GET reports; other records of the account are deleted on read.
+  - **Deleted on:** sign-out (before logout), signed_out (all), not_member, member_disabled, forbidden, route off (all), none, and replace (before the POST). **Kept** on unavailable / error.
+  - **Fallback.** Without WebCrypto or storage, memory only.
+  - **Guard.** `app/scripts/storage-guard.mjs` checks the customer esbuild graph inside the packager, plus `tests/club/storageGuard.test.ts` and its selfTest fixtures. The customer bundle string ban is now sessionStorage / indexedDB / document.cookie (localStorage removed).
+  - The server is unchanged and never re-sends a token.
+- **Owner decision (b)** «Δεν ξέρω ακόμα, να δουλεύει σε όλες»: the counter must work on iPad, Android and a USB scanner.
+  - The camera uses BarcodeDetector, else jsQR (now a runtime dependency, pinned 1.4.0) loaded lazily as its own chunk `staff-app/assets/jsQR-*.js`, on frames downscaled to at most 480 px every 300 ms on the main thread.
+  - No Worker: it would need an emitted worker file outside the manifest checks and a CSP `worker-src` rule. The shell CSP `script-src 'self'` allows the chunk, and there is no Permissions-Policy.
+  - The isolation test proves jsQR is a separate dynamic chunk, absent from the customer and ordering apps.
+- **Majors fixed.**
+  1. **Camera leak.** `startQrCamera(..., signal)`: a stream granted after abort (Close, screen change, lock) is stopped at once. DOM tests cover a slow getUserMedia with a lock, and with Close.
+  2. **Hand scanner.** `normalizeScannedCode` maps Greek-layout letters (εωψ_αβδφ) back and undoes Caps Lock; then exact `^evc_[0-9a-f]{48}$` (= `EVC_Qr_Token::is_valid_format`) is required, otherwise invalid_qr locally with no request sent.
+- **Minors and nits.**
+  - `Retry-After: 0` → 0, with a 1 s countdown redraw («Δοκιμάστε ξανά σε m:ss») that re-enables by itself.
+  - Scanner focus (no camera / after busy); autocorrect etc. off.
+  - Tailwind now scans only `src/` and the root HTML pages (`src/index.css` `source(none)` + `@source`); the CSS selector sets are unchanged.
+  - check-isolated-build now includes the customer entry and `dist-customer`. The canary was reworked: a docs-only word must NOT change the build, and an unwired `src/` file must.
+  - The QR white padded frame and the 32ch dialog width are restored.
+  - PHP `ready()` logs club_db_unavailable / club_db_schema_too_old at most once per 300 s (transient); the true-answer cache was not done.
+  - The coffee_redemption comment now names the catalogue gap.
+  - Encoder bit-exact fixtures come from python-qrcode 7.4.2. segno 1.6.6 is not spec-exact here: it inserts a 0x00 codeword when the data already ends on a byte boundary.
+  - Nits: the aborted lookup resets busy; signed_out clears memory; the sample card is not replaced by «Φόρτωση…» while the route is unknown; fixed status and alert live regions; the dialog sits outside live regions; «Ο καφές καταχωρήθηκε: Espresso · Γιάννης»; «προγράμματος περιήγησης».
+- **Mutants.** Frontend 299 → 325 (C14–C27, Q12–Q23; Q4/Q5/Q6/Q8/Q11 re-aimed; C14 and C24 first survived and were fixed: one abort check after every await, and a test that moves focus away first). Local: the 31 new or re-aimed mutants all killed; WordPress 147/147 killed (QL23–QL24 new, QL20 re-aimed); PHP suites all green.

@@ -81,6 +81,46 @@ describe("staff bundle isolation (real import graph)", () => {
     for (const needle of ["sessionStorage", "localStorage", "indexedDB", "document.cookie", "console."]) assert.ok(!own.output.includes(needle), `counter flow must not use ${needle}`);
   });
 
+  it("STAGE-05D round 2: jsQR (camera fallback) is a separate, lazily loaded chunk of the staff bundle only", async () => {
+    assert.ok(appDir);
+    const mod = await import(pathToFileURL(join(appDir, "node_modules", "esbuild", "lib", "main.js")).href);
+    const esbuild = (mod.default ?? mod) as typeof import("esbuild");
+    const outdir = mkdtempSync(join(tmpdir(), "evc-split-"));
+    try {
+      const result = await esbuild.build({
+        entryPoints: [join(appDir, "src/staff/main.tsx")],
+        bundle: true,
+        write: false,
+        metafile: true,
+        splitting: true,
+        outdir,
+        format: "esm",
+        platform: "browser",
+        jsx: "automatic",
+        loader: { ".png": "file", ".css": "empty" },
+        logLevel: "silent",
+      });
+      const outputs = Object.entries(result.metafile.outputs).filter(([name]) => name.endsWith(".js"));
+      const entry = outputs.find(([, o]) => o.entryPoint?.endsWith("src/staff/main.tsx"));
+      assert.ok(entry, "sanity: the entry chunk");
+      const lazy = outputs.filter(([, o]) => Object.keys(o.inputs).some((i) => i.includes("node_modules/jsqr/")));
+      assert.equal(lazy.length, 1, "exactly one chunk holds jsQR");
+      assert.notEqual(lazy[0][0], entry[0], "and it is not the entry chunk");
+      assert.ok(!Object.keys(entry[1].inputs).some((i) => i.includes("node_modules/jsqr/")), "the entry does not include jsQR");
+      assert.ok(entry[1].imports.some((i) => i.kind === "dynamic-import" && i.path === lazy[0][0]), "the entry loads it only through import()");
+      const text = (name: string) => result.outputFiles.find((f) => f.path.endsWith(name.split("/").pop()!))?.text ?? "";
+      for (const needle of ["fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "localStorage", "sessionStorage", "indexedDB"]) {
+        assert.ok(!text(lazy[0][0]).includes(needle), `the jsQR chunk must not use ${needle}`);
+      }
+    } finally {
+      rmSync(outdir, { recursive: true, force: true });
+    }
+    const customer = await bundle("src/customer/main.tsx");
+    assert.equal(customer.inputs.find((p) => p.includes("node_modules/jsqr/")), undefined, "the customer app never ships jsQR");
+    const ordering = await bundle("src/main.tsx");
+    assert.equal(ordering.inputs.find((p) => p.includes("node_modules/jsqr/")), undefined, "nor the ordering app");
+  });
+
   it("the UI-03D.D recovery state machine is not wired into any shipped entry", async () => {
     for (const entry of ["src/staff/main.tsx", "src/main.tsx"]) {
       const { inputs, output } = await bundle(entry);

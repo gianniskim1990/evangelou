@@ -46,7 +46,7 @@ function body(state: MemberQrState, flow: MemberQrFlow, confirmRef: RefObject<HT
     case "shown":
       return (
         <div className="text-center">
-          <div className="inline-block">
+          <div className="inline-block rounded-[10px] bg-white p-1">
             <QrSvg text={state.token} size={196} />
           </div>
           <p className="t-small mt-3 text-[var(--ink-2)]">Ενεργός από τις {ATHENS_DATE.format(new Date(state.issuedAt))}. Μένει ίδιος μέχρι να ζητήσετε νέο. Μπορείτε να κρατήσετε στιγμιότυπο οθόνης.</p>
@@ -64,7 +64,7 @@ function body(state: MemberQrState, flow: MemberQrFlow, confirmRef: RefObject<HT
       );
     case "confirm_replace":
       return (
-        <div role="alertdialog" aria-labelledby="evc-qr-confirm-title" aria-describedby="evc-qr-confirm-text" className="mx-auto max-w-[30ch] py-4 text-center">
+        <div role="alertdialog" aria-labelledby="evc-qr-confirm-title" aria-describedby="evc-qr-confirm-text" className="mx-auto max-w-[32ch] py-4 text-center">
           <h2 id="evc-qr-confirm-title" ref={confirmRef} tabIndex={-1} className="t-title text-[var(--ink)]">Θέλετε νέο κωδικό QR;</h2>
           <p id="evc-qr-confirm-text" className="t-small mt-2 text-[var(--ink-2)]">
             Ο τωρινός κωδικός, και κάθε στιγμιότυπο οθόνης του, θα σταματήσει να ισχύει αμέσως, σε όλες τις συσκευές.
@@ -96,14 +96,42 @@ function body(state: MemberQrState, flow: MemberQrFlow, confirmRef: RefObject<HT
   }
 }
 
+/** What the two fixed live regions announce (the visible text stays outside them). */
+function announce(state: MemberQrState): { status: string; alert: string } {
+  switch (state.phase) {
+    case "loading":
+      return { status: "Φόρτωση του κωδικού σας.", alert: "" };
+    case "replacing":
+      return { status: "Δημιουργία νέου κωδικού.", alert: "" };
+    case "shown":
+      return { status: "Ο κωδικός QR σας εμφανίζεται.", alert: "" };
+    case "elsewhere":
+      return { status: "Ο κωδικός σας δεν φαίνεται σε αυτή τη συσκευή.", alert: "" };
+    case "unavailable":
+    case "error":
+    case "signed_out":
+      return { status: "", alert: "Ο κωδικός σας δεν φορτώθηκε." };
+    default:
+      return { status: "", alert: "" };
+  }
+}
+
 export function MemberQrPanel({ flow }: { flow: MemberQrFlow }) {
   const state = useSyncExternalStore(flow.subscribe, flow.getState);
   const confirmRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (state.phase === "confirm_replace") confirmRef.current?.focus();
   }, [state.phase]);
+  const said = announce(state);
   return (
-    <div data-evc-qr-state={state.phase} aria-live="polite" aria-busy={state.phase === "loading" || state.phase === "replacing"}>
+    <div data-evc-qr-state={state.phase} aria-busy={state.phase === "loading" || state.phase === "replacing"}>
+      {/* Two fixed live regions; the confirmation dialog is NOT inside either (it takes focus instead). */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {said.status}
+      </p>
+      <p role="alert" aria-live="assertive" className="sr-only">
+        {said.alert}
+      </p>
       {body(state, flow, confirmRef)}
     </div>
   );

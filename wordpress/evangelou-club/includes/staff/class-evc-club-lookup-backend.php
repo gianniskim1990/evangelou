@@ -42,6 +42,8 @@ final class EVC_Club_Lookup_Backend {
     const REASON_CONNECT = 'club_db_unavailable';
     const REASON_SCHEMA = 'club_db_schema_too_old';
     const REASON_FAILED = 'lookup_failed';
+    /** ready(): a real outage (connect / schema) is logged at most once per reason in this window. */
+    const READY_LOG_SECONDS = 300;
 
     /** @var callable(): array */
     private $environment;
@@ -208,6 +210,8 @@ final class EVC_Club_Lookup_Backend {
      * now: steps 1-8 above, including a real connection and schema MAX(version) >= 3. Reads no member,
      * token or name. Quiet: a refusal here is not logged (the session check runs on every tablet start
      * and on every return to the tab, and "off" is the normal state); last_reason() still says why.
+     * Config refusals stay quiet; a real outage (REASON_CONNECT, REASON_SCHEMA) is logged at most once
+     * per reason every READY_LOG_SECONDS (a transient), so a down Club DB is visible without flooding.
      * Never throws.
      */
     public function ready(): bool {
@@ -282,6 +286,9 @@ final class EVC_Club_Lookup_Backend {
     private function refuse(string $reason, ?Throwable $e = null) {
         $this->last_reason = $reason;
         if ($this->quiet) {
+            if ($reason === self::REASON_CONNECT || $reason === self::REASON_SCHEMA) {
+                $this->log_not_ready($reason, $e);
+            }
             return null;
         }
         try {
@@ -290,6 +297,20 @@ final class EVC_Club_Lookup_Backend {
             // never changes the answer
         }
         return null;
+    }
+
+    /** At most one line per reason per READY_LOG_SECONDS; never changes the answer. */
+    private function log_not_ready(string $reason, ?Throwable $e): void {
+        try {
+            $key = 'evc_club_qr_ready_logged_' . $reason;
+            if (get_transient($key) !== false) {
+                return;
+            }
+            set_transient($key, 1, self::READY_LOG_SECONDS);
+            ($this->log)('Evangelou Club: staff QR not ready (' . $reason . ($e === null ? '' : ', ' . self::safe(get_class($e))) . ').');
+        } catch (Throwable $ignored) {
+            // never changes the answer
+        }
     }
 
     private static function safe($value): string {

@@ -544,6 +544,13 @@ caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
   server's v1 list (`evc-coffee-v1-2026-11-03`, including `other_coffee`).
 - The customer app calls `GET|POST /me/qr`; a `404` from `GET` means the QR route is not switched on.
 - No wire-shape change on the server.
+- Round 2 (client only):
+  - The staff app sends `/members/lookup` only for a code that matches exactly `^evc_[0-9a-f]{48}$`,
+    after mapping Greek keyboard-layout letters and Caps Lock back. Anything else is answered "not a
+    Club QR" on the tablet.
+  - `Retry-After: 0` means no wait.
+  - The customer app remembers its own QR between visits (owner decision); the server still sends the
+    token only at issue.
 
 ## 16. Demo-only shortcuts (deliberate)
 

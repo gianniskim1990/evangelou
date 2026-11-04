@@ -4,7 +4,8 @@ import { createElement } from "react";
 import type { CustomerConfig } from "../../src/customer/config";
 import { CustomerApp } from "../../src/customer/CustomerApp";
 import { createCustomerApi, createNonceBox, type CustomerApi, type Me } from "../../src/customer/customerApi";
-import { MemberQrFlow, createQrMemory, type QrMemory } from "../../src/customer/memberQr";
+import { MemberQrFlow, createQrKeeper } from "../../src/customer/memberQr";
+import { QR_STORE_PREFIX, createStorageQrKeeper } from "../../src/customer/qrStore";
 import { createCustomerQrApi, parseQrIssued, parseQrStatus, type CustomerQrApi, type QrIssue, type QrStatus } from "../../src/customer/qrApi";
 import { createDom, type DomHarness } from "../staff/support/dom";
 
@@ -14,8 +15,12 @@ import { createDom, type DomHarness } from "../staff/support/dom";
  *   token only ever comes from a POST 200.
  * - MemberQrFlow: the decision rules of docs/member-qr.md; a replacement
  *   only after an explicit confirmation (D6); 409 qr_exists handled.
+ * - qrStore (round 2, owner «Ναι, να τον θυμάται»): the phone remembers the
+ *   QR per account + issued_at, shows it only for the issued_at the server
+ *   reports, and deletes it on every rule of the decision.
  * - CustomerApp: the real QR in the approved pass; the sample stays when the
- *   route does not exist; nothing in browser storage, the token never as text.
+ *   route does not exist; only qrStore writes browser storage; the token is
+ *   never written out as text.
  */
 
 const ORIGIN = "https://shop.example";
@@ -161,45 +166,167 @@ function scripted(statuses: QrStatus[], issues: QrIssue[]) {
   return { api, calls };
 }
 
-describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
-  it("none: POST {} once and show the new QR, kept in memory only", async () => {
-    const memory = createQrMemory();
-    const { api, calls } = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
-    const flow = new MemberQrFlow(api, memory);
-    await flow.open();
-    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: true });
-    assert.deepEqual(calls, ["GET", "POST {}"]);
-    assert.deepEqual(memory.get(), { token: TOKEN, issuedAt: ISSUED });
+/** A Map-backed Storage (the real browser API shape). */
+class MapStorage {
+  map = new Map<string, string>();
+  writes: string[] = [];
+  get length() {
+    return this.map.size;
+  }
+  key(i: number) {
+    return [...this.map.keys()][i] ?? null;
+  }
+  getItem(k: string) {
+    return this.map.get(k) ?? null;
+  }
+  setItem(k: string, v: string) {
+    this.writes.push(`set ${k}`);
+    this.map.set(k, String(v));
+  }
+  removeItem(k: string) {
+    this.writes.push(`remove ${k}`);
+    this.map.delete(k);
+  }
+  ours() {
+    return [...this.map.keys()].filter((k) => k.startsWith(QR_STORE_PREFIX));
+  }
+}
+
+const ME = "Eleni@Example.org";
+const OTHER = "nikos@example.org";
+const subtle = globalThis.crypto.subtle;
+
+function persisted() {
+  const storage = new MapStorage();
+  const store = createStorageQrKeeper(storage as unknown as Storage, subtle)!;
+  return { storage, store, keeper: createQrKeeper(store) };
+}
+
+describe("STAGE-05D round 2: the phone's QR record (qrStore.ts)", () => {
+  it("kept per account + issued_at, never in the clear; read only for the exact issued_at", async () => {
+    const { storage, store } = persisted();
+    await store.write(ME, ISSUED, TOKEN);
+    assert.equal(storage.ours().length, 1);
+    const [key] = storage.ours();
+    assert.match(key, /^evc-club-qr:v1:[0-9a-f]{64}$/);
+    const raw = storage.getItem(key)!;
+    assert.doesNotMatch(raw + key, /eleni|example|2026-11/i, "no e-mail and no date in the clear");
+    assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ["a", "t", "v"]);
+    assert.equal(await store.read("eleni@example.org", ISSUED), TOKEN, "the e-mail is case-insensitive");
+    assert.equal(await store.read(OTHER, ISSUED), null, "another account never reads it");
+    assert.equal(storage.ours().length, 1, "and never deletes it");
   });
 
-  it("active with the same issued_at kept here: shown again with no POST", async () => {
-    const memory = createQrMemory();
-    memory.set({ token: TOKEN, issuedAt: ISSUED });
+  it("a different issued_at shows nothing and deletes the old record", async () => {
+    const { storage, store } = persisted();
+    await store.write(ME, ISSUED, TOKEN);
+    await store.write(OTHER, ISSUED, TOKEN2);
+    assert.equal(await store.read(ME, ISSUED2), null);
+    assert.equal(storage.ours().length, 1, "only the other account's record is left");
+    assert.equal(await store.read(OTHER, ISSUED), TOKEN2);
+  });
+
+  it("a new record replaces the account's older one; forget / forgetAll; a tampered record is never shown", async () => {
+    const { storage, store } = persisted();
+    await store.write(ME, ISSUED, TOKEN);
+    await store.write(ME, ISSUED2, TOKEN2);
+    assert.equal(storage.ours().length, 1);
+    assert.equal(await store.read(ME, ISSUED2), TOKEN2);
+    await store.write(OTHER, ISSUED, TOKEN);
+    await store.forget(ME);
+    assert.equal(storage.ours().length, 1);
+    await store.forgetAll();
+    assert.equal(storage.ours().length, 0);
+    storage.setItem("unrelated", "kept");
+    await store.write(ME, ISSUED, TOKEN);
+    const [key] = storage.ours();
+    storage.setItem(key, JSON.stringify({ v: 1, a: JSON.parse(storage.getItem(key)!).a, t: "evc_not-a-token" }));
+    assert.equal(await store.read(ME, ISSUED), null);
+    assert.equal(storage.ours().length, 0, "the bad record is deleted");
+    assert.equal(storage.getItem("unrelated"), "kept", "keys that are not ours are never touched");
+  });
+
+  it("no SHA-256 or no working storage: nothing is persisted (memory only); storage errors never throw", async () => {
+    assert.equal(createStorageQrKeeper(new MapStorage() as unknown as Storage, null), null);
+    assert.equal(createStorageQrKeeper(null, subtle), null);
+    const broken = { length: 1, key: () => { throw new Error("x"); }, getItem: () => { throw new Error("x"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => { throw new Error("x"); } };
+    const store = createStorageQrKeeper(broken as unknown as Storage, subtle)!;
+    await store.write(ME, ISSUED, TOKEN);
+    assert.equal(await store.read(ME, ISSUED), null);
+    await store.forget(ME);
+    await store.forgetAll();
+  });
+});
+
+describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
+  it("none: POST {} once, show the new QR and keep it on the phone", async () => {
+    const { storage, keeper } = persisted();
+    const { api, calls } = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
+    const flow = new MemberQrFlow(api, keeper);
+    await flow.open(ME);
+    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: true });
+    assert.deepEqual(calls, ["GET", "POST {}"]);
+    assert.equal(storage.ours().length, 1);
+  });
+
+  it("a LATER visit (new page, same phone): active with the same issued_at shows the remembered QR, no POST", async () => {
+    const first = persisted();
+    await new MemberQrFlow(scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]).api, first.keeper).open(ME);
+    const store = createStorageQrKeeper(first.storage as unknown as Storage, subtle)!;
     const { api, calls } = scripted([{ kind: "active", issuedAt: ISSUED }], []);
-    const flow = new MemberQrFlow(api, memory);
-    await flow.open();
+    const flow = new MemberQrFlow(api, createQrKeeper(store));
+    await flow.open(ME);
     assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: false });
     assert.deepEqual(calls, ["GET"]);
   });
 
-  it("active but nothing (or an older QR) kept: never replaced by itself, the old kept code is forgotten", async () => {
-    for (const kept of [null, { token: TOKEN, issuedAt: ISSUED }]) {
-      const memory = createQrMemory();
-      if (kept) memory.set(kept);
-      const { api, calls } = scripted([{ kind: "active", issuedAt: ISSUED2 }], []);
-      const flow = new MemberQrFlow(api, memory);
-      await flow.open();
-      assert.deepEqual(flow.getState(), { phase: "elsewhere", reason: "not_here" });
-      assert.deepEqual(calls, ["GET"], "no POST without the member's request");
-      assert.equal(memory.get(), null, "a dead code is never shown");
+  it("active with a different issued_at (replaced elsewhere, revoked and re-issued): not shown, the record is deleted", async () => {
+    const { storage, keeper } = persisted();
+    await keeper.write(ME, ISSUED, TOKEN);
+    const { api, calls } = scripted([{ kind: "active", issuedAt: ISSUED2 }], []);
+    const flow = new MemberQrFlow(api, createQrKeeper(createStorageQrKeeper(storage as unknown as Storage, subtle)));
+    await flow.open(ME);
+    assert.deepEqual(flow.getState(), { phase: "elsewhere", reason: "not_here" });
+    assert.deepEqual(calls, ["GET"], "no POST without the member's request");
+    assert.equal(storage.ours().length, 0, "a dead code is never kept");
+    // The same with the old QR still in this page's memory (shown earlier in this visit).
+    const again = persisted();
+    await again.keeper.write(ME, ISSUED, TOKEN);
+    const f2 = new MemberQrFlow(scripted([{ kind: "active", issuedAt: ISSUED2 }], []).api, again.keeper);
+    await f2.open(ME);
+    assert.deepEqual(f2.getState(), { phase: "elsewhere", reason: "not_here" });
+    assert.equal(again.keeper.memory(), null, "the in-memory copy is dropped too");
+  });
+
+  it("delete rules: signed_out, not_member, member_disabled, forbidden, route off and none", async () => {
+    for (const [kind, othersKept] of [["signed_out", 0], ["not_member", 1], ["member_disabled", 1], ["forbidden", 1], ["off", 0], ["none", 1]] as const) {
+      const { storage, keeper } = persisted();
+      await keeper.write(OTHER, ISSUED, TOKEN2);
+      await keeper.write(ME, ISSUED, TOKEN);
+      const { api } = scripted([{ kind }], kind === "none" ? [{ kind: "unavailable" }] : []);
+      const flow = new MemberQrFlow(api, keeper);
+      await flow.open(ME);
+      assert.equal(storage.ours().length, othersKept, `${kind}: the account's record is deleted`);
+      assert.equal(keeper.memory(), null, `${kind}: nor kept in memory`);
     }
   });
 
-  it("«Νέο QR» asks first; cancel goes back; confirm POSTs replace: true", async () => {
-    const memory = createQrMemory();
-    const { api, calls } = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
-    const flow = new MemberQrFlow(api, memory);
-    await flow.open();
+  it("unavailable / error keep the record (a passing failure says nothing about the QR) and show no code", async () => {
+    for (const kind of ["unavailable", "error"] as const) {
+      const { storage, keeper } = persisted();
+      await keeper.write(ME, ISSUED, TOKEN);
+      const flow = new MemberQrFlow(scripted([{ kind }], []).api, keeper);
+      await flow.open(ME);
+      assert.deepEqual(flow.getState(), { phase: kind });
+      assert.equal(storage.ours().length, 1);
+    }
+  });
+
+  it("«Νέο QR» asks first; cancel goes back; confirm deletes the old record BEFORE POST replace: true", async () => {
+    const { storage, keeper } = persisted();
+    const { api, calls } = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }, { kind: "unavailable" }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
+    const flow = new MemberQrFlow(api, keeper);
+    await flow.open(ME);
     flow.askReplace();
     assert.deepEqual(flow.getState(), { phase: "confirm_replace", back: "shown" });
     flow.cancelReplace();
@@ -207,17 +334,31 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
     assert.deepEqual(calls, ["GET", "POST {}"], "cancel sends nothing");
     flow.askReplace();
     await flow.confirmReplace();
+    assert.deepEqual(flow.getState(), { phase: "unavailable" });
+    assert.equal(storage.ours().length, 0, "the old code is gone even though the new one did not arrive");
+    await flow.open(ME);
+    flow.askReplace();
+    assert.equal(flow.getState().phase, "error", "open() with a GET error: nothing to replace from");
+  });
+
+  it("confirm replace: the new QR is shown and kept", async () => {
+    const { storage, keeper } = persisted();
+    const { api, calls } = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
+    const flow = new MemberQrFlow(api, keeper);
+    await flow.open(ME);
+    flow.askReplace();
+    await flow.confirmReplace();
     assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN2, issuedAt: ISSUED2, fresh: true });
     assert.deepEqual(calls, ["GET", "POST {}", "POST replace"]);
-    assert.deepEqual(memory.get(), { token: TOKEN2, issuedAt: ISSUED2 });
+    assert.equal(await createStorageQrKeeper(storage as unknown as Storage, subtle)!.read(ME, ISSUED2), TOKEN2);
     await flow.confirmReplace();
     assert.equal(calls.length, 3, "confirm without a question does nothing");
   });
 
   it("409 qr_exists after GET none (another device was first): explained, nothing replaced", async () => {
     const { api, calls } = scripted([{ kind: "none" }], [{ kind: "qr_exists" }]);
-    const flow = new MemberQrFlow(api, createQrMemory());
-    await flow.open();
+    const flow = new MemberQrFlow(api, createQrKeeper());
+    await flow.open(ME);
     assert.deepEqual(flow.getState(), { phase: "elsewhere", reason: "created_elsewhere" });
     flow.askReplace();
     assert.deepEqual(flow.getState(), { phase: "confirm_replace", back: "elsewhere" });
@@ -226,70 +367,46 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
 
   it("409 concurrent_change: read the server again once; twice in a row is an error", async () => {
     const once = scripted([{ kind: "none" }, { kind: "active", issuedAt: ISSUED }], [{ kind: "concurrent_change" }]);
-    const f1 = new MemberQrFlow(once.api, createQrMemory());
-    await f1.open();
+    const f1 = new MemberQrFlow(once.api, createQrKeeper());
+    await f1.open(ME);
     assert.deepEqual(f1.getState(), { phase: "elsewhere", reason: "not_here" });
     assert.deepEqual(once.calls, ["GET", "POST {}", "GET"]);
     const twice = scripted([{ kind: "none" }, { kind: "none" }], [{ kind: "concurrent_change" }, { kind: "concurrent_change" }]);
-    const f2 = new MemberQrFlow(twice.api, createQrMemory());
-    await f2.open();
+    const f2 = new MemberQrFlow(twice.api, createQrKeeper());
+    await f2.open(ME);
     assert.deepEqual(f2.getState(), { phase: "error" });
-    assert.deepEqual(twice.calls, ["GET", "POST {}", "GET", "POST {}"]);
   });
 
-  it("not a member, disabled, signed out, forbidden, unavailable, error, off", async () => {
-    for (const kind of ["not_member", "member_disabled", "signed_out", "forbidden", "unavailable", "error", "off"] as const) {
-      const memory = createQrMemory();
-      memory.set({ token: TOKEN, issuedAt: ISSUED });
-      const { api, calls } = scripted([{ kind }], []);
-      const flow = new MemberQrFlow(api, memory);
-      await flow.open();
-      assert.deepEqual(flow.getState(), { phase: kind }, kind);
-      assert.deepEqual(calls, ["GET"], kind);
-    }
-    const unknownCommit = scripted([{ kind: "none" }], [{ kind: "unavailable" }]);
-    const flow = new MemberQrFlow(unknownCommit.api, createQrMemory());
-    await flow.open();
-    assert.deepEqual(flow.getState(), { phase: "unavailable" }, "an unknown COMMIT outcome is unavailable; retry starts with GET again");
-  });
-
-  it("an older reply never overwrites a newer open(); forget() drops the plaintext", async () => {
+  it("an older reply never overwrites a newer open(); forget() drops memory and the phone's record", async () => {
     let release: (s: QrStatus) => void = () => {};
-    const memory: QrMemory = createQrMemory();
+    const { storage, keeper } = persisted();
     let n = 0;
     const api: CustomerQrApi = {
       status: () => (n++ === 0 ? new Promise<QrStatus>((r) => (release = r)) : Promise.resolve({ kind: "member_disabled" })),
       issue: async () => ({ kind: "issued", token: TOKEN, issuedAt: ISSUED }),
     };
-    const flow = new MemberQrFlow(api, memory);
-    const first = flow.open();
-    await flow.open();
+    const flow = new MemberQrFlow(api, keeper);
+    const first = flow.open(ME);
+    await flow.open(ME);
     release({ kind: "none" });
     await first;
     assert.deepEqual(flow.getState(), { phase: "member_disabled" });
-    assert.equal(memory.get(), null);
-    memory.set({ token: TOKEN, issuedAt: ISSUED });
-    flow.forget();
-    assert.equal(memory.get(), null);
+    await keeper.write(ME, ISSUED, TOKEN);
+    await flow.forget();
+    assert.equal(keeper.memory(), null);
+    assert.equal(storage.ours().length, 0);
     assert.deepEqual(flow.getState(), { phase: "loading" });
+    assert.equal(flow.seenRoute(), true);
   });
 });
 
 let dom: DomHarness;
 let act: (fn: () => Promise<void>) => Promise<void>;
-const storageWrites: string[] = [];
 
 before(async () => {
   dom = await createDom();
   act = (await import("react")).act as unknown as typeof act;
   dom.window.scrollTo = () => {};
-  for (const area of ["localStorage", "sessionStorage"] as const) {
-    const s = dom.window[area];
-    for (const m of ["setItem", "removeItem", "clear"] as const) {
-      const original = s[m].bind(s);
-      Object.defineProperty(s, m, { value: (...args: unknown[]) => (storageWrites.push(`${area}.${m}`), (original as (...a: unknown[]) => unknown)(...args)), configurable: true });
-    }
-  }
 });
 after(() => dom.dispose());
 beforeEach(async () => {
@@ -303,44 +420,58 @@ const button = (label: string) => {
   assert.ok(b, `button «${label}» exists`);
   return b as HTMLButtonElement;
 };
-const ACTIVE: Me = { displayName: "Ελένη Μαρκοπούλου", email: "eleni@example.org", state: "active", paidUntilUtc: "2026-11-15T10:00:00+00:00" };
+/** SHA-256 (WebCrypto) resolves on Node's thread pool: let real time pass inside act(). */
+async function settle(rounds = 4) {
+  for (let i = 0; i < rounds; i++) await act(async () => void (await new Promise((r) => setTimeout(r, 15))));
+}
+const ACTIVE: Me = { displayName: "Ελένη Μαρκοπούλου", email: ME, state: "active", paidUntilUtc: "2026-11-15T10:00:00+00:00" };
 
-async function mountWith(statuses: QrStatus[], issues: QrIssue[], memory = createQrMemory()) {
-  const s = scripted(statuses, issues);
-  const flow = new MemberQrFlow(s.api, memory);
-  const api: CustomerApi = { me: async () => ({ kind: "ok", me: ACTIVE }) };
+async function mountWith(statuses: (QrStatus | (() => Promise<QrStatus>))[], issues: QrIssue[], ctx = persisted()) {
+  const calls: string[] = [];
+  const api: CustomerQrApi = {
+    async status() {
+      calls.push("GET");
+      const s = statuses.shift() ?? { kind: "error" };
+      return typeof s === "function" ? s() : s;
+    },
+    async issue(replace) {
+      calls.push(replace ? "POST replace" : "POST {}");
+      return issues.shift() ?? { kind: "error" };
+    },
+  };
+  const flow = new MemberQrFlow(api, ctx.keeper);
+  const me: CustomerApi = { me: async () => ({ kind: "ok", me: ACTIVE }) };
   const visited: string[] = [];
-  await dom.render(createElement(CustomerApp, { config: CONFIG, api, now: () => Date.parse("2026-11-04T10:00:00Z"), navigate: (u: string) => visited.push(u), qrFlow: flow }));
-  await act(async () => {});
-  await act(async () => {});
-  return { ...s, flow, memory, visited };
+  await dom.render(createElement(CustomerApp, { config: CONFIG, api: me, now: () => Date.parse("2026-11-04T10:00:00Z"), navigate: (u: string) => visited.push(u), qrFlow: flow }));
+  await settle();
+  return { calls, flow, visited, ...ctx };
 }
 
 describe("STAGE-05D customer app: the real QR on the card", () => {
-  it("a first QR is issued and drawn in the pass; the token never appears as text and nothing is stored", async () => {
-    const { calls, memory } = await mountWith([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
+  it("a first QR is issued, drawn in a white frame and remembered; the token never appears as text", async () => {
+    const { calls, storage } = await mountWith([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
     assert.deepEqual(calls, ["GET", "POST {}"]);
     const svg = app().querySelector('[data-evc-qr="member"]');
     assert.ok(svg, "the member QR is drawn");
     assert.equal(svg!.getAttribute("role"), "img");
     assert.equal(svg!.getAttribute("aria-label"), "Ο κωδικός QR της κάρτας μέλους σας");
+    assert.match(svg!.parentElement!.className, /bg-white/, "the white padded frame");
     assert.equal(app().querySelector('[data-evc-preview="sample-qr"]'), null, "no sample code next to the real one");
     assert.doesNotMatch(dom.document.body.innerHTML, /evc_[0-9a-f]{48}/, "the plaintext is drawn, never written out");
     assert.match(text(), /Μένει ίδιος μέχρι να ζητήσετε νέο/);
     assert.match(text(), /στιγμιότυπο οθόνης/);
     assert.match(text(), /Δείξτε τον κωδικό στο ταμείο/);
-    assert.doesNotMatch(text(), /δεν είναι ακόμη ενεργός/);
     assert.ok(app().querySelector('[aria-label="Κάρτα μέλους Evangelou Club"]'));
-    assert.equal(memory.get()?.token, TOKEN);
-    assert.deepEqual(storageWrites, []);
-    assert.equal(dom.network.fetch.length + dom.network.xhr.length, 0, "only the injected client talks to the server");
+    assert.equal(storage.ours().length, 1, "the phone remembers it");
+    assert.ok(app().querySelector('[role="status"]') && app().querySelector('[role="alert"]'), "two fixed live regions");
   });
 
-  it("«Νέο QR» shows a clear Greek confirmation (focus moves to it); «Άκυρο» keeps the code; «Ναι, νέο QR» replaces it", async () => {
+  it("«Νέο QR» shows a clear Greek confirmation (focus moves to it, not inside a live region); «Άκυρο» keeps the code; «Ναι, νέο QR» replaces it", async () => {
     const { calls } = await mountWith([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
     await dom.click(button("Νέο QR"));
     const dialog = app().querySelector('[role="alertdialog"]') as HTMLElement;
     assert.ok(dialog);
+    assert.equal(dialog.closest("[aria-live]"), null, "the dialog is not inside a live region");
     assert.match(dialog.textContent ?? "", /Θέλετε νέο κωδικό QR;/);
     assert.match(dialog.textContent ?? "", /θα σταματήσει να ισχύει αμέσως, σε όλες τις συσκευές/);
     assert.equal(dom.document.activeElement?.id, "evc-qr-confirm-title", "focus on the question");
@@ -349,9 +480,18 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     assert.deepEqual(calls, ["GET", "POST {}"]);
     await dom.click(button("Νέο QR"));
     await dom.click(button("Ναι, νέο QR"));
-    await act(async () => {});
+    await settle();
     assert.deepEqual(calls, ["GET", "POST {}", "POST replace"]);
     assert.equal(app().querySelector("[data-evc-qr-state]")?.getAttribute("data-evc-qr-state"), "shown");
+  });
+
+  it("the next visit shows the remembered QR without asking the server for a new one", async () => {
+    const ctx = persisted();
+    await ctx.keeper.write(ME, ISSUED, TOKEN);
+    const fresh = { ...ctx, keeper: createQrKeeper(createStorageQrKeeper(ctx.storage as unknown as Storage, subtle)) };
+    const { calls } = await mountWith([{ kind: "active", issuedAt: ISSUED }], [], fresh);
+    assert.deepEqual(calls, ["GET"]);
+    assert.ok(app().querySelector('[data-evc-qr="member"]'));
   });
 
   it("active on another device: explained, the screenshot still works, «Νέο QR» on request only", async () => {
@@ -372,26 +512,32 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     assert.equal(app().querySelector('[data-evc-qr="member"]'), null);
   });
 
-  it("the QR route does not exist (feature off): the approved sample card, unchanged", async () => {
-    await mountWith([{ kind: "off" }], []);
+  it("the route does not exist (feature off): the approved sample card, never replaced by «Φόρτωση…»", async () => {
+    let answer: (s: QrStatus) => void = () => {};
+    await mountWith([() => new Promise<QrStatus>((r) => (answer = r))], []);
+    assert.ok(app().querySelector('[data-evc-preview="sample-qr"]'), "while the first GET is pending: the sample");
+    assert.doesNotMatch(text(), /Φόρτωση του κωδικού σας/);
+    await act(async () => answer({ kind: "off" }));
+    await settle();
     assert.ok(app().querySelector('[data-evc-preview="sample-qr"]'));
     assert.match(text(), /Ο κωδικός QR δεν είναι ακόμη ενεργός/);
     assert.equal(app().querySelector("[data-evc-qr-state]"), null);
   });
 
-  it("unavailable: retry starts again from GET; sign-out forgets the code", async () => {
-    const memory = createQrMemory();
-    const { calls, visited } = await mountWith([{ kind: "unavailable" }, { kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }], memory);
+  it("unavailable: retry starts again from GET; sign-out deletes the remembered code before WordPress signs out", async () => {
+    const ctx = persisted();
+    const { calls, visited, storage } = await mountWith([{ kind: "unavailable" }, { kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }], ctx);
     assert.match(text(), /δεν είναι διαθέσιμος αυτή τη στιγμή/);
     await dom.click(button("Δοκιμάστε ξανά"));
-    await act(async () => {});
+    await settle();
     assert.deepEqual(calls, ["GET", "GET", "POST {}"]);
-    assert.equal(memory.get()?.token, TOKEN);
+    assert.equal(storage.ours().length, 1);
     await dom.click(button("Αρχική"));
     await dom.click(button("Λογαριασμός"));
     await dom.click(button("Αποσύνδεση"));
+    await settle();
     assert.deepEqual(visited, [CONFIG.logoutUrl]);
-    assert.equal(memory.get(), null, "the plaintext is dropped at sign-out");
-    assert.deepEqual(storageWrites, []);
+    assert.equal(storage.ours().length, 0, "deleted at sign-out");
+    assert.equal(ctx.keeper.memory(), null, "and the in-memory copy too");
   });
 });

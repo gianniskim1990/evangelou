@@ -306,10 +306,10 @@ function utf8(text: string): number[] {
 
 /**
  * Encodes `text` (byte mode, level M) into the smallest version 1-10 that
- * fits. Returns the module matrix: matrix[y][x] === true is a dark module.
+ * fits, with the lowest-penalty mask (or `options.mask`, tests only). Returns the module matrix: matrix[y][x] === true is a dark module.
  * Throws QrTooLongError when the text does not fit version 10.
  */
-export function encodeQr(text: string): boolean[][] {
+export function encodeQr(text: string, options: { mask?: number } = {}): boolean[][] {
   const bytes = utf8(text);
   let version = 1;
   for (; version <= QR_MAX_VERSION; version++) {
@@ -342,7 +342,11 @@ export function encodeQr(text: string): boolean[][] {
   matrix.drawCodewords(addEccAndInterleave(data, version));
   let best = 0;
   let bestPenalty = Infinity;
+  // A forced mask is for the bit-exact reference tests (tests/club/fixtures-qr-reference.json).
+  const forced = options.mask;
+  if (forced !== undefined && !(Number.isInteger(forced) && forced >= 0 && forced <= 7)) throw new RangeError("mask must be 0-7");
   for (let mask = 0; mask < 8; mask++) {
+    if (forced !== undefined && mask !== forced) continue;
     matrix.applyMask(mask);
     matrix.drawFormatBits(mask);
     const p = matrix.penalty();

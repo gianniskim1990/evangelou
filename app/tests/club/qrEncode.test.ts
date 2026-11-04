@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import jsQR from "jsqr";
 import { QrTooLongError, encodeQr, numDataCodewords } from "../../src/customer/qrEncode";
+import reference from "./fixtures-qr-reference.json";
 
 /*
  * STAGE-05D: the member QR encoder is checked against an INDEPENDENT decoder
@@ -95,5 +96,16 @@ describe("member QR encoder (decoded by jsQR)", () => {
       assert.equal(a[y0 + 1][x0 + 1], false, "finder light square");
       assert.equal(a[y0 + 3][x0 + 3], true, "finder centre");
     }
+  });
+
+  it("is bit-exact against an independent reference encoder (python-qrcode 7.4.2, committed fixtures) for every mask", () => {
+    const cases = (reference as { cases: { text: string; mask: number | null; auto_mask?: number; rows: string[] }[] }).cases;
+    assert.equal(cases.length, 36, "4 tokens x (auto + 8 masks)");
+    for (const c of cases) {
+      const m = c.mask === null ? encodeQr(c.text) : encodeQr(c.text, { mask: c.mask });
+      const rows = m.map((row) => row.map((b) => (b ? "1" : "0")).join(""));
+      assert.deepEqual(rows, c.rows, `${c.text} mask ${c.mask ?? `auto (${c.auto_mask})`}`);
+    }
+    assert.throws(() => encodeQr("x", { mask: 8 }), RangeError);
   });
 });

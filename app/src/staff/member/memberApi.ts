@@ -26,8 +26,31 @@ export const LOOKUP_TIMEOUT_MS = 10_000;
 export const DEFAULT_RETRY_AFTER_SECONDS = 300;
 const MAX_RETRY_AFTER_SECONDS = 3600;
 const MEMBER_ID_RE = /^mem_[0-9a-f]{32}$/;
-/** Longer than any QR the server accepts (256 bytes): refused locally, never sent. */
-const MAX_SCAN_LENGTH = 256;
+/** EXACTLY EVC_Qr_Token::is_valid_format() (includes/class-evc-qr-token.php: /^evc_[0-9a-f]{48}$/D). */
+export const QR_TOKEN_RE = /^evc_[0-9a-f]{48}$/;
+
+/*
+ * A USB / Bluetooth hand scanner "types" the code as key presses, so the
+ * tablet's keyboard layout decides which characters arrive: with the Greek
+ * layout "evc_0a…" arrives as "εωψ_0α…", with Caps Lock as "EVC_0A…" or
+ * "ΕΩΨ_0Α…". Each Greek letter is mapped back to the Latin key it sits on
+ * (standard Greek layout), then everything is lower-cased.
+ */
+const GREEK_LAYOUT: Record<string, string> = {
+  ";": "q", ς: "w", ε: "e", ρ: "r", τ: "t", υ: "y", θ: "u", ι: "i", ο: "o", π: "p",
+  α: "a", σ: "s", δ: "d", φ: "f", γ: "g", η: "h", ξ: "j", κ: "k", λ: "l",
+  ζ: "z", χ: "x", ψ: "c", ω: "v", β: "b", ν: "n", μ: "m",
+};
+
+/** The scanned text as the Club token it was meant to be (layout fixed, lower case, trimmed). */
+export function normalizeScannedCode(raw: string): string {
+  let out = "";
+  for (const ch of raw.trim().normalize("NFC")) {
+    const lower = ch.toLocaleLowerCase("el-GR");
+    out += GREEK_LAYOUT[lower] ?? lower.toLowerCase();
+  }
+  return out;
+}
 
 export type MemberStatus = "active" | "used_today" | "inactive";
 
@@ -63,15 +86,18 @@ function envelopeCode(body: unknown): string | null {
   return isRecord(body) && isRecord(body.error) && typeof body.error.code === "string" ? body.error.code : null;
 }
 
-/** Retry-After header (seconds), else details.retry_after_seconds, else 300; bounded to 1..3600. */
+/**
+ * Retry-After header (seconds), else details.retry_after_seconds, else 300 when neither is a valid
+ * number; bounded to 0..3600. An explicit 0 means "now", never the 300 s default.
+ */
 export function retryAfterOf(header: string | null, body: unknown): number {
   let seconds: number | null = null;
   if (header && /^\d{1,6}$/.test(header.trim())) seconds = Number(header.trim());
   else if (isRecord(body) && isRecord(body.error) && isRecord(body.error.details)) {
     const d = body.error.details.retry_after_seconds;
-    if (typeof d === "number" && Number.isInteger(d)) seconds = d;
+    if (typeof d === "number" && Number.isInteger(d) && d >= 0) seconds = d;
   }
-  if (seconds === null || seconds < 1) return DEFAULT_RETRY_AFTER_SECONDS;
+  if (seconds === null) return DEFAULT_RETRY_AFTER_SECONDS;
   return Math.min(seconds, MAX_RETRY_AFTER_SECONDS);
 }
 
@@ -101,9 +127,10 @@ export function createMemberApi(api: StaffApi, restBase: string, timeoutMs = LOO
   const base = restBase.replace(/\/+$/, "");
   return {
     async lookupQr(token, signal) {
-      const scanned = token.trim();
-      // Nothing that cannot be a Club QR leaves the tablet as a "scan"; the server would refuse it anyway.
-      if (scanned === "" || scanned.length > MAX_SCAN_LENGTH) return { kind: "invalid_qr" };
+      // Nothing that is not exactly a Club token leaves the tablet: a bad scan (wrong layout leftovers,
+      // another QR, a half read) is answered here, so it never uses up the ~10 failed scans / 5 min (D9).
+      const scanned = normalizeScannedCode(token);
+      if (!QR_TOKEN_RE.test(scanned)) return { kind: "invalid_qr" };
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       const onAbort = () => controller.abort();

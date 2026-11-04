@@ -91,15 +91,21 @@ export function CustomerApp({
   }, [screen, result]);
 
   const signOut = () => {
-    qrFlow?.forget();
-    navigate(config.logoutUrl);
+    // The phone's QR record and the in-memory copy go BEFORE WordPress signs the account out.
+    void (async () => {
+      await qrFlow?.forget();
+      navigate(config.logoutUrl);
+    })();
   };
 
+  const account = result?.kind === "ok" ? result.me.email : null;
   const onCard = result?.kind === "ok" && (screen ?? (toLiveView(result.me, now()).state === "active" ? "card" : "dashboard")) === "card";
   // Each time the card is opened, the QR is resolved again from GET /me/qr (docs/member-qr.md rules).
   useEffect(() => {
-    if (onCard) void qrFlow?.open();
-  }, [onCard, qrFlow]);
+    if (onCard && account !== null) void qrFlow?.open(account);
+  }, [onCard, account, qrFlow]);
+  // The real panel replaces the sample only once the route is known to exist (never «Φόρτωση…» when it is off).
+  const showQr = qrFlow !== undefined && qrState.phase !== "off" && (qrState.phase !== "loading" || qrFlow.seenRoute());
 
   let body: ReactNode;
   if (result === null) {
@@ -143,7 +149,7 @@ export function CustomerApp({
           go={go}
           view={view}
           actions={actions}
-          {...(qrFlow && qrState.phase !== "off"
+          {...(qrFlow && showQr
             ? { qr: <MemberQrPanel flow={qrFlow} />, qrNote: "Δείξτε τον κωδικό στο ταμείο. Το προσωπικό βλέπει μόνο το μικρό σας όνομα και αν δικαιούστε καφέ σήμερα." }
             : {})}
         />
