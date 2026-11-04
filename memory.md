@@ -1389,3 +1389,7 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - The field is `aria-describedby="evc-scan-title evc-scan-help"`.
   - A decoder load that fails after an abort reports "aborted".
 - **Mutants.** Frontend 335 → 346 (Q30–Q39 minus Q28/Q29, which were equivalent to the esbuild folding and are removed together with their dead regex folds; C31–C34; C23, Q21, Q22, Q27 re-aimed). Q33 first survived and was killed by a deterministic test using a fake phone read. The shards are 173 + 173. All 33 changed-line mutants killed locally, peak memory 0.43 GB.
+- CI on 6598446e (STAGE-05D round 4 code, PR #39): green.
+  - Foundation: pull_request 41903894197 18/18; push 41903886651 18/18 after one re-run of the known BacsConfirmationTest Athens-chain flake (commerce PHP 8.4 / MySQL 8.0 / hpos, attempt 1).
+  - Frontend: pull_request 41903894109 4/4 and push 41903886594 4/4. Both mutation shards (346 mutants) and the isolated-build check passed.
+- **BacsConfirmationTest flake.** Seen on PHP 7.4 / MariaDB on 5d8e1c6 and on PHP 8.4 / MySQL on 6598446. It is the real-clock test `test_expiry_and_an_early_renewal_follow_the_athens_chain` and is still not fixed (owned by the earlier commerce stage).
