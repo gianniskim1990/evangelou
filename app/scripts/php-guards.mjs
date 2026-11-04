@@ -788,7 +788,7 @@ function qrSelfTest() {
   expect("store constructed twice in store()", Q.servicesFile, GOOD_QR_SERVICES.replace("{ return new EVC_Sql_Qr_Token_Store($db); }", "{ $a = new EVC_Sql_Qr_Token_Store($db); return new EVC_Sql_Qr_Token_Store($db); }"), true);
   expect("token service constructed in a backend", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("return EVC_Club_Qr_Services::token_service($db, $c, $r, true);", "return new EVC_Qr_Token_Service($s, $a, $c);"), true);
   expect("lookup service constructed elsewhere", "includes/x.php", "<?php\n$s = new EVC_Member_Lookup_Service($a, $b, $c, $d, $e, $f, $g, $h, 'x');", true);
-  expect("key ring constructed elsewhere", "includes/x.php", "<?php\n$k = new EVC_Lookup_Key_Ring(array('k1' => $s), 'k1');", true);
+  expect("lookup keys constructed elsewhere", "includes/x.php", "<?php\n$k = new EVC_Lookup_Key_Ring(array('k1' => $s), 'k1');", true);
   expect("store() defined twice", Q.servicesFile, GOOD_QR_SERVICES.replace("final class EVC_Club_Qr_Services {", "final class Y { public static function store() { return 1; } }\nfinal class EVC_Club_Qr_Services {"), true);
   // dynamic construction in QR files
   expect("new self in the store file", Q.storeFile, GOOD_QR_STORE.replace("{ public function", "{ public static function make($db) { return new self($db); } public function"), true);
