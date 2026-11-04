@@ -1290,3 +1290,7 @@ The re-review verdict was OK, with no Blocker or Major.
 - **Mutation runs this round:** SQL 48/48 killed; WordPress 139/139 killed, 0 invalid; sources restored each time.
 - **Migrator:** I chose the simpler option. `EVC_Migrator::migrate(int $up_to)` is now REQUIRED, so there is no call that applies everything. Test callers pass `PHP_INT_MAX` (25 call sites). MG38 and MG39 were re-aimed.
 - **Docs:** the exact guard-fixture count was dropped.
+- **Owner decisions, 2026-11-04, relayed by the coordinator during round 4:**
+  - (a) «Όχι, μένει έτσι»: successful tablet re-logins have no limit. This is documented as an accepted risk, with no code change.
+  - (b) «Όχι, μόνο ο διαχειριστής»: QR revocation stays administrator-only, and the tablet only scans. This closes the earlier open question (see the "Open owner question" lines above).
+  - Both are recorded in `member-qr.md` (decision rows D9α and D10, plus the revoke section), the README and the limiter docblock.

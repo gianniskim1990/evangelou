@@ -828,6 +828,9 @@ scans per 5 minutes per tablet, counted in the new migration **003** (`evc_looku
 approved, applying it anywhere real needs separate approval). The migrations page applies only up to
 `EVC_CLUB_MIGRATIONS_TARGET` (undefined = 2), so 003 is shown as "pending, not approved" and is never
 applied until the technician sets the target to 3 after the owner's go-ahead.
+Owner decisions 2026-11-04 (later): successful tablet re-logins stay unlimited, so each new login
+gives about 10 more failed scans («Όχι, μένει έτσι», an accepted risk, no code); QR revocation stays
+administrator-only and the tablet only scans («Όχι, μόνο ο διαχειριστής»).
 
 - **Customer:** `GET|POST evangelou-club-customer/v1/me/qr`, only with `EVC_CLUB_CUSTOMER_ENABLED` AND
   `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`. A member gets one QR; a second request without

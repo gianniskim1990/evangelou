@@ -18,7 +18,7 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  * - A new WordPress login gives a new session ref (server-derived, EVC_Staff_Session::session_ref) and
  *   so a fresh count. EVC_Login_Throttle limits only FAILED password attempts, so successful re-logins
  *   are not limited: whoever knows the tablet password can log in again for about 10 more failures.
- *   No cap was added (owner decision D9 stands; raised with the owner).
+ *   No cap: the owner accepted this risk on 2026-11-04 («Όχι, μένει έτσι»).
  *   Successful scans are not counted (the decision limits failures only); allow() consumes nothing.
  * - record_failure() is one atomic INSERT ... ON DUPLICATE KEY UPDATE per key (no read-then-write),
  *   then prunes at most PRUNE_LIMIT rows older than RETENTION_SECONDS. A prune error propagates too,
