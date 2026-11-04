@@ -1294,3 +1294,4 @@ The re-review verdict was OK, with no Blocker or Major.
   - (a) «Όχι, μένει έτσι»: successful tablet re-logins have no limit. This is documented as an accepted risk, with no code change.
   - (b) «Όχι, μόνο ο διαχειριστής»: QR revocation stays administrator-only, and the tablet only scans. This closes the earlier open question (see the "Open owner question" lines above).
   - Both are recorded in `member-qr.md` (decision rows D9α and D10, plus the revoke section), the README and the limiter docblock.
+- CI on 2741086 (round 4 plus the owner-decision docs): foundation 18/18 green, run 41815843926 (push). Frontend did not run because no app/ paths changed. No pull_request-event run was created for this SHA (GitHub returned 500 on the first push attempt). The superseded runs for 06cb78c were cancelled.
