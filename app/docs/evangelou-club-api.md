@@ -116,6 +116,12 @@ taken from the session, never from the body; path ids only from the URL.
 > `429 rate_limited` (D9, `Retry-After: 300`), `503 server_error`. The richer body below (display name,
 > masked phone, membership dates, benefits) is the earlier proposal and is NOT what the server sends.
 > Details: `wordpress/evangelou-club/docs/member-qr.md`.
+>
+> **STAGE-05D (staff app wired, still opt-in):** the real counter sends exactly the QR body and parses
+> exactly the D8 answer (`src/staff/member/memberApi.ts`: exact keys, `mem_` + 32 hex, first name 1-40
+> characters or `null`). `404 member_not_found` is "not found" only WITH the envelope; `429` closes the
+> scan until `Retry-After`; `5xx` is "unavailable"; `401`/`403` end the session. The React mapper for the
+> earlier proposal (`mapLookupResponse`) was removed; `restClubService` refuses lookups without a request.
 
 Phone numbers are **never** put in a URL. The body carries exactly one
 method; both or neither is `400 invalid_request`.
@@ -273,6 +279,13 @@ extend the inactivity window**. No personal or customer data is returned.
   "features": { "qr_lookup": false, "phone_lookup": false, "coffee_redemption": false, "history": false }
 }
 ```
+
+**STAGE-05D:** `features.qr_lookup` (and `coffee_redemption`, whose gates are a subset) is `true`
+only when the lookup route exists in this request AND every lookup gate passes at that moment: staff
+flag, `EVC_CLUB_REDEMPTION_SOURCE`, commerce source, payment provenance, Club DB constants, a lookup key
+of at least 32 bytes, a real Club DB connection and schema version 3 or later. Any failure or error is
+`false`; the check reads no member data and logs nothing. The staff app shows the QR scan and the
+coffee only while it is `true`. `phone_lookup` and `history` stay `false`.
 
 `POST /session/end` → `200 {"ended": true}`: destroys the current WordPress
 session token and clears the auth cookie (logout, 5-minute lock). Other
@@ -519,11 +532,25 @@ caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
 **STAGE-05C (2026-11-04):**
 
 - `POST /members/lookup` implemented behind `EVC_CLUB_REDEMPTION_SOURCE` (see the §4.1 note): QR only,
-  minimum body per owner decision D8. The React adapter's lookup mapper still expects the earlier
-  proposal and must be updated in STAGE-05D before the staff UI is wired.
+  minimum body per owner decision D8. (STAGE-05D replaced the React lookup mapper; see §4.1.)
 - New: `POST /admin/members/qr/revoke` (administrators) and the customer namespace's `GET|POST /me/qr`.
 - New error codes: `invalid_qr` (now sent), `not_a_member`, `member_disabled`, `qr_exists`,
   `concurrent_change`.
+
+**STAGE-05D (2026-11-04):**
+
+- `GET /session` `features.qr_lookup` / `coffee_redemption` now report the real readiness (§4.3).
+- The staff app calls `POST /members/lookup` and the v1 redeem route; the coffee codes are exactly the
+  server's v1 list (`evc-coffee-v1-2026-11-03`, including `other_coffee`).
+- The customer app calls `GET|POST /me/qr`; a `404` from `GET` means the QR route is not switched on.
+- No wire-shape change on the server.
+- Round 2 (client only):
+  - The staff app sends `/members/lookup` only for a code that matches exactly `^evc_[0-9a-f]{48}$`,
+    after mapping Greek keyboard-layout letters and Caps Lock back. Anything else is answered "not a
+    Club QR" on the tablet.
+  - `Retry-After: 0` means no wait.
+  - The customer app remembers its own QR between visits (owner decision); the server still sends the
+    token only at issue.
 
 ## 16. Demo-only shortcuts (deliberate)
 

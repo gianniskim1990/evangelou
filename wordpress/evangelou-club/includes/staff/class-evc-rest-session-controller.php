@@ -5,7 +5,10 @@ defined('ABSPATH') || exit;
  * Smallest staff-session surface the /club-admin/ app needs (flag-gated):
  *
  *  GET  /evangelou-club/v1/session      status: authenticated, absolute expiry,
- *                                       policy timeouts, feature availability.
+ *                                       policy timeouts, feature availability
+ *                                       (STAGE-05D: qr_lookup / coffee_redemption are
+ *                                       true only when the QR lookup is really ready,
+ *                                       EVC_Rest_Lookup_Controller::lookup_ready()).
  *  POST /evangelou-club/v1/session/end  destroys THIS session server-side and
  *                                       clears the auth cookie (logout / lock).
  *
@@ -43,6 +46,13 @@ final class EVC_Rest_Session_Controller {
         if ($expiry === null) {
             return EVC_Rest_Security::error_response('unauthorized', 401);
         }
+        // STAGE-05D: QR lookup (and with it the coffee redemption the scan leads to) is reported only when
+        // its route exists AND every gate passes now. The lookup gates include the redeem route's
+        // constants, Club DB and schema (3 >= 2), but NOT its catalogue check (REASON_CATALOGUE,
+        // coffee_catalogue_unavailable): the shipped catalogue is the fixed approved list and is never
+        // empty, so the same answer is used for both (the empty-catalogue gap is documented in
+        // docs/member-qr.md; the redeem route still refuses with 503 if it ever were empty).
+        $qr = EVC_Rest_Lookup_Controller::lookup_ready();
         return new WP_REST_Response(array(
             'authenticated' => true,
             'session' => array(
@@ -52,9 +62,9 @@ final class EVC_Rest_Session_Controller {
                 'idle_lock_seconds' => EVC_Staff_Shell::IDLE_LOCK_SECONDS,
             ),
             'features' => array(
-                'qr_lookup' => false,
+                'qr_lookup' => $qr,
                 'phone_lookup' => false,
-                'coffee_redemption' => false,
+                'coffee_redemption' => $qr,
                 'history' => false,
             ),
         ), 200);

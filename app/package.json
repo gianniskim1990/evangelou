@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@upstash/redis": "^1.38.4",
+    "jsqr": "1.4.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

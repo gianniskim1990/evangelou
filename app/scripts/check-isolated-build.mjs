@@ -17,7 +17,10 @@
 //   A = HEAD
 //   B = HEAD with every changed non-shipped file restored to its state at
 //       --base (deleted again if it was added)
-// and compares every produced file (name + sha256) of dist/ and dist-staff/.
+// and compares every produced file (name + sha256) of dist/, dist-staff/ and (STAGE-05D round 2)
+// dist-customer/. Since then Tailwind scans only src/ and the root HTML pages (src/index.css
+// `source(none)` + `@source`), so docs, tests and scripts cannot change the CSS at all; an unwired
+// module under src/ still can, and that is what this check (and its canary) is about.
 // Files that ARE in the shipped graph, and CSS/HTML/config, stay as they are
 // in both trees, so legitimate UI changes never fail this check, and no
 // absolute hash is pinned anywhere.
@@ -125,6 +128,7 @@ function outputOf(tree, parts) {
 
 const STAFF = { config: "vite.staff.config.ts", dir: "dist-staff" };
 const ORDERING = { config: null, dir: "dist" };
+const CUSTOMER = { config: "vite.customer.config.ts", dir: "dist-customer" };
 
 function buildAll(tree, apps) {
   for (const app of apps) viteBuild(tree, app.config);
@@ -134,17 +138,17 @@ function buildAll(tree, apps) {
 function cssOf(tree, part, outputMap) {
   const css = [...outputMap.keys()].filter((k) => k.startsWith(`${part}/assets/`) && k.endsWith(".css"));
   // The shared stylesheet is the entry CSS (index-*.css / staff-*.css), not a lazy chunk's.
-  const name = css.find((k) => /\/(index|staff)-[^/]*\.css$/.test(k)) ?? css[0];
+  const name = css.find((k) => /\/(index|staff|customer)-[^/]*\.css$/.test(k)) ?? css[0];
   return name ? readFileSync(join(tree, appRel, name), "utf8") : "";
 }
 
-/** Repo-relative paths of every module in the shipped import graph (staff + ordering entries). */
+/** Repo-relative paths of every module in the shipped import graph (staff + ordering + customer entries). */
 async function shippedGraph(tree) {
   const cwd = join(tree, appRel);
   const mod = await import(pathToFileURL(join(appDir, "node_modules", "esbuild", "lib", "main.js")).href);
   const esbuild = mod.default ?? mod;
   const shipped = new Set();
-  for (const entry of ["src/main.tsx", "src/staff/main.tsx"]) {
+  for (const entry of ["src/main.tsx", "src/staff/main.tsx", "src/customer/main.tsx"]) {
     const result = await esbuild.build({
       entryPoints: [join(cwd, entry)],
       // metafile inputs are relative to the working directory, and the result must be relative to
@@ -179,8 +183,8 @@ function nonShippedChanges(shipped) {
     if (!path.startsWith(`${appRel}/`)) continue; // outside app/: never scanned or built
     const inApp = path.slice(appRel.length + 1);
     const isSource = /^src\/.*\.(ts|tsx)$/.test(inApp);
-    // Root HTML other than the two build entries (e.g. the local-only recovery preview page) is scanned by Tailwind but never built.
-    const strayHtml = /^[^/]+\.html$/.test(inApp) && inApp !== "index.html" && inApp !== "staff.html";
+    // Root HTML other than the three build entries (e.g. the local-only recovery preview page) is scanned by Tailwind but never built.
+    const strayHtml = /^[^/]+\.html$/.test(inApp) && !["index.html", "staff.html", "customer.html"].includes(inApp);
     const nonShipped = /^(tests|docs|scripts)\//.test(inApp) || strayHtml || (isSource && !shipped.has(path));
     if (nonShipped) files.push(path);
   }
@@ -204,7 +208,7 @@ function report(title, a, b, treeA, treeB) {
   for (const name of cmp.changed) console.log(`  same name, DIFFERENT content:         ${name}`);
   for (const name of cmp.onlyB) console.log(`  only without the non-shipped changes: ${name}`);
   for (const name of cmp.onlyA) console.log(`  only with the non-shipped changes:    ${name}`);
-  for (const part of ["dist-staff", "dist"]) {
+  for (const part of ["dist-staff", "dist", "dist-customer"]) {
     const ca = selectors(cssOf(treeA, part, a));
     const cb = selectors(cssOf(treeB, part, b));
     const added = [...ca].filter((s) => !cb.has(s));
@@ -217,7 +221,9 @@ async function main() {
   const treeA = makeTree("A");
 
   if (canary) {
-    // Prove the detector can fail: add a docs-only file containing a bare utility word.
+    // 1. Prove the detector can fail: an UNWIRED module under src/ (scanned by Tailwind, in no import
+    //    graph) containing a bare utility word must change the staff build.
+    // 2. Prove the STAGE-05D round 2 narrowing: the same word in a docs-only file must NOT change it.
     const treeB = makeTree("B");
     const baseline = buildAll(treeB, [STAFF]);
     const css = cssOf(treeB, STAFF.dir, baseline);
@@ -225,13 +231,19 @@ async function main() {
     const word = candidates.find((c) => !css.includes(`.${c}{`));
     if (!word) throw new Error("no canary candidate is absent from the baseline CSS");
     writeFileSync(join(treeA, appRel, "docs", "__isolation-canary.md"), `canary ${word}\n`);
+    const docsOnly = buildAll(treeA, [STAFF]);
+    if (!compare(docsOnly, baseline).same) {
+      console.error("DOCS ARE SCANNED AGAIN: a docs-only file changed the staff build; check the @source lines of src/index.css.");
+      return 1;
+    }
+    writeFileSync(join(treeA, appRel, "src", "__isolationCanary.ts"), `export const canary = "${word}";\n`);
     const withCanary = buildAll(treeA, [STAFF]);
     const cmp = compare(withCanary, baseline);
     if (cmp.same) {
-      console.error(`CANARY NOT DETECTED: a docs-only file containing a bare utility word did not change the staff build; the check is blind.`);
+      console.error(`CANARY NOT DETECTED: an unwired src/ module containing a bare utility word did not change the staff build; the check is blind.`);
       return 1;
     }
-    console.log(`canary detected: a docs-only file changed the staff output (${cmp.onlyA.length + cmp.onlyB.length} added/removed, ${cmp.changed.length} changed-content file(s)).`);
+    console.log(`docs are not scanned (a docs-only "${word}" left the staff build identical); canary detected: an unwired src/ module changed it (${cmp.onlyA.length + cmp.onlyB.length} added/removed, ${cmp.changed.length} changed-content file(s)).`);
     return 0;
   }
 
@@ -245,16 +257,17 @@ async function main() {
     return 0;
   }
 
-  const outA = buildAll(treeA, [STAFF, ORDERING]);
+  const outA = buildAll(treeA, [STAFF, ORDERING, CUSTOMER]);
   const treeB = makeTree("B");
   for (const f of isolated) revert(treeB, f);
-  const outB = buildAll(treeB, [STAFF, ORDERING]);
+  const outB = buildAll(treeB, [STAFF, ORDERING, CUSTOMER]);
 
   const cmp = compare(outA, outB);
   log(`staff    : ${[...outA.keys()].filter((k) => k.startsWith("dist-staff/assets/") && /\.(js|css)$/.test(k)).join(", ")}`);
   log(`ordering : ${[...outA.keys()].filter((k) => k.startsWith("dist/assets/index-")).join(", ")}`);
+  log(`customer : ${[...outA.keys()].filter((k) => k.startsWith("dist-customer/assets/") && /\.(js|css)$/.test(k)).join(", ")}`);
   if (cmp.same) {
-    console.log("OK: the non-shipped changes leave the staff and ordering build output byte-identical.");
+    console.log("OK: the non-shipped changes leave the staff, ordering and customer build output byte-identical.");
     return 0;
   }
 
@@ -270,7 +283,7 @@ async function main() {
     if (!compare(staffOnly, baselineStaff).same) culprits.push(f);
   }
   console.log(`\nculprit file(s) (each alone reproduces the change): ${culprits.length ? culprits.join(", ") : "no single file; a combination"}`);
-  console.log("Tailwind scans every file under app/ for class-name candidates: avoid bare utility words in docs, tests and scripts.");
+  console.log("Tailwind scans src/ and the root HTML pages for class-name candidates: an unwired module under src/ with a bare utility word changes the shipped CSS.");
   return 1;
 }
 

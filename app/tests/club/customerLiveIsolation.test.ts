@@ -54,13 +54,26 @@ describe("STAGE-01 customer app: bundle isolation", () => {
     for (const forbidden of [/src\/customerPreview\//, /src\/club\//, /src\/staff\//, /src\/main\.tsx$/, /src\/App\.tsx$/, /src\/admin\//, /Context\.tsx$/, /src\/preview\/ClubPreviewApp\.tsx$/, /src\/preview\/(Staff|Management)/]) {
       assert.equal(inputs.find((p) => forbidden.test(p)), undefined, `customer app must not include ${forbidden}`);
     }
-    for (const api of ["localStorage", "sessionStorage", "indexedDB", "XMLHttpRequest", "sendBeacon", "WebSocket", "getUserMedia"]) {
+    // STAGE-05D round 2: localStorage only through src/customer/qrStore.ts (tests/club/storageGuard.test.ts).
+    for (const api of ["sessionStorage", "indexedDB", "document.cookie", "XMLHttpRequest", "sendBeacon", "WebSocket", "getUserMedia"]) {
       assert.ok(!output.includes(api), `customer app must not use ${api}`);
     }
   });
 
+  it("STAGE-05D: only qrApi.ts talks to /me/qr (GET + POST, nothing else); the QR modules use no storage, camera or other route", () => {
+    const client = readFileSync(join(appDir, "src/customer/qrApi.ts"), "utf8");
+    assert.match(client, /endpointUrl\(config\.restBase, "\/me\/qr"\)/);
+    assert.equal((client.match(/fetchImpl\(/g) ?? []).length, 1, "one request site");
+    assert.doesNotMatch(client, /method: "(PUT|PATCH|DELETE)"/);
+    assert.doesNotMatch(client.replace(/\/\*[\s\S]*?\*\//g, ""), /\/admin|revoke|members\/lookup|console\./, "no admin, staff or logging path");
+    for (const f of ["src/customer/memberQr.ts", "src/customer/MemberQrPanel.tsx", "src/customer/qrEncode.ts"]) {
+      const code = readFileSync(join(appDir, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+      for (const api of ["fetch(", "localStorage", "sessionStorage", "indexedDB", "document.cookie", "getUserMedia", "console."]) assert.ok(!code.includes(api), `${f} must not use ${api}`);
+    }
+  });
+
   it("only GET /me is ever requested, and only by the client module", () => {
-    const sources = ["src/customer/CustomerApp.tsx", "src/customer/liveView.ts", "src/customer/config.ts", "src/customer/main.tsx"].map((f) => readFileSync(join(appDir, f), "utf8"));
+    const sources = ["src/customer/CustomerApp.tsx", "src/customer/liveView.ts", "src/customer/config.ts", "src/customer/main.tsx", "src/customer/memberQr.ts", "src/customer/MemberQrPanel.tsx", "src/customer/qrEncode.ts", "src/customer/qrStore.ts"].map((f) => readFileSync(join(appDir, f), "utf8"));
     for (const s of sources) assert.ok(!/\bfetch\(/.test(s), "no direct fetch outside customerApi.ts");
     const client = readFileSync(join(appDir, "src/customer/customerApi.ts"), "utf8");
     assert.match(client, /method: "GET"/);

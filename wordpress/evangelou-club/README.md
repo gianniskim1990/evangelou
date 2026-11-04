@@ -843,6 +843,21 @@ administrator-only and the tablet only scans («Όχι, μόνο ο διαχει
   route's own membership source; the redeem route still re-checks at the counter.
 - **Administrator:** `POST evangelou-club/v1/admin/members/qr/revoke {wp_user_id}` (`evc_manage_club`,
   never the shared tablet account) retires a customer's QR (lost phone).
+- **Screens (STAGE-05D):**
+  - **Tablet** (`app/src/staff/member/`): the QR scan, then the first name and status, then a coffee from
+    the v1 list (including «Άλλος καφές»). Shown ONLY while `GET /session` reports `features.qr_lookup:
+    true`, which happens only when every lookup gate passes now (constants, key, connection, schema ≥ 3).
+    No revoke on the tablet.
+  - **Member card** (`app/src/customer/`): the real QR (own encoder), `409 qr_exists`, and «Νέο QR» with
+    a Greek confirmation. Owner decision 2026-11-04 «Ναι, να τον θυμάται»: the phone remembers the QR.
+    It lives in `qrStore.ts`, the only file allowed to use browser storage (`localStorage`; packager
+    guard `storage-guard.mjs`), keyed by hashes of the account and issued_at. It is shown only for the
+    `issued_at` the server reports, and deleted on sign-out, signed_out, not_member, member_disabled,
+    route off and replace. The server never re-sends a token.
+  - **Devices** (owner decision 2026-11-04 «Δεν ξέρω ακόμα, να δουλεύει σε όλες»): iPad, Android and a
+    USB hand scanner. The camera uses `BarcodeDetector`, else jsQR loaded lazily as its own chunk on
+    in-memory downscaled frames. A hand scanner on the Greek layout or with Caps Lock is corrected, and
+    non-Club codes are refused on the tablet without being sent.
 - **Store:** `EVC_Sql_Qr_Token_Store` over 001, as a compare-and-set in one transaction. **Limiter:**
   `EVC_Sql_Lookup_Rate_Limiter` over 003, with atomic increments per tablet session; a failure that
   cannot be recorded makes the scan `unavailable` (fail closed). **Single

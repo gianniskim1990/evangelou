@@ -36,6 +36,49 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
    WordPress μπορεί επίσης να ακυρώσει τον QR ενός πελάτη (με τον αριθμό χρήστη WordPress). Ο κοινός
    λογαριασμός του ταμείου **δεν** μπορεί.
 
+### Οι οθόνες (STAGE-05D)
+
+- **Tablet του ταμείου.** Το κουμπί «Σάρωση QR μέλους» εμφανίζεται **μόνο** όταν ο διακομιστής λέει ότι
+  η σάρωση είναι πραγματικά έτοιμη, δηλαδή ότι ισχύουν όλα όσα γράφει το «Πώς ενεργοποιείται» παρακάτω,
+  μαζί με τη μετάβαση 003. Μέχρι τότε η οθόνη είναι όπως πριν, με όλες τις λειτουργίες απενεργοποιημένες.
+  1. Ο υπάλληλος σαρώνει τον κωδικό, με την κάμερα του tablet ή με σαρωτή χειρός.
+  2. Βλέπει **μόνο** το μικρό όνομα και την κατάσταση: «Ενεργό μέλος · δικαιούται καφέ σήμερα», «Ο
+     σημερινός καφές έχει ήδη δοθεί» ή «Η συνδρομή δεν είναι ενεργή».
+  3. Για ενεργό μέλος διαλέγει τον καφέ από τη λίστα v1, όπου υπάρχει και το «Άλλος καφές».
+  4. Πατά «Καταχώρηση καφέ».
+
+  Αν δεν επιβεβαιωθεί η καταχώρηση, το «Δοκιμή ξανά» στέλνει **το ίδιο** αίτημα, οπότε δεν μπορεί να
+  γραφτεί δεύτερος καφές. Το tablet **δεν** ακυρώνει ποτέ QR.
+- **Κάμερα και σαρωτής (απόφαση ιδιοκτήτη 2026-11-04: «Δεν ξέρω ακόμα, να δουλεύει σε όλες»).**
+  Λειτουργεί σε iPad, σε tablet Android και με σαρωτή χειρός USB/Bluetooth:
+  - Στον Chrome (Android) η κάμερα χρησιμοποιεί την ανάγνωση QR του ίδιου του προγράμματος περιήγησης.
+  - Στο Safari (iPad) φορτώνεται, μόνο όταν ανοίξει η κάμερα, ένα μικρό πρόσθετο αρχείο ανάγνωσης QR από
+    το ίδιο το plugin. Η εικόνα της κάμερας διαβάζεται μόνο στη μνήμη και δεν φεύγει από το tablet.
+  - Ο σαρωτής χειρός δουλεύει και με ελληνικό πληκτρολόγιο ή με Caps Lock: τα «εωψ_…» διορθώνονται
+    σε «evc_…».
+  - Ένας κωδικός που δεν είναι κωδικός του Club απορρίπτεται στο tablet και δεν στέλνεται. Έτσι δεν
+    μετράει στις 10 αποτυχίες ανά 5 λεπτά.
+  - Μετά από πολλές αποτυχίες η οθόνη δείχνει αντίστροφη μέτρηση («Δοκιμάστε ξανά σε 4:59») και
+    ξανανοίγει μόνη της.
+  - Η κάμερα κλείνει πάντα όταν κλειδώσει η οθόνη, ακόμη κι αν εκείνη τη στιγμή περίμενε ακόμη την άδεια.
+- **Κινητό του πελάτη.**
+  - Η κάρτα δείχνει τον πραγματικό QR του μέλους.
+  - Ο QR μένει ίδιος μέχρι να πατήσει ο πελάτης «Νέο QR». Πριν αλλάξει, η εφαρμογή ρωτά ξεκάθαρα:
+    «Θέλετε νέο κωδικό QR; Ο τωρινός κωδικός, και κάθε στιγμιότυπο οθόνης του, θα σταματήσει να ισχύει
+    αμέσως, σε όλες τις συσκευές.»
+  - Στιγμιότυπο οθόνης επιτρέπεται.
+  - **Το κινητό θυμάται τον QR** (απόφαση ιδιοκτήτη 2026-11-04: «Ναι, να τον θυμάται»). Τον κρατά στην
+    αποθήκευση του προγράμματος περιήγησης, χωρίς e-mail ή ημερομηνία σε αναγνώσιμη μορφή, και τον
+    δείχνει **μόνο** αν ο διακομιστής λέει ότι ισχύει ακόμη ο ίδιος QR.
+  - Ο QR σβήνεται από το κινητό όταν:
+    - ο πελάτης αποσυνδέεται ή η σύνδεση έχει λήξει·
+    - ο λογαριασμός δεν είναι (πια) μέλος ή η κάρτα είναι ανενεργή·
+    - η λειτουργία QR είναι κλειστή·
+    - ζητηθεί νέος QR·
+    - ο διακομιστής έχει άλλον QR, για παράδειγμα αν ο διαχειριστής ακύρωσε τον παλιό.
+  - Ο διακομιστής **δεν** ξαναστέλνει ποτέ έναν QR. Αν το κινητό τον χάσει, ο πελάτης χρησιμοποιεί το
+    στιγμιότυπο οθόνης ή πατά «Νέο QR».
+
 ### Πώς ενεργοποιείται (ΜΟΝΟ με έγκριση του ιδιοκτήτη, πρώτα στο staging)
 
 - **QR πελάτη:** `EVC_CLUB_CUSTOMER_ENABLED = true` **και** `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`
@@ -199,21 +242,108 @@ GET never returns a token.
 - Customer accounts only (`EVC_Customer_Auth`).
 - Responses are no-store.
 
-**How the customer app keeps the QR (for 05D, not changed here).** The customer bundle
-(`app/src/customer/`) is unchanged in this stage; the packager still forbids `localStorage` in it.
-05D should:
-- add ONE module (e.g. `src/customer/qrStorage.ts`) that lifts that ban for itself only;
-- store `{token, issued_at}` under one key per signed-in account (e.g.
-  `evc-club-qr:v1:<hash of the user id from the bootstrap>`), wrapping every access in try/catch;
-- clear it on sign-out;
-- on each open, `GET /me/qr`, then:
+**The customer app (STAGE-05D).** The QR is drawn by `app/src/customer/qrEncode.ts`, a small encoder
+with no dependency: byte mode, level M, versions 1–10, and a Club token is version 4.
+- **Encoder tests** (`tests/club/qrEncode.test.ts`):
+  - every output is decoded by an independent decoder (jsQR);
+  - round 2: the output is **bit-exact** against `fixtures-qr-reference.json`, made offline with
+    python-qrcode 7.4.2 (generator `gen-qr-reference.py`), for 4 tokens × every forced mask plus the
+    automatic choice.
+  - segno 1.6.6 was tried first and is not usable as a reference: when the data ends on a byte boundary it
+    adds a whole 0x00 codeword before the pad bytes.
+- **Client and flow.**
+  - The client is `qrApi.ts`. Its replies are strict, and only a POST 200 carries the token.
+  - The flow is `memberQr.ts` (`MemberQrFlow`) and the screen is `MemberQrPanel.tsx`, which has two fixed
+    live regions; the confirmation dialog takes focus and is not inside either region.
+  - The client and `/me` share one in-memory nonce (`createNonceBox`).
+- **Where the plaintext lives** (round 2, owner decision 2026-11-04 «Ναι, να τον θυμάται»): in this page's
+  memory AND on the phone, in `qrStore.ts`, the ONLY customer file allowed to touch browser storage.
+  - **Store.** `localStorage`: the owner allowed it "if simpler" than IndexedDB. It is synchronous, needs
+    no dependency, can be tested in jsdom, and is equally readable by page script.
+  - **Key and value.** The key is `evc-club-qr:v1:` + SHA-256("evc-club-qr|" + e-mail + "|" + issued_at).
+    The value is `{"v":1,"a": SHA-256(account), "t": token}`. No e-mail or date is stored in the clear.
+  - **Shown** only when `GET /me/qr` reports exactly that `issued_at`. Any other record of the account is
+    deleted on that read.
+  - **Deleted on:**
+    - sign-out (before WordPress signs out);
+    - `signed_out` (everything, the in-memory copy too);
+    - `not_member`, `member_disabled`, `forbidden`;
+    - route off (everything);
+    - `none`;
+    - replace (before the POST).
+  - **Kept** on `unavailable` / error (a passing failure).
+  - **Fallback.** Without WebCrypto or a working `localStorage` (private mode, blocked, full), the QR stays
+    in memory only.
+  - The server never re-sends a token.
+  - **Shared phone and other tabs (round 4).**
+    - The phone keeps at most ONE QR. A read for an account (the sign-in) deletes every other record,
+      whatever its account, and a write replaces every record.
+    - A sign-out or replace in another tab of the same browser fires a `storage` event that removes our
+      key. This tab then drops its in-memory copy at once and asks the server again
+      (`onExternalChange`).
+    - The memory layer has its own epoch, so a read still in flight at sign-out never puts the token back
+      into memory (the reviewer's `race2`).
+  - **Sign-out race (round 3, review MAJOR 1).** A write computes two SHA-256 digests before `setItem`.
+    Every `forget()` / `forgetAll()` bumps an epoch the moment it is called, and a write re-checks that
+    epoch after its last await, in the same synchronous step as `setItem`. So no record can land after
+    sign-out has started, and logout awaits the wipe before WordPress signs out. Covered by a test of the
+    reviewer's reproduction (sign-out while the new QR is still being written) and mutants Q24–Q26.
+  - **A change of the `issued_at` format fails safe.** The record key includes the exact `issued_at`
+    string, so any change (time zone, precision) makes the stored record unreadable for that key, and it is
+    deleted on the next read. The member then sees «Νέο QR» or uses the screenshot; no wrong code is ever
+    shown.
+  - **The account hash is unsalted (a deliberate choice, round 3).** It only keeps the e-mail from being
+    readable at a glance. Anyone who can read this storage can also read the token itself, which is the
+    valuable part, and a per-device salt kept in the same store would be just as readable. So a salt would
+    add code without protecting anything; documented as low risk.
+  - **Residual risk, accepted by the owner («Ναι, να τον θυμάται»).** Any script running on the WordPress
+    origin can read `localStorage` and so the member's token: another plugin, the theme, or an XSS on any
+    page of the site. Such a token works at the counter like a screenshot, so the limits are the same:
+    - one free coffee per Athens day, enforced by the server;
+    - the staff check of the first name;
+    - «Νέο QR» or the administrator's revocation retires it.
+    It is NOT secret storage.
+- **Guard.** `app/scripts/storage-guard.mjs` runs in the packager on the customer bundle's real esbuild
+  import graph (app sources and `node_modules`) and in `tests/club/storageGuard.test.ts`:
+  - **Normalisation (rounds 3 and 4).** The rules run on a normalised text:
+    - esbuild parses the module and reprints it with `minifySyntax`. This is a real parser, so comments
+      are removed correctly, also next to a regex literal such as `/a\/*/`. The reprint decodes
+      `\uXXXX` / `\u{…}` / `\xXX` escapes, folds `"local" + "Storage"` and `${"local"}Storage`, and
+      prints `x["cookie"]` as `x.cookie`;
+    - then literal joins such as `["local", "Storage"].join("")` are folded (esbuild leaves joins alone);
+    - a module that cannot be parsed is refused (fail closed).
+  - **Rules.**
+    - Only `src/customer/qrStore.ts` may name a browser store: `localStorage`, plus its own generic
+      `storage` names (its variables, the `storage` event).
+    - In the app's own sources the names `caches`, `cookie`, `.cookie` and `storage` are refused
+      wherever they appear. This also covers destructuring (`const { cookie } = document`,
+      `const { storage } = navigator`) and an alias (`d.cookie`).
+    - React's development build has a local `caches`, so for `node_modules` these generic names are left
+      to the built-bundle checks. The specific APIs (`localStorage`, `sessionStorage`, `indexedDB`,
+      `document.cookie`, `navigator.storage`, …) are checked in `node_modules` too.
+  - **Built-bundle checks (packager).** The BUILT, minified customer JS must contain `localStorage` exactly
+    once and `Storage` exactly once (`EXPECTED_CUSTOMER_LOCAL_STORAGE`, the access in qrStore.ts).
+    - The minifier folds escapes, concatenations and constant brackets, so such a bypass in any module
+      changes a count. A name split into an array and joined changes the `Storage` count.
+    - It bans `cookie` (any occurrence: the bundle has none, and a destructuring keeps the word),
+      `sessionStorage`, `indexedDB`, `.cookie`, `caches`, `navigator.storage`, `cookieStore`,
+      `openDatabase` and `CacheStorage`, and a destructuring of `storage` out of `navigator`.
+  - **Not covered statically:**
+    - aliasing that is not a destructuring and uses a run-time key (`const n = navigator; n[k]`);
+    - a store name split so that no piece is `Storage` and joined at run time from non-literal parts.
+    - Review remains the last net.
+  - Mutants Q12–Q22, Q27–Q30.
+- **The decision rules, as built:**
 
 | Server says | What the app does |
 |---|---|
-| `active` with the same `issued_at` | Show the stored QR. |
-| `none` | `POST {}`. |
-| `active` with nothing (or a different `issued_at`) stored on this device | Offer «Νέο QR» → `POST {"replace": true}`. |
-| `not_member` | Explain that the card appears after the payment is confirmed. |
+| `active`, the same `issued_at` kept (this visit or an earlier one) | Show the kept QR. |
+| `none` | Delete the account's record; `POST {}`; a `409 qr_exists` (another device was first) → "created elsewhere" + «Νέο QR». |
+| `active` with nothing (or an older QR) kept | Delete the old one, explain, offer «Νέο QR» → confirmation → delete → `POST {"replace": true}`. |
+| `not_member` / `member_disabled` | Delete; explain; no code. |
+| `404` (no route: the provenance gate is off) | Delete everything; the approved sample card, unchanged (never replaced by «Φόρτωση…» while the route is unknown). |
+| `409 concurrent_change` | `GET` again once, then follow the rules; twice in a row → error. |
+| `503` (including an unknown COMMIT) / error | Keep the record, show no code; «Δοκιμάστε ξανά» starts again from `GET` (never a silent replace). |
 
 ### Staff routes (`evangelou-club/v1`)
 
@@ -246,6 +376,89 @@ GET never returns a token.
 - **The lookup proof:** the reviewed service computes its proof, but the v1 route does not return it
   and the v1 redeem route does not need it. Its TTL (300 s, `EVC_Club_Qr_Services`) therefore has no
   effect today; decide it with v2 prepared redemption.
+
+**The staff app (STAGE-05D).** `app/src/staff/member/`:
+- **Pieces.**
+  - `memberApi.ts` holds the lookup client. It uses the staff transport (in-memory nonce) and a 10 s bound,
+    and parses the D8 body strictly (exact keys, `mem_` + 32 hex, a first name of 1–40 characters or
+    `null`). The same file holds the reviewed v1 redeem client (`restClubService`) on that transport.
+  - `counterFlow.ts` holds the flow and `CounterScreens.tsx` the screens.
+  - The old §4.1 proposal mapper in `restClubService` is removed: lookups through it are refused without a
+    request.
+- **Mapping.**
+  - `404 member_not_found` → "not found", but only WITH the envelope; a bare 404 is `invalid_response`.
+  - `400 invalid_qr` → "not a Club QR".
+  - `429` → the scan stays closed until `Retry-After` has passed (header, then `details`, else 300 s).
+  - `5xx` → unavailable.
+  - `401` / `403` → the controller ends the session.
+- **Screens.**
+  - The first name and the three statuses only.
+  - A coffee picker with exactly the v1 catalogue (`coffeeCatalogue.ts`, including «Άλλος καφές»). A test
+    reads the PHP `ITEMS` and requires the same codes, labels and order.
+  - One `request_id` per intent (`RedemptionIntentTracker`): «Δοκιμή ξανά» resends it, and the coffee is
+    locked while the outcome is unknown.
+  - No revoke UI (D10).
+- **Devices (round 2, owner decision 2026-11-04 «Δεν ξέρω ακόμα, να δουλεύει σε όλες»): iPad, Android and
+  a USB hand scanner.**
+  - **Camera.** `BarcodeDetector` where the browser has it. Otherwise jsQR (a runtime dependency, pinned
+    1.4.0) is loaded **lazily**: it is its own chunk in `staff-app/assets/`, fetched only when the camera
+    opens, and `tests/staff/isolation.test.ts` proves it is separate and dynamic.
+    - It is fed frames downscaled to at most 480 px from an in-memory canvas every 300 ms.
+    - It runs on the main thread. A Worker would need a separately emitted worker file (outside the
+      packaged manifest checks) and a `worker-src` CSP rule, for no visible gain at that frame size.
+    - The shell CSP (`script-src 'self'`) already allows the chunk, and no Permissions-Policy blocks the
+      camera.
+  - **Camera leak fixed.** Every start has an AbortController. A stream granted after Close, a screen
+    change or a lock is stopped at once. Mutants C14–C16.
+  - **Hand scanner.**
+    - Greek-layout letters are mapped back to the Latin keys (εωψ_… → evc_…) and Caps Lock is undone.
+    - The code must then match exactly `^evc_[0-9a-f]{48}$` (= `EVC_Qr_Token::is_valid_format`). Anything
+      else is «not a Club QR» on the tablet and is NOT sent, so it never uses up the D9 limit.
+    - Mutants C17–C19.
+  - **Retry-After.** An explicit `0` is 0 (not 300). The scan screen redraws every second with a «4:59»
+    countdown and re-opens by itself. Mutants C20–C22.
+  - **Focus (round 3, review MINOR 4).** With the jsQR fallback almost every tablet "has a camera", so
+    the scanner field now has focus WHENEVER the camera is not running: on arrival, after a lookup, after
+    a wait, after «Κλείσιμο κάμερας». A USB / Bluetooth hand scanner therefore works without a tap.
+    - The field is `inputmode="none"`, so focusing it does not open the on-screen keyboard over the
+      screen; a hardware scanner or keyboard still types into it.
+    - «Πληκτρολόγηση κωδικού», or a finger or stylus tap on the field (round 4), switches to the normal
+      keyboard for typing or pasting.
+    - Round 4: focus is never stolen. The field takes focus back only when focus is on the body, inside
+      the scan form, or on an element that has just left the page. A staff member on «Πίσω στην αρχική»
+      keeps it there when a wait ends. `focus({ preventScroll: true })`.
+    - Round 4: the field is described by the screen title and its help (`aria-describedby="evc-scan-title
+      evc-scan-help"`), so a screen reader hears «Σάρωση QR μέλους» on arrival.
+    - autocomplete / autocorrect / autocapitalize / spellcheck are off.
+    - Two fixed live regions (status, alert); the field's label («Σαρωτής QR») tells a screen reader
+      where it is.
+    - Mutants C23–C24.
+  - **After Close.** A camera that answers after «Κλείσιμο κάμερας», a lock or a screen change (granted
+    or refused) shows nothing and is stopped. So does a decoder whose chunk fails to load after Close
+    (round 4: "aborted", not "unavailable"). The jsQR canvas is emptied on stop. Mutants C28–C30.
+- **Gating:** everything runs only while the session is ready AND `features.qr_lookup === true`. A status
+  check that turns it off, a lock, an expiry or a 401 / 403 drops the member at once.
+
+**`GET /session` `features.qr_lookup` (STAGE-05D).**
+- `EVC_Rest_Lookup_Controller::lookup_ready()` is true only when the lookup routes were registered in this
+  request (so `EVC_CLUB_REDEMPTION_SOURCE` is on) AND `EVC_Club_Lookup_Backend::ready()` passes every gate
+  of `lookup()` now: staff flag, redemption source, commerce config, provenance, DB config, lookup key of
+  at least 32 bytes, a real connection, and schema `MAX(version) >= 3`.
+- `ready()` reads no member, token or name and counts nothing.
+- **Logging.** Config refusals are quiet: they are kept in `last_reason()` but not logged, because the
+  status check runs at every tablet start and tab return. A real outage (`club_db_unavailable`,
+  `club_db_schema_too_old`) is logged at most once per reason every 300 s (a transient). The line is
+  `Evangelou Club: staff QR not ready (club_db_unavailable, PDOException).` (round 2, mutants QL23–QL24).
+  No caching of a true answer (optional in the review, not done: a stale "ready" would only lead to a 503
+  scan).
+- `coffee_redemption` reports the same value. The lookup gates include the redeem route's constants, Club
+  DB and schema, but NOT its catalogue check (`coffee_catalogue_unavailable`). The shipped catalogue is the
+  fixed approved list and never empty; the empty-catalogue gap is noted above, and the redeem route would
+  still answer 503.
+- Any error → `false`. The cost is one Club DB connection per status check while the constants are set.
+- Tests in `StaffQrLookupTest`: the shipped wiring → false with nothing logged; every gate; schema 2; DB
+  down (logged once, throttled); ready again. Mutants QL17–QL24.
+- The shell's bootstrap `features` stays all `false`; the app uses the `/session` answer.
 
 **`POST /admin/members/qr/revoke`** (D6). Users with `evc_manage_club` (administrators). Body
 `{"wp_user_id": int}`. The route itself refuses, BEFORE the service:
@@ -354,13 +567,14 @@ appears. The staff answer carries the first name only (D8).
 - `MigratorTest` / `SqlProvenanceStoreTest` updated for 003.
 
 **WordPress.**
-- `StaffQrLookupTest` (wp-redemption, 12):
+- `StaffQrLookupTest` (wp-redemption, 14):
   - shipped wiring → 503; auth; every gate without connection;
   - the D8 body, first word only, any key order;
   - a leading NBSP or other Unicode space, or invalid UTF-8, never shows the whole name (null instead);
   - inactive / used_today / Athens midnight; byte-identical not-found;
   - D9; the authorizer;
   - D6 revocation; staff-role administrator and Application Password refused.
+  - `GET /session` features.qr_lookup only when every gate is ready; the ready check is quiet and reads nothing.
 - `CustomerQrTest` (wp-customer, 6).
 - `ClubRedemptionBackendTest::test_without_the_constant_no_qr_route_is_registered` (wp-enabled).
 - `ClubMigrationsTest` (003 not approved by default; target 3 / 1 / invalid).
@@ -375,7 +589,7 @@ appears. The staff answer carries the first name only (D8).
 - SQL runner: QS1–QS12, LR1–LR8.
 - Membership runner: L27 (uncounted failure).
 - WP runner, each with named killer tests:
-  - QL1–QL16 (modes enabled / redemption);
+  - QL1–QL24 (modes enabled / redemption; QL17–QL24: the session flag and its throttled outage log);
   - QC1–QC7 (mode customer);
   - MG37–MG42 (migration target).
 - Equivalent, not listed:
@@ -386,8 +600,5 @@ appears. The staff answer carries the first name only (D8).
 
 ### Not done here
 
-- The staff UI wiring (STAGE-05D).
-- Changes to the customer bundle (05D: the storage module above).
 - Phone lookup; v2 prepared redemption.
 - Applying 003 anywhere real.
-- `GET /session` still reports `features.qr_lookup: false` (05D).

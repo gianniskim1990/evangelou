@@ -23,10 +23,8 @@ import {
   ClubApiError,
   MEMBERSHIP_STATUSES,
   type ApiErrorCode,
-  type BenefitState,
   type ClubErrorDetails,
   type CoffeeOption,
-  type MemberBenefitStatus,
   type MemberLookup,
   type MembershipStatus,
   type RedeemBenefitRequest,
@@ -45,7 +43,6 @@ type Json = Record<string, unknown>;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** ISO 8601 / RFC 3339 instant with an EXPLICIT offset (Z or ±hh:mm). */
 const INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
-const BENEFIT_STATES: readonly BenefitState[] = ["available", "used", "unavailable"];
 
 function isObject(v: unknown): v is Json {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -76,37 +73,14 @@ function invalid(): ClubApiError {
 // DTO -> domain mappers (exported for tests)
 // ---------------------------------------------------------------------------
 
-function mapBenefit(raw: unknown): MemberBenefitStatus {
-  if (!isObject(raw)) throw invalid();
-  const { state, business_date, redeemed_at, reason, coffee_code } = raw;
-  if (typeof state !== "string" || !(BENEFIT_STATES as readonly string[]).includes(state)) throw invalid();
-  if (!isBusinessDate(business_date)) throw invalid();
-  if (redeemed_at !== null && !isInstant(redeemed_at)) throw invalid();
-  if (reason !== undefined && reason !== "membership_inactive") throw invalid();
-  if (coffee_code !== undefined && coffee_code !== null && typeof coffee_code !== "string") throw invalid();
-  return {
-    state: state as BenefitState,
-    businessDate: business_date,
-    redeemedAt: redeemed_at,
-    ...(reason ? { reason: "membership_inactive" as const } : {}),
-    coffeeCode: typeof coffee_code === "string" ? coffee_code : null,
-  };
-}
-
-export function mapLookupResponse(raw: unknown): MemberLookup {
-  if (!isObject(raw) || !isObject(raw.member) || !isObject(raw.membership) || !isObject(raw.benefits)) throw invalid();
-  const { member_id, display_name, phone_masked } = raw.member;
-  const { status, started_at, valid_until } = raw.membership;
-  if (typeof member_id !== "string" || member_id === "") throw invalid();
-  if (typeof display_name !== "string" || typeof phone_masked !== "string") throw invalid();
-  if (!isMembershipStatus(status)) throw invalid();
-  if (started_at !== undefined && started_at !== null && !isInstant(started_at)) throw invalid();
-  if (valid_until !== null && !isInstant(valid_until)) throw invalid();
-  return {
-    member: { id: member_id, name: display_name, phoneMasked: phone_masked, status, validUntil: valid_until },
-    benefit: mapBenefit(raw.benefits.free_coffee),
-  };
-}
+/*
+ * STAGE-05D: the earlier §4.1 PROPOSAL mapper (display name, masked phone,
+ * membership dates, benefits) is gone: the server never sends that body. The
+ * real lookup answer (owner decision D8: {member:{member_id, first_name},
+ * status}) is parsed by the counter's own client, src/staff/member/memberApi.ts
+ * (parseLookupFound / mapLookupReply). Lookups through this adapter are refused
+ * below without sending anything.
+ */
 
 /** Validates a redeem success against the request that was sent. */
 export function mapRedeemResponse(raw: unknown, request: RedeemBenefitRequest): RedemptionOutcome {
@@ -246,24 +220,15 @@ export function createRestClubService(options: RestClubServiceOptions = {}): Clu
     }
   }
 
-  async function lookup(body: unknown): Promise<MemberLookup> {
-    try {
-      return mapLookupResponse(await call("POST", "/members/lookup", body));
-    } catch (err) {
-      // A real 404 member_not_found is a normal outcome; the screens expect
-      // `{ member: null }` exactly like the mock returns.
-      if (err instanceof ClubApiError && err.code === "member_not_found") return { member: null, benefit: null };
-      throw err;
-    }
-  }
-
   return {
-    findMemberByPhone(phone) {
-      return lookup({ method: "phone", phone });
+    async findMemberByPhone() {
+      // Phone lookup is not offered by the v1 server (400 invalid_request); nothing is sent.
+      throw clubError("invalid_request");
     },
 
-    findMemberByQrToken(qrToken) {
-      return lookup({ method: "qr", qr_token: qrToken });
+    async findMemberByQrToken(): Promise<MemberLookup> {
+      // The real QR lookup is src/staff/member/memberApi.ts (the D8 answer); nothing is sent from here.
+      throw clubError("invalid_request");
     },
 
     async getMemberStatus() {

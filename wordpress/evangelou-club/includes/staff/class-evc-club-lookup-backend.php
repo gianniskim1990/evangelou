@@ -42,6 +42,8 @@ final class EVC_Club_Lookup_Backend {
     const REASON_CONNECT = 'club_db_unavailable';
     const REASON_SCHEMA = 'club_db_schema_too_old';
     const REASON_FAILED = 'lookup_failed';
+    /** ready(): a real outage (connect / schema) is logged at most once per reason in this window. */
+    const READY_LOG_SECONDS = 300;
 
     /** @var callable(): array */
     private $environment;
@@ -57,6 +59,8 @@ final class EVC_Club_Lookup_Backend {
     private $membership;
     /** @var string|null */
     private $last_reason = null;
+    /** @var bool true while ready() runs: refusals are recorded but not logged */
+    private $quiet = false;
 
     public function __construct(?callable $environment = null, ?callable $connect = null, ?EVC_Clock_Source $clock = null, ?callable $log = null, ?callable $first_name = null, ?callable $membership = null) {
         $this->environment = $environment ?? array(__CLASS__, 'constants');
@@ -201,9 +205,27 @@ final class EVC_Club_Lookup_Backend {
         return $today === null ? 'active' : 'used_today';
     }
 
+    /**
+     * STAGE-05D: GET /session's `features.qr_lookup`. True ONLY when every gate of lookup() passes right
+     * now: steps 1-8 above, including a real connection and schema MAX(version) >= 3. Reads no member,
+     * token or name. Quiet: a refusal here is not logged (the session check runs on every tablet start
+     * and on every return to the tab, and "off" is the normal state); last_reason() still says why.
+     * Config refusals stay quiet; a real outage (REASON_CONNECT, REASON_SCHEMA) is logged at most once
+     * per reason every READY_LOG_SECONDS (a transient), so a down Club DB is visible without flooding.
+     * Never throws.
+     */
+    public function ready(): bool {
+        try {
+            return $this->open(true) !== null;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
     /** @return array{0:EVC_Club_Db,1:EVC_Commerce_Source_Config,2:string}|null */
-    private function open(): ?array {
+    private function open(bool $quiet = false): ?array {
         $this->last_reason = null;
+        $this->quiet = $quiet;
         try {
             $env = ($this->environment)();
         } catch (Throwable $e) {
@@ -263,12 +285,32 @@ final class EVC_Club_Lookup_Backend {
     /** @return null always */
     private function refuse(string $reason, ?Throwable $e = null) {
         $this->last_reason = $reason;
+        if ($this->quiet) {
+            if ($reason === self::REASON_CONNECT || $reason === self::REASON_SCHEMA) {
+                $this->log_not_ready($reason, $e);
+            }
+            return null;
+        }
         try {
             ($this->log)('Evangelou Club: staff QR unavailable (' . $reason . ($e === null ? '' : ', ' . self::safe(get_class($e))) . ').');
         } catch (Throwable $ignored) {
             // never changes the answer
         }
         return null;
+    }
+
+    /** At most one line per reason per READY_LOG_SECONDS; never changes the answer. */
+    private function log_not_ready(string $reason, ?Throwable $e): void {
+        try {
+            $key = 'evc_club_qr_ready_logged_' . $reason;
+            if (get_transient($key) !== false) {
+                return;
+            }
+            set_transient($key, 1, self::READY_LOG_SECONDS);
+            ($this->log)('Evangelou Club: staff QR not ready (' . $reason . ($e === null ? '' : ', ' . self::safe(get_class($e))) . ').');
+        } catch (Throwable $ignored) {
+            // never changes the answer
+        }
     }
 
     private static function safe($value): string {

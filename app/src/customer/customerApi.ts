@@ -53,8 +53,32 @@ export function parseMe(body: unknown): Me | null {
   return { displayName: account.display_name, email: account.email, state: state as MembershipState, paidUntilUtc: until };
 }
 
-export function createCustomerApi(config: CustomerConfig, fetchImpl: typeof fetch = (...args) => fetch(...args), timeoutMs = REQUEST_TIMEOUT_MS): CustomerApi {
-  let nonce = config.nonce;
+/**
+ * STAGE-05D: the wp_rest nonce, in memory only, shared by the /me client and
+ * the /me/qr client (qrApi.ts) so that a refreshed X-WP-Nonce from either is
+ * used by both. Only well-formed nonces are accepted.
+ */
+export interface NonceBox {
+  get(): string;
+  update(candidate: string | null): void;
+}
+
+export function createNonceBox(initial: string): NonceBox {
+  let value = initial;
+  return {
+    get: () => value,
+    update(candidate) {
+      if (candidate && NONCE_RE.test(candidate)) value = candidate;
+    },
+  };
+}
+
+export function createCustomerApi(
+  config: CustomerConfig,
+  fetchImpl: typeof fetch = (...args) => fetch(...args),
+  timeoutMs = REQUEST_TIMEOUT_MS,
+  nonceBox: NonceBox = createNonceBox(config.nonce),
+): CustomerApi {
   const url = endpointUrl(config.restBase, "/me");
   return {
     async me() {
@@ -75,11 +99,10 @@ export function createCustomerApi(config: CustomerConfig, fetchImpl: typeof fetc
               credentials: "same-origin",
               cache: "no-store",
               redirect: "error",
-              headers: { Accept: "application/json", "X-WP-Nonce": nonce },
+              headers: { Accept: "application/json", "X-WP-Nonce": nonceBox.get() },
               signal: controller.signal,
             });
-            const fresh = res.headers.get("X-WP-Nonce");
-            if (fresh && NONCE_RE.test(fresh)) nonce = fresh;
+            nonceBox.update(res.headers.get("X-WP-Nonce"));
             let body: unknown = null;
             try {
               body = await res.json();

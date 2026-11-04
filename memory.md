@@ -1295,3 +1295,101 @@ The re-review verdict was OK, with no Blocker or Major.
   - (b) «Όχι, μόνο ο διαχειριστής»: QR revocation stays administrator-only, and the tablet only scans. This closes the earlier open question (see the "Open owner question" lines above).
   - Both are recorded in `member-qr.md` (decision rows D9α and D10, plus the revoke section), the README and the limiter docblock.
 - CI on 2741086 (round 4 plus the owner-decision docs): foundation 18/18 green, run 41815843926 (push). Frontend did not run because no app/ paths changed. No pull_request-event run was created for this SHA (GitHub returned 500 on the first push attempt). The superseded runs for 06cb78c were cancelled.
+
+### STAGE-05D: staff counter + member QR UI (2026-11-04)
+Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing is merged, deployed or enabled.
+- **Staff (`app/src/staff/member/`).** Shown ONLY while the session is ready AND `GET /session` `features.qr_lookup === true`.
+  - Pieces: `memberApi.ts` (strict D8 parser; 404 is "not found" only with the envelope; 429 → wait for Retry-After; 5xx → unavailable; 401/403 end the session; v1 redeem through `restClubService` on the staff transport), `counterFlow.ts` and `CounterScreens.tsx`.
+  - Behaviour: one request_id per intent, and the coffee is locked while the outcome is unknown. `coffeeCatalogue.ts` = the PHP v1 list, including `other_coffee` «Άλλος καφές»; a test reads the PHP `ITEMS`. No revoke (D10).
+  - Camera: `BarcodeDetector` when the browser has it; otherwise the hand-scanner / paste field.
+  - The old `mapLookupResponse` (the §4.1 proposal) was removed from `restClubService`.
+- **Session flag (PHP).**
+  - `EVC_Rest_Lookup_Controller::lookup_ready()` = routes registered + `EVC_Club_Lookup_Backend::ready()`: all 8 gates (incl. key ≥ 32 bytes, a real connect, schema ≥ 3), quiet (no log), reads nothing.
+  - `qr_lookup` and `coffee_redemption` report it. The guard allows only the session controller to name `EVC_Rest_Lookup_Controller` (plus 3 fixtures).
+  - Mutants QL17–QL22.
+- **Customer (`app/src/customer/`).**
+  - Pieces: `qrEncode.ts` (own QR encoder, byte mode, level M, v1–10; the test decodes with jsQR as a devDependency), `qrApi.ts` (strict GET/POST /me/qr, nonce shared with /me via `createNonceBox`), `memberQr.ts` (the member-qr.md table) and `MemberQrPanel.tsx` («Νέο QR» → Greek confirmation → `replace: true`; 409 qr_exists → "created elsewhere"). A 404 on GET → the sample card, unchanged.
+  - **The plaintext is kept in memory only**: the coordinator said "localStorage stays forbidden", which conflicts with the old member-qr.md design (one module lifting the ban). After a reload the card offers «Νέο QR» or the screenshot.
+- **Open decisions reported:** (1) keep the customer QR between visits (which store?); (2) the counter device (iPad Safari has no BarcodeDetector → hand scanner or a decoder library).
+- **Frontend mutants:** 275 → 299 (C1–C13, Q1–Q11; S4 re-aimed to `nonceBox.get()`). The shard timeout was raised 30 → 45 min (shards took about 21 min for 138).
+- CI on e4244186 (STAGE-05D code, Draft PR #39): green. Foundation 18/18 (runs 41831022507 push, 41831030657 pull_request) and frontend 4/4 (runs 41831022377 push, 41831030864 pull_request; the PR run includes the isolated-build check). The superseded runs for 99abf09 were cancelled; that commit had added Tailwind candidates (`table`, `ring`, `p-1`, `max-w-[32ch]`), which e424418 removed.
+
+### STAGE-05D round 2: review of e424418 (approve with changes) + owner decisions (2026-11-04)
+- **Owner decision (a)** «Ναι, να τον θυμάται»: the customer's phone remembers the member QR.
+  - **Store.** `app/src/customer/qrStore.ts` is the ONLY customer file allowed to use browser storage. It uses `localStorage` (allowed "if simpler" than IndexedDB: synchronous, no dependency, testable in jsdom).
+  - **Key and value.** The key is `evc-club-qr:v1:` + SHA-256(account|issued_at); the value is {v, a: SHA-256(account), t: token}.
+  - **Shown** only for the issued_at GET reports; other records of the account are deleted on read.
+  - **Deleted on:** sign-out (before logout), signed_out (all), not_member, member_disabled, forbidden, route off (all), none, and replace (before the POST). **Kept** on unavailable / error.
+  - **Fallback.** Without WebCrypto or storage, memory only.
+  - **Guard.** `app/scripts/storage-guard.mjs` checks the customer esbuild graph inside the packager, plus `tests/club/storageGuard.test.ts` and its selfTest fixtures. The customer bundle string ban is now sessionStorage / indexedDB / document.cookie (localStorage removed).
+  - The server is unchanged and never re-sends a token.
+- **Owner decision (b)** «Δεν ξέρω ακόμα, να δουλεύει σε όλες»: the counter must work on iPad, Android and a USB scanner.
+  - The camera uses BarcodeDetector, else jsQR (now a runtime dependency, pinned 1.4.0) loaded lazily as its own chunk `staff-app/assets/jsQR-*.js`, on frames downscaled to at most 480 px every 300 ms on the main thread.
+  - No Worker: it would need an emitted worker file outside the manifest checks and a CSP `worker-src` rule. The shell CSP `script-src 'self'` allows the chunk, and there is no Permissions-Policy.
+  - The isolation test proves jsQR is a separate dynamic chunk, absent from the customer and ordering apps.
+- **Majors fixed.**
+  1. **Camera leak.** `startQrCamera(..., signal)`: a stream granted after abort (Close, screen change, lock) is stopped at once. DOM tests cover a slow getUserMedia with a lock, and with Close.
+  2. **Hand scanner.** `normalizeScannedCode` maps Greek-layout letters (εωψ_αβδφ) back and undoes Caps Lock; then exact `^evc_[0-9a-f]{48}$` (= `EVC_Qr_Token::is_valid_format`) is required, otherwise invalid_qr locally with no request sent.
+- **Minors and nits.**
+  - `Retry-After: 0` → 0, with a 1 s countdown redraw («Δοκιμάστε ξανά σε m:ss») that re-enables by itself.
+  - Scanner focus (no camera / after busy); autocorrect etc. off.
+  - Tailwind now scans only `src/` and the root HTML pages (`src/index.css` `source(none)` + `@source`); the CSS selector sets are unchanged.
+  - check-isolated-build now includes the customer entry and `dist-customer`. The canary was reworked: a docs-only word must NOT change the build, and an unwired `src/` file must.
+  - The QR white padded frame and the 32ch dialog width are restored.
+  - PHP `ready()` logs club_db_unavailable / club_db_schema_too_old at most once per 300 s (transient); the true-answer cache was not done.
+  - The coffee_redemption comment now names the catalogue gap.
+  - Encoder bit-exact fixtures come from python-qrcode 7.4.2. segno 1.6.6 is not spec-exact here: it inserts a 0x00 codeword when the data already ends on a byte boundary.
+  - Nits: the aborted lookup resets busy; signed_out clears memory; the sample card is not replaced by «Φόρτωση…» while the route is unknown; fixed status and alert live regions; the dialog sits outside live regions; «Ο καφές καταχωρήθηκε: Espresso · Γιάννης»; «προγράμματος περιήγησης».
+- **Mutants.** Frontend 299 → 325 (C14–C27, Q12–Q23; Q4/Q5/Q6/Q8/Q11 re-aimed; C14 and C24 first survived and were fixed: one abort check after every await, and a test that moves focus away first). Local: the 31 new or re-aimed mutants all killed; WordPress 147/147 killed (QL23–QL24 new, QL20 re-aimed); PHP suites all green.
+- **CI on e628991.**
+  - Foundation: green after one re-run of the push run. The PR run 41852986670 was 18/18 first time; the push run 41852977222 had one failure in the untouched `SqlProvenanceConcurrencyTest::test_duplicate_callbacks_and_cross_source_aliases_fund_one_period` (multi-process race, 7 workers `unavailable` on PHP 7.4 / MySQL 8.0) and passed on the re-run.
+  - Frontend: mutation shard 2 died twice (push and PR) at mutant C13 with "The runner has received a shutdown signal".
+  - **Cause:** under the mutant, `assert.equal(<jsdom element>, null)` failed, and Node's assert then FORMATS the jsdom element (a huge object graph). That took about 5.7 GB of total RSS and killed the 7 GB runner; the per-process heap cap did not stop it.
+  - **Fix:** in `memberCounter.test.ts` and `customerQr.test.ts`, DOM-node comparisons now use `assert.ok(a === b, message)`, which never inspects. C13 now peaks at 0.36 GB (baseline 0.37 GB).
+  - All 50 C* / Q* mutants were re-run locally: all killed, peak 0.43 GB.
+  - **Rule for future tests:** never pass DOM nodes as actual/expected to `assert.equal`, `assert.notEqual` or `assert.deepEqual`.
+- CI on 77a0e359 (STAGE-05D round 2 code, PR #39): green. Foundation pull_request run 41873126950 18/18; frontend pull_request 41873127251 4/4 (incl. both mutation shards of 325 and the isolated-build check with the new canary); frontend push 41873118887 4/4. No foundation push run was created for this SHA (the commit touched only app/tests and memory.md; foundation's path filter). The previous code SHA e628991 had foundation push 41852977222 green after one flake re-run.
+
+### STAGE-05D round 3: re-review of 77a0e35 (approve with changes) (2026-11-04)
+- **MAJOR 1, sign-out race.** `qrStore.ts` now has an epoch: `forget()` / `forgetAll()` bump it synchronously when called, and `write()` re-checks it after its last await, in the same synchronous step as `setItem`. No record can land after sign-out has started. The test reproduces the reviewer's `race.ts`. Mutants Q24–Q26.
+- **MAJOR 2, guard bypasses.**
+  - `storage-guard.mjs` normalises the source first: escapes decoded, string concatenation and template literals folded, `x["y"]` turned into `x.y`.
+  - New rules: `caches`, `.cookie` and `navigator.storage`. The generic names `caches` and `.cookie` are checked in app sources only, because React's development build has its own `caches`.
+  - Bypass fixtures were added.
+  - Packager: the built minified customer JS must contain `localStorage` exactly `EXPECTED_CUSTOMER_LOCAL_STORAGE = 1` times (verified by hand: a second access gives 2 and FAILS). Extra bundle bans: `.cookie`, `caches`, `navigator.storage`, `cookieStore`, `openDatabase`, `CacheStorage`.
+  - Aliasing (`const n = navigator; n.storage`) is documented as not statically catchable.
+  - Mutants Q27–Q30.
+- **Minors.**
+  - **Camera answers after abort.** These are now silent: `startQrCamera` throws "aborted" when the refusal comes after the abort, and the screen checks `run.signal.aborted`. Mutants C28–C29.
+  - **Scanner focus.** The scanner field has focus whenever the camera is not running, with `inputmode="none"` (no on-screen keyboard; a USB scanner still types) and a «Πληκτρολόγηση κωδικού» toggle. C23 and C24 were re-aimed.
+  - **Account hash.** It stays unsalted; documented as low risk, because a salt kept in the same store protects nothing from someone who can read the token anyway.
+  - **Residual risk.** Any script on the WordPress origin can read the localStorage token; documented, and accepted by the owner.
+- **Nits.** The canvas is emptied on stop (C30). An `issued_at` format change fails safe (the record is deleted); documented.
+- **Rule kept.** No DOM nodes in `assert.equal`, `assert.notEqual` or `assert.deepEqual`.
+- CI on 5d8e1c67 (STAGE-05D round 3 code, PR #39): green.
+  - Foundation: pull_request 41887526535 18/18; push 41887521755 18/18 after one re-run of the failed job. The failure was the known BacsConfirmationTest Athens-chain real-clock flake (`test_expiry_and_an_early_renewal_follow_the_athens_chain`, commerce PHP 7.4 / MariaDB / orders posts).
+  - Frontend: pull_request 41887526558 4/4 and push 41887521605 4/4. Both mutation shards (335 mutants) and the isolated-build check passed.
+
+### STAGE-05D round 4: review of 5d8e1c6 (approve with changes, no majors) (2026-11-04)
+- **Guard.**
+  - `storage-guard.mjs` now normalises with esbuild `transformSync` (`minifySyntax`): a real parser, so comments are stripped correctly even next to a regex literal such as `/a\/*/`. It decodes escapes and folds concatenation, templates and brackets. It is resolved at call time (from the file, else `EVC_APP_DIR`) because the test runner bundles tests into a temp dir.
+  - It also folds `["a","b"].join("")`.
+  - New app-only names: `cookie` and `storage`, which catches destructuring from document / navigator. The allowed file may use `localStorage` and `storage`.
+  - A module that cannot be parsed is refused.
+  - Packager: `cookie` is banned outright in the built customer JS, a `{…storage…}=navigator` destructuring is banned, and `Storage` must also appear exactly once (this catches an array join).
+  - The docs' over-claims were fixed.
+- **Shared phone and other tabs.**
+  - The phone keeps at most one QR: a read deletes every OTHER record (any account), and a write replaces all records.
+  - A `storage` event that removes our key (another tab's sign-out or replace) drops the in-memory token and re-opens the flow.
+  - The memory layer has its own epoch, so a read still in flight never refills memory after a forget (reviewer's `race2`, now a 30-spin test).
+  - The persistent read's epoch check was removed as dead: `forgetAll` deletes synchronously.
+- **Counter.**
+  - Focus is never stolen: the field is refocused only from body, from inside the scan form, or from a detached element, with `preventScroll`.
+  - A finger or stylus tap on the field (`pointerType` other than mouse) switches to the text keyboard.
+  - The field is `aria-describedby="evc-scan-title evc-scan-help"`.
+  - A decoder load that fails after an abort reports "aborted".
+- **Mutants.** Frontend 335 → 346 (Q30–Q39 minus Q28/Q29, which were equivalent to the esbuild folding and are removed together with their dead regex folds; C31–C34; C23, Q21, Q22, Q27 re-aimed). Q33 first survived and was killed by a deterministic test using a fake phone read. The shards are 173 + 173. All 33 changed-line mutants killed locally, peak memory 0.43 GB.
+- CI on 6598446e (STAGE-05D round 4 code, PR #39): green.
+  - Foundation: pull_request 41903894197 18/18; push 41903886651 18/18 after one re-run of the known BacsConfirmationTest Athens-chain flake (commerce PHP 8.4 / MySQL 8.0 / hpos, attempt 1).
+  - Frontend: pull_request 41903894109 4/4 and push 41903886594 4/4. Both mutation shards (346 mutants) and the isolated-build check passed.
+- **BacsConfirmationTest flake.** Seen on PHP 7.4 / MariaDB on 5d8e1c6 and on PHP 8.4 / MySQL on 6598446. It is the real-clock test `test_expiry_and_an_early_renewal_follow_the_athens_chain` and is still not fixed (owned by the earlier commerce stage).

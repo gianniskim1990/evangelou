@@ -26,12 +26,32 @@ final class EVC_Rest_Lookup_Controller {
 
     /** @var EVC_Club_Lookup_Backend */
     private $backend;
+    /**
+     * STAGE-05D: the backend whose routes were registered in this request (null when the routes do not
+     * exist, i.e. without EVC_CLUB_REDEMPTION_SOURCE). Read only by lookup_ready().
+     * @var EVC_Club_Lookup_Backend|null
+     */
+    private static $registered = null;
 
     public function __construct(EVC_Club_Lookup_Backend $backend) {
         $this->backend = $backend;
     }
 
+    /**
+     * GET /session `features.qr_lookup`: true only when the lookup route exists in this request AND its
+     * backend passes every gate now (EVC_Club_Lookup_Backend::ready(): constants, lookup key, a real
+     * connection, schema >= 3). Anything else, including any error, is false. Never throws.
+     */
+    public static function lookup_ready(): bool {
+        try {
+            return self::$registered !== null && self::$registered->ready() === true;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
     public function register_routes(bool $override = false): void {
+        self::$registered = $this->backend;
         register_rest_route(EVC_Rest_Security::NAMESPACE_V1, self::LOOKUP_ROUTE, array(
             'methods' => 'POST',
             'callback' => array($this, 'lookup'),

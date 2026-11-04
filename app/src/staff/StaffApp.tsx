@@ -3,11 +3,17 @@ import { ClubShell } from "../club/ClubShell";
 import { formatClockTime } from "../club/format";
 import logoUrl from "./assets/logo-evaggelou-color.png";
 import type { StaffController, StaffState } from "./staffController";
+import { CounterScreens } from "./member/CounterScreens";
+import type { CounterFlow, CounterState } from "./member/counterFlow";
+import type { CameraEnv } from "./member/qrCamera";
 
 /**
  * REAL staff app UI. No demo data, no mock service: everything shown comes
- * from the WordPress session endpoint. Member functions are not connected
- * yet and are rendered as clearly disabled, non-interactive cards.
+ * from the WordPress session endpoint and, STAGE-05D, the member routes.
+ * The QR scan (and the coffee it leads to) is offered ONLY when GET /session
+ * reports features.qr_lookup === true; otherwise every member function is a
+ * clearly disabled, non-interactive card as before. Phone lookup and history
+ * stay disabled. There is no QR revocation on the tablet (D10).
  */
 
 export const NOT_READY_MESSAGE = "Η λειτουργία θα ενεργοποιηθεί μετά τη σύνδεση του Club.";
@@ -65,7 +71,11 @@ function PrimaryButton({ onClick, children, disabled }: { onClick: () => void; c
   );
 }
 
-function Dashboard({ state, controller }: { state: Extract<StaffState, { phase: "ready" }>; controller: StaffController }) {
+const NO_COUNTER: CounterState = { screen: "home" };
+const noSubscribe = () => () => {};
+
+function Dashboard({ state, controller, counter }: { state: Extract<StaffState, { phase: "ready" }>; controller: StaffController; counter?: CounterFlow }) {
+  const qrOn = state.session.features.qrLookup && counter !== undefined;
   return (
     <main className="mx-auto max-w-[560px] px-5 pt-8 pb-12 md:max-w-[880px] md:px-8 md:pt-12">
       <h1 className="font-literata mb-1.5 text-[24px] font-semibold">Καλώς ήρθατε</h1>
@@ -85,16 +95,45 @@ function Dashboard({ state, controller }: { state: Extract<StaffState, { phase: 
 
         <section className="rounded-2xl border border-espresso/10 bg-surface p-5" aria-label="Κατάσταση Club">
           <h2 className="mb-2 text-[15px] font-semibold">Σύνδεση με τα μέλη του Club</h2>
-          <p className="text-[13.5px] text-espresso/70">
-            <span className="mr-2 inline-block h-2 w-2 rounded-full bg-disabled align-middle" aria-hidden="true" />
-            Δεν έχει ενεργοποιηθεί ακόμη.
-          </p>
-          <p className="mt-1 text-[12.5px] text-espresso/50">Καμία καταχώρηση καφέ δεν είναι δυνατή μέχρι τότε.</p>
+          {qrOn ? (
+            <>
+              <p className="text-[13.5px] text-espresso/70">
+                <span className="mr-2 inline-block h-2 w-2 rounded-full bg-[#2f7d4f] align-middle" aria-hidden="true" />
+                Ενεργή: σάρωση QR και δωρεάν καφές.
+              </p>
+              <p className="mt-1 text-[12.5px] text-espresso/50">Ο διακομιστής ελέγχει ξανά τη συνδρομή σε κάθε καταχώρηση.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-[13.5px] text-espresso/70">
+                <span className="mr-2 inline-block h-2 w-2 rounded-full bg-disabled align-middle" aria-hidden="true" />
+                Δεν έχει ενεργοποιηθεί ακόμη.
+              </p>
+              <p className="mt-1 text-[12.5px] text-espresso/50">Καμία καταχώρηση καφέ δεν είναι δυνατή μέχρι τότε.</p>
+            </>
+          )}
         </section>
       </div>
 
+      {qrOn && (
+        <button
+          type="button"
+          onClick={() => counter.openScan()}
+          className="mb-3 flex w-full items-start gap-3.5 rounded-2xl border-none bg-bronze-dark p-5 text-left text-white"
+          data-evc-action="qr"
+        >
+          <span className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-white/15">
+            <Icon path={ICONS.qr} />
+          </span>
+          <span>
+            <span className="block text-[16px] font-semibold">Σάρωση QR μέλους</span>
+            <span className="mt-0.5 block text-[12.5px] text-white/75">Μετά τη σάρωση: μικρό όνομα, κατάσταση και επιλογή καφέ.</span>
+          </span>
+        </button>
+      )}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {ACTIONS.map((action) => (
+        {ACTIONS.filter((action) => !(qrOn && (action.key === "qr" || action.key === "coffee"))).map((action) => (
           <div
             key={action.key}
             role="group"
@@ -131,8 +170,9 @@ function Dashboard({ state, controller }: { state: Extract<StaffState, { phase: 
   );
 }
 
-export function StaffApp({ controller }: { controller: StaffController }) {
+export function StaffApp({ controller, counter, camera }: { controller: StaffController; counter?: CounterFlow; camera?: CameraEnv }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
+  const counterState = useSyncExternalStore(counter?.subscribe ?? noSubscribe, counter?.getState ?? (() => NO_COUNTER));
   const login = () => controller.reauthenticate();
 
   let content: ReactNode;
@@ -145,7 +185,13 @@ export function StaffApp({ controller }: { controller: StaffController }) {
       );
       break;
     case "ready":
-      content = <Dashboard state={state} controller={controller} />;
+      // The counter screens exist only while the server says the QR lookup is ready.
+      content =
+        counter && camera && state.session.features.qrLookup && counterState.screen !== "home" ? (
+          <CounterScreens flow={counter} camera={camera} />
+        ) : (
+          <Dashboard state={state} controller={controller} counter={counter} />
+        );
       break;
     case "locked":
       content = (
