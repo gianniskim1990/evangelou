@@ -723,7 +723,7 @@ See `docs/staff-role-upgrade.md`.
 ## Migration procedure (isolated environments only)
 
 1. Take and verify a backup of the target Club database.
-2. Run `EVC_Migrator::migrate()` with the DDL user. It verifies every applied
+2. Run `EVC_Migrator::migrate($target)` (the target is required) with the DDL user. It verifies every applied
    migration's checksum, rejects missing/out-of-order files, holds a named
    lock, applies pending files in order and records version + checksum.
 3. DDL auto-commits in MySQL/MariaDB: a failed migration may leave partial

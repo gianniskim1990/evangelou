@@ -55,7 +55,7 @@ final class StaffQrLookupTest extends EVC_WP_Test_Case {
                 copy(EVC_Test_Database::migrations_dir() . '/' . $file, $dir . '/' . $file);
             }
         }
-        (new EVC_Migrator($db->connect(), $dir))->migrate();
+        (new EVC_Migrator($db->connect(), $dir))->migrate(PHP_INT_MAX);
         return $db;
     }
 
@@ -221,6 +221,33 @@ final class StaffQrLookupTest extends EVC_WP_Test_Case {
         $this->assertSame(array('member_id' => $public, 'first_name' => 'Μαρία'), $r->get_data()['member'], 'D8 «μικρό όνομα»: the first word only');
         list(, , $long) = $this->member_with_qr(str_repeat('Α', 60));
         $this->assertSame(40, mb_strlen($this->scan($long)->get_data()['member']['first_name']));
+    }
+
+    public function test_a_leading_unicode_space_or_invalid_utf8_never_shows_the_whole_name(): void {
+        $this->use_backend();
+        $this->login_as($this->create_staff_user());
+        list($user, $public, $token) = $this->member_with_qr("\u{00A0}Μαρία Ελένη");
+        $this->adapter->set($user, EVC_Mock_Membership_Adapter::active_until('2026-12-01T10:00:00Z'));
+        $this->assertSame('Μαρία', $this->scan($token)->get_data()['member']['first_name'], 'a leading NBSP is a space, not the whole name');
+
+        // The database refuses invalid UTF-8, so it is served the way a filter or another store could.
+        $invalid = "Μαρία\xff Ελένη Παπαδοπούλου";
+        delete_user_meta($user, 'billing_first_name');
+        $serve = static function ($value, $id, $key, $single) use ($user, $invalid) {
+            return ((int) $id === $user && $key === 'first_name') ? array($invalid) : $value;
+        };
+        add_filter('get_user_metadata', $serve, 10, 4);
+        $this->assertSame($invalid, get_user_meta($user, 'first_name', true), 'the invalid value really is served');
+        $r = $this->scan($token);
+        $this->assertSame(200, $r->get_status());
+        $this->assertNull($r->get_data()['member']['first_name'], 'invalid UTF-8: no name rather than the whole string');
+        $json = wp_json_encode($r->get_data());
+        $this->assertIsString($json, 'the answer is valid JSON');
+        $this->assertStringNotContainsString('Ελένη', $json);
+        $this->assertStringNotContainsString('Παπαδοπούλου', $json);
+
+        update_user_meta($user, 'billing_first_name', "\u{2003}Γιώργος\u{00A0}Νίκος");
+        $this->assertSame('Γιώργος', $this->scan($token)->get_data()['member']['first_name'], 'falls back to the billing first word');
     }
 
     public function test_frozen_expired_and_unverified_cards_are_not_active_and_todays_coffee_shows_as_taken(): void {

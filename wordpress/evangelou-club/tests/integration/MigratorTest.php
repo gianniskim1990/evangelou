@@ -42,7 +42,7 @@ final class MigratorTest extends EVC_Db_Test_Case {
 
     public function test_fresh_database_migrates_and_records_version_and_checksum(): void {
         $migrator = new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir());
-        $this->assertSame(array(1, 2, 3), $migrator->migrate());
+        $this->assertSame(array(1, 2, 3), $migrator->migrate(PHP_INT_MAX));
 
         $this->assertSame(array(
             'evc_audit_events' => 'InnoDB',
@@ -91,16 +91,16 @@ final class MigratorTest extends EVC_Db_Test_Case {
 
     public function test_repeat_migration_is_a_no_op(): void {
         $migrator = new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir());
-        $migrator->migrate();
+        $migrator->migrate(PHP_INT_MAX);
         $before = $this->tables();
-        $this->assertSame(array(), $migrator->migrate());
-        $this->assertSame(array(), (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate());
+        $this->assertSame(array(), $migrator->migrate(PHP_INT_MAX));
+        $this->assertSame(array(), (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX));
         $this->assertSame($before, $this->tables());
         $this->assertSame(3, $this->count_rows('evc_schema_migrations'));
     }
 
     public function test_required_unique_keys_and_foreign_keys_exist(): void {
-        (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate();
+        (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX);
         $unique = $this->db->fetch_all(
             "SELECT INDEX_NAME AS i, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS cols
                FROM information_schema.STATISTICS
@@ -129,12 +129,12 @@ final class MigratorTest extends EVC_Db_Test_Case {
 
     public function test_modified_applied_migration_is_detected_as_drift(): void {
         $dir = $this->temp_migrations(array('001_initial.sql' => "CREATE TABLE evc_tmp_a (id INT) ENGINE=InnoDB;\n"));
-        (new EVC_Migrator($this->db, $dir))->migrate();
+        (new EVC_Migrator($this->db, $dir))->migrate(PHP_INT_MAX);
         file_put_contents($dir . '/001_initial.sql', "CREATE TABLE evc_tmp_a (id BIGINT) ENGINE=InnoDB;\n");
 
         $this->expectException(EVC_Migration_Exception::class);
         $this->expectExceptionMessage('modified after it ran');
-        (new EVC_Migrator($this->db, $dir))->migrate();
+        (new EVC_Migrator($this->db, $dir))->migrate(PHP_INT_MAX);
     }
 
     public function test_missing_applied_migration_is_detected_as_drift(): void {
@@ -142,12 +142,12 @@ final class MigratorTest extends EVC_Db_Test_Case {
             '001_one.sql' => "CREATE TABLE evc_tmp_a (id INT) ENGINE=InnoDB;\n",
             '002_two.sql' => "CREATE TABLE evc_tmp_b (id INT) ENGINE=InnoDB;\n",
         ));
-        (new EVC_Migrator($this->db, $dir))->migrate();
+        (new EVC_Migrator($this->db, $dir))->migrate(PHP_INT_MAX);
         unlink($dir . '/002_two.sql');
 
         $this->expectException(EVC_Migration_Exception::class);
         $this->expectExceptionMessage('missing from the code');
-        (new EVC_Migrator($this->db, $dir))->migrate();
+        (new EVC_Migrator($this->db, $dir))->migrate(PHP_INT_MAX);
     }
 
     public function test_out_of_order_migration_is_rejected(): void {
@@ -155,11 +155,11 @@ final class MigratorTest extends EVC_Db_Test_Case {
             '001_one.sql' => "CREATE TABLE evc_tmp_a (id INT) ENGINE=InnoDB;\n",
             '003_three.sql' => "CREATE TABLE evc_tmp_c (id INT) ENGINE=InnoDB;\n",
         ));
-        (new EVC_Migrator($this->db, $dir))->migrate();
+        (new EVC_Migrator($this->db, $dir))->migrate(PHP_INT_MAX);
         file_put_contents($dir . '/002_two.sql', "CREATE TABLE evc_tmp_b (id INT) ENGINE=InnoDB;\n");
 
         try {
-            (new EVC_Migrator($this->db, $dir))->migrate();
+            (new EVC_Migrator($this->db, $dir))->migrate(PHP_INT_MAX);
             $this->fail('Out-of-order migration must be rejected.');
         } catch (EVC_Migration_Exception $e) {
             $this->assertStringContainsString('Out-of-order', $e->getMessage());
@@ -170,7 +170,7 @@ final class MigratorTest extends EVC_Db_Test_Case {
     public function test_pre_existing_incompatible_table_fails_instead_of_being_kept(): void {
         $this->db->exec_raw('CREATE TABLE evc_members (id INT NOT NULL, PRIMARY KEY (id)) ENGINE=InnoDB');
         try {
-            (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate();
+            (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX);
             $this->fail('Migration over an incompatible existing table must fail.');
         } catch (EVC_Migration_Exception $e) {
             $this->assertStringContainsString('Migration 001 failed', $e->getMessage());
@@ -184,7 +184,7 @@ final class MigratorTest extends EVC_Db_Test_Case {
         $this->db->exec_raw('CREATE TABLE evc_schema_migrations (foo INT) ENGINE=InnoDB');
         $this->expectException(EVC_Migration_Exception::class);
         $this->expectExceptionMessage('unexpected shape');
-        (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate();
+        (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX);
     }
 
     public function test_concurrent_migrator_is_blocked_by_lock(): void {
@@ -195,7 +195,7 @@ final class MigratorTest extends EVC_Db_Test_Case {
             $migrator = new EVC_Migrator($this->db, $this->temp_migrations(array('001_one.sql' => "CREATE TABLE evc_tmp_a (id INT) ENGINE=InnoDB;\n")));
             $start = microtime(true);
             try {
-                $migrator->migrate();
+                $migrator->migrate(PHP_INT_MAX);
                 $this->fail('Second migrator must not run while the lock is held.');
             } catch (EVC_Migration_Exception $e) {
                 $this->assertStringContainsString('lock not acquired', $e->getMessage());

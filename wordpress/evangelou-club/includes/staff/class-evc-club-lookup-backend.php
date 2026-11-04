@@ -99,15 +99,16 @@ final class EVC_Club_Lookup_Backend {
     /**
      * D8 «μικρό όνομα»: the FIRST WORD of the first name as the customer entered it (WordPress, else
      * WooCommerce billing), at most 40 characters; null when there is none.
+     * Any Unicode space separates words (a leading NBSP leaves no empty first word). A value that is not
+     * valid UTF-8 is skipped, never shown whole: the result is always null or valid UTF-8 (json_encode).
      */
     public static function wordpress_first_name(int $wp_user_id): ?string {
         foreach (array('first_name', 'billing_first_name') as $key) {
-            $name = trim((string) get_user_meta($wp_user_id, $key, true));
-            if ($name !== '') {
-                $words = preg_split('/\s+/u', $name);
-                $first = is_array($words) && $words[0] !== '' ? $words[0] : $name;
-                return function_exists('mb_substr') ? mb_substr($first, 0, self::FIRST_NAME_MAX) : substr($first, 0, self::FIRST_NAME_MAX);
+            $words = preg_split('/\s+/u', (string) get_user_meta($wp_user_id, $key, true), -1, PREG_SPLIT_NO_EMPTY);
+            if (!is_array($words) || $words === array()) {
+                continue;
             }
+            return preg_match('/^.{1,' . self::FIRST_NAME_MAX . '}/su', $words[0], $m) === 1 ? $m[0] : null;
         }
         return null;
     }

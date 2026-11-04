@@ -16,10 +16,13 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *   running in parallel can each pass allow() before either records its failure, so a burst may exceed
  *   10 by the number of parallel scans: "about 10", as decided).
  * - A new WordPress login gives a new session ref (server-derived, EVC_Staff_Session::session_ref) and
- *   so a fresh count; how often that can happen is bounded only by the existing staff login throttle.
+ *   so a fresh count. EVC_Login_Throttle limits only FAILED password attempts, so successful re-logins
+ *   are not limited: whoever knows the tablet password can log in again for about 10 more failures.
+ *   No cap was added (owner decision D9 stands; raised with the owner).
  *   Successful scans are not counted (the decision limits failures only); allow() consumes nothing.
  * - record_failure() is one atomic INSERT ... ON DUPLICATE KEY UPDATE per key (no read-then-write),
- *   then prunes at most PRUNE_LIMIT rows older than RETENTION_SECONDS.
+ *   then prunes at most PRUNE_LIMIT rows older than RETENTION_SECONDS. A prune error propagates too,
+ *   so it turns that already-counted failed scan into `unavailable` (503).
  * - Stored key: SHA-256 of "evc-lookup-limit-v1|<action>|<key>" (the session_ref is already a keyed
  *   hash of the session token); nothing personal, no token.
  * - Any database error propagates; EVC_Member_Lookup_Service turns it into `unavailable` (fail closed).

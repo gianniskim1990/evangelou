@@ -35,7 +35,7 @@ final class RedeemControllerEngineTest extends EVC_WP_Test_Case {
         parent::set_up();
         $this->club_db_handle = EVC_Test_Database::create();
         $this->club_db = $this->club_db_handle->connect();
-        (new EVC_Migrator($this->club_db, EVC_Test_Database::migrations_dir()))->migrate();
+        (new EVC_Migrator($this->club_db, EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX);
 
         $this->member = EVC_Member_Id::mint();
         $this->club_db->execute(

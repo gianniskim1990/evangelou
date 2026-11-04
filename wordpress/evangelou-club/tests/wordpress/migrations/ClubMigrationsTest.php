@@ -195,11 +195,11 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         mkdir($dir);
         copy(EVC_Test_Database::migrations_dir() . '/001_initial.sql', $dir . '/001_initial.sql');
         $this->temp_dirs[] = $dir;
-        $this->assertSame(array(1), (new EVC_Migrator($this->club->connect(), $dir))->migrate());
+        $this->assertSame(array(1), (new EVC_Migrator($this->club->connect(), $dir))->migrate(PHP_INT_MAX));
     }
 
     private function migrate_all(): void {
-        $this->assertSame(array(1, 2, 3), (new EVC_Migrator($this->club->connect(), EVC_Test_Database::migrations_dir()))->migrate());
+        $this->assertSame(array(1, 2, 3), (new EVC_Migrator($this->club->connect(), EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX));
     }
 
     /** The tables of the APPROVED target (default EVC_CLUB_MIGRATIONS_TARGET = 2: 001 + 002). */
@@ -435,7 +435,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
             copy(EVC_Test_Database::migrations_dir() . '/' . $file, $dir . '/' . $file);
         }
         $this->temp_dirs[] = $dir;
-        $this->assertSame(array(1, 2), (new EVC_Migrator($this->club->connect(), $dir))->migrate());
+        $this->assertSame(array(1, 2), (new EVC_Migrator($this->club->connect(), $dir))->migrate(PHP_INT_MAX));
         return $this->recorded();
     }
 

@@ -30,7 +30,7 @@ abstract class EVC_Db_Test_Case extends TestCase {
         $this->database = EVC_Test_Database::create();
         $this->db = $this->database->connect();
         if ($this->migrate_on_setup()) {
-            (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate();
+            (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX);
         }
         $this->adapter = new EVC_Mock_Membership_Adapter();
         $this->clock = new EVC_Fixed_Clock(self::DEFAULT_NOW);

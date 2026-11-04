@@ -49,7 +49,7 @@ final class CustomerQrTest extends EVC_WP_Test_Case {
                 copy(EVC_Test_Database::migrations_dir() . '/' . $file, $dir . '/' . $file);
             }
         }
-        (new EVC_Migrator($db->connect(), $dir))->migrate();
+        (new EVC_Migrator($db->connect(), $dir))->migrate(PHP_INT_MAX);
         return $db;
     }
 

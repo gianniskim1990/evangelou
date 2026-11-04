@@ -161,7 +161,7 @@ wp evc-club migrations apply --yes
   (POST/redirect/GET). The notice travels in the per-user transient `evc_club_migrations_result_<id>`
   (5 minutes), shown once and deleted. The render callback never acts on a POST.
 - **Lock:** `GET_LOCK(CONCAT('evc_migrations_', SHA1(DATABASE())), 0)` taken first (no wait →
-  `lock_busy`) and held across inspection + `EVC_Migrator::migrate()`. GET_LOCK is re-entrant per
+  `lock_busy`) and held across inspection + `EVC_Migrator::migrate($target)`. GET_LOCK is re-entrant per
   connection on MySQL ≥ 5.7 / MariaDB ≥ 10.0.2, so the migrator's own lock nests inside it.
 - **Separation checks** (`inspect()`, all read-only; any failure refuses):
   - configured name (exact, case-sensitive) + normalised host equal to `DB_NAME` + `DB_HOST` →

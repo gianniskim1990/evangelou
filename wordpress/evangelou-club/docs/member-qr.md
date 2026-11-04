@@ -99,7 +99,7 @@ its last config check:
 Any failure → 503. Both connections run `SET SESSION innodb_lock_wait_timeout = 5`
 (`EVC_Club_Qr_Services::prepare_connection`), like the 05A / 05B paths.
 
-### Packager guard (`app/scripts/php-guards.mjs`, `qrProblemsFor` + `qrSelfTest`, 58 fixtures)
+### Packager guard (`app/scripts/php-guards.mjs`, `qrProblemsFor` + `qrSelfTest` with its fixtures)
 
 The guard replaces the blanket string bans on:
 - `new EVC_Qr_Token_Service`, `new EVC_Member_Lookup_Service`, `new EVC_Lookup_Key_Ring`;
@@ -235,6 +235,9 @@ GET never returns a token.
   - Otherwise, a ledger row for today's Athens day → `used_today`; else `active`.
 - **First name (D8 «μικρό όνομα»):** the FIRST WORD of WP `first_name`, else of WooCommerce
   `billing_first_name`, else `null`; at most 40 characters. Body keys may come in any order.
+  Any Unicode space (NBSP, em space, …) separates words, and empty pieces are dropped. A value that
+  is not valid UTF-8 is skipped (the next source, else `null`), never shown whole, so the JSON
+  answer is always valid.
 - **Known gap, left as is (review):** the scan does not look at the coffee catalogue. If the approved
   catalogue were ever empty, the scan would still say `active` while the redeem route answers 503
   (`coffee_catalogue_unavailable`). The shipped v1 catalogue is never empty.
@@ -275,15 +278,19 @@ hand-off ones, is false even if the user has it).
   either records its failure, so a burst may exceed 10 by the number of parallel scans. This is the
   "about 10" the owner decided.
 - Successes are not counted.
-- **A new login is a fresh count.** The session ref is derived on the server from the WordPress
-  session token (`EVC_Staff_Session::session_ref`), so logging the tablet in again starts a new
-  count of 10. No extra cap was added (that would be a new business rule). How often this can happen
-  is bounded only by the existing staff login throttle (`EVC_Login_Throttle`).
+- **A new login resets the count, and successful logins are not limited.** The session ref is
+  derived on the server from the WordPress session token (`EVC_Staff_Session::session_ref`), so each
+  new login of the tablet starts a new count of 10. `EVC_Login_Throttle` limits only FAILED password
+  attempts; a successful login is not counted or limited. So anyone who knows the tablet password
+  can log in again and get about 10 more failed scans, as often as they like. No cap was added: the
+  owner's D9 decision stands, and the coordinator is raising this with the owner.
 
 **Writes and storage.**
 - `record_failure()` is one atomic `INSERT … ON DUPLICATE KEY UPDATE failures = failures + 1` per key.
 - It reads the clock once, then prunes ≤ 50 rows older than 1 day, oldest first
   (`ORDER BY window_start_utc`).
+- Because failures fail closed (below), an error in the prune `DELETE` (lock wait, deadlock, missing
+  grant) also makes that scan `unavailable` (503), even though its failure was already counted.
 - Stored key: `sha256("evc-lookup-limit-v1|<action>|session:<ref>")`. No token, id or name is stored.
 - **Fail closed, both ways (review MAJOR 1).** A read error in `allow()` makes the lookup
   `unavailable`. So does an error while RECORDING a failure (missing grant, lock timeout, broken
@@ -306,7 +313,8 @@ hand-off ones, is false even if the user has it).
   - anything else → refusal `migrations_target_invalid`.
 
   The technician sets `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` ONLY after the owner's go-ahead.
-  `EVC_Migrator::migrate($up_to)` stops at the target.
+  `EVC_Migrator::migrate(int $up_to)` stops at the target. The argument is REQUIRED (round 4): there
+  is no argument-less call that applies everything; PHP refuses one. Tests pass `PHP_INT_MAX`.
 - Tests in `ClubMigrationsTest`:
   - `test_by_default_migration_003_is_shown_as_not_approved_and_never_applied`;
   - `…with_target_3_a_database_with_001_and_002_gets_only_003`;
@@ -344,9 +352,10 @@ appears. The staff answer carries the first name only (D8).
 - `MigratorTest` / `SqlProvenanceStoreTest` updated for 003.
 
 **WordPress.**
-- `StaffQrLookupTest` (wp-redemption, 11):
+- `StaffQrLookupTest` (wp-redemption, 12):
   - shipped wiring → 503; auth; every gate without connection;
   - the D8 body, first word only, any key order;
+  - a leading NBSP or other Unicode space, or invalid UTF-8, never shows the whole name (null instead);
   - inactive / used_today / Athens midnight; byte-identical not-found;
   - D9; the authorizer;
   - D6 revocation; staff-role administrator and Application Password refused.
@@ -364,7 +373,7 @@ appears. The staff answer carries the first name only (D8).
 - SQL runner: QS1–QS12, LR1–LR8.
 - Membership runner: L27 (uncounted failure).
 - WP runner, each with named killer tests:
-  - QL1–QL14 (modes enabled / redemption);
+  - QL1–QL16 (modes enabled / redemption);
   - QC1–QC7 (mode customer);
   - MG37–MG42 (migration target).
 - Equivalent, not listed:

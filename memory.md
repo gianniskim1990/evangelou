@@ -1276,3 +1276,17 @@ The existing website developer replied explicitly:
 **Open owner question:** whether the tablet may revoke a member's QR. It is still unanswered, so revocation stays admin-only.
 
 - CI on ad07eea (STAGE-05C round-3 review fixes): green. Foundation 18/18 (runs 41803814061 push, 41803819688 pull_request) and frontend 4/4 (runs 41803814135, 41803819701). No flake re-runs needed. The commerce hpos mutation step took about 70 minutes, inside its 120-minute limit.
+
+### STAGE-05C round 4: follow-ups from the re-review of ad07eea (2026-11-04)
+The re-review verdict was OK, with no Blocker or Major.
+- **D8 privacy:** `wordpress_first_name` now uses `preg_split('/\s+/u', …, -1, PREG_SPLIT_NO_EMPTY)`.
+  - A leading NBSP or other Unicode space no longer falls back to the whole name.
+  - Invalid UTF-8 (preg_split returns false) or an empty result skips that source: the next source is used, else null.
+  - The value is cut to 40 characters with `preg_match('/^.{1,40}/su')`, so the result is always valid UTF-8, even without mbstring.
+  - The DB refuses invalid UTF-8, so the test serves it through the `get_user_metadata` filter.
+  - Test `StaffQrLookupTest::test_a_leading_unicode_space_or_invalid_utf8_never_shows_the_whole_name`; QL6 re-aimed; QL15 and QL16 added.
+- **Docs honesty (D9):** `EVC_Login_Throttle` limits only FAILED password attempts. Successful re-logins are not limited, so anyone with the tablet password can log in again for about 10 more failures. This is now stated in `member-qr.md` and the limiter docblock. No cap was added; the coordinator is raising it with the owner.
+- **Docs:** a failed prune DELETE turns an already-counted failed scan into 503 (fail closed).
+- **Mutation runs this round:** SQL 48/48 killed; WordPress 139/139 killed, 0 invalid; sources restored each time.
+- **Migrator:** I chose the simpler option. `EVC_Migrator::migrate(int $up_to)` is now REQUIRED, so there is no call that applies everything. Test callers pass `PHP_INT_MAX` (25 call sites). MG38 and MG39 were re-aimed.
+- **Docs:** the exact guard-fixture count was dropped.

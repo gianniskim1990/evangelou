@@ -87,7 +87,7 @@ function evc_test_commerce_club_db(): void {
     $admin = new PDO(sprintf('mysql:host=%s;port=%d;charset=utf8mb4', EVC_CLUB_DB_HOST, EVC_CLUB_DB_PORT), EVC_CLUB_DB_USER, EVC_CLUB_DB_PASSWORD, array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
     $admin->exec('DROP DATABASE IF EXISTS `' . $config->database() . '`');
     $admin->exec('CREATE DATABASE `' . $config->database() . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
-    (new EVC_Migrator(EVC_Club_Db::connect($config), dirname(__DIR__, 3) . '/database'))->migrate();
+    (new EVC_Migrator(EVC_Club_Db::connect($config), dirname(__DIR__, 3) . '/database'))->migrate(PHP_INT_MAX);
 }
 
 /** The staging configuration as verified on 2026-10-23 (fresh test database, fixed ids). */
