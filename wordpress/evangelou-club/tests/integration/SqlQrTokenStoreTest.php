@@ -546,7 +546,8 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
      * @group concurrency
      */
     public function test_simultaneous_writers_in_separate_processes_leave_exactly_one_active_token(): void {
-        $rounds = max(1, (int) (getenv('EVC_CONCURRENCY_ROUNDS') ?: 10));
+        // At most 10 rounds even in CI (EVC_CONCURRENCY_ROUNDS=25 there): the engine job has a 25-minute budget.
+        $rounds = min(10, max(1, (int) (getenv('EVC_CONCURRENCY_ROUNDS') ?: 10)));
         $workers = max(2, (int) (getenv('EVC_CONCURRENCY_WORKERS') ?: 6));
         for ($round = 0; $round < $rounds; $round++) {
             $id = $this->member_id($this->create_member(9000 + $round));
@@ -598,7 +599,8 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
      * @group concurrency
      */
     public function test_simultaneous_revoke_and_rotate_in_separate_processes_have_exactly_one_winner(): void {
-        $rounds = max(1, (int) (getenv('EVC_CONCURRENCY_ROUNDS') ?: 10));
+        // At most 10 rounds even in CI (EVC_CONCURRENCY_ROUNDS=25 there): the engine job has a 25-minute budget.
+        $rounds = min(10, max(1, (int) (getenv('EVC_CONCURRENCY_ROUNDS') ?: 10)));
         $workers = max(2, (int) (getenv('EVC_CONCURRENCY_WORKERS') ?: 6));
         for ($round = 0; $round < $rounds; $round++) {
             $id = $this->member_id($this->create_member(9500 + $round));

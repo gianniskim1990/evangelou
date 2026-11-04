@@ -51,7 +51,9 @@ jobs:
   php-check:
     name: engine php ${{ matrix.php }} / ${{ matrix.db }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # STAGE-05C: 25 -> 35. The job ran 24 min on a normal runner and hit 25 on a slow one (run
+    # 41785636286: the unchanged engine mutation step took 15 instead of 10.7 min).
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
