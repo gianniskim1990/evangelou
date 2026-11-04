@@ -456,7 +456,7 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     assert.equal(svg!.getAttribute("role"), "img");
     assert.equal(svg!.getAttribute("aria-label"), "Ο κωδικός QR της κάρτας μέλους σας");
     assert.match(svg!.parentElement!.className, /bg-white/, "the white padded frame");
-    assert.equal(app().querySelector('[data-evc-preview="sample-qr"]'), null, "no sample code next to the real one");
+    assert.ok((app().querySelector('[data-evc-preview="sample-qr"]')) === (null), "no sample code next to the real one");
     assert.doesNotMatch(dom.document.body.innerHTML, /evc_[0-9a-f]{48}/, "the plaintext is drawn, never written out");
     assert.match(text(), /Μένει ίδιος μέχρι να ζητήσετε νέο/);
     assert.match(text(), /στιγμιότυπο οθόνης/);
@@ -471,7 +471,7 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     await dom.click(button("Νέο QR"));
     const dialog = app().querySelector('[role="alertdialog"]') as HTMLElement;
     assert.ok(dialog);
-    assert.equal(dialog.closest("[aria-live]"), null, "the dialog is not inside a live region");
+    assert.ok((dialog.closest("[aria-live]")) === (null), "the dialog is not inside a live region");
     assert.match(dialog.textContent ?? "", /Θέλετε νέο κωδικό QR;/);
     assert.match(dialog.textContent ?? "", /θα σταματήσει να ισχύει αμέσως, σε όλες τις συσκευές/);
     assert.equal(dom.document.activeElement?.id, "evc-qr-confirm-title", "focus on the question");
@@ -498,7 +498,7 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     const { calls } = await mountWith([{ kind: "active", issuedAt: ISSUED }], []);
     assert.match(text(), /Ο κωδικός σας δεν φαίνεται σε αυτή τη συσκευή/);
     assert.match(text(), /Αν έχετε στιγμιότυπο οθόνης, ισχύει κανονικά/);
-    assert.equal(app().querySelector('[data-evc-qr="member"]'), null);
+    assert.ok((app().querySelector('[data-evc-qr="member"]')) === (null), "app().querySelector('[data-evc-qr=\"member\"]') === null");
     assert.deepEqual(calls, ["GET"]);
     button("Νέο QR");
   });
@@ -509,7 +509,7 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     await dom.reset();
     await mountWith([{ kind: "member_disabled" }], []);
     assert.match(text(), /Η κάρτα σας δεν είναι ενεργή/);
-    assert.equal(app().querySelector('[data-evc-qr="member"]'), null);
+    assert.ok((app().querySelector('[data-evc-qr="member"]')) === (null), "app().querySelector('[data-evc-qr=\"member\"]') === null");
   });
 
   it("the route does not exist (feature off): the approved sample card, never replaced by «Φόρτωση…»", async () => {
@@ -521,7 +521,7 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     await settle();
     assert.ok(app().querySelector('[data-evc-preview="sample-qr"]'));
     assert.match(text(), /Ο κωδικός QR δεν είναι ακόμη ενεργός/);
-    assert.equal(app().querySelector("[data-evc-qr-state]"), null);
+    assert.ok((app().querySelector("[data-evc-qr-state]")) === (null), "app().querySelector(\"[data-evc-qr-state]\") === null");
   });
 
   it("unavailable: retry starts again from GET; sign-out deletes the remembered code before WordPress signs out", async () => {

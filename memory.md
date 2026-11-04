@@ -1341,3 +1341,10 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - Encoder bit-exact fixtures come from python-qrcode 7.4.2. segno 1.6.6 is not spec-exact here: it inserts a 0x00 codeword when the data already ends on a byte boundary.
   - Nits: the aborted lookup resets busy; signed_out clears memory; the sample card is not replaced by «Φόρτωση…» while the route is unknown; fixed status and alert live regions; the dialog sits outside live regions; «Ο καφές καταχωρήθηκε: Espresso · Γιάννης»; «προγράμματος περιήγησης».
 - **Mutants.** Frontend 299 → 325 (C14–C27, Q12–Q23; Q4/Q5/Q6/Q8/Q11 re-aimed; C14 and C24 first survived and were fixed: one abort check after every await, and a test that moves focus away first). Local: the 31 new or re-aimed mutants all killed; WordPress 147/147 killed (QL23–QL24 new, QL20 re-aimed); PHP suites all green.
+- **CI on e628991.**
+  - Foundation: green after one re-run of the push run. The PR run 41852986670 was 18/18 first time; the push run 41852977222 had one failure in the untouched `SqlProvenanceConcurrencyTest::test_duplicate_callbacks_and_cross_source_aliases_fund_one_period` (multi-process race, 7 workers `unavailable` on PHP 7.4 / MySQL 8.0) and passed on the re-run.
+  - Frontend: mutation shard 2 died twice (push and PR) at mutant C13 with "The runner has received a shutdown signal".
+  - **Cause:** under the mutant, `assert.equal(<jsdom element>, null)` failed, and Node's assert then FORMATS the jsdom element (a huge object graph). That took about 5.7 GB of total RSS and killed the 7 GB runner; the per-process heap cap did not stop it.
+  - **Fix:** in `memberCounter.test.ts` and `customerQr.test.ts`, DOM-node comparisons now use `assert.ok(a === b, message)`, which never inspects. C13 now peaks at 0.36 GB (baseline 0.37 GB).
+  - All 50 C* / Q* mutants were re-run locally: all killed, peak 0.43 GB.
+  - **Rule for future tests:** never pass DOM nodes as actual/expected to `assert.equal`, `assert.notEqual` or `assert.deepEqual`.

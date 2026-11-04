@@ -476,12 +476,12 @@ async function mountApp(qrLookup: boolean) {
 describe("STAGE-05D StaffApp: the counter on the real dashboard", () => {
   it("features.qr_lookup false: no scan, the cards stay disabled exactly as before", async () => {
     const { flow } = await mountApp(false);
-    assert.equal(dom.document.querySelector('[data-evc-action="qr"]'), null);
+    assert.ok((dom.document.querySelector('[data-evc-action="qr"]')) === (null), "dom.document.querySelector('[data-evc-action=\"qr\"]') === null");
     assert.match(text(), /Σάρωση QR μέλους — μη διαθέσιμη|Σάρωση QR μέλους/);
     assert.ok(dom.document.querySelector('[aria-label="Σάρωση QR μέλους — μη διαθέσιμη"]'));
     assert.match(text(), /Δεν έχει ενεργοποιηθεί ακόμη/);
     await act(async () => flow.openScan());
-    assert.equal(dom.document.querySelector('[data-evc-counter]'), null);
+    assert.ok((dom.document.querySelector('[data-evc-counter]')) === (null), "dom.document.querySelector('[data-evc-counter]') === null");
   });
 
   it("scan with the hand scanner -> «Μαρία», active, 7 coffees with «Άλλος καφές» -> recorded; no revoke anywhere (D10)", async () => {
@@ -489,10 +489,10 @@ describe("STAGE-05D StaffApp: the counter on the real dashboard", () => {
     members.lookupReplies = [found("active")];
     members.redeemReplies = [redeemed];
     assert.match(text(), /Ενεργή: σάρωση QR και δωρεάν καφές/);
-    assert.equal(dom.document.querySelector('[aria-label="Καταχώρηση δωρεάν καφέ — μη διαθέσιμη"]'), null, "the coffee comes after the scan");
+    assert.ok((dom.document.querySelector('[aria-label="Καταχώρηση δωρεάν καφέ — μη διαθέσιμη"]')) === (null), "the coffee comes after the scan");
     assert.ok(dom.document.querySelector('[aria-label="Αναζήτηση με τηλέφωνο — μη διαθέσιμη"]'), "phone lookup stays off");
     await dom.click(dom.document.querySelector('[data-evc-action="qr"]')!);
-    assert.equal(dom.document.activeElement, dom.document.getElementById("evc-scan-code"), "no camera: focus on the scanner field");
+    assert.ok((dom.document.activeElement) === (dom.document.getElementById("evc-scan-code")), "no camera: focus on the scanner field");
     assert.equal(button("Αναζήτηση").disabled, true, "nothing to send yet");
     await type(dom.document.getElementById("evc-scan-code") as HTMLInputElement, TOKEN);
     await dom.click(button("Αναζήτηση"));
@@ -510,7 +510,7 @@ describe("STAGE-05D StaffApp: the counter on the real dashboard", () => {
     await act(async () => {});
     assert.equal(members.redeems[0]?.coffeeCode, "other_coffee");
     assert.match(text(), /Ο καφές καταχωρήθηκε: Άλλος καφές · Μαρία/);
-    assert.equal(dom.document.querySelector('[role="status"]')?.textContent?.includes("καταχωρήθηκε"), true, "announced politely");
+    assert.ok((dom.document.querySelector('[role="status"]')?.textContent?.includes("καταχωρήθηκε")) === (true), "announced politely");
     assert.doesNotMatch(dom.document.body.innerHTML, /ακύρωση QR|Ακύρωση QR|revoke|Ανάκληση/i, "the tablet never revokes");
     assert.doesNotMatch(text(), /evc_[0-9a-f]{48}/);
     assert.equal(dom.network.fetch.length, 0);
@@ -707,15 +707,15 @@ describe("STAGE-05D round 2: scan screen (DOM)", () => {
     members.lookupReplies = [{ kind: "not_found" }];
     await dom.click(dom.document.querySelector('[data-evc-action="qr"]')!);
     const field = dom.document.getElementById("evc-scan-code") as HTMLInputElement;
-    assert.equal(dom.document.activeElement, field, "a hand scanner can type straight away");
+    assert.ok((dom.document.activeElement) === (field), "a hand scanner can type straight away");
     for (const attr of [["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"], ["spellcheck", "false"]]) assert.equal(field.getAttribute(attr[0]), attr[1], attr[0]);
     await type(field, toGreekLayout(TOKEN));
     await dom.focus(button("Αναζήτηση"));
-    assert.notEqual(dom.document.activeElement, field, "sanity: focus left the field (as a tap on the button does)");
+    assert.ok((dom.document.activeElement) !== (field), "sanity: focus left the field (as a tap on the button does)");
     await dom.click(button("Αναζήτηση"));
     await act(async () => {});
     assert.deepEqual(members.lookups, [toGreekLayout(TOKEN)]);
-    assert.equal(dom.document.activeElement, dom.document.getElementById("evc-scan-code"), "focus is back for the next scan");
+    assert.ok((dom.document.activeElement) === (dom.document.getElementById("evc-scan-code")), "focus is back for the next scan");
     assert.ok(dom.document.querySelector('[role="status"]') && dom.document.querySelector('[role="alert"]'), "two fixed live regions");
   });
 
