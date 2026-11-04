@@ -317,17 +317,28 @@ final class SqlQrTokenStoreTest extends EVC_Db_Test_Case {
         $this->assertIsResource($proc);
         $observer = EVC_Test_Database::admin_pdo();
         $waiting = false;
-        for ($i = 0; $i < 200 && !$waiting; $i++) {
+        $seen = array();
+        $exit = null;
+        for ($i = 0; $i < 400 && !$waiting; $i++) {
             usleep(50000);
-            $waiting = (int) $observer->query("SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT'")->fetchColumn() > 0;
+            $seen = $observer->query('SELECT trx_state, trx_query FROM information_schema.INNODB_TRX')->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($seen as $trx) {
+                $waiting = $waiting || $trx['trx_state'] === 'LOCK WAIT';
+            }
+            $status = proc_get_status($proc);
+            if (!$waiting && !$status['running']) {
+                $exit = $status['exitcode']; // proc_close() would no longer know it
+                break;
+            }
         }
         $holder->commit();
         $out = stream_get_contents($pipes[1]);
         $err = stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
-        $this->assertSame(0, proc_close($proc), 'worker stderr: ' . $err);
-        $this->assertTrue($waiting, 'the second writer really waited on the row lock');
+        $closed = proc_close($proc);
+        $this->assertSame(0, $exit ?? $closed, 'worker stderr: ' . $err . ' stdout: ' . $out);
+        $this->assertTrue($waiting, 'the second writer really waited on the row lock; worker: ' . trim((string) $out) . ' ' . trim((string) $err) . '; transactions: ' . json_encode($seen));
         $this->assertSame('conflict', json_decode(trim((string) $out), true)['outcome'] ?? null, 'worker output: ' . $out);
         $this->assertSame(1, $this->active_count($id));
         $this->assertSame($winner, $this->store()->active_token_hash($id));
