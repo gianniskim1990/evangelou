@@ -1443,3 +1443,4 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - FT1–FT35: all killed locally.
   - FW1–FW21: all killed locally.
   - FC1–FC2 (mode `commerce_fluentcrm`, CI commerce job only: the plugin fetch is blocked by the proxy locally).
+- CI on 7c61551 (STAGE-06 round 2, PR #40): green on the first attempt, no re-runs. Foundation: push 42010613586 18/18 and pull_request 42010622437 18/18 (these include `wp-fluentcrm`, `wp-commerce-fluentcrm` on HPOS and posts, and the commerce mutation mode). Frontend: push 42010613595 4/4 and pull_request 42010622764 4/4.
