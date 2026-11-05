@@ -14,6 +14,7 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         delete_option(EVC_Fluentcrm_Plugin::STATUS_OPTION);
         delete_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION);
         delete_option(EVC_Fluentcrm_Plugin::LOCK_OPTION);
+        delete_option(EVC_Fluentcrm_Plugin::RETRY_OPTION);
         delete_transient(EVC_Fluentcrm_Plugin::LOG_TRANSIENT);
         wp_clear_scheduled_hook(EVC_Fluentcrm_Plugin::CRON_HOOK);
         wp_clear_scheduled_hook(EVC_Fluentcrm_Plugin::CONTINUE_HOOK);
@@ -65,7 +66,7 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         $this->assertSame(EVC_Fluentcrm_Plugin::PROBLEM_SOURCE, EVC_Fluentcrm_Plugin::problem());
         $this->assertFalse(has_action('woocommerce_order_status_completed', array('EVC_Fluentcrm_Plugin', 'note_order')));
         $this->assertFalse(has_action('shutdown', array('EVC_Fluentcrm_Plugin', 'flush')));
-        $this->assertFalse(has_action(EVC_Fluentcrm_Plugin::CRON_HOOK, array('EVC_Fluentcrm_Plugin', 'reconcile')));
+        $this->assertFalse(has_action(EVC_Fluentcrm_Plugin::CRON_HOOK, array('EVC_Fluentcrm_Plugin', 'reconcile_daily')));
         do_action('init');
         $this->assertFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CRON_HOOK));
         $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile());
@@ -127,6 +128,8 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         $this->assertSame(EVC_Fluentcrm_Plugin::EVENT_PRIORITY, has_action('woocommerce_order_refunded', array('EVC_Fluentcrm_Plugin', 'note_order')));
         $this->assertSame(EVC_Fluentcrm_Plugin::EVENT_PRIORITY, has_action('pmpro_after_change_membership_level', array('EVC_Fluentcrm_Plugin', 'note_level_change')));
         $this->assertSame(EVC_Fluentcrm_Plugin::EVENT_PRIORITY, has_action('shutdown', array('EVC_Fluentcrm_Plugin', 'flush')));
+        $this->assertSame(10, has_action(EVC_Fluentcrm_Plugin::CRON_HOOK, array('EVC_Fluentcrm_Plugin', 'reconcile_daily')), 'the daily run');
+        $this->assertSame(10, has_action(EVC_Fluentcrm_Plugin::CONTINUE_HOOK, array('EVC_Fluentcrm_Plugin', 'reconcile')), 'the follow-up run');
         $this->assertSame(array('completed', 'processing', 'on-hold', 'pending', 'cancelled', 'failed', 'refunded'), EVC_Fluentcrm_Plugin::ORDER_STATUSES);
         // Without WooCommerce in this suite an order event is ignored quietly.
         EVC_Fluentcrm_Plugin::note_order(123);
@@ -222,11 +225,12 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         $this->boot_with($membership, function (int $after) {
             return $after < 3 ? array(1, 2, 3) : array();
         });
-        $this->set_lock((time() + 600) . '|another-run');
+        $live = (time() + 600) . '|another-run';
+        $this->set_lock($live);
         $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile(), 'another run holds the lock');
         $this->assertSame(array(), $membership->calls);
         $this->assertNull(EVC_Fluentcrm_Plugin::acquire_lock());
-        $this->assertSame((time() + 600) . '|another-run', EVC_Fluentcrm_Plugin::lock_value(), 'a live lock is never touched');
+        $this->assertSame($live, EVC_Fluentcrm_Plugin::lock_value(), 'a live lock is never touched');
         $this->set_lock((time() - 1) . '|crashed-run');
         $this->assertSame(3, EVC_Fluentcrm_Plugin::reconcile(), 'a stale lock (crashed run) is taken over');
         $this->assertNull(EVC_Fluentcrm_Plugin::lock_value(), 'and released');
@@ -281,6 +285,58 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         $this->assertSame(array(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER => EVC_Fluentcrm_Plugin::BATCH), EVC_Fluentcrm_Plugin::status()['current']);
         $this->assertNotFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK));
         $this->assertNull(EVC_Fluentcrm_Plugin::lock_value());
+    }
+
+    /** N3 (round 3): the lock's end moves forward after every batch; a run that lost it stops cleanly. */
+    public function test_the_lock_is_refreshed_after_every_batch_and_a_lost_lock_stops_the_run(): void {
+        $seen = array();
+        $calls = 0;
+        $other = (time() + 900) . '|other-run';
+        $this->boot_with(new EVC_Mock_Membership_Adapter(), function (int $after, int $limit) use (&$seen, &$calls, $other) {
+            $calls++;
+            $seen[] = EVC_Fluentcrm_Plugin::lock_value();
+            if ($calls === 3) {
+                // Another run took the lock over (as if ours had looked stale).
+                global $wpdb;
+                $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s", $other, EVC_Fluentcrm_Plugin::LOCK_OPTION));
+            }
+            return range($after + 1, $after + $limit);
+        });
+        $this->assertSame(3 * EVC_Fluentcrm_Plugin::BATCH, EVC_Fluentcrm_Plugin::reconcile(), 'stopped after the batch whose refresh failed');
+        $this->assertCount(3, array_unique($seen), 'a new lock value after every batch');
+        $this->assertSame($other, EVC_Fluentcrm_Plugin::lock_value(), 'the other run\'s lock is neither released nor touched');
+        $this->assertSame(3 * EVC_Fluentcrm_Plugin::BATCH, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION), 'the cursor is saved for whoever continues');
+        $this->assertFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK), 'no follow-up of its own');
+        $mine = EVC_Fluentcrm_Plugin::acquire_lock();
+        $this->assertNull($mine, 'the other run holds it');
+        $this->assertNull(EVC_Fluentcrm_Plugin::refresh_lock('1|not-mine'));
+    }
+
+    /** N4 (round 3): after failures, at most three follow-up runs (5, 10, 20 minutes), then the next daily run. */
+    public function test_retries_after_failures_are_bounded_with_backoff(): void {
+        $this->boot_with(new EVC_Mock_Membership_Adapter(), function () {
+            throw new RuntimeException('database');
+        });
+        foreach (array(300, 600, 1200) as $delay) {
+            $before = time();
+            $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile());
+            $next = wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK);
+            $this->assertNotFalse($next);
+            $this->assertGreaterThanOrEqual($before + $delay, $next);
+            $this->assertLessThanOrEqual(time() + $delay, $next);
+            wp_clear_scheduled_hook(EVC_Fluentcrm_Plugin::CONTINUE_HOOK); // as if the follow-up ran (and failed)
+        }
+        $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile());
+        $this->assertFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK), 'given up until the daily run');
+        $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile_daily());
+        $this->assertNotFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK), 'the daily run has a fresh budget');
+        $this->assertSame(1, (int) get_option(EVC_Fluentcrm_Plugin::RETRY_OPTION));
+        // A run that works clears the budget.
+        $this->boot_with(new EVC_Mock_Membership_Adapter(), function () {
+            return array();
+        });
+        EVC_Fluentcrm_Plugin::reconcile();
+        $this->assertFalse(get_option(EVC_Fluentcrm_Plugin::RETRY_OPTION));
     }
 
     public function test_the_daily_schedule_and_deactivation(): void {

@@ -175,6 +175,54 @@ final class FluentcrmCommerceTest extends EVC_WP_Test_Case {
         $this->assertSame(array(4), EVC_Test_Fluentcrm::tags_of(33), 'never guessed Active');
     }
 
+    /** N1 (round 3): no Club history -> "none" without the voided evidence -> nothing is written. */
+    public function test_an_outsider_tagged_by_hand_who_buys_something_else_is_never_touched(): void {
+        $user = $this->customer();
+        EVC_Test_Fluentcrm::contact(34, self::email($user), null, array(2, 4)); // hand-tagged by staff, no Club history
+        $coffee = new WC_Product_Simple();
+        $coffee->set_name('Synthetic espresso');
+        $coffee->set_regular_price('3');
+        $coffee->set_status('publish');
+        $coffee->save();
+        $order = wc_create_order(array('customer_id' => $user));
+        $order->add_product($coffee, 1);
+        $order->set_payment_method('bacs');
+        $order->calculate_totals();
+        $order->save();
+        $order->update_status('on-hold');
+        $this->assertSame(array(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER => 1), $this->end_of_request());
+        wc_get_order($order->get_id())->update_status('cancelled');
+        $this->assertSame(array(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER => 1), $this->end_of_request());
+        $this->assertSame(array(2, 4), EVC_Test_Fluentcrm::tags_of(34), 'untouched');
+        $this->assertNotContains('attachTags', EVC_Test_Fluentcrm::$calls);
+        $this->assertNotContains('detachTags', EVC_Test_Fluentcrm::$calls);
+    }
+
+    /** N1 (round 3): a wrong Club level setting fails closed — no writes for anyone. */
+    public function test_a_wrong_club_level_setting_writes_nothing(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $paying = $this->customer();
+        $voided = $this->customer();
+        $order = $this->on_hold($paying);
+        $this->wire(self::at7('-30 seconds'));
+        $this->complete($order->get_id(), $this->staff());
+        $this->on_hold($voided)->update_status('cancelled');
+        EVC_Test_Fluentcrm::contact(51, self::email($paying), null, array(2));
+        EVC_Test_Fluentcrm::contact(52, self::email($voided), null, array(4));
+
+        $wrong = EVC_Commerce_Source_Config::parse(EVC_CLUB_MEMBERSHIP_SOURCE, EVC_TEST_CLUB_LEVEL + 900, EVC_CLUB_WC_PRODUCT_ID, EVC_CLUB_EVIDENCE_KEY);
+        $this->assertNotNull($wrong);
+        EVC_Fluentcrm_Plugin::boot(array('membership' => new EVC_Pmpro_Membership_Adapter(new EVC_Wp_Commerce_Pmpro_Reader($wrong, EVC_Customer_Plugin::payment_provenance($wrong)), $wrong->mapper())));
+        EVC_Test_Fluentcrm::$calls = array();
+        $this->assertGreaterThanOrEqual(2, EVC_Fluentcrm_Plugin::reconcile());
+        $this->assertNotContains('attachTags', EVC_Test_Fluentcrm::$calls);
+        $this->assertNotContains('detachTags', EVC_Test_Fluentcrm::$calls);
+        $this->assertSame(array(2), EVC_Test_Fluentcrm::tags_of(51));
+        $this->assertSame(array(4), EVC_Test_Fluentcrm::tags_of(52));
+        $last = EVC_Fluentcrm_Plugin::status()['last'];
+        $this->assertSame(2, $last[EVC_Fluentcrm_Tag_Sync::OUTCOME_STATE_UNKNOWN] ?? 0, 'the source reports a conflict, never "none"');
+    }
+
     // ---- the daily reconcile with the default member query ---------------------------------------
 
     public function test_the_reconcile_finds_order_only_customers_and_paying_members(): void {

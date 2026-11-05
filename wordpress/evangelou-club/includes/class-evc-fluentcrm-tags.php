@@ -154,8 +154,9 @@ final class EVC_Fluentcrm_Tag_Config {
  *   pending_payment (unpaid BACS order, no paid time)        -> pending
  *   expired (or ended) WITH an unpaid renewal order          -> pending (round 2: the same answer before
  *     and after PMPro's expiry cron, which turns it into pending_payment)
- *   none (not a Club member)                                 -> null here; EVC_Fluentcrm_Tag_Sync then
- *     replaces a left-over Active / Pending with Inactive (e.g. a first BACS order cancelled unpaid)
+ *   none (not a Club member)                                 -> null: no write, EXCEPT none with the
+ *     mapper's "club_order_voided" (a Club order voided unpaid, no PMPro row): EVC_Fluentcrm_Tag_Sync then
+ *     replaces a left-over Active / Pending with Inactive
  *   anything else that cannot be confirmed (indeterminate,
  *   e.g. the add-on date conflict, partial refund, unknown
  *   expiry, unverified payment)                              -> null: no write
@@ -242,6 +243,9 @@ final class EVC_Fluentcrm_Tag_Sync {
     const OUTCOME_SOURCE_ERROR = 'source_error';
     const OUTCOME_API_ERROR = 'api_error';
     const OUTCOME_CONFIG_INVALID = 'config_invalid';
+
+    /** The mapper's evidence of a Club order voided before it was paid (EVC_Pmpro_Entitlement_Mapper). */
+    const VOIDED_FLAG = 'club_order_voided';
 
     const PROBLEM_API_UNAVAILABLE = 'api_unavailable';
     const PROBLEM_TAG_MISSING = 'tag_missing';
@@ -330,6 +334,11 @@ final class EVC_Fluentcrm_Tag_Sync {
         }
         try {
             if ($role === null) {
+                // Round 3: only on positive evidence of a voided Club order; any other "none" (no Club
+                // history, another level, a wrong level configuration) writes nothing.
+                if (!in_array(self::VOIDED_FLAG, $entitlement->diagnostic_flags(), true)) {
+                    return self::OUTCOME_NOT_MEMBER;
+                }
                 return $this->retire($wp_user_id);
             }
             $contact = $this->contact_for($wp_user_id);
@@ -378,8 +387,8 @@ final class EVC_Fluentcrm_Tag_Sync {
     }
 
     /**
-     * Not (or no longer) a Club member, e.g. a first bank-transfer order cancelled before it was paid
-     * (the mapper then says "none"). A contact still carrying Active or Pending gets Inactive instead
+     * A first bank-transfer order cancelled or failed before it was paid (the mapper says none +
+     * club_order_voided; nothing else reaches here). A contact still carrying Active or Pending gets Inactive instead
      * (exactly one tag, as for every former member); one with Inactive or none of the three is left alone.
      */
     private function retire(int $wp_user_id): string {

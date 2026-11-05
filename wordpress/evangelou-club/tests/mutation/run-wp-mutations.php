@@ -1192,15 +1192,12 @@ $mutants = array(
         if (!$won) {', '        $won = true;
         if (!$won) {',
         array('FluentcrmTagSyncWpTest::test_two_acquirers_never_both_hold_the_lock')),
-    array('FW20-failure-not-retried-soon', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
-        '            if (!wp_next_scheduled(self::CONTINUE_HOOK)) {
-                wp_schedule_single_event(time() + self::CONTINUE_DELAY, self::CONTINUE_HOOK);
-            }
-            self::log($e);', '            self::log($e);',
-        array('FluentcrmTagSyncWpTest::test_a_failure_midway_keeps_the_counts_and_the_cursor')),
+    array('FW20-retries-unbounded', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '        if ($n > self::MAX_RETRIES || wp_next_scheduled(self::CONTINUE_HOOK)) {', '        if (wp_next_scheduled(self::CONTINUE_HOOK)) {',
+        array('FluentcrmTagSyncWpTest::test_retries_after_failures_are_bounded_with_backoff')),
     array('FW21-failure-drops-the-counts', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
         '            update_option(self::STATUS_OPTION, $status, false);
-            if (!wp_next_scheduled', '            if (!wp_next_scheduled',
+            self::schedule_retry();', '            self::schedule_retry();',
         array('FluentcrmTagSyncWpTest::test_a_failure_midway_keeps_the_counts_and_the_cursor')),
     array('FC1-member-query-misses-order-only-customers', 'commerce_fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
         'WHERE membership_id = %d UNION {$customers}) x', 'WHERE membership_id = %d AND %s <> \'\') x',
@@ -1209,6 +1206,34 @@ $mutants = array(
         '            add_action(\'woocommerce_order_status_\' . $status, array(__CLASS__, \'note_order\'), self::EVENT_PRIORITY, 1);
 ', '',
         array('FluentcrmCommerceTest::test_an_on_hold_bacs_order_is_pending_and_its_cancellation_leaves_inactive_not_pending')),
+    // STAGE-06 round 3 (FW23-FW28): bounded retries with backoff, the per-batch lock refresh; (FC3) retiring only on the voided evidence, real stack.
+    array('FW23-failure-not-retried', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '            self::schedule_retry();
+', '',
+        array('FluentcrmTagSyncWpTest::test_reconcile_survives_a_failing_member_list')),
+    array('FW24-retries-without-backoff', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        'self::CONTINUE_DELAY * (1 << ($n - 1))', 'self::CONTINUE_DELAY',
+        array('FluentcrmTagSyncWpTest::test_retries_after_failures_are_bounded_with_backoff')),
+    array('FW25-daily-run-keeps-the-spent-budget', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '        delete_option(self::RETRY_OPTION);
+        return self::reconcile();', '        return self::reconcile();',
+        array('FluentcrmTagSyncWpTest::test_retries_after_failures_are_bounded_with_backoff')),
+    array('FW26-lock-never-refreshed', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '                $lock = self::refresh_lock($lock);
+', '',
+        array('FluentcrmTagSyncWpTest::test_the_lock_is_refreshed_after_every_batch_and_a_lost_lock_stops_the_run')),
+    array('FW27-lost-lock-ignored', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '                if ($lock === null) {
+                    break;
+                }
+', '',
+        array('FluentcrmTagSyncWpTest::test_the_lock_is_refreshed_after_every_batch_and_a_lost_lock_stops_the_run')),
+    array('FW28-refresh-takes-any-lock', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        'SET option_value = %s WHERE option_name = %s AND option_value = %s", $next, self::LOCK_OPTION, $mine));', 'SET option_value = %s WHERE option_name = %s", $next, self::LOCK_OPTION));',
+        array('FluentcrmTagSyncWpTest::test_the_lock_is_refreshed_after_every_batch_and_a_lost_lock_stops_the_run')),
+    array('FC3-retires-without-the-voided-evidence', 'commerce_fluentcrm', 'includes/class-evc-fluentcrm-tags.php',
+        '                if (!in_array(self::VOIDED_FLAG, $entitlement->diagnostic_flags(), true)) {', '                if (false) {',
+        array('FluentcrmCommerceTest::test_an_outsider_tagged_by_hand_who_buys_something_else_is_never_touched')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */

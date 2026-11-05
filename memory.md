@@ -1444,3 +1444,19 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - FW1–FW21: all killed locally.
   - FC1–FC2 (mode `commerce_fluentcrm`, CI commerce job only: the plugin fetch is blocked by the proxy locally).
 - CI on 7c61551 (STAGE-06 round 2, PR #40): green on the first attempt, no re-runs. Foundation: push 42010613586 18/18 and pull_request 42010622437 18/18 (these include `wp-fluentcrm`, `wp-commerce-fluentcrm` on HPOS and posts, and the commerce mutation mode). Frontend: push 42010613595 4/4 and pull_request 42010622764 4/4.
+
+### STAGE-06 round 3 — re-review: all round-2 fixes accepted except N1; N1–N4 fixed (2026-11-05)
+- **N1 (MEDIUM).** Retiring is narrowed back to the spec ("unknown / non-member → no write").
+  - The mapper adds `club_order_voided` to `none` only when the user has no PMPro row at all and every payment fact is a failed, unconfirmed Club-level order.
+  - The sync retires (Active/Pending → Inactive) only with that flag. Any other `none` is a no-write `not_member`, including a hand-tagged outsider buying ordinary coffee.
+  - A wrong level ID fails closed: the reader's environment conflicts make every member `indeterminate`.
+  - Real-stack tests cover the outsider and the wrong level ID. The on-hold → Pending → cancelled → Inactive test is kept.
+- **N2 (LOW), gateway guard.** It now flags:
+  - `->$var`, `](` and `)(` (casts excepted), `$f(`;
+  - `new` of anything but RuntimeException or InvalidArgumentException;
+  - writes chained off anything but `$this`'s own properties, plus `++`/`--`, `**=`, `<<=`.
+  - `<=`, `>=` and `<=>` are no longer counted as writes. There are negative and positive self-tests.
+- **N3 (NIT).** The lock is refreshed by compare-and-swap after each batch, with a new value each time. A failed refresh stops the run cleanly: cursor saved, nothing released or scheduled.
+- **N4 (NIT).** Retries after a failure are capped at 3, with 5/10/20-minute backoff (`evc_club_fluentcrm_retries`). The daily hook now runs `reconcile_daily()`, which resets the budget; a successful run clears it.
+- **Mutants.** FT36–FT40, FW23–FW28 and FC3 were added; FW20/FW21 were re-aimed. Locally FT1–FT40 and FW1–FW28 were all killed. The FC mutants run in the CI commerce job only.
+- **Equivalent mutants (not added).** The voided check's status/confirmed_at redundancy is defence in depth; removing either alone is equivalent.

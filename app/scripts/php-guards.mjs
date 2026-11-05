@@ -894,6 +894,9 @@ final class EVC_Wc_Completion_Plugin {
 // (Class::name( checked against an allowlist), FluentCrmApi( only with the literal 'contacts' or 'tags', no
 // call_user_func* / forward_static_call*, and no property write on any variable other than $this (so a contact's
 // status, name or e-mail can never be assigned), including compound and dynamic ({...}) property writes.
+// Round 3: in the gateway also no variable member (->$x), no call of an expression result (]( or )(, casts
+// excepted), no variable function call ($f(), `new` only of its own exceptions, and no write chained off
+// anything but $this's own property ($this->x(...)->p = / $this->a->b =); <=, >=, <=> are not writes.
 // LIMITATION (documented): a token guard cannot follow names assembled at run time from string pieces
 // (e.g. 'fc_' . 'tags', 'create' . 'OrUpdate'); the gateway's small, reviewed surface and the test-only fake
 // FluentCRM (which fails on any undocumented call) cover that gap, not this guard.
@@ -922,7 +925,8 @@ const FLUENTCRM_GATEWAY_FORBIDDEN_CALLS = ["do_action", "apply_filters", "add_ac
 const FLUENTCRM_TABLES = ["fc_subscriber", "fc_tag", "fc_list"];
 const FLUENTCRM_GATEWAY_STATIC = { self: ["int", "row", "tag_id", "version_supported"], static: ["int", "row", "tag_id", "version_supported"], evc_fluentcrm_feature: ["assert_constructible"] };
 const FLUENTCRM_DYNAMIC_CALLS = ["call_user_func", "call_user_func_array", "forward_static_call", "forward_static_call_array"];
-const COMPOUND_OPS = [".", "+", "-", "*", "/", "%", "|", "&", "^", "?", "<", ">"];
+/** The gateway may construct only its own exceptions. */
+const FLUENTCRM_GATEWAY_NEW = ["runtimeexception", "invalidargumentexception"];
 const reachesFluentcrm = (v) => v.startsWith("fluentcrm") || v.startsWith("fluent_crm") || v.includes("fluentcrmapi") || v.includes("\\fluentcrm\\") || v.startsWith("fluentcampaign");
 
 export function fluentcrmProblemsFor(path, src, rules = FLUENTCRM_RULES) {
@@ -948,15 +952,38 @@ export function fluentcrmProblemsFor(path, src, rules = FLUENTCRM_RULES) {
   });
   if (gateway) {
     tokens.forEach((tk, k) => {
-      if (tk.t !== "var" || tk.v === "$this" || tokens[k + 1]?.v !== "->") return;
-      if (tokens[k + 2]?.v === "{") { problems.push(`${path}: the gateway uses a dynamic property ${tk.v}->{...}`); return; }
-      const a = tokens[k + 3]?.v;
-      const b = tokens[k + 4]?.v;
-      const write = (a === "=" && b !== "=" && b !== ">") || (COMPOUND_OPS.includes(a) && (b === "=" || (a === b && tokens[k + 5]?.v === "="))) || a === "[";
-      if (tokens[k + 2]?.t === "id" && write && !(a === "[" && !isAssignAfterBracket(tokens, k + 3))) problems.push(`${path}: the gateway writes ${tk.v}->${tokens[k + 2].v}`);
+      const nx = tokens[k + 1];
+      if (tk.t === "op" && tk.v === "->") {
+        // Round 3: variable / dynamic members, and writes on anything but $this's own properties (so also
+        // `$this->x(...)->prop =` and `$this->a->b =`).
+        if (nx?.t === "var") problems.push(`${path}: the gateway uses a variable member ->${nx.v}`);
+        if (nx?.v === "{") problems.push(`${path}: the gateway uses a dynamic member ->{...}`);
+        if (nx?.t === "id" && !(tokens[k - 1]?.t === "var" && tokens[k - 1].v === "$this") && writesAt(tokens, k + 2)) problems.push(`${path}: the gateway writes ->${nx.v}`);
+      }
+      const isCast = tk.v === ")" && tokens[k - 2]?.v === "(" && ["string", "int", "integer", "bool", "boolean", "float", "double", "array"].includes(String(tokens[k - 1]?.v).toLowerCase());
+      if (tk.t === "op" && (tk.v === "]" || tk.v === ")") && nx?.v === "(" && !isCast) problems.push(`${path}: the gateway calls the result of an expression (${tk.v}()`);
+      if (tk.t === "var" && nx?.v === "(") problems.push(`${path}: the gateway calls a variable function ${tk.v}()`);
+      if (tk.t === "id" && tk.v.toLowerCase() === "new" && !(nx?.t === "id" && FLUENTCRM_GATEWAY_NEW.includes(bare(nx.v).toLowerCase()))) problems.push(`${path}: the gateway constructs ${nx ? nx.v : "?"}`);
     });
   }
   return problems;
+}
+
+/**
+ * Is the token at $j the start of a write to the member just before it? Assignments (=, compound ops,
+ * ??=, <<=, >>=, **=), ++ / -- and array writes count; comparisons (==, ===, <=, >=, <=>, !=) and reads
+ * (?? without =) do not.
+ */
+function writesAt(tokens, j) {
+  const a = tokens[j]?.v;
+  const b = tokens[j + 1]?.v;
+  if (tokens[j]?.t !== "op") return false;
+  if (a === "=") return b !== "=" && b !== ">";
+  if ([".", "+", "-", "*", "/", "%", "|", "&", "^"].includes(a) && b === "=") return true;
+  if ((a === "+" || a === "-") && b === a) return true;
+  if (["?", "<", ">", "*"].includes(a) && b === a && tokens[j + 2]?.v === "=") return true;
+  if (a === "[") return isAssignAfterBracket(tokens, j);
+  return false;
 }
 
 /** `$x->p[...] = …` : after the matching ], an assignment follows. */
@@ -1045,6 +1072,30 @@ function fluentcrmSelfTest() {
   expect("a contact's field array written", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "$s->custom_fields['a'] = 1;"), true);
   expect("a dynamic property write", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "$s->{$p} = 1;"), true);
   expect("a null-coalescing property write", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "$s->email ??= 'x';"), true);
+  // Round 3: bypasses ...
+  const g = (code) => GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", code);
+  expect("a variable method call", F.gateway, g("$s->$m();"), true);
+  expect("a variable property read", F.gateway, g("$x = $s->$p;"), true);
+  expect("a call through an array element", F.gateway, g("$fns[0]($s);"), true);
+  expect("a call through a parenthesised expression", F.gateway, g("($this->fn)($s);"), true);
+  expect("a variable function call", F.gateway, g("$f($s);"), true);
+  expect("constructing another class", F.gateway, g("$q = new Foo();"), true);
+  expect("constructing a namespaced class", F.gateway, g("$q = new \\FluentCrm\\App\\Models\\Tag();"), true);
+  expect("constructing a class through a variable", F.gateway, g("$q = new $cls();"), true);
+  expect("a write chained off a method call", F.gateway, g("$this->subscriber($c)->status = 'x';"), true);
+  expect("a write through a property of $this", F.gateway, g("$this->last->status = 'x';"), true);
+  expect("an increment", F.gateway, g("$s->n++;"), true);
+  expect("a power-assign", F.gateway, g("$s->n **= 2;"), true);
+  expect("a shift-assign", F.gateway, g("$s->n <<= 2;"), true);
+  // ... and no false positives.
+  expect("<= is a comparison", F.gateway, g("$ok = $s->id <= $c;"), false);
+  expect(">= is a comparison", F.gateway, g("$ok = $s->id >= $c;"), false);
+  expect("<=> is a comparison", F.gateway, g("$ok = $s->id <=> $c;"), false);
+  expect("!= is a comparison", F.gateway, g("$ok = $s->id != $c;"), false);
+  expect("?? is a read", F.gateway, g("$ok = $s->user_id ?? null;"), false);
+  expect("the gateway's own exceptions", F.gateway, g("if (!$s) { throw new RuntimeException('x'); } $e = new \\InvalidArgumentException('y');"), false);
+  expect("its own property", F.gateway, g("$this->cache = $s;"), false);
+  expect("a cast before a parenthesis", F.gateway, g("$x = (string) ($s->email ?? '');"), false);
   return bad;
 }
 

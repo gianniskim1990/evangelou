@@ -13,7 +13,7 @@ final class FluentcrmOffTest extends EVC_WP_Test_Case {
         EVC_Fluentcrm_Plugin::boot(array('membership' => new EVC_Unavailable_Membership_Adapter(), 'candidates' => function () {
             return array(1);
         }));
-        foreach (array('admin_notices' => 'notice', 'admin_menu' => 'add_menu', 'shutdown' => 'flush', 'pmpro_after_change_membership_level' => 'note_level_change', 'woocommerce_order_status_completed' => 'note_order', 'woocommerce_order_refunded' => 'note_order', EVC_Fluentcrm_Plugin::CRON_HOOK => 'reconcile', 'init' => 'schedule') as $hook => $method) {
+        foreach (array('admin_notices' => 'notice', 'admin_menu' => 'add_menu', 'shutdown' => 'flush', 'pmpro_after_change_membership_level' => 'note_level_change', 'woocommerce_order_status_completed' => 'note_order', 'woocommerce_order_refunded' => 'note_order', EVC_Fluentcrm_Plugin::CRON_HOOK => 'reconcile_daily', EVC_Fluentcrm_Plugin::CONTINUE_HOOK => 'reconcile', 'init' => 'schedule') as $hook => $method) {
             $this->assertFalse(has_action($hook, array('EVC_Fluentcrm_Plugin', $method)), $hook);
         }
         do_action('init');

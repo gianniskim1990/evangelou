@@ -31,7 +31,7 @@
  * And STAGE-03D (RP19-RP23: recovery policy after a WooCommerce completion; MK1-MK3: signed completion marker;
  * CX1-CX4: admin entry points; CN1-CN2: the construction guard).
  * And STAGE-05B (MS6: the member-sync construction guard).
- * And STAGE-06 (FT1-FT35: FluentCRM membership tags).
+ * And STAGE-06 (FT1-FT40: FluentCRM membership tags).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2693,6 +2693,45 @@ $mutants = array(
         'file' => 'includes/class-evc-fluentcrm-tags.php',
         'search' => '        if (!($mbstring ?? function_exists(\'mb_strtolower\'))) {',
         'replace' => '        if (false) {',
+    ),
+    // STAGE-06 round 3 (FT36-FT40): the "club_order_voided" evidence and retiring only on it.
+    array(
+        'id' => 'FT36-voided-evidence-never-given',
+        'file' => 'includes/class-evc-pmpro-entitlement-mapper.php',
+        'search' => '            if ($s->memberships === array() && self::club_order_voided($s->payments, $this->config)) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'FT37-voided-evidence-from-any-level',
+        'file' => 'includes/class-evc-pmpro-entitlement-mapper.php',
+        'search' => '            if (!$config->is_club_level($p->level_id) || $p->status',
+        'replace' => '            if ($p->status',
+    ),
+    array(
+        'id' => 'FT38-voided-evidence-despite-another-pmpro-row',
+        'file' => 'includes/class-evc-pmpro-entitlement-mapper.php',
+        'search' => '            if ($s->memberships === array() && self::club_order_voided(',
+        'replace' => '            if (self::club_order_voided(',
+    ),
+    array(
+        'id' => 'FT39-voided-evidence-without-any-order',
+        'file' => 'includes/class-evc-pmpro-entitlement-mapper.php',
+        'search' => '        if ($payments === array()) {
+            return false;
+        }
+        foreach ($payments as $p) {
+            if (!$config->is_club_level',
+        'replace' => '        if ($payments === array()) {
+            return true;
+        }
+        foreach ($payments as $p) {
+            if (!$config->is_club_level',
+    ),
+    array(
+        'id' => 'FT40-retires-without-the-voided-evidence',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '                if (!in_array(self::VOIDED_FLAG, $entitlement->diagnostic_flags(), true)) {',
+        'replace' => '                if (false) {',
     ),
 );
 

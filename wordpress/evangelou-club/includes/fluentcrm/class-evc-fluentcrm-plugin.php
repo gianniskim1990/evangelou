@@ -23,6 +23,9 @@ final class EVC_Fluentcrm_Plugin {
     const CURSOR_OPTION = 'evc_club_fluentcrm_cursor';
     const LOCK_OPTION = 'evc_club_fluentcrm_lock';
     const LOG_TRANSIENT = 'evc_club_fluentcrm_logged';
+    const RETRY_OPTION = 'evc_club_fluentcrm_retries';
+    /** Round 3: after a failing run, at most this many follow-up runs (5, 10, 20 minutes), then the next daily run. */
+    const MAX_RETRIES = 3;
     const LOCK_TTL = 900;
     const BATCH = 50;
     const MAX_PER_RUN = 500;
@@ -77,7 +80,7 @@ final class EVC_Fluentcrm_Plugin {
         add_action('woocommerce_order_refunded', array(__CLASS__, 'note_order'), self::EVENT_PRIORITY, 1);
         add_action('pmpro_after_change_membership_level', array(__CLASS__, 'note_level_change'), self::EVENT_PRIORITY, 2);
         add_action('shutdown', array(__CLASS__, 'flush'), self::EVENT_PRIORITY, 0);
-        add_action(self::CRON_HOOK, array(__CLASS__, 'reconcile'));
+        add_action(self::CRON_HOOK, array(__CLASS__, 'reconcile_daily'));
         add_action(self::CONTINUE_HOOK, array(__CLASS__, 'reconcile'));
         add_action('init', array(__CLASS__, 'schedule'));
     }
@@ -179,6 +182,12 @@ final class EVC_Fluentcrm_Plugin {
         }
     }
 
+    /** The daily run: a fresh retry budget, then the reconcile. */
+    public static function reconcile_daily(): int {
+        delete_option(self::RETRY_OPTION);
+        return self::reconcile();
+    }
+
     /** @return int how many members were synced in this run (counts only). */
     public static function reconcile(): int {
         if (self::$sync === null || self::$candidates === null) {
@@ -216,8 +225,16 @@ final class EVC_Fluentcrm_Plugin {
                 }
                 $status['current'] = self::add_counts($status['current'], $counts);
                 update_option(self::CURSOR_OPTION, $cursor, false);
+                // Round 3: push the lock's end forward after every batch, so a long run is never taken over.
+                // Not ours any more (another run took it): stop here; that run goes on from the saved cursor.
+                $lock = self::refresh_lock($lock);
+                if ($lock === null) {
+                    break;
+                }
             }
-            if ($finished) {
+            if ($lock === null) {
+                // stopped cleanly: nothing scheduled, nothing released
+            } elseif ($finished) {
                 $status['last'] = $status['current'];
                 $status['last_finished_at'] = time();
                 $status['current'] = array();
@@ -226,18 +243,39 @@ final class EVC_Fluentcrm_Plugin {
                 wp_schedule_single_event(time() + self::CONTINUE_DELAY, self::CONTINUE_HOOK);
             }
             update_option(self::STATUS_OPTION, $status, false);
+            delete_option(self::RETRY_OPTION);
             self::log_problem();
         } catch (Throwable $e) {
-            // Round 2: keep what was counted and come back soon, from the saved cursor.
+            // Round 2: keep what was counted and come back from the saved cursor (round 3: bounded, with backoff).
             update_option(self::STATUS_OPTION, $status, false);
-            if (!wp_next_scheduled(self::CONTINUE_HOOK)) {
-                wp_schedule_single_event(time() + self::CONTINUE_DELAY, self::CONTINUE_HOOK);
-            }
+            self::schedule_retry();
             self::log($e);
         } finally {
-            self::release_lock($lock);
+            if ($lock !== null) {
+                self::release_lock($lock);
+            }
         }
         return $done;
+    }
+
+    /** At most MAX_RETRIES follow-up runs after failures, 5, 10 then 20 minutes later; then the next daily run. */
+    private static function schedule_retry(): void {
+        $n = max(0, (int) get_option(self::RETRY_OPTION, 0)) + 1;
+        update_option(self::RETRY_OPTION, $n, false);
+        if ($n > self::MAX_RETRIES || wp_next_scheduled(self::CONTINUE_HOOK)) {
+            return;
+        }
+        wp_schedule_single_event(time() + self::CONTINUE_DELAY * (1 << ($n - 1)), self::CONTINUE_HOOK);
+    }
+
+    /** Compare-and-swap: a new end and token for OUR lock; null when it is not ours any more. */
+    public static function refresh_lock(string $mine): ?string {
+        global $wpdb;
+        $next = (time() + self::LOCK_TTL) . '|' . bin2hex(random_bytes(16));
+        $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $next, self::LOCK_OPTION, $mine));
+        $ok = (int) $wpdb->rows_affected === 1;
+        self::forget_cached_lock();
+        return $ok ? $next : null;
     }
 
     /**
@@ -416,5 +454,6 @@ final class EVC_Fluentcrm_Plugin {
     public static function deactivate(): void {
         wp_clear_scheduled_hook(self::CRON_HOOK);
         wp_clear_scheduled_hook(self::CONTINUE_HOOK);
+        delete_option(self::RETRY_OPTION);
     }
 }

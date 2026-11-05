@@ -79,8 +79,9 @@ The rules are in `EVC_Fluentcrm_Tag_Map::target()`, evaluated at "now":
 | `indeterminate` with `payment_reversed` (a recorded void or reversal: the card is **frozen**) | Inactive |
 | `pending_payment` (a Club order awaiting the bank transfer, no paid time) | Pending payment |
 | legacy: an active PMPro row with **no** recorded Club payment and a Club order awaiting the transfer (`pending_payment`, `no_payment_evidence` + `renewal_pending`) | Pending payment |
-| `none` (not a Club member) and the contact carries **Active or Pending payment** | **Inactive** (round 2): e.g. a first bank-transfer order put on hold (Pending) and then cancelled or voided unpaid — the mapper then says `none`, and a Pending tag must not stay behind forever |
-| `none` and the contact carries only Inactive, none of the three, or there is no contact | no write; counted as `not_member` |
+| `none` **with `club_order_voided`** (positive evidence: no PMPro row at all, and every payment fact is a Club order that failed or was cancelled unpaid) and the contact carries **Active or Pending payment** | **Inactive** (rounds 2–3): a first bank-transfer order put on hold (Pending) and then cancelled or voided unpaid must not leave Pending behind forever |
+| `none` with `club_order_voided`, contact with only Inactive, none of the three, or no contact | no write; counted as `not_member` |
+| any other `none`: no Club history (e.g. someone tagged by hand who buys ordinary coffee), a membership of another level, no order at all | **no write**; counted as `not_member` (round 3: the spec's "non-member → no write") |
 | any other `indeterminate` state | no write; counted as `state_unknown` |
 | an active row with an unverified payment or an unknown end | no write; counted as `state_unknown` |
 
@@ -104,7 +105,12 @@ Edge cases:
   the sync writes nothing (`state_unknown`), never a guessed Active (also proven on the real stack).
   Round 1 wrongly said that every confirmed member was in the conflict.
 - **First order cancelled unpaid.** On hold → Pending payment; cancelled or failed → Inactive (the
-  rule above). A contact that never had one of the three tags is not given Inactive.
+  rule above), only on the mapper's `club_order_voided` evidence. A contact that never had one of the
+  three tags is not given Inactive.
+- **A wrong Club level setting fails closed.** The commerce reader reports the mismatch with the
+  add-on's product → level map and the level itself as a source conflict, so every member reads
+  `indeterminate` and nothing is written (proven on the real stack). The voided evidence also requires
+  that the user has no PMPro row of any level.
 - **Cancelled or refunded before the correction is recorded** (for example, the Club DB was down).
   This reads as a source conflict, so there is no write. When the recovery step records the correction,
   the next event or the daily reconcile sets Inactive.
@@ -157,9 +163,14 @@ another e-mail, it is not seen.
     `UPDATE … WHERE option_value = <the stale value read>`, so of two runs racing for it only one wins;
   - released with `DELETE … WHERE option_value = <our own value>`, never someone else's lock.
 
+  - (round 3) after every batch the run moves the lock's end forward with the same compare-and-swap
+    (a new value each time), so a run longer than 15 minutes is never taken over; if the swap fails the
+    lock is no longer ours and the run stops cleanly (cursor saved, nothing released or scheduled).
+
   It works in batches of 50 and handles at most 500 members per run, resuming from a saved cursor with
-  a follow-up run 5 minutes later. If the member query fails midway, the counts so far are kept and the
-  follow-up run is scheduled.
+  a follow-up run 5 minutes later. If the member query fails, the counts so far are kept and a
+  follow-up run is scheduled — at most 3 in a row, after 5, 10 and 20 minutes (round 3); then it waits
+  for the next daily run, which starts with a fresh budget. A run that completes clears the budget.
 
   The members are WordPress users with a PMPro row on the Club level, or with a WooCommerce order of
   the Club product in any status. Time-based expiry is caught here, because no event fires at the paid
@@ -265,8 +276,12 @@ enforces the following (round 2 additions marked +):
 - \+ no shipped file names a FluentCRM table (`fc_subscriber*`, `fc_tag*`, `fc_list*`) inside a string;
 - \+ in the gateway: static calls only to its own helpers and the feature guard; `FluentCrmApi(` only
   with the literal `'contacts'` or `'tags'`; no `call_user_func*` / `forward_static_call*`; no property
-  write (plain, compound, array or dynamic) on any variable but `$this`, so a contact's status, name or
-  e-mail can never be assigned.
+  write (plain, compound, `??=`, `++`/`--`, array or dynamic) except on `$this`'s own properties — so
+  also none chained off `$this->x(...)->prop` or `$this->a->b`; comparisons (`<=`, `>=`, `<=>`) are not
+  writes;
+- \+ (round 3) in the gateway: no variable member (`->$x`), no call of an expression result (`](` or
+  `)(`, casts excepted), no variable function call (`$f(`), and `new` only of its own exceptions
+  (`RuntimeException`, `InvalidArgumentException`).
 
 Limitation: a token guard cannot follow names assembled at run time from string pieces (for example
 `'fc_' . 'tags'`). The gateway's small reviewed surface and the test-only fake FluentCRM, which fails on
@@ -302,12 +317,14 @@ any undocumented call, cover that gap.
   covers: on-hold → Pending; cancelled unpaid → Inactive (not Pending); confirmed by shop staff →
   Active; full refund → Inactive; completed without the Club's confirmation → no write
   (`state_unknown`); the reconcile finding an order-only customer and a PMPro member, and its second
-  pass writing nothing.
+  pass writing nothing; (round 3) an outsider tagged by hand buying a non-Club product → untouched; a
+  wrong Club level setting → no writes.
 - **Mutants:**
-  - FT1–FT35 in `run-membership-mutations.php` (mapping incl. the renewal cases, retiring left-over
-    tags, ID verification incl. tag 1 by ID, mbstring, no defaults, never-touch, no-create, matching);
-  - FW1–FW21 in `run-wp-mutations.php`, in modes `fluentcrm` and `disabled` (flag, gate, construction
-    guard, deferral, caps, the atomic token lock, bound, retry after a failure, logging, notice,
-    gateway);
-  - FC1–FC2 in mode `commerce_fluentcrm` (`--mode=commerce`, the CI commerce job): the default member
-    query and the order-status events on the real stack.
+  - FT1–FT40 in `run-membership-mutations.php` (mapping incl. the renewal cases, the voided evidence and
+    retiring only on it, ID verification incl. tag 1 by ID, mbstring, no defaults, never-touch,
+    no-create, matching);
+  - FW1–FW28 in `run-wp-mutations.php`, in modes `fluentcrm` and `disabled` (flag, gate, construction
+    guard, deferral, caps, the atomic token lock and its per-batch refresh, bound, bounded retries with
+    backoff, logging, notice, gateway);
+  - FC1–FC3 in mode `commerce_fluentcrm` (`--mode=commerce`, the CI commerce job): the default member
+    query, the order-status events, and retiring only on the voided evidence, on the real stack.

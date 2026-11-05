@@ -281,6 +281,26 @@ final class FluentcrmTagSyncTest extends TestCase {
         }
     }
 
+    /** The mapper's answer for a Club order voided before it was paid (no PMPro row, only failed Club facts). */
+    private static function voided(): EVC_Entitlement {
+        return EVC_Entitlement::none('pmpro', array('no_club_membership', 'club_order_voided'));
+    }
+
+    /** N1 (round 3): any other "none" — no Club history, another level, a wrong level setting — writes nothing. */
+    public function test_a_non_member_without_the_voided_evidence_is_never_touched(): void {
+        foreach (array(array(), array('no_club_membership'), array('non_club_level_only')) as $flags) {
+            foreach (array(array(2), array(4), array(2, 4), array(1)) as $tags) {
+                $label = implode(',', $flags) . ' / ' . implode(',', $tags);
+                $g = EVC_Fake_Fluentcrm_Gateway::standard()->contact(9, 'member@example.com', self::USER, $tags);
+                $this->assertSame(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER, $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, EVC_Entitlement::none('pmpro', $flags)))->sync_user(self::USER), $label);
+                $this->assertSame(array('available', 'tag:2', 'tag:3', 'tag:4'), $g->calls, $label . ': no contact lookup, no write');
+                $expected = $tags;
+                sort($expected);
+                $this->assertSame($expected, $g->tags_of(9), $label);
+            }
+        }
+    }
+
     /** HIGH 1 (round 2): e.g. a first BACS order put on hold (Pending) and then cancelled unpaid -> mapper "none". */
     public function test_a_non_member_left_with_active_or_pending_is_moved_to_inactive(): void {
         $cases = array(
@@ -292,7 +312,7 @@ final class FluentcrmTagSyncTest extends TestCase {
         );
         foreach ($cases as $label => list($before, $after, $outcome)) {
             $g = EVC_Fake_Fluentcrm_Gateway::standard()->contact(9, 'member@example.com', null, $before);
-            $sync = $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, EVC_Entitlement::none('pmpro')));
+            $sync = $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, self::voided()));
             $this->assertSame($outcome, $sync->sync_user(self::USER), $label);
             $this->assertSame($after, $g->tags_of(9), $label);
             foreach ($g->writes() as $write) {
@@ -303,14 +323,14 @@ final class FluentcrmTagSyncTest extends TestCase {
             $this->assertSame(array(), $g->writes(), $label);
         }
         $g = EVC_Fake_Fluentcrm_Gateway::standard();
-        $this->assertSame(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER, $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, EVC_Entitlement::none('pmpro')))->sync_user(self::USER), 'no contact: still not a member, nothing created');
+        $this->assertSame(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER, $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, self::voided()))->sync_user(self::USER), 'no contact: still not a member, nothing created');
         $this->assertSame(array(), $g->contacts);
         $g = EVC_Fake_Fluentcrm_Gateway::standard()->contact(9, 'member@example.com', 777, array(4));
-        $this->assertSame(EVC_Fluentcrm_Tag_Sync::OUTCOME_AMBIGUOUS, $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, EVC_Entitlement::none('pmpro')))->sync_user(self::USER));
+        $this->assertSame(EVC_Fluentcrm_Tag_Sync::OUTCOME_AMBIGUOUS, $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, self::voided()))->sync_user(self::USER));
         $this->assertSame(array(4), $g->tags_of(9));
         $g = EVC_Fake_Fluentcrm_Gateway::standard()->contact(9, 'member@example.com', null, array(4));
         $g->fail_on = 'has_tag';
-        $this->assertSame(EVC_Fluentcrm_Tag_Sync::OUTCOME_API_ERROR, $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, EVC_Entitlement::none('pmpro')))->sync_user(self::USER));
+        $this->assertSame(EVC_Fluentcrm_Tag_Sync::OUTCOME_API_ERROR, $this->sync($g, (new EVC_Mock_Membership_Adapter())->set(self::USER, self::voided()))->sync_user(self::USER));
     }
 
     // ---- matching: user link or e-mail only; never created ------------------------------------------
