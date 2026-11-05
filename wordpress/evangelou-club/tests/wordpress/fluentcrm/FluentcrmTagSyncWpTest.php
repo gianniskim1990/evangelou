@@ -203,7 +203,7 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         $this->assertGreaterThan(0, $status['last_finished_at']);
         $this->assertSame(0, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION));
         $this->assertSame(array(2), EVC_Test_Fluentcrm::tags_of(9));
-        $this->assertFalse(get_option(EVC_Fluentcrm_Plugin::LOCK_OPTION), 'lock released');
+        $this->assertNull(EVC_Fluentcrm_Plugin::lock_value(), 'lock released');
         // A second full pass changes nothing.
         EVC_Test_Fluentcrm::$calls = array();
         EVC_Fluentcrm_Plugin::reconcile();
@@ -212,20 +212,50 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         $this->assertSame(1, EVC_Fluentcrm_Plugin::status()['last'][EVC_Fluentcrm_Tag_Sync::OUTCOME_UNCHANGED]);
     }
 
+    private function set_lock(string $value): void {
+        global $wpdb;
+        $wpdb->query($wpdb->prepare("REPLACE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", EVC_Fluentcrm_Plugin::LOCK_OPTION, $value));
+    }
+
     public function test_reconcile_is_lock_protected(): void {
         $membership = new EVC_Mock_Membership_Adapter();
         $this->boot_with($membership, function (int $after) {
             return $after < 3 ? array(1, 2, 3) : array();
         });
-        add_option(EVC_Fluentcrm_Plugin::LOCK_OPTION, time() + 600, '', false);
+        $this->set_lock((time() + 600) . '|another-run');
         $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile(), 'another run holds the lock');
         $this->assertSame(array(), $membership->calls);
-        $this->assertFalse(EVC_Fluentcrm_Plugin::acquire_lock());
-        update_option(EVC_Fluentcrm_Plugin::LOCK_OPTION, time() - 1, false);
+        $this->assertNull(EVC_Fluentcrm_Plugin::acquire_lock());
+        $this->assertSame((time() + 600) . '|another-run', EVC_Fluentcrm_Plugin::lock_value(), 'a live lock is never touched');
+        $this->set_lock((time() - 1) . '|crashed-run');
         $this->assertSame(3, EVC_Fluentcrm_Plugin::reconcile(), 'a stale lock (crashed run) is taken over');
-        $this->assertTrue(EVC_Fluentcrm_Plugin::acquire_lock());
-        $this->assertFalse(EVC_Fluentcrm_Plugin::acquire_lock());
-        EVC_Fluentcrm_Plugin::release_lock();
+        $this->assertNull(EVC_Fluentcrm_Plugin::lock_value(), 'and released');
+    }
+
+    public function test_two_acquirers_never_both_hold_the_lock(): void {
+        $first = EVC_Fluentcrm_Plugin::acquire_lock();
+        $this->assertIsString($first);
+        $this->assertMatchesRegularExpression('/^\d+\|[0-9a-f]{32}$/D', $first);
+        $this->assertNull(EVC_Fluentcrm_Plugin::acquire_lock(), 'the INSERT IGNORE of the second inserts nothing');
+        $second_token = ((string) (time() + 900)) . '|' . str_repeat('0', 32);
+        EVC_Fluentcrm_Plugin::release_lock($second_token);
+        $this->assertSame($first, EVC_Fluentcrm_Plugin::lock_value(), 'only the owner may release');
+        EVC_Fluentcrm_Plugin::release_lock($first);
+        $this->assertNull(EVC_Fluentcrm_Plugin::lock_value());
+    }
+
+    public function test_two_runs_racing_for_a_stale_lock_cannot_both_win(): void {
+        $this->set_lock((time() - 5) . '|crashed-run');
+        $other = null;
+        $mine = EVC_Fluentcrm_Plugin::acquire_lock(function () use (&$other) {
+            // Between our read of the stale value and our takeover, another run takes it over first.
+            $other = EVC_Fluentcrm_Plugin::acquire_lock();
+        });
+        $this->assertIsString($other, 'the other run won the takeover');
+        $this->assertNull($mine, 'our conditional UPDATE matched nothing');
+        $this->assertSame($other, EVC_Fluentcrm_Plugin::lock_value());
+        $this->assertNull(EVC_Fluentcrm_Plugin::acquire_lock(), 'and its lock is live');
+        EVC_Fluentcrm_Plugin::release_lock($other);
     }
 
     public function test_reconcile_survives_a_failing_member_list(): void {
@@ -233,8 +263,24 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
             throw new RuntimeException('database');
         });
         $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile());
-        $this->assertFalse(get_option(EVC_Fluentcrm_Plugin::LOCK_OPTION), 'lock released after a failure');
+        $this->assertNull(EVC_Fluentcrm_Plugin::lock_value(), 'lock released after a failure');
         $this->assertStringContainsString('(RuntimeException)', (string) file_get_contents($this->log));
+        $this->assertNotFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK), 'retried soon');
+    }
+
+    public function test_a_failure_midway_keeps_the_counts_and_the_cursor(): void {
+        $calls = 0;
+        $this->boot_with(new EVC_Mock_Membership_Adapter(), function (int $after, int $limit) use (&$calls) {
+            if (++$calls > 1) {
+                throw new RuntimeException('database went away');
+            }
+            return range(1, $limit);
+        });
+        $this->assertSame(EVC_Fluentcrm_Plugin::BATCH, EVC_Fluentcrm_Plugin::reconcile());
+        $this->assertSame(EVC_Fluentcrm_Plugin::BATCH, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION));
+        $this->assertSame(array(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER => EVC_Fluentcrm_Plugin::BATCH), EVC_Fluentcrm_Plugin::status()['current']);
+        $this->assertNotFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK));
+        $this->assertNull(EVC_Fluentcrm_Plugin::lock_value());
     }
 
     public function test_the_daily_schedule_and_deactivation(): void {

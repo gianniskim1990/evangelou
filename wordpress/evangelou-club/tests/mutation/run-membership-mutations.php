@@ -31,7 +31,7 @@
  * And STAGE-03D (RP19-RP23: recovery policy after a WooCommerce completion; MK1-MK3: signed completion marker;
  * CX1-CX4: admin entry points; CN1-CN2: the construction guard).
  * And STAGE-05B (MS6: the member-sync construction guard).
- * And STAGE-06 (FT1-FT26: FluentCRM membership tags).
+ * And STAGE-06 (FT1-FT35: FluentCRM membership tags).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2472,8 +2472,10 @@ $mutants = array(
     array(
         'id' => 'FT3-ended-paid-period-stays-active',
         'file' => 'includes/class-evc-fluentcrm-tags.php',
-        'search' => '$reason === EVC_Entitlement::DENIAL_EXPIRED ? EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE : null;',
-        'replace' => '$reason === EVC_Entitlement::DENIAL_EXPIRED ? EVC_Fluentcrm_Tag_Config::ROLE_ACTIVE : null;',
+        'search' => '                if ($reason !== EVC_Entitlement::DENIAL_EXPIRED) {
+                    return null;',
+        'replace' => '                if (false) {
+                    return null;',
     ),
     array(
         'id' => 'FT4-any-unknown-state-tagged-inactive',
@@ -2623,10 +2625,74 @@ $mutants = array(
     array(
         'id' => 'FT26-unknown-state-reaches-fluentcrm',
         'file' => 'includes/class-evc-fluentcrm-tags.php',
-        'search' => '        if ($role === null) {
-            return EVC_Fluentcrm_Tag_Map::skip_reason',
-        'replace' => '        if ($role === null && false) {
-            return EVC_Fluentcrm_Tag_Map::skip_reason',
+        'search' => '        if ($role === null && EVC_Fluentcrm_Tag_Map::skip_reason($entitlement) !== EVC_Fluentcrm_Tag_Map::SKIP_NOT_MEMBER) {',
+        'replace' => '        if (false) {',
+    ),
+    // STAGE-06 round 2 (FT27-FT35): retiring left-over Active / Pending, expired + unpaid renewal = Pending,
+    // tag 1 refused by ID (config and verify), mbstring required.
+    array(
+        'id' => 'FT27-non-member-never-retired',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '                return $this->retire($wp_user_id);',
+        'replace' => '                return self::OUTCOME_NOT_MEMBER;',
+    ),
+    array(
+        'id' => 'FT28-retire-touches-any-non-member',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if (!$this->gateway->has_tag($id, $this->config->id(EVC_Fluentcrm_Tag_Config::ROLE_ACTIVE))
+            && !$this->gateway->has_tag($id, $this->config->id(EVC_Fluentcrm_Tag_Config::ROLE_PENDING))) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'FT29-retire-ignores-pending',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '
+            && !$this->gateway->has_tag($id, $this->config->id(EVC_Fluentcrm_Tag_Config::ROLE_PENDING))) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'FT30-retire-counts-non-members-as-no-contact',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if ($contact === self::OUTCOME_NO_CONTACT) {
+            return self::OUTCOME_NOT_MEMBER;',
+        'replace' => '        if ($contact === self::OUTCOME_NO_CONTACT) {
+            return self::OUTCOME_NO_CONTACT;',
+    ),
+    array(
+        'id' => 'FT31-expired-with-renewal-inactive',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            case EVC_Entitlement::STATUS_EXPIRED:
+                return self::renewal_pending($entitlement) ? EVC_Fluentcrm_Tag_Config::ROLE_PENDING',
+        'replace' => '            case EVC_Entitlement::STATUS_EXPIRED:
+                return self::renewal_pending($entitlement) ? EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE',
+    ),
+    array(
+        'id' => 'FT32-ended-with-renewal-inactive',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '                    return null;
+                }
+                return self::renewal_pending($entitlement) ? EVC_Fluentcrm_Tag_Config::ROLE_PENDING',
+        'replace' => '                    return null;
+                }
+                return self::renewal_pending($entitlement) ? EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE',
+    ),
+    array(
+        'id' => 'FT33-tag-1-accepted-by-config',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            if (in_array($id, self::PROTECTED_IDS, true)) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'FT34-tag-1-accepted-by-verify',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '                if (in_array($id, EVC_Fluentcrm_Tag_Config::PROTECTED_IDS, true)) {',
+        'replace' => '                if (false) {',
+    ),
+    array(
+        'id' => 'FT35-runs-without-mbstring',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if (!($mbstring ?? function_exists(\'mb_strtolower\'))) {',
+        'replace' => '        if (false) {',
     ),
 );
 

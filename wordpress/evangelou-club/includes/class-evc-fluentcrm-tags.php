@@ -27,6 +27,14 @@ final class EVC_Fluentcrm_Tag_Config {
     const PROBLEM_INVALID_NAME = 'tag_name_invalid';
     const PROBLEM_NOT_DISTINCT = 'tags_not_distinct';
     const PROBLEM_PROTECTED_NAME = 'protected_tag_configured';
+    const PROBLEM_PROTECTED_ID = 'protected_tag_id';
+    const PROBLEM_NO_MBSTRING = 'mbstring_missing';
+
+    /**
+     * Never ours to touch, whatever it is called now: tag 1 is the legacy newsletter tag «Ευαγγέλου Club»
+     * (round 2: protected by ID as well as by name, so renaming it cannot make it configurable).
+     */
+    const PROTECTED_IDS = array(1);
 
     /**
      * Never ours to touch (normalised): the legacy newsletter tag/list «Ευαγγέλου Club». A configured
@@ -55,12 +63,17 @@ final class EVC_Fluentcrm_Tag_Config {
 
     /**
      * Pure parser. $raw holds, per role, 'id' and 'name' exactly as configured (null = not defined).
-     * Only an int >= 1 is an ID (no numeric strings) and only a non-empty string is a name.
+     * Only an int >= 1 is an ID (no numeric strings) and only a non-empty string is a name. Without
+     * mbstring the Greek names cannot be compared safely: fail closed.
      *
      * @param array<string,array{id:mixed,name:mixed}> $raw
+     * @param bool|null $mbstring TEST seam; default: whether mb_strtolower exists
      * @return array{0:?EVC_Fluentcrm_Tag_Config,1:?string} [config, problem]
      */
-    public static function parse(array $raw): array {
+    public static function parse(array $raw, ?bool $mbstring = null): array {
+        if (!($mbstring ?? function_exists('mb_strtolower'))) {
+            return array(null, self::PROBLEM_NO_MBSTRING);
+        }
         $ids = array();
         $names = array();
         foreach (self::roles() as $role) {
@@ -71,6 +84,9 @@ final class EVC_Fluentcrm_Tag_Config {
             }
             if (!is_int($id) || $id < 1) {
                 return array(null, self::PROBLEM_INVALID_ID);
+            }
+            if (in_array($id, self::PROTECTED_IDS, true)) {
+                return array(null, self::PROBLEM_PROTECTED_ID);
             }
             if (!is_string($name) || self::normalise($name) === '' || strlen($name) > 191) {
                 return array(null, self::PROBLEM_INVALID_NAME);
@@ -107,8 +123,15 @@ final class EVC_Fluentcrm_Tag_Config {
         return array_values($this->ids);
     }
 
-    /** Trimmed, lower-cased (UTF-8 aware when mbstring exists), inner whitespace collapsed. */
+    /**
+     * NFC (when intl's Normalizer exists, so «έ» typed as e + combining accent equals «έ»), inner whitespace
+     * collapsed, trimmed, lower-cased (UTF-8 aware; parse() refuses to run without mbstring).
+     */
     public static function normalise(string $value): string {
+        if (class_exists('Normalizer')) {
+            $nfc = Normalizer::normalize($value, Normalizer::FORM_C);
+            $value = is_string($nfc) ? $nfc : '';
+        }
         $value = trim((string) preg_replace('/\s+/u', ' ', $value));
         return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
     }
@@ -129,7 +152,10 @@ final class EVC_Fluentcrm_Tag_Config {
  *   expired | cancelled | refunded | payment_failed (voided) -> inactive
  *   indeterminate with "payment_reversed" (voided/frozen)    -> inactive
  *   pending_payment (unpaid BACS order, no paid time)        -> pending
- *   none (never a Club member)                               -> null: not a member, no write
+ *   expired (or ended) WITH an unpaid renewal order          -> pending (round 2: the same answer before
+ *     and after PMPro's expiry cron, which turns it into pending_payment)
+ *   none (not a Club member)                                 -> null here; EVC_Fluentcrm_Tag_Sync then
+ *     replaces a left-over Active / Pending with Inactive (e.g. a first BACS order cancelled unpaid)
  *   anything else that cannot be confirmed (indeterminate,
  *   e.g. the add-on date conflict, partial refund, unknown
  *   expiry, unverified payment)                              -> null: no write
@@ -145,8 +171,12 @@ final class EVC_Fluentcrm_Tag_Map {
         }
         switch ($entitlement->status()) {
             case EVC_Entitlement::STATUS_ACTIVE:
-                return $reason === EVC_Entitlement::DENIAL_EXPIRED ? EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE : null;
+                if ($reason !== EVC_Entitlement::DENIAL_EXPIRED) {
+                    return null;
+                }
+                return self::renewal_pending($entitlement) ? EVC_Fluentcrm_Tag_Config::ROLE_PENDING : EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE;
             case EVC_Entitlement::STATUS_EXPIRED:
+                return self::renewal_pending($entitlement) ? EVC_Fluentcrm_Tag_Config::ROLE_PENDING : EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE;
             case EVC_Entitlement::STATUS_CANCELLED:
             case EVC_Entitlement::STATUS_REFUNDED:
             case EVC_Entitlement::STATUS_PAYMENT_FAILED:
@@ -158,6 +188,11 @@ final class EVC_Fluentcrm_Tag_Map {
             default:
                 return null;
         }
+    }
+
+    /** The mapper's flag for a Club order awaiting its bank transfer next to the ended paid time. */
+    private static function renewal_pending(EVC_Entitlement $entitlement): bool {
+        return in_array('renewal_pending', $entitlement->diagnostic_flags(), true);
     }
 
     /** Why target() gave null (counts only). */
@@ -259,6 +294,9 @@ final class EVC_Fluentcrm_Tag_Sync {
                 if ($tag === null) {
                     return self::PROBLEM_TAG_MISSING;
                 }
+                if (in_array($id, EVC_Fluentcrm_Tag_Config::PROTECTED_IDS, true)) {
+                    return EVC_Fluentcrm_Tag_Config::PROBLEM_PROTECTED_ID;
+                }
                 if (!isset($tag['id'], $tag['title'], $tag['slug']) || $tag['id'] !== $id) {
                     return self::PROBLEM_TAG_MISMATCH;
                 }
@@ -287,10 +325,13 @@ final class EVC_Fluentcrm_Tag_Sync {
         } catch (Throwable $e) {
             return self::OUTCOME_SOURCE_ERROR;
         }
-        if ($role === null) {
-            return EVC_Fluentcrm_Tag_Map::skip_reason($entitlement) === EVC_Fluentcrm_Tag_Map::SKIP_NOT_MEMBER ? self::OUTCOME_NOT_MEMBER : self::OUTCOME_STATE_UNKNOWN;
+        if ($role === null && EVC_Fluentcrm_Tag_Map::skip_reason($entitlement) !== EVC_Fluentcrm_Tag_Map::SKIP_NOT_MEMBER) {
+            return self::OUTCOME_STATE_UNKNOWN;
         }
         try {
+            if ($role === null) {
+                return $this->retire($wp_user_id);
+            }
             $contact = $this->contact_for($wp_user_id);
             if (is_string($contact)) {
                 return $contact;
@@ -334,6 +375,27 @@ final class EVC_Fluentcrm_Tag_Sync {
             return self::OUTCOME_AMBIGUOUS;
         }
         return $contact;
+    }
+
+    /**
+     * Not (or no longer) a Club member, e.g. a first bank-transfer order cancelled before it was paid
+     * (the mapper then says "none"). A contact still carrying Active or Pending gets Inactive instead
+     * (exactly one tag, as for every former member); one with Inactive or none of the three is left alone.
+     */
+    private function retire(int $wp_user_id): string {
+        $contact = $this->contact_for($wp_user_id);
+        if ($contact === self::OUTCOME_NO_CONTACT) {
+            return self::OUTCOME_NOT_MEMBER;
+        }
+        if (is_string($contact)) {
+            return $contact;
+        }
+        $id = (int) $contact['id'];
+        if (!$this->gateway->has_tag($id, $this->config->id(EVC_Fluentcrm_Tag_Config::ROLE_ACTIVE))
+            && !$this->gateway->has_tag($id, $this->config->id(EVC_Fluentcrm_Tag_Config::ROLE_PENDING))) {
+            return self::OUTCOME_NOT_MEMBER;
+        }
+        return $this->apply($id, EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE);
     }
 
     /** Exactly one of the three tags: attach the wanted one if missing, then detach the other two if present. */

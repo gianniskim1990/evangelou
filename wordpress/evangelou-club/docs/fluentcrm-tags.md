@@ -48,7 +48,9 @@ once an hour.
 
 | Check | Code when it fails |
 |---|---|
+| PHP's mbstring is installed (Greek names are compared lower-cased; intl's `Normalizer`, when present, also folds them to Unicode NFC) | `mbstring_missing` |
 | the six constants exist; IDs are ints ≥ 1; names are non-empty strings; all distinct | `tags_not_configured`, `tag_id_invalid`, `tag_name_invalid`, `tags_not_distinct` |
+| no configured ID is **1** (`PROTECTED_IDS`: the «Ευαγγέλου Club» tag, refused by ID whatever it is called now), checked in the configuration and again before any write | `protected_tag_id` |
 | no configured name, verified title or verified slug is «Ευαγγέλου Club» / `ευαγγέλου-club` / «Evangelou Club» | `protected_tag_configured` |
 | FluentCRM is active with the documented API, `FLUENTCRM_PLUGIN_VERSION` ≥ 3.2.5 | `api_unavailable` |
 | each configured ID exists | `tag_missing` |
@@ -68,29 +70,41 @@ The rules are in `EVC_Fluentcrm_Tag_Map::target()`, evaluated at "now":
 | active with an **early renewal** confirmed (the chain continues) | Active |
 | active with a **pending renewal** order (unpaid) | Active (the paid period still runs) |
 | active row, but now ≥ paid end (the end is exclusive) | Inactive |
+| active row past its paid end **with an unpaid renewal order** (`renewal_pending`) | Pending payment |
 | `expired` | Inactive |
+| `expired` **with an unpaid renewal order** (`renewal_pending`, before PMPro's expiry cron has run) | Pending payment (round 2: the same answer as after the cron, which makes it `pending_payment`) |
 | `cancelled` | Inactive |
 | `refunded` (a recorded refund correction) | Inactive |
 | `payment_failed` (only cancelled or failed orders, "voided") | Inactive |
 | `indeterminate` with `payment_reversed` (a recorded void or reversal: the card is **frozen**) | Inactive |
 | `pending_payment` (a Club order awaiting the bank transfer, no paid time) | Pending payment |
-| `none` (never a Club member) | no write; counted as `not_member` |
+| legacy: an active PMPro row with **no** recorded Club payment and a Club order awaiting the transfer (`pending_payment`, `no_payment_evidence` + `renewal_pending`) | Pending payment |
+| `none` (not a Club member) and the contact carries **Active or Pending payment** | **Inactive** (round 2): e.g. a first bank-transfer order put on hold (Pending) and then cancelled or voided unpaid — the mapper then says `none`, and a Pending tag must not stay behind forever |
+| `none` and the contact carries only Inactive, none of the three, or there is no contact | no write; counted as `not_member` |
 | any other `indeterminate` state | no write; counted as `state_unknown` |
 | an active row with an unverified payment or an unknown end | no write; counted as `state_unknown` |
 
 Examples of the other indeterminate states:
 
-- the add-on date conflict;
+- a PMPro membership the Club has no recorded payment for (for example the add-on issued it on its
+  own while the WooCommerce-completion path was off), or PMPro dates that disagree with the recorded
+  period;
 - a partial refund, whose policy is still open;
 - an order cancelled or refunded before its correction was recorded;
 - source errors.
 
 Edge cases:
 
-- **Today's add-on date conflict.** Until the owner approves aligning the PMPro dates with the
-  recorded Club period (`docs/commerce-membership-source.md`, "Date conflict"), a confirmed member
-  reads as `indeterminate` (`verified_paid_period_conflict`). The sync then leaves their tags
-  untouched (`state_unknown`). It never guesses Active.
+- **Confirmed payments are Active (correction, round 2).** The production confirmation path is the
+  STAGE-03D WooCommerce completion (`EVC_CLUB_WC_COMPLETION_ENABLED`): it records the payment and then
+  issues PMPro's dates from the recorded period itself, so a member confirmed that way reads as
+  active, and the sync tags Active. This is proven on the real stack (`wp-commerce-fluentcrm`). The
+  date conflict ("Date conflict" in `docs/commerce-membership-source.md`) only arises when the add-on
+  issues the membership by itself, without the Club's record: then the member is `indeterminate` and
+  the sync writes nothing (`state_unknown`), never a guessed Active (also proven on the real stack).
+  Round 1 wrongly said that every confirmed member was in the conflict.
+- **First order cancelled unpaid.** On hold → Pending payment; cancelled or failed → Inactive (the
+  rule above). A contact that never had one of the three tags is not given Inactive.
 - **Cancelled or refunded before the correction is recorded** (for example, the Club DB was down).
   This reads as a source conflict, so there is no write. When the recovery step records the correction,
   the next event or the daily reconcile sets Inactive.
@@ -113,10 +127,15 @@ The match is refused, and counted as `ambiguous_contact`, when:
 - the e-mail's contact is linked to another WordPress user;
 - the API answers with a contact that does not fit the request.
 
+Residual risk: FluentCRM documents no way, short of its raw model query builder (deliberately unused),
+to ask whether **two** contacts carry the same `user_id`; `getContactByUserId()` returns one of them.
+If the e-mail lookup finds a different contact, the match is refused; if a second linked contact has
+another e-mail, it is not seen.
+
 `getContactByUserRef` is never used, because it writes the user link when it matches by e-mail.
 
-**No contact is ever created.** A member without a contact is counted as `no_contact`. The Tools page
-shows that count.
+**No contact is ever created** (owner decision D11, below). A member without a contact is counted as
+`no_contact`. The Tools page shows that count.
 
 ## When it runs
 
@@ -130,9 +149,17 @@ shows that count.
   finished, for at most 20 customers per request. A failure there is swallowed and counted. It never
   blocks or rolls back a payment, membership or redemption.
 - **Daily reconcile on WP-Cron** (`evc_club_fluentcrm_reconcile`). It is idempotent: a second pass
-  writes nothing. It is protected by an atomic option lock (`add_option`); a stale lock older than 15
-  minutes is taken over. It works in batches of 50 and handles at most 500 members per run, resuming
-  from a saved cursor with a follow-up run 5 minutes later.
+  writes nothing. It is protected by a lock row in `wp_options` that holds `<until>|<random token>`
+  (round 2):
+  - taken with `INSERT IGNORE` on the unique option name, and held only when exactly one row was
+    inserted (`rows_affected === 1`);
+  - a stale lock (until ≤ now: a crashed run, after 15 minutes) is taken over with a conditional
+    `UPDATE … WHERE option_value = <the stale value read>`, so of two runs racing for it only one wins;
+  - released with `DELETE … WHERE option_value = <our own value>`, never someone else's lock.
+
+  It works in batches of 50 and handles at most 500 members per run, resuming from a saved cursor with
+  a follow-up run 5 minutes later. If the member query fails midway, the counts so far are kept and the
+  follow-up run is scheduled.
 
   The members are WordPress users with a PMPro row on the Club level, or with a WooCommerce order of
   the Club product in any status. Time-based expiry is caught here, because no event fires at the paid
@@ -183,11 +210,18 @@ What those pages confirmed:
 - whether `getContact()` compares e-mails case-insensitively. The plugin lower-cases them, and
   FluentCRM's column collation normally does too.
 
-**Before enabling it on a real site**, the technician checks on **staging** with a **test contact**:
+## Go-live checklist (owner + technician; nothing here is done by this stage)
 
-1. The admin notice is gone.
-2. The Tools page shows counts.
-3. One reconcile moves the test contact's tag as expected and nothing else.
+1. Confirm the three tag IDs and names **on the production site** (2/3/4 are staging-only and
+   unverified) and set the six constants. ID 1 is refused.
+2. **Review FluentCRM → Automations (and funnels) for any trigger on tags 2, 3 or 4** ("tag applied" /
+   "tag removed"): they will fire when the sync changes these tags, including on the first reconcile,
+   which may change many contacts at once. Pause or adjust them first.
+3. On **staging** with a **test contact**: the admin notice is gone, the Tools page shows counts, and
+   one reconcile moves the test contact's tag as expected and nothing else.
+4. Check that `FLUENTCRM_PLUGIN_VERSION` is defined and ≥ 3.2.5 (otherwise the notice says
+   `api_unavailable`) and that PHP has mbstring.
+5. Only then set `EVC_CLUB_FLUENTCRM_SYNC_ENABLED` to `true` (owner approval required).
 
 ## Owner risk: automations
 
@@ -198,17 +232,15 @@ funnel that **listens for "tag applied" or "tag removed"** on Active, Inactive o
 This includes the first reconcile after enabling, which may tag many contacts at once. Before
 enabling, the owner and technician check FluentCRM → Automations for triggers on these three tags.
 
-## Owner question: creating contacts (not built)
+## Owner decision D11: contacts are never created
 
-Creating FluentCRM contacts for members who are not contacts yet is a separate decision. Today they are
-only counted (`no_contact`).
+**Decided by the owner (STAGE-06 round 2):** Club members who are not FluentCRM contacts are **not**
+created as contacts, now or later. They keep being counted as `no_contact` (Tools page, counts only).
+The plugin has no code path that creates a contact, and the packager bans `createOrUpdate` and the
+user-link writer in every shipped file.
 
-> **Ερώτηση προς τον ιδιοκτήτη:** Υπάρχουν μέλη του Club που δεν είναι επαφές στο FluentCRM (τα
-> μετράμε, αλλά δεν τα αγγίζουμε). Θέλετε να δημιουργούνται αυτόματα ως νέες επαφές, ώστε να παίρνουν
-> κι αυτά την ετικέτα Ενεργό / Ανενεργό / Αναμονή πληρωμής; Αν ναι: (α) με ποια κατάσταση εγγραφής —
-> χωρίς συγκατάθεση για newsletter (μόνο για ενημερώσεις συνδρομής) ή «εκκρεμεί επιβεβαίωση» με e-mail
-> διπλής επιβεβαίωσης; (β) με ποια στοιχεία — μόνο e-mail ή και όνομα; Μέχρι να απαντήσετε, δεν
-> δημιουργείται καμία επαφή.
+> **Απόφαση ιδιοκτήτη (D11):** Τα μέλη του Club που δεν είναι επαφές στο FluentCRM **δεν**
+> δημιουργούνται ως επαφές, ούτε τώρα ούτε αργότερα. Απλώς μετριούνται («no_contact»).
 
 ## Code
 
@@ -221,7 +253,7 @@ only counted (`no_contact`).
   notice and the Tools page. It is the only construction site.
 
 The packager (`app/scripts/php-guards.mjs`, STAGE-06 rules, with self-tested negative fixtures)
-enforces the following:
+enforces the following (round 2 additions marked +):
 
 - nothing outside the gateway names `FluentCrmApi`, the `FluentCrm\` namespace, `FLUENTCRM*`
   constants or `fluentcrm_*` / `fluent_crm/*` hooks;
@@ -229,7 +261,16 @@ enforces the following:
 - no shipped file names `createOrUpdate`, `getContactByUserRef`, lists, `updateStatus`, double
   opt-in, custom fields, `importBulk` or the event switch;
 - the gateway and the sync are constructed only in `wire()`, behind the gate;
-- no shipped file defines the flag or a tag constant.
+- no shipped file defines the flag or a tag constant;
+- \+ no shipped file names a FluentCRM table (`fc_subscriber*`, `fc_tag*`, `fc_list*`) inside a string;
+- \+ in the gateway: static calls only to its own helpers and the feature guard; `FluentCrmApi(` only
+  with the literal `'contacts'` or `'tags'`; no `call_user_func*` / `forward_static_call*`; no property
+  write (plain, compound, array or dynamic) on any variable but `$this`, so a contact's status, name or
+  e-mail can never be assigned.
+
+Limitation: a token guard cannot follow names assembled at run time from string pieces (for example
+`'fc_' . 'tags'`). The gateway's small reviewed surface and the test-only fake FluentCRM, which fails on
+any undocumented call, cover that gap.
 
 ## Tests
 
@@ -237,7 +278,8 @@ enforces the following:
   - config parsing;
   - the full mapping table and the exclusive paid end;
   - every verification failure, which means no write and no read;
-  - the protected newsletter tag;
+  - the protected newsletter tag (by ID and by name), mbstring, Unicode NFC;
+  - a non-member's left-over Active / Pending becoming Inactive;
   - exactly one tag, idempotency and attach-before-detach;
   - matching by e-mail or link, ambiguity and no-create;
   - swallowed failures.
@@ -254,8 +296,18 @@ enforces the following:
   - the gateway's surface.
 
   The `wp-common` test `FluentcrmOffTest` proves that nothing exists while the flag is off.
+- **Real stack** (round 2): suite `wp-commerce-fluentcrm` in the CI commerce job (HPOS and posts
+  storage, PHP 7.4 / 8.2 / 8.4) uses the real WooCommerce + PMPro + add-on + Club DB + reader + mapper,
+  the production wiring of the plugin and the DEFAULT member query; only FluentCRM is the fake. It
+  covers: on-hold → Pending; cancelled unpaid → Inactive (not Pending); confirmed by shop staff →
+  Active; full refund → Inactive; completed without the Club's confirmation → no write
+  (`state_unknown`); the reconcile finding an order-only customer and a PMPro member, and its second
+  pass writing nothing.
 - **Mutants:**
-  - FT1–FT26 in `run-membership-mutations.php` (mapping, ID verification, no defaults, never-touch,
-    no-create, matching);
-  - FW1–FW16 in `run-wp-mutations.php`, in modes `fluentcrm` and `disabled` (flag, gate, construction
-    guard, deferral, caps, lock, bound, logging, notice, gateway).
+  - FT1–FT35 in `run-membership-mutations.php` (mapping incl. the renewal cases, retiring left-over
+    tags, ID verification incl. tag 1 by ID, mbstring, no defaults, never-touch, no-create, matching);
+  - FW1–FW21 in `run-wp-mutations.php`, in modes `fluentcrm` and `disabled` (flag, gate, construction
+    guard, deferral, caps, the atomic token lock, bound, retry after a failure, logging, notice,
+    gateway);
+  - FC1–FC2 in mode `commerce_fluentcrm` (`--mode=commerce`, the CI commerce job): the default member
+    query and the order-status events on the real stack.

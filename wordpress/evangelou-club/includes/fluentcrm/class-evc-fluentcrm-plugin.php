@@ -188,12 +188,13 @@ final class EVC_Fluentcrm_Plugin {
             self::log_problem(); // held back: no FluentCRM write, the cursor stays where it is
             return 0;
         }
-        if (!self::acquire_lock()) {
+        $lock = self::acquire_lock();
+        if ($lock === null) {
             return 0;
         }
         $done = 0;
+        $status = self::status();
         try {
-            $status = self::status();
             $cursor = max(0, (int) get_option(self::CURSOR_OPTION, 0));
             $finished = false;
             while ($done < self::MAX_PER_RUN) {
@@ -227,29 +228,66 @@ final class EVC_Fluentcrm_Plugin {
             update_option(self::STATUS_OPTION, $status, false);
             self::log_problem();
         } catch (Throwable $e) {
-            self::log($e); // retried by the next run, from the saved cursor
+            // Round 2: keep what was counted and come back soon, from the saved cursor.
+            update_option(self::STATUS_OPTION, $status, false);
+            if (!wp_next_scheduled(self::CONTINUE_HOOK)) {
+                wp_schedule_single_event(time() + self::CONTINUE_DELAY, self::CONTINUE_HOOK);
+            }
+            self::log($e);
         } finally {
-            self::release_lock();
+            self::release_lock($lock);
         }
         return $done;
     }
 
-    /** Atomic: add_option() inserts only when the row does not exist; a stale lock (crashed run) is taken over. */
-    public static function acquire_lock(): bool {
+    /**
+     * The reconcile lock, atomic in the database (round 2). The row holds "<until>|<random token>":
+     *  - taken with INSERT IGNORE on the unique option_name: exactly one caller sees rows_affected === 1;
+     *  - a stale lock (a crashed run, until <= now) is taken over with a conditional UPDATE … WHERE
+     *    option_value = <the stale value read>, so of two callers racing for it only one wins;
+     *  - released with DELETE … WHERE option_value = <our own value>: never someone else's lock.
+     *
+     * @param callable(): void|null $before_takeover TEST seam: runs between reading a stale lock and taking it over
+     * @return string|null our lock value (pass it to release_lock()), or null when another run holds the lock
+     */
+    public static function acquire_lock(?callable $before_takeover = null): ?string {
+        global $wpdb;
         $now = time();
-        if (add_option(self::LOCK_OPTION, $now + self::LOCK_TTL, '', false)) {
-            return true;
+        $mine = ($now + self::LOCK_TTL) . '|' . bin2hex(random_bytes(16));
+        $wpdb->query($wpdb->prepare("INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", self::LOCK_OPTION, $mine));
+        $won = (int) $wpdb->rows_affected === 1;
+        if (!$won) {
+            $old = $wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::LOCK_OPTION));
+            if (!is_string($old) || (int) strstr($old . '|', '|', true) > $now) {
+                return null; // held by a live run (or released this instant: the next run will do it)
+            }
+            if ($before_takeover !== null) {
+                $before_takeover();
+            }
+            $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $mine, self::LOCK_OPTION, $old));
+            $won = (int) $wpdb->rows_affected === 1;
         }
-        $until = (int) get_option(self::LOCK_OPTION, 0);
-        if ($until > $now) {
-            return false;
-        }
-        delete_option(self::LOCK_OPTION);
-        return add_option(self::LOCK_OPTION, $now + self::LOCK_TTL, '', false);
+        self::forget_cached_lock();
+        return $won ? $mine : null;
     }
 
-    public static function release_lock(): void {
-        delete_option(self::LOCK_OPTION);
+    /** Releases the lock only while it is still ours. */
+    public static function release_lock(string $mine): void {
+        global $wpdb;
+        $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", self::LOCK_OPTION, $mine));
+        self::forget_cached_lock();
+    }
+
+    /** The lock row as stored (null = free), read past the options cache. */
+    public static function lock_value(): ?string {
+        global $wpdb;
+        $v = $wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::LOCK_OPTION));
+        return is_string($v) ? $v : null;
+    }
+
+    private static function forget_cached_lock(): void {
+        wp_cache_delete(self::LOCK_OPTION, 'options');
+        wp_cache_delete('notoptions', 'options');
     }
 
     /**

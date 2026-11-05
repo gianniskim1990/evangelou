@@ -19,15 +19,8 @@ final class EVC_Fluentcrm_Api_Gateway implements EVC_Fluentcrm_Gateway {
     const VERSION_CONSTANT = 'FLUENTCRM_PLUGIN_VERSION';
     const API_FUNCTION = 'FluentCrmApi';
 
-    /** @var callable(string): mixed|null */
-    private $api;
-    /** @var string|null */
-    private $version;
-
     public function __construct() {
         EVC_Fluentcrm_Feature::assert_constructible(__CLASS__);
-        $this->api = function_exists(self::API_FUNCTION) ? self::API_FUNCTION : null;
-        $this->version = defined(self::VERSION_CONSTANT) ? (string) constant(self::VERSION_CONSTANT) : null;
     }
 
     /** Pure: is this FluentCRM version at least the pinned minimum? */
@@ -35,8 +28,9 @@ final class EVC_Fluentcrm_Api_Gateway implements EVC_Fluentcrm_Gateway {
         return $version !== null && preg_match('/^\d+\.\d+(\.\d+)*$/D', $version) === 1 && version_compare($version, self::MIN_VERSION, '>=');
     }
 
+    /** Resolved when asked (round 2), not at plugins_loaded: FluentCRM may load after this plugin. */
     public function available(): bool {
-        if ($this->api === null || !self::version_supported($this->version)) {
+        if (!function_exists(self::API_FUNCTION) || !self::version_supported(defined(self::VERSION_CONSTANT) ? (string) constant(self::VERSION_CONSTANT) : null)) {
             return false;
         }
         $contacts = $this->contacts();
@@ -54,6 +48,11 @@ final class EVC_Fluentcrm_Api_Gateway implements EVC_Fluentcrm_Gateway {
         return array('id' => self::int($tag->id), 'title' => (string) ($tag->title ?? ''), 'slug' => (string) ($tag->slug ?? ''));
     }
 
+    /**
+     * FluentCRM documents no way (short of the raw model query builder, deliberately unused) to ask
+     * whether TWO contacts carry the same user_id; getContactByUserId() returns one. The residual risk is
+     * documented; the sync still refuses when the e-mail lookup finds a different contact.
+     */
     public function contact_by_user_id(int $wp_user_id): ?array {
         return self::row($this->contacts()->getContactByUserId($wp_user_id));
     }
@@ -87,11 +86,11 @@ final class EVC_Fluentcrm_Api_Gateway implements EVC_Fluentcrm_Gateway {
     }
 
     private function contacts() {
-        return call_user_func($this->api, 'contacts');
+        return FluentCrmApi('contacts');
     }
 
     private function tags() {
-        return call_user_func($this->api, 'tags');
+        return FluentCrmApi('tags');
     }
 
     private static function tag_id(int $tag_id): int {

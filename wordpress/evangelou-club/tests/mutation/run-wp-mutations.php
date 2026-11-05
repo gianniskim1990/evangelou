@@ -1146,9 +1146,7 @@ $mutants = array(
 ', '',
         array('FluentcrmTagSyncWpTest::test_the_hooks_are_the_lifecycle_events')),
     array('FW8-lock-ignored', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
-        '        if ($until > $now) {
-            return false;', '        if (false) {
-            return false;',
+        '            if (!is_string($old) || (int) strstr($old . \'|\', \'|\', true) > $now) {', '            if (!is_string($old)) {',
         array('FluentcrmTagSyncWpTest::test_reconcile_is_lock_protected')),
     array('FW9-reconcile-unbounded', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
         '            while ($done < self::MAX_PER_RUN) {', '            while (true) {',
@@ -1159,7 +1157,7 @@ $mutants = array(
             self::log_problem(); // held back: no FluentCRM write, the cursor',
         array('FluentcrmTagSyncWpTest::test_a_renamed_tag_holds_every_write_back_with_a_notice_and_a_class_name_log')),
     array('FW11-lock-not-released', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
-        '            self::release_lock();
+        '            self::release_lock($lock);
 ', '',
         array('FluentcrmTagSyncWpTest::test_reconcile_is_batched_bounded_resumable_and_idempotent')),
     array('FW12-log-carries-the-message', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
@@ -1181,6 +1179,36 @@ $mutants = array(
                 return array(\'sync\' => null, \'problem\' => self::PROBLEM_SOURCE', '            if (false) {
                 return array(\'sync\' => null, \'problem\' => self::PROBLEM_SOURCE',
         array('FluentcrmTagSyncWpTest::test_without_the_membership_source_nothing_is_hooked_and_the_administrator_is_told')),
+    // STAGE-06 round 2 (FW17-FW21): the atomic, token-owned reconcile lock and the retry after a failure;
+    // (FC1-FC2, mode commerce_fluentcrm): the default member query and the order events on the real stack.
+    array('FW17-stale-takeover-unconditional', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        'SET option_value = %s WHERE option_name = %s AND option_value = %s", $mine, self::LOCK_OPTION, $old));', 'SET option_value = %s WHERE option_name = %s", $mine, self::LOCK_OPTION));',
+        array('FluentcrmTagSyncWpTest::test_two_runs_racing_for_a_stale_lock_cannot_both_win')),
+    array('FW18-release-not-owner-checked', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        'DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", self::LOCK_OPTION, $mine));', 'DELETE FROM {$wpdb->options} WHERE option_name = %s", self::LOCK_OPTION));',
+        array('FluentcrmTagSyncWpTest::test_two_acquirers_never_both_hold_the_lock')),
+    array('FW19-insert-result-ignored', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '        $won = (int) $wpdb->rows_affected === 1;
+        if (!$won) {', '        $won = true;
+        if (!$won) {',
+        array('FluentcrmTagSyncWpTest::test_two_acquirers_never_both_hold_the_lock')),
+    array('FW20-failure-not-retried-soon', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '            if (!wp_next_scheduled(self::CONTINUE_HOOK)) {
+                wp_schedule_single_event(time() + self::CONTINUE_DELAY, self::CONTINUE_HOOK);
+            }
+            self::log($e);', '            self::log($e);',
+        array('FluentcrmTagSyncWpTest::test_a_failure_midway_keeps_the_counts_and_the_cursor')),
+    array('FW21-failure-drops-the-counts', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '            update_option(self::STATUS_OPTION, $status, false);
+            if (!wp_next_scheduled', '            if (!wp_next_scheduled',
+        array('FluentcrmTagSyncWpTest::test_a_failure_midway_keeps_the_counts_and_the_cursor')),
+    array('FC1-member-query-misses-order-only-customers', 'commerce_fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        'WHERE membership_id = %d UNION {$customers}) x', 'WHERE membership_id = %d AND %s <> \'\') x',
+        array('FluentcrmCommerceTest::test_the_reconcile_finds_order_only_customers_and_paying_members')),
+    array('FC2-order-status-events-not-hooked', 'commerce_fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '            add_action(\'woocommerce_order_status_\' . $status, array(__CLASS__, \'note_order\'), self::EVENT_PRIORITY, 1);
+', '',
+        array('FluentcrmCommerceTest::test_an_on_hold_bacs_order_is_pending_and_its_cancellation_leaves_inactive_not_pending')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -1217,6 +1245,10 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
         // STAGE-03D: the same site with EVC_CLUB_WC_COMPLETION_ENABLED = true (separate process, own constant).
         $suite = 'wp-commerce-on';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_WC_COMPLETION_FLAG' => 'enabled'));
+    } elseif ($mode === 'commerce_fluentcrm') {
+        // STAGE-06 round 2: the real commerce site + EVC_CLUB_FLUENTCRM_SYNC_ENABLED + the TEST-ONLY fake FluentCRM API.
+        $suite = 'wp-commerce-fluentcrm';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_FLUENTCRM_FLAG' => 'enabled'));
     } elseif ($mode === 'fluentcrm') {
         // STAGE-06: EVC_CLUB_FLUENTCRM_SYNC_ENABLED = true + the six tag constants + the TEST-ONLY fake FluentCRM API.
         $suite = 'wp-fluentcrm';
@@ -1245,7 +1277,7 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
 // commerce mutants, which need the real plugins (EVC_TEST_COMMERCE_PLUGINS) and their own CI job.
 $evc_commerce_only = in_array('--mode=commerce', $argv, true);
 $mutants = array_values(array_filter($mutants, function ($m) use ($evc_commerce_only) {
-    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem'), true) === $evc_commerce_only;
+    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm'), true) === $evc_commerce_only;
 }));
 if ($evc_commerce_only && (string) getenv('EVC_TEST_COMMERCE_PLUGINS') === '') {
     fwrite(STDERR, "ABORT: --mode=commerce needs EVC_TEST_COMMERCE_PLUGINS.\n");
@@ -1257,7 +1289,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm') as $mode) {
+foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

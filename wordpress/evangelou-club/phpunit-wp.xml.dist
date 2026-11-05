@@ -55,5 +55,9 @@
         <testsuite name="wp-fluentcrm">
             <directory>tests/wordpress/fluentcrm</directory>
         </testsuite>
+        <!-- STAGE-06 round 2: the same over the REAL commerce site (EVC_TEST_COMMERCE_PLUGINS, CI commerce job). -->
+        <testsuite name="wp-commerce-fluentcrm">
+            <directory>tests/wordpress/commerce-fluentcrm</directory>
+        </testsuite>
     </testsuites>
 </phpunit>
