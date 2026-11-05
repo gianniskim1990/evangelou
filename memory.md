@@ -1393,3 +1393,25 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - Foundation: pull_request 41903894197 18/18; push 41903886651 18/18 after one re-run of the known BacsConfirmationTest Athens-chain flake (commerce PHP 8.4 / MySQL 8.0 / hpos, attempt 1).
   - Frontend: pull_request 41903894109 4/4 and push 41903886594 4/4. Both mutation shards (346 mutants) and the isolated-build check passed.
 - **BacsConfirmationTest flake.** Seen on PHP 7.4 / MariaDB on 5d8e1c6 and on PHP 8.4 / MySQL on 6598446. It is the real-clock test `test_expiry_and_an_early_renewal_follow_the_athens_chain` and is still not fixed (owned by the earlier commerce stage).
+
+## STAGE-06 — FluentCRM membership tags, default OFF (branch `feat/evc-fluentcrm-tags`, stacked on `feat/evc-member-ui`) — 2026-11-05
+- **Owner go.** The owner said «πάμε» (roadmap step 4, part 1). This is development only: no merge, no deploy, nothing enabled, no real or staging DB, no real FluentCRM call.
+- **Part 0: the BacsConfirmationTest flake is fixed** (its own commit, ba5f237).
+  - Root cause: `test_expiry_and_an_early_renewal_follow_the_athens_chain` confirmed the first payment with the REAL clock. The recorded Club period keeps the seconds of the verified instant, while the PMPro WooCommerce add-on writes minute-rounded "+1 month" dates from the order completion. When the clock fell on second :00 (about 1 run in 60), the two calendars coincided, no conflict was reported, and "unverified before alignment" read 'active'.
+  - Fix: an injected clock pinned one second before a whole minute (the sibling tests' pattern), with the renewal at that instant +1 minute. No assertion was loosened; an assertion that the recorded end is never on :00 was added.
+- **Built**, see `wordpress/evangelou-club/docs/fluentcrm-tags.md`.
+  - Flag `EVC_CLUB_FLUENTCRM_SYNC_ENABLED` (exact boolean true), plus six tag constants with NO defaults: `EVC_CLUB_FLUENTCRM_TAG_{ACTIVE,INACTIVE,PENDING}_{ID,NAME}`.
+  - Every ID is verified (it exists, and its title or slug equals the configured name). Any mismatch, missing FluentCRM (version below 3.2.5 or no API) or unconfigured Club membership source means no writes, an admin notice with a code, and a log line with the class name only.
+  - Exactly one of Active / Inactive / Pending payment per member contact. Tag 1, lists, status, consent, names and fields are never touched. Contacts are never created (counted as `no_contact`).
+  - Matching is by the WP user link (`getContactByUserId`) or e-mail (`getContact`), never `getContactByUserRef`, which writes the link.
+  - Lifecycle events only note the customer; the sync runs at shutdown (at most 20 per request). There is also a daily reconcile: an `add_option` lock, batches of 50, at most 500 per run, resumable.
+  - Tools page «Evangelou Club — FluentCRM» shows counts only.
+  - Packager guard: only the gateway reaches FluentCRM, and the never-touch methods are banned.
+- **Key finding.** While the add-on date conflict is unresolved (alignment needs the owner's approval), confirmed members map to `indeterminate`. The sync then writes NOTHING for them (`state_unknown`), so Active tags appear only after that decision.
+- **Owner questions open.**
+  1. Create contacts for members who are not FluentCRM contacts? The Greek question is in the doc.
+  2. Owner risk: FluentCRM automations listening for "tag applied" on these tags will fire, including on the first reconcile.
+- **FluentCRM 3.2.5 API.** The developer docs were verified. Not verified (no source reachable): the docs' version, the `FLUENTCRM_PLUGIN_VERSION` constant name and the runtime types. If the constant name is wrong, the sync fails closed with `api_unavailable`.
+- **Tests and mutants.**
+  - Unit `FluentcrmTagSyncTest` (20 tests). WP suite `wp-fluentcrm` (14 tests, TEST-ONLY fake `FluentCrmApi` that fails on any undocumented call), plus `wp-common` `FluentcrmOffTest`.
+  - Mutants: FT1–FT26 (membership runner) and FW1–FW16 (WP runner, new mode `fluentcrm`). All were killed locally.

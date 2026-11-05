@@ -112,4 +112,6 @@ require_once $evc_includes . 'class-evc-rest-v2-boundary.php';
 require_once $evc_includes . 'class-evc-staff-role-upgrade.php';
 // STAGE-01 customer view of an entitlement (pure, contract customer-me-v1).
 require_once $evc_includes . 'class-evc-customer-membership.php';
+// STAGE-06 FluentCRM membership tags, pure core (definitions only; wired solely behind EVC_CLUB_FLUENTCRM_SYNC_ENABLED).
+require_once $evc_includes . 'class-evc-fluentcrm-tags.php';
 unset($evc_includes);

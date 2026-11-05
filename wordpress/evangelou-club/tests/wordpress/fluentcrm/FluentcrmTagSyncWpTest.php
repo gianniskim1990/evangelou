@@ -1,0 +1,297 @@
+<?php
+/**
+ * STAGE-06 wp-fluentcrm suite: EVC_CLUB_FLUENTCRM_SYNC_ENABLED === true, the six tag constants (2/3/4),
+ * and the TEST-ONLY fake FluentCRM API (tests/wordpress/support/fake-fluentcrm.php). The membership
+ * source and the member list are test seams; the gateway is the real shipped one, over the fake API.
+ */
+final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
+    /** @var string */
+    private $log;
+
+    public function set_up() {
+        parent::set_up();
+        EVC_Test_Fluentcrm::reset();
+        delete_option(EVC_Fluentcrm_Plugin::STATUS_OPTION);
+        delete_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION);
+        delete_option(EVC_Fluentcrm_Plugin::LOCK_OPTION);
+        delete_transient(EVC_Fluentcrm_Plugin::LOG_TRANSIENT);
+        wp_clear_scheduled_hook(EVC_Fluentcrm_Plugin::CRON_HOOK);
+        wp_clear_scheduled_hook(EVC_Fluentcrm_Plugin::CONTINUE_HOOK);
+        $this->log = (string) tempnam(sys_get_temp_dir(), 'evc-log');
+        ini_set('error_log', $this->log);
+    }
+
+    public function tear_down() {
+        $this->assertSame(array(), EVC_Test_Fluentcrm::$forbidden, 'no FluentCRM method outside the documented, allowed set');
+        ini_restore('error_log');
+        @unlink($this->log);
+        parent::tear_down();
+    }
+
+    private function member(string $email = 'maria@example.com'): int {
+        return (int) self::factory()->user->create(array('role' => 'customer', 'user_email' => $email));
+    }
+
+    private static function active(): EVC_Entitlement {
+        return new EVC_Entitlement(EVC_Entitlement::STATUS_ACTIVE, true, new DateTimeImmutable('+10 days', new DateTimeZone('UTC')), 'pmpro:1', 'pmpro');
+    }
+
+    private function boot_with(EVC_Mock_Membership_Adapter $membership, ?callable $candidates = null): void {
+        EVC_Fluentcrm_Plugin::boot(array('membership' => $membership, 'candidates' => $candidates ?? function () {
+            return array();
+        }));
+    }
+
+    private function writes(): array {
+        return array_values(array_filter(EVC_Test_Fluentcrm::$calls, function ($c) {
+            return in_array($c, array('attachTags', 'detachTags'), true);
+        }));
+    }
+
+    // ---- flag, configuration and the held-back states --------------------------------------------
+
+    public function test_the_flag_is_on_only_for_boolean_true(): void {
+        $this->assertTrue(EVC_Fluentcrm_Feature::enabled());
+        foreach (array(1, '1', 'true', 'yes', array(true), null, false) as $value) {
+            $this->assertFalse(EVC_Fluentcrm_Feature::is_enabled_value($value), var_export($value, true));
+        }
+        list($config, $problem) = EVC_Fluentcrm_Feature::tag_config();
+        $this->assertNull($problem);
+        $this->assertSame(array(2, 3, 4), $config->ids());
+    }
+
+    public function test_without_the_membership_source_nothing_is_hooked_and_the_administrator_is_told(): void {
+        EVC_Fluentcrm_Plugin::boot('');
+        $this->assertSame(EVC_Fluentcrm_Plugin::PROBLEM_SOURCE, EVC_Fluentcrm_Plugin::problem());
+        $this->assertFalse(has_action('woocommerce_order_status_completed', array('EVC_Fluentcrm_Plugin', 'note_order')));
+        $this->assertFalse(has_action('shutdown', array('EVC_Fluentcrm_Plugin', 'flush')));
+        $this->assertFalse(has_action(EVC_Fluentcrm_Plugin::CRON_HOOK, array('EVC_Fluentcrm_Plugin', 'reconcile')));
+        do_action('init');
+        $this->assertFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CRON_HOOK));
+        $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile());
+        wp_set_current_user($this->create_user_with_role('administrator'));
+        $this->assertStringContainsString(EVC_Fluentcrm_Plugin::PROBLEM_SOURCE, $this->notice());
+        wp_set_current_user($this->create_user_with_role('shop_manager'));
+        $this->assertSame('', $this->notice(), 'administrators only');
+        $this->assertSame(array(), EVC_Test_Fluentcrm::$calls, 'FluentCRM never called');
+    }
+
+    private function notice(): string {
+        ob_start();
+        EVC_Fluentcrm_Plugin::notice();
+        return (string) ob_get_clean();
+    }
+
+    public function test_a_renamed_tag_holds_every_write_back_with_a_notice_and_a_class_name_log(): void {
+        $user = $this->member();
+        EVC_Test_Fluentcrm::contact(9, 'maria@example.com', null, array(1, 3));
+        EVC_Test_Fluentcrm::$tags[3] = array('id' => 3, 'title' => 'Πρώην μέλη', 'slug' => 'proin-meli');
+        $this->boot_with((new EVC_Mock_Membership_Adapter())->set($user, self::active()), function () use ($user) {
+            return array($user);
+        });
+        EVC_Fluentcrm_Plugin::note_user($user);
+        EVC_Fluentcrm_Plugin::flush();
+        $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile());
+        $this->assertSame(array(), $this->writes());
+        $this->assertSame(array(1, 3), EVC_Test_Fluentcrm::tags_of(9));
+        wp_set_current_user($this->create_user_with_role('administrator'));
+        $this->assertStringContainsString(EVC_Fluentcrm_Tag_Sync::PROBLEM_TAG_MISMATCH, $this->notice());
+        $log = (string) file_get_contents($this->log);
+        $this->assertStringContainsString('(EVC_Fluentcrm_Tag_Sync)', $log);
+        $this->assertStringNotContainsString('maria', $log);
+        $this->assertStringNotContainsString('Πρώην', $log);
+    }
+
+    // ---- lifecycle events: noted during the request, synced at its end --------------------------
+
+    public function test_a_level_change_is_synced_at_the_end_of_the_request(): void {
+        $user = $this->member('Maria@Example.com');
+        EVC_Test_Fluentcrm::contact(9, 'MARIA@example.com', null, array(1, 3, 4));
+        $this->boot_with((new EVC_Mock_Membership_Adapter())->set($user, self::active()));
+        do_action('pmpro_after_change_membership_level', 1, $user, 0);
+        $this->assertSame(array(), $this->writes(), 'nothing during the event itself');
+        EVC_Fluentcrm_Plugin::flush();
+        $this->assertSame(array(1, 2), EVC_Test_Fluentcrm::tags_of(9), 'Active added, Inactive / Pending removed, the newsletter tag kept');
+        $this->assertSame(1, EVC_Fluentcrm_Plugin::status()['events'][EVC_Fluentcrm_Tag_Sync::OUTCOME_ACTIVE]);
+        $contact = EVC_Test_Fluentcrm::$contacts[9];
+        $this->assertSame(array('subscribed', 'Μαρία', 'MARIA@example.com', null), array($contact['status'], $contact['first_name'], $contact['email'], $contact['user_id']), 'status, name, e-mail and user link untouched');
+        EVC_Fluentcrm_Plugin::flush();
+        $this->assertCount(3, $this->writes(), 'attach 2, detach 3 and 4; an empty queue then does nothing');
+    }
+
+    public function test_the_hooks_are_the_lifecycle_events(): void {
+        $this->boot_with(new EVC_Mock_Membership_Adapter());
+        foreach (EVC_Fluentcrm_Plugin::ORDER_STATUSES as $status) {
+            $this->assertSame(EVC_Fluentcrm_Plugin::EVENT_PRIORITY, has_action('woocommerce_order_status_' . $status, array('EVC_Fluentcrm_Plugin', 'note_order')), $status);
+        }
+        $this->assertSame(EVC_Fluentcrm_Plugin::EVENT_PRIORITY, has_action('woocommerce_order_refunded', array('EVC_Fluentcrm_Plugin', 'note_order')));
+        $this->assertSame(EVC_Fluentcrm_Plugin::EVENT_PRIORITY, has_action('pmpro_after_change_membership_level', array('EVC_Fluentcrm_Plugin', 'note_level_change')));
+        $this->assertSame(EVC_Fluentcrm_Plugin::EVENT_PRIORITY, has_action('shutdown', array('EVC_Fluentcrm_Plugin', 'flush')));
+        $this->assertSame(array('completed', 'processing', 'on-hold', 'pending', 'cancelled', 'failed', 'refunded'), EVC_Fluentcrm_Plugin::ORDER_STATUSES);
+        // Without WooCommerce in this suite an order event is ignored quietly.
+        EVC_Fluentcrm_Plugin::note_order(123);
+        EVC_Fluentcrm_Plugin::flush();
+        $this->assertSame(array(), EVC_Test_Fluentcrm::$calls);
+    }
+
+    public function test_a_request_syncs_at_most_twenty_members(): void {
+        $membership = new EVC_Mock_Membership_Adapter();
+        $this->boot_with($membership);
+        for ($i = 1; $i <= 25; $i++) {
+            EVC_Fluentcrm_Plugin::note_user(1000 + $i);
+        }
+        EVC_Fluentcrm_Plugin::note_user(1001);
+        EVC_Fluentcrm_Plugin::note_user(0);
+        EVC_Fluentcrm_Plugin::flush();
+        $this->assertCount(20, $membership->calls);
+        $this->assertSame(20, EVC_Fluentcrm_Plugin::status()['events'][EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER]);
+    }
+
+    public function test_failures_never_escape_into_the_request(): void {
+        $user = $this->member();
+        EVC_Test_Fluentcrm::contact(9, 'maria@example.com', null, array(3));
+        $this->boot_with((new EVC_Mock_Membership_Adapter())->set($user, new RuntimeException('Club database down')));
+        EVC_Fluentcrm_Plugin::note_user($user);
+        EVC_Fluentcrm_Plugin::flush();
+        $this->assertSame(1, EVC_Fluentcrm_Plugin::status()['events'][EVC_Fluentcrm_Tag_Sync::OUTCOME_SOURCE_ERROR]);
+        $this->boot_with((new EVC_Mock_Membership_Adapter())->set($user, self::active()));
+        EVC_Test_Fluentcrm::$fail_on = 'attachTags';
+        EVC_Fluentcrm_Plugin::note_user($user);
+        EVC_Fluentcrm_Plugin::flush();
+        $this->assertSame(1, EVC_Fluentcrm_Plugin::status()['events'][EVC_Fluentcrm_Tag_Sync::OUTCOME_API_ERROR]);
+        $this->assertSame(array(3), EVC_Test_Fluentcrm::tags_of(9));
+    }
+
+    public function test_members_without_a_contact_are_counted_never_created(): void {
+        $user = $this->member('new-member@example.com');
+        EVC_Test_Fluentcrm::contact(9, 'someone@example.com', null, array(1));
+        $this->boot_with((new EVC_Mock_Membership_Adapter())->set($user, self::active()), function (int $after) use ($user) {
+            return $after < $user ? array($user) : array();
+        });
+        $this->assertSame(1, EVC_Fluentcrm_Plugin::reconcile());
+        $this->assertSame(1, EVC_Fluentcrm_Plugin::status()['last'][EVC_Fluentcrm_Tag_Sync::OUTCOME_NO_CONTACT]);
+        $this->assertCount(1, EVC_Test_Fluentcrm::$contacts);
+        $this->assertSame(array(), $this->writes());
+    }
+
+    // ---- daily reconcile -----------------------------------------------------------------------
+
+    public function test_reconcile_is_batched_bounded_resumable_and_idempotent(): void {
+        $user = $this->member();
+        EVC_Test_Fluentcrm::contact(9, 'maria@example.com', $user, array(4));
+        $membership = (new EVC_Mock_Membership_Adapter())->set($user, self::active());
+        $population = range(100001, 100600);
+        $population[] = $user;
+        $asked = array();
+        $this->boot_with($membership, function (int $after, int $limit) use ($population, &$asked) {
+            $asked[] = $limit;
+            $next = array_values(array_filter($population, function ($id) use ($after) {
+                return $id > $after;
+            }));
+            sort($next);
+            return array_slice($next, 0, $limit);
+        });
+        $this->assertSame(EVC_Fluentcrm_Plugin::MAX_PER_RUN, EVC_Fluentcrm_Plugin::reconcile(), 'bounded per run');
+        $this->assertSame(array_fill(0, 10, EVC_Fluentcrm_Plugin::BATCH), $asked, 'batches of 50');
+        $this->assertSame(100499, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION), 'the member first, then 499 more');
+        $this->assertNotFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK), 'a follow-up run for the rest');
+        $this->assertSame(array(), EVC_Fluentcrm_Plugin::status()['last']);
+        $this->assertSame(101, EVC_Fluentcrm_Plugin::reconcile());
+        $status = EVC_Fluentcrm_Plugin::status();
+        $this->assertSame(array(EVC_Fluentcrm_Tag_Sync::OUTCOME_ACTIVE => 1, EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER => 600), $status['last']);
+        $this->assertSame(array(), $status['current']);
+        $this->assertGreaterThan(0, $status['last_finished_at']);
+        $this->assertSame(0, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION));
+        $this->assertSame(array(2), EVC_Test_Fluentcrm::tags_of(9));
+        $this->assertFalse(get_option(EVC_Fluentcrm_Plugin::LOCK_OPTION), 'lock released');
+        // A second full pass changes nothing.
+        EVC_Test_Fluentcrm::$calls = array();
+        EVC_Fluentcrm_Plugin::reconcile();
+        EVC_Fluentcrm_Plugin::reconcile();
+        $this->assertSame(array(), $this->writes());
+        $this->assertSame(1, EVC_Fluentcrm_Plugin::status()['last'][EVC_Fluentcrm_Tag_Sync::OUTCOME_UNCHANGED]);
+    }
+
+    public function test_reconcile_is_lock_protected(): void {
+        $membership = new EVC_Mock_Membership_Adapter();
+        $this->boot_with($membership, function (int $after) {
+            return $after < 3 ? array(1, 2, 3) : array();
+        });
+        add_option(EVC_Fluentcrm_Plugin::LOCK_OPTION, time() + 600, '', false);
+        $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile(), 'another run holds the lock');
+        $this->assertSame(array(), $membership->calls);
+        $this->assertFalse(EVC_Fluentcrm_Plugin::acquire_lock());
+        update_option(EVC_Fluentcrm_Plugin::LOCK_OPTION, time() - 1, false);
+        $this->assertSame(3, EVC_Fluentcrm_Plugin::reconcile(), 'a stale lock (crashed run) is taken over');
+        $this->assertTrue(EVC_Fluentcrm_Plugin::acquire_lock());
+        $this->assertFalse(EVC_Fluentcrm_Plugin::acquire_lock());
+        EVC_Fluentcrm_Plugin::release_lock();
+    }
+
+    public function test_reconcile_survives_a_failing_member_list(): void {
+        $this->boot_with(new EVC_Mock_Membership_Adapter(), function () {
+            throw new RuntimeException('database');
+        });
+        $this->assertSame(0, EVC_Fluentcrm_Plugin::reconcile());
+        $this->assertFalse(get_option(EVC_Fluentcrm_Plugin::LOCK_OPTION), 'lock released after a failure');
+        $this->assertStringContainsString('(RuntimeException)', (string) file_get_contents($this->log));
+    }
+
+    public function test_the_daily_schedule_and_deactivation(): void {
+        $this->boot_with(new EVC_Mock_Membership_Adapter());
+        EVC_Fluentcrm_Plugin::schedule();
+        $this->assertNotFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CRON_HOOK));
+        $this->assertSame('daily', wp_get_schedule(EVC_Fluentcrm_Plugin::CRON_HOOK));
+        wp_schedule_single_event(time() + 300, EVC_Fluentcrm_Plugin::CONTINUE_HOOK);
+        EVC_Fluentcrm_Plugin::deactivate();
+        $this->assertFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CRON_HOOK));
+        $this->assertFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK));
+    }
+
+    // ---- administrator page: counts only ----------------------------------------------------------
+
+    public function test_the_tools_page_shows_counts_and_no_personal_data(): void {
+        $user = $this->member('private.person@example.com');
+        EVC_Test_Fluentcrm::contact(9, 'private.person@example.com', null, array());
+        $this->boot_with((new EVC_Mock_Membership_Adapter())->set($user, self::active()), function (int $after) use ($user) {
+            return $after < $user ? array($user) : array();
+        });
+        EVC_Fluentcrm_Plugin::reconcile();
+        wp_set_current_user($this->create_user_with_role('administrator'));
+        ob_start();
+        EVC_Fluentcrm_Plugin::render();
+        $html = (string) ob_get_clean();
+        $this->assertStringContainsString('tagged_active</td><td>1', $html);
+        $this->assertStringContainsString('no_contact</td><td>0', $html);
+        $this->assertStringNotContainsString('private.person', $html);
+        $this->assertSame('', $this->notice(), 'no notice while verified');
+    }
+
+    // ---- the shipped gateway over the documented API --------------------------------------------
+
+    public function test_the_gateway_uses_only_the_documented_surface(): void {
+        $g = new EVC_Fluentcrm_Api_Gateway();
+        $this->assertTrue($g->available());
+        $this->assertSame(array('id' => 2, 'title' => 'Active', 'slug' => 'active'), $g->tag(2));
+        $this->assertNull($g->tag(99));
+        EVC_Test_Fluentcrm::contact(9, 'maria@example.com', 501, array(3));
+        $this->assertSame(array('id' => 9, 'email' => 'maria@example.com', 'user_id' => 501), $g->contact_by_user_id(501));
+        $this->assertSame(9, $g->contact_by_email('maria@example.com')['id']);
+        $this->assertNull($g->contact_by_email('9'), 'never a numeric string (getContact would read it as an ID)');
+        $this->assertNull($g->contact_by_user_id(502));
+        $this->assertTrue($g->has_tag(9, 3));
+        $g->attach_tag(9, 2);
+        $g->detach_tag(9, 3);
+        $this->assertSame(array(2), EVC_Test_Fluentcrm::tags_of(9));
+        try {
+            $g->attach_tag(10, 2);
+            $this->fail('an unknown contact');
+        } catch (RuntimeException $e) {
+            $this->assertSame(array(2), EVC_Test_Fluentcrm::tags_of(9));
+        }
+        foreach (array('3.2.5' => true, '3.2.6' => true, '3.10.0' => true, '3.2.4' => false, '2.9.0' => false, '' => false, 'dev' => false, '3.2.5-beta' => false) as $version => $ok) {
+            $this->assertSame($ok, EVC_Fluentcrm_Api_Gateway::version_supported((string) $version), (string) $version);
+        }
+        $this->assertFalse(EVC_Fluentcrm_Api_Gateway::version_supported(null));
+    }
+}

@@ -31,6 +31,7 @@
  * And STAGE-03D (RP19-RP23: recovery policy after a WooCommerce completion; MK1-MK3: signed completion marker;
  * CX1-CX4: admin entry points; CN1-CN2: the construction guard).
  * And STAGE-05B (MS6: the member-sync construction guard).
+ * And STAGE-06 (FT1-FT26: FluentCRM membership tags).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2452,6 +2453,180 @@ $mutants = array(
         'search' => '        EVC_Wc_Completion_Feature::assert_constructible(__CLASS__);
 ',
         'replace' => '',
+    ),
+    // STAGE-06 (FT1-FT26): FluentCRM membership tags - mapping, tag-ID verification, no defaults, matching, exactly one
+    // tag, never-touch (the newsletter tag, contacts that do not exist) and the fail-closed gates.
+    array(
+        'id' => 'FT1-expired-not-inactive',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            case EVC_Entitlement::STATUS_EXPIRED:
+',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'FT2-pending-tagged-active',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '                return EVC_Fluentcrm_Tag_Config::ROLE_PENDING;',
+        'replace' => '                return EVC_Fluentcrm_Tag_Config::ROLE_ACTIVE;',
+    ),
+    array(
+        'id' => 'FT3-ended-paid-period-stays-active',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '$reason === EVC_Entitlement::DENIAL_EXPIRED ? EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE : null;',
+        'replace' => '$reason === EVC_Entitlement::DENIAL_EXPIRED ? EVC_Fluentcrm_Tag_Config::ROLE_ACTIVE : null;',
+    ),
+    array(
+        'id' => 'FT4-any-unknown-state-tagged-inactive',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => 'in_array(\'payment_reversed\', $entitlement->diagnostic_flags(), true) ? EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE : null;',
+        'replace' => 'EVC_Fluentcrm_Tag_Config::ROLE_INACTIVE;',
+    ),
+    array(
+        'id' => 'FT5-unverified-active-tagged-active',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if ($reason === null) {
+            return EVC_Fluentcrm_Tag_Config::ROLE_ACTIVE;',
+        'replace' => '        if ($reason === null || $entitlement->status() === EVC_Entitlement::STATUS_ACTIVE) {
+            return EVC_Fluentcrm_Tag_Config::ROLE_ACTIVE;',
+    ),
+    array(
+        'id' => 'FT6-non-member-tagged-inactive',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            case EVC_Entitlement::STATUS_CANCELLED:
+',
+        'replace' => '            case EVC_Entitlement::STATUS_CANCELLED:
+            case EVC_Entitlement::STATUS_NONE:
+',
+    ),
+    array(
+        'id' => 'FT7-tag-verification-skipped',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        $this->problem = $this->check();',
+        'replace' => '        $this->problem = null;',
+    ),
+    array(
+        'id' => 'FT8-slug-not-accepted',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => ' && EVC_Fluentcrm_Tag_Config::normalise((string) $tag[\'slug\']) !== $want) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'FT9-tag-name-not-compared',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '                    return self::PROBLEM_TAG_MISMATCH;
+                }
+            }
+            return null;',
+        'replace' => '                }
+            }
+            return null;',
+    ),
+    array(
+        'id' => 'FT10-tag-id-not-compared',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => ' || $tag[\'id\'] !== $id) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'FT11-protected-tag-accepted-by-verify',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '                if (EVC_Fluentcrm_Tag_Config::is_protected((string) $tag[\'title\']) || EVC_Fluentcrm_Tag_Config::is_protected((string) $tag[\'slug\'])) {',
+        'replace' => '                if (false) {',
+    ),
+    array(
+        'id' => 'FT12-protected-name-accepted-by-config',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            if (self::is_protected($name)) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'FT13-numeric-string-id-accepted',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            if (!is_int($id) || $id < 1) {',
+        'replace' => '            if ((int) $id < 1) {',
+    ),
+    array(
+        'id' => 'FT14-duplicate-ids-accepted',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if (count(array_unique(array_values($ids))) !== count($ids)
+            ||',
+        'replace' => '        if (false
+            ||',
+    ),
+    array(
+        'id' => 'FT15-staging-ids-as-defaults',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            $id = $raw[$role][\'id\'] ?? null;',
+        'replace' => '            $id = $raw[$role][\'id\'] ?? array(\'active\' => 2, \'inactive\' => 3, \'pending\' => 4)[$role];',
+    ),
+    array(
+        'id' => 'FT16-other-tags-not-removed',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '                $this->gateway->detach_tag($contact_id, $other);
+',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'FT17-touches-a-tag-outside-the-three',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        foreach ($this->config->ids() as $other) {',
+        'replace' => '        foreach (array_merge($this->config->ids(), array(1)) as $other) {',
+    ),
+    array(
+        'id' => 'FT18-attach-not-idempotent',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if (!$this->gateway->has_tag($contact_id, $want)) {',
+        'replace' => '        if (true) {',
+    ),
+    array(
+        'id' => 'FT19-missing-contact-written-anyway',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            return self::OUTCOME_NO_CONTACT;',
+        'replace' => '            return array(\'id\' => 1, \'email\' => $email, \'user_id\' => null);',
+    ),
+    array(
+        'id' => 'FT20-email-match-case-sensitive',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        $email = strtolower(trim($email));',
+        'replace' => '        $email = trim($email);',
+    ),
+    array(
+        'id' => 'FT21-contact-of-another-user-accepted',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            if ($linked !== null && $linked !== 0 && $linked !== $wp_user_id) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'FT22-two-contacts-accepted',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if ($by_user !== null && $by_email !== null && $by_user[\'id\'] !== $by_email[\'id\']) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'FT23-user-link-not-checked',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if ($by_user !== null && ($by_user[\'user_id\'] ?? null) !== $wp_user_id) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'FT24-email-contact-not-checked',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '            if (self::normalise_email($by_email[\'email\'] ?? null) !== $email) {',
+        'replace' => '            if (false) {',
+    ),
+    array(
+        'id' => 'FT25-writes-despite-failed-verification',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if ($wp_user_id < 1 || $this->verify() !== null) {',
+        'replace' => '        if ($wp_user_id < 1) {',
+    ),
+    array(
+        'id' => 'FT26-unknown-state-reaches-fluentcrm',
+        'file' => 'includes/class-evc-fluentcrm-tags.php',
+        'search' => '        if ($role === null) {
+            return EVC_Fluentcrm_Tag_Map::skip_reason',
+        'replace' => '        if ($role === null && false) {
+            return EVC_Fluentcrm_Tag_Map::skip_reason',
     ),
 );
 

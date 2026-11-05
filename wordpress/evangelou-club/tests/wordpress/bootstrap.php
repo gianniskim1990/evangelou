@@ -56,6 +56,24 @@ if ($evc_redemption_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-06: the FluentCRM tag-sync constant, fixed per PHPUnit process: EVC_TEST_FLUENTCRM_FLAG=enabled defines it as
+// boolean true with the six tag constants (the staging IDs 2/3/4 — test values only) and loads the TEST-ONLY fake
+// FluentCRM API (the wp-fluentcrm suite); unset/disabled leaves all of it undefined (every other suite).
+$evc_fluentcrm_mode = getenv('EVC_TEST_FLUENTCRM_FLAG');
+if ($evc_fluentcrm_mode === 'enabled') {
+    define('EVC_CLUB_FLUENTCRM_SYNC_ENABLED', true);
+    define('EVC_CLUB_FLUENTCRM_TAG_ACTIVE_ID', 2);
+    define('EVC_CLUB_FLUENTCRM_TAG_ACTIVE_NAME', 'Active');
+    define('EVC_CLUB_FLUENTCRM_TAG_INACTIVE_ID', 3);
+    define('EVC_CLUB_FLUENTCRM_TAG_INACTIVE_NAME', 'Inactive');
+    define('EVC_CLUB_FLUENTCRM_TAG_PENDING_ID', 4);
+    define('EVC_CLUB_FLUENTCRM_TAG_PENDING_NAME', 'Pending payment');
+    require_once __DIR__ . '/support/fake-fluentcrm.php';
+} elseif ($evc_fluentcrm_mode !== false && $evc_fluentcrm_mode !== '' && $evc_fluentcrm_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_FLUENTCRM_FLAG must be enabled or disabled.\n");
+    exit(1);
+}
+
 // STAGE-03D review: TEST-ONLY hook so the suites may construct the WooCommerce-completion classes with the
 // feature constant OFF (EVC_Wc_Completion_Feature::assert_constructible; the packager refuses it in shipped files).
 define('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);

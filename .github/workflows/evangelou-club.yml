@@ -207,6 +207,14 @@ jobs:
           if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/redemption-junit.xml" 40; fi
           exit $rc
 
+      - name: WordPress suite - FluentCRM tag sync ON over a TEST-ONLY fake FluentCRM API (STAGE-06, no real FluentCRM)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_FLUENTCRM_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-fluentcrm --log-junit "$RUNNER_TEMP/fluentcrm-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/fluentcrm-junit.xml" 40; fi
+          exit $rc
+
       - name: Authorization mutation tests (real WordPress)
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-wp-mutations.php

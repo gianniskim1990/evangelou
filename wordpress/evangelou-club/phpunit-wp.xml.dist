@@ -8,6 +8,7 @@
   STAGE-04A: wp-migrations runs with EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CLUB_MIGRATIONS_FLAG=enabled.
   STAGE-05A: wp-redemption runs with EVC_TEST_STAFF_FLAG=enabled EVC_TEST_CLUB_REDEMPTION_FLAG=enabled;
   wp-commerce-redeem adds EVC_TEST_COMMERCE_PLUGINS (CI commerce job).
+  STAGE-06: wp-fluentcrm runs with EVC_TEST_STAFF_FLAG=disabled EVC_TEST_FLUENTCRM_FLAG=enabled (fake FluentCRM API).
   STAGE-02: same flags + EVC_TEST_COMMERCE_PLUGINS=<dir of pinned WooCommerce/PMPro/add-on> (wp-commerce).
 -->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -49,6 +50,10 @@
         <!-- STAGE-05A: the same with the real WooCommerce / PMPro site, recorded provenance and the Club DB (CI commerce job). -->
         <testsuite name="wp-commerce-redeem">
             <directory>tests/wordpress/commerce-redeem</directory>
+        </testsuite>
+        <!-- STAGE-06: FluentCRM tag sync constant ON with the TEST-ONLY fake FluentCRM API (EVC_TEST_FLUENTCRM_FLAG=enabled). -->
+        <testsuite name="wp-fluentcrm">
+            <directory>tests/wordpress/fluentcrm</directory>
         </testsuite>
     </testsuites>
 </phpunit>
