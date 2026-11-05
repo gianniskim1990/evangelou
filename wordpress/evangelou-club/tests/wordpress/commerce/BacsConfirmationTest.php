@@ -327,7 +327,22 @@ final class BacsConfirmationTest extends EVC_WP_Test_Case {
     public function test_expiry_and_an_early_renewal_follow_the_athens_chain(): void {
         $customer = $this->customer();
         $manager = $this->manager();
-        $first = $this->confirm($manager, $this->order($customer, 'completed'), self::reference());
+        // Deterministic (STAGE-06 Part 0): the first confirmation used the real clock. Its verified instant
+        // keeps its seconds and the recorded chain starts there, while the add-on's PMPro dates are
+        // minute-rounded "+1 month" from the order's completion. When the real clock landed on second :00
+        // (about 1 run in 60) the recorded chain equalled the add-on's dates, so there was no conflict and
+        // line "unverified before alignment" saw 'active' (CI runs 41903886651, 41887521755). The instant is
+        // now pinned off :00 (one second earlier, as in the tests above) and the renewal is pinned to it.
+        $at = new DateTimeImmutable((new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s'), new DateTimeZone('UTC'));
+        if ($at->format('s') === '00') {
+            $at = $at->modify('-1 second');
+        }
+        $order = $this->order($customer, 'completed');
+        $first = $this->service(function () use ($at) {
+            return $at;
+        })->confirm($manager, array('order_id' => $order->get_id(), 'bank_reference' => self::reference(), 'amount_minor' => 2000, 'currency' => 'EUR', 'received_on' => $at->setTimezone(new DateTimeZone('Europe/Athens'))->format('Y-m-d')));
+        $this->assertSame(EVC_Record_Outcome::NEWLY_RECORDED, $first->outcome, (string) $first->reason);
+        $this->assertNotSame('00', $first->period->end_utc()->format('s'), 'the recorded end can never equal a minute-rounded add-on date');
         $first_end = $first->period->end_utc();
 
         // Early renewal: a second order, completed and confirmed while the first month runs.
@@ -342,8 +357,8 @@ final class BacsConfirmationTest extends EVC_WP_Test_Case {
         $this->assertSame(EVC_Record_Outcome::INDETERMINATE, $same_second->outcome);
         $this->assertSame('same_instant_payment', $same_second->reason);
         $this->assertCount(1, $this->movements($customer));
-        $second = $this->service(function () {
-            return new DateTimeImmutable('+1 minute', new DateTimeZone('UTC'));
+        $second = $this->service(function () use ($at) {
+            return $at->modify('+1 minute');
         })->confirm($manager, $input);
         $this->assertSame(EVC_Record_Outcome::NEWLY_RECORDED, $second->outcome, (string) $second->reason);
         $this->assertSame(EVC_Funded_Period::KIND_EARLY, $second->period->kind());

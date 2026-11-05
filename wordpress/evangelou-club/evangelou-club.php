@@ -17,6 +17,7 @@ require_once EVC_CLUB_PATH . 'includes/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/staff/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/customer/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/admin/bootstrap.php';
+require_once EVC_CLUB_PATH . 'includes/fluentcrm/bootstrap.php';
 
 // Staff authentication foundation (Task 1C-C). Role-scoped session policy,
 // admin guard and login throttling are active for users holding the
@@ -48,3 +49,10 @@ add_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));
 // ONLY when wp-config.php defines EVC_CLUB_MIGRATIONS_ENABLED as boolean true (default: OFF =
 // nothing hooked, no menu, no command). Activation never migrates.
 add_action('plugins_loaded', array('EVC_Club_Migrations_Plugin', 'boot'));
+
+// STAGE-06: FluentCRM membership tags (Active / Inactive / Pending payment) from the Club's own membership
+// state. ONLY when wp-config.php defines EVC_CLUB_FLUENTCRM_SYNC_ENABLED as boolean true (default: OFF =
+// nothing hooked, scheduled or called), and even then no write until the tag IDs are configured and verified
+// (docs/fluentcrm-tags.md). Never creates contacts, never touches lists, status, consent or other tags.
+register_deactivation_hook(__FILE__, array('EVC_Fluentcrm_Plugin', 'deactivate'));
+add_action('plugins_loaded', array('EVC_Fluentcrm_Plugin', 'boot'));

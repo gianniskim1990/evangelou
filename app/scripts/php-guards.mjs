@@ -878,6 +878,227 @@ final class EVC_Wc_Completion_Plugin {
     private static function wire($x) { return new EVC_Wc_Completion_Confirmer(); }
 }`;
 
+// ---- STAGE-06 rule set: FluentCRM membership tags, only behind EVC_CLUB_FLUENTCRM_SYNC_ENABLED ------------------
+// A. The STAGE-03D construction rules with their own bootstrap and gate: EVC_Fluentcrm_Api_Gateway and
+//    EVC_Fluentcrm_Tag_Sync are constructed only inside EVC_Fluentcrm_Plugin::wire() (reached only via build() <- boot()
+//    after `if (!EVC_Fluentcrm_Feature::enabled()) { return; }`); their names appear only in the allowlisted files; no
+//    shipped file defines the opt-in constant or any of the six tag constants (no enabling defaults).
+// B. fluentcrmProblemsFor(): nothing but the gateway file reaches FluentCRM at all (FluentCrmApi, the FluentCrm\
+//    namespace, FLUENTCRM* constants, fluentcrm_* / fluent_crm/* hooks, as identifiers or inside strings); the
+//    gateway calls only the documented read / tag methods (getContact, getContactByUserId, find, hasAnyTagId,
+//    attachTags, detachTags) and fires or hooks nothing; and NO shipped file names a never-touch method (contact
+//    creation, the user-link writer, lists, status / double opt-in, custom fields, bulk tag import) or defines the
+//    FluentCRM event switch.
+// Round 2 additions: the FluentCRM table names (fc_subscriber*, fc_tag*, fc_list*) inside any string of any shipped
+// file (no raw SQL on FluentCRM); in the gateway, static calls only to its own helpers and the feature guard
+// (Class::name( checked against an allowlist), FluentCrmApi( only with the literal 'contacts' or 'tags', no
+// call_user_func* / forward_static_call*, and no property write on any variable other than $this (so a contact's
+// status, name or e-mail can never be assigned), including compound and dynamic ({...}) property writes.
+// Round 3: in the gateway also no variable member (->$x), no call of an expression result (]( or )(, casts
+// excepted), no variable function call ($f(), `new` only of its own exceptions, and no write chained off
+// anything but $this's own property ($this->x(...)->p = / $this->a->b =); <=, >=, <=> are not writes.
+// LIMITATION (documented): a token guard cannot follow names assembled at run time from string pieces
+// (e.g. 'fc_' . 'tags', 'create' . 'OrUpdate'); the gateway's small, reviewed surface and the test-only fake
+// FluentCRM (which fails on any undocumented call) cover that gap, not this guard.
+const FLUENTCRM_BOOTSTRAP = "includes/fluentcrm/class-evc-fluentcrm-plugin.php";
+const FLUENTCRM_GATEWAY = "includes/fluentcrm/class-evc-fluentcrm-api-gateway.php";
+export const FLUENTCRM_RULES = Object.freeze({
+  bootstrap: FLUENTCRM_BOOTSTRAP,
+  pluginClass: "EVC_Fluentcrm_Plugin",
+  featureClass: "EVC_Fluentcrm_Feature",
+  guarded: ["EVC_Fluentcrm_Api_Gateway", "EVC_Fluentcrm_Tag_Sync"],
+  forbidden: [],
+  allowlist: ["evangelou-club.php", FLUENTCRM_BOOTSTRAP, FLUENTCRM_GATEWAY, "includes/class-evc-fluentcrm-tags.php"],
+  guardedFiles: [FLUENTCRM_BOOTSTRAP, FLUENTCRM_GATEWAY],
+  memberLockFiles: null,
+  forbiddenDefines: [
+    "EVC_CLUB_FLUENTCRM_SYNC_ENABLED",
+    "EVC_CLUB_FLUENTCRM_TAG_ACTIVE_ID", "EVC_CLUB_FLUENTCRM_TAG_ACTIVE_NAME",
+    "EVC_CLUB_FLUENTCRM_TAG_INACTIVE_ID", "EVC_CLUB_FLUENTCRM_TAG_INACTIVE_NAME",
+    "EVC_CLUB_FLUENTCRM_TAG_PENDING_ID", "EVC_CLUB_FLUENTCRM_TAG_PENDING_NAME",
+  ],
+  gateway: FLUENTCRM_GATEWAY,
+});
+const FLUENTCRM_GATEWAY_METHODS = ["getcontact", "getcontactbyuserid", "find", "hasanytagid", "attachtags", "detachtags"];
+const FLUENTCRM_NEVER = ["createorupdate", "getcontactbyuserref", "attachlists", "detachlists", "updatestatus", "senddoubleoptinemail", "synccustomfieldvalues", "importbulk", "fluentcrm_disable_tag_list_events"];
+const FLUENTCRM_GATEWAY_FORBIDDEN_CALLS = ["do_action", "apply_filters", "add_action", "add_filter", "do_action_ref_array", "apply_filters_ref_array", "wp_mail"];
+const FLUENTCRM_TABLES = ["fc_subscriber", "fc_tag", "fc_list"];
+const FLUENTCRM_GATEWAY_STATIC = { self: ["int", "row", "tag_id", "version_supported"], static: ["int", "row", "tag_id", "version_supported"], evc_fluentcrm_feature: ["assert_constructible"] };
+const FLUENTCRM_DYNAMIC_CALLS = ["call_user_func", "call_user_func_array", "forward_static_call", "forward_static_call_array"];
+/** The gateway may construct only its own exceptions. */
+const FLUENTCRM_GATEWAY_NEW = ["runtimeexception", "invalidargumentexception"];
+const reachesFluentcrm = (v) => v.startsWith("fluentcrm") || v.startsWith("fluent_crm") || v.includes("fluentcrmapi") || v.includes("\\fluentcrm\\") || v.startsWith("fluentcampaign");
+
+export function fluentcrmProblemsFor(path, src, rules = FLUENTCRM_RULES) {
+  const tokens = tokenize(src);
+  const problems = [];
+  const gateway = path === rules.gateway;
+  tokens.forEach((tk, k) => {
+    if (tk.t !== "id" && tk.t !== "str") return;
+    const v = bare(tk.v).toLowerCase();
+    if (!gateway && reachesFluentcrm(v)) problems.push(`${path}: reaches FluentCRM (${tk.t === "str" ? "string" : tk.v}) outside the gateway`);
+    if (FLUENTCRM_NEVER.some((n) => (tk.t === "id" ? v === n || v.endsWith("\\" + n) : v.includes(n)))) problems.push(`${path}: names a never-touch FluentCRM method (${tk.v})`);
+    if (tk.t === "str" && FLUENTCRM_TABLES.some((t) => v.includes(t))) problems.push(`${path}: names a FluentCRM table in a string`);
+    if (gateway && tk.t === "id") {
+      if (tokens[k - 1]?.v === "->" && tokens[k + 1]?.v === "(" && !FLUENTCRM_GATEWAY_METHODS.includes(v) && !["contacts", "tags", "subscriber"].includes(v)) problems.push(`${path}: the gateway calls ->${tk.v}()`);
+      if (FLUENTCRM_GATEWAY_FORBIDDEN_CALLS.includes(v) && tokens[k + 1]?.v === "(") problems.push(`${path}: the gateway calls ${tk.v}()`);
+      if (FLUENTCRM_DYNAMIC_CALLS.includes(v)) problems.push(`${path}: the gateway uses ${tk.v}`);
+      if (tokens[k + 1]?.v === "::" && tokens[k + 2]?.t === "id" && tokens[k + 3]?.v === "(") {
+        const allowed = FLUENTCRM_GATEWAY_STATIC[v] ?? [];
+        if (!allowed.includes(tokens[k + 2].v.toLowerCase())) problems.push(`${path}: the gateway calls ${tk.v}::${tokens[k + 2].v}()`);
+      }
+      if (v === "fluentcrmapi" && tokens[k + 1]?.v === "(" && !(tokens[k + 2]?.t === "str" && ["contacts", "tags"].includes(tokens[k + 2].v) && tokens[k + 3]?.v === ")")) problems.push(`${path}: FluentCrmApi() with anything but 'contacts' or 'tags'`);
+    }
+  });
+  if (gateway) {
+    tokens.forEach((tk, k) => {
+      const nx = tokens[k + 1];
+      if (tk.t === "op" && tk.v === "->") {
+        // Round 3: variable / dynamic members, and writes on anything but $this's own properties (so also
+        // `$this->x(...)->prop =` and `$this->a->b =`).
+        if (nx?.t === "var") problems.push(`${path}: the gateway uses a variable member ->${nx.v}`);
+        if (nx?.v === "{") problems.push(`${path}: the gateway uses a dynamic member ->{...}`);
+        if (nx?.t === "id" && !(tokens[k - 1]?.t === "var" && tokens[k - 1].v === "$this") && writesAt(tokens, k + 2)) problems.push(`${path}: the gateway writes ->${nx.v}`);
+      }
+      const isCast = tk.v === ")" && tokens[k - 2]?.v === "(" && ["string", "int", "integer", "bool", "boolean", "float", "double", "array"].includes(String(tokens[k - 1]?.v).toLowerCase());
+      if (tk.t === "op" && (tk.v === "]" || tk.v === ")") && nx?.v === "(" && !isCast) problems.push(`${path}: the gateway calls the result of an expression (${tk.v}()`);
+      if (tk.t === "var" && nx?.v === "(") problems.push(`${path}: the gateway calls a variable function ${tk.v}()`);
+      if (tk.t === "id" && tk.v.toLowerCase() === "new" && !(nx?.t === "id" && FLUENTCRM_GATEWAY_NEW.includes(bare(nx.v).toLowerCase()))) problems.push(`${path}: the gateway constructs ${nx ? nx.v : "?"}`);
+    });
+  }
+  return problems;
+}
+
+/**
+ * Is the token at $j the start of a write to the member just before it? Assignments (=, compound ops,
+ * ??=, <<=, >>=, **=), ++ / -- and array writes count; comparisons (==, ===, <=, >=, <=>, !=) and reads
+ * (?? without =) do not.
+ */
+function writesAt(tokens, j) {
+  const a = tokens[j]?.v;
+  const b = tokens[j + 1]?.v;
+  if (tokens[j]?.t !== "op") return false;
+  if (a === "=") return b !== "=" && b !== ">";
+  if ([".", "+", "-", "*", "/", "%", "|", "&", "^"].includes(a) && b === "=") return true;
+  if ((a === "+" || a === "-") && b === a) return true;
+  if (["?", "<", ">", "*"].includes(a) && b === a && tokens[j + 2]?.v === "=") return true;
+  if (a === "[") return isAssignAfterBracket(tokens, j);
+  return false;
+}
+
+/** `$x->p[...] = …` : after the matching ], an assignment follows. */
+function isAssignAfterBracket(tokens, at) {
+  let depth = 0;
+  for (let j = at; j < tokens.length; j++) {
+    if (tokens[j].v === "[") depth++;
+    else if (tokens[j].v === "]" && --depth === 0) return tokens[j + 1]?.v === "=" && tokens[j + 2]?.v !== "=" && tokens[j + 2]?.v !== ">";
+  }
+  return false;
+}
+
+const GOOD_FLUENTCRM_GATEWAY = `<?php
+final class EVC_Fluentcrm_Api_Gateway implements EVC_Fluentcrm_Gateway {
+    const API_FUNCTION = 'FluentCrmApi';
+    public function __construct() { EVC_Fluentcrm_Feature::assert_constructible(__CLASS__); }
+    public function available(): bool { return function_exists(self::API_FUNCTION) && self::version_supported(defined('FLUENTCRM_PLUGIN_VERSION') ? '1' : null); }
+    public function tag(int $id): ?array { $t = $this->tags()->find($id); return array('id' => self::int($t->id)); }
+    public function attach_tag(int $c, int $t): void { $s = $this->subscriber($c); $s->attachTags(array(self::tag_id($t))); $ok = $s->id === $c; $this->last = $s; }
+    private function subscriber(int $c) { return $this->contacts()->getContact($c); }
+    private function contacts() { return FluentCrmApi('contacts'); }
+    private function tags() { return FluentCrmApi('tags'); }
+}`;
+const GOOD_FLUENTCRM_PLUGIN = `<?php
+final class EVC_Fluentcrm_Plugin {
+    public static function boot($seams = null): void {
+        if (!EVC_Fluentcrm_Feature::enabled()) {
+            return;
+        }
+        $parts = self::build();
+    }
+    public static function build() { return self::wire(); }
+    private static function wire() { return new EVC_Fluentcrm_Tag_Sync($c, new EVC_Fluentcrm_Api_Gateway(), $m, $e, $k); }
+}`;
+
+function fluentcrmSelfTest() {
+  const bad = [];
+  const F = FLUENTCRM_RULES;
+  const expect = (label, path, src, want) => {
+    const got = problemsFor(path, src, F).length + fluentcrmProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`fluentcrm ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good plugin", F.bootstrap, GOOD_FLUENTCRM_PLUGIN, false);
+  expect("good gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY, false);
+  expect("gate missing", F.bootstrap, GOOD_FLUENTCRM_PLUGIN.replace("if (!EVC_Fluentcrm_Feature::enabled()) {\n            return;\n        }", ""), true);
+  expect("gate of another feature", F.bootstrap, GOOD_FLUENTCRM_PLUGIN.replace("EVC_Fluentcrm_Feature::enabled", "EVC_Customer_Feature::enabled"), true);
+  expect("gateway constructed elsewhere", "includes/x.php", "<?php\n$g = new EVC_Fluentcrm_Api_Gateway();", true);
+  expect("sync constructed outside wire()", F.bootstrap, GOOD_FLUENTCRM_PLUGIN.replace("public static function build() {", "public static function build() { new EVC_Fluentcrm_Tag_Sync(1, 2, 3, 4, 5);"), true);
+  expect("FluentCrmApi called elsewhere", "includes/x.php", "<?php\n$c = FluentCrmApi('contacts');", true);
+  expect("FluentCrmApi with a leading backslash", "includes/x.php", "<?php\n$c = \\FluentCrmApi('contacts');", true);
+  expect("FluentCrmApi through a string", "includes/x.php", "<?php\n$c = call_user_func('fluentcrmapi', 'contacts');", true);
+  expect("FluentCrm namespace elsewhere", "includes/x.php", "<?php\n$s = \\FluentCrm\\App\\Models\\Subscriber::where('email', $e)->first();", true);
+  expect("FluentCrm namespace in a string", "includes/x.php", "<?php\n$c = 'FluentCrm\\\\App\\\\Models\\\\Tag';", true);
+  expect("a FluentCRM hook elsewhere", "includes/x.php", "<?php\nadd_action('fluent_crm/contact_added_to_tags', 'f');", true);
+  expect("a legacy FluentCRM hook elsewhere", "includes/x.php", "<?php\ndo_action('fluentcrm_contact_added_to_tags', $a, $b);", true);
+  expect("a FluentCRM constant elsewhere", "includes/x.php", "<?php\n$v = FLUENTCRM_PLUGIN_VERSION;", true);
+  expect("contact creation", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("->find($id)", "->createOrUpdate(array())"), true);
+  expect("contact creation named elsewhere", "includes/x.php", "<?php\n$m = 'createOrUpdate';", true);
+  expect("the user-link writer", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("->getContact($c)", "->getContactByUserRef($c)"), true);
+  expect("lists", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("->attachTags(", "->attachLists("), true);
+  expect("status write", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("->attachTags(array(self::tag_id($t)))", "->updateStatus('subscribed')"), true);
+  expect("double opt-in", "includes/x.php", "<?php\n$s->sendDoubleOptinEmail();", true);
+  expect("an undocumented gateway call", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("->attachTags(array(self::tag_id($t)))", "->save()"), true);
+  expect("the gateway fires a hook", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$t = $this->tags()", "do_action('x'); $t = $this->tags()"), true);
+  expect("the event switch", "includes/x.php", "<?php\ndefine('FLUENTCRM_DISABLE_TAG_LIST_EVENTS', true);", true);
+  expect("the event switch in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("final class", "define('FLUENTCRM_DISABLE_TAG_LIST_EVENTS', true);\nfinal class"), true);
+  expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_FLUENTCRM_SYNC_ENABLED', true);", true);
+  expect("defines a tag ID default", "includes/x.php", "<?php\ndefine('EVC_CLUB_FLUENTCRM_TAG_ACTIVE_ID', 2);", true);
+  expect("our own option names are fine", "includes/x.php", "<?php\nupdate_option('evc_club_fluentcrm_status', array());\n$c = 'EVC_CLUB_FLUENTCRM_SYNC_ENABLED';", false);
+  expect("a comment mention is fine", "includes/x.php", "<?php\n// FluentCrmApi('contacts')->createOrUpdate()\n$x = 1;", false);
+  // Round 2.
+  expect("raw SQL on the subscribers table", F.bootstrap, GOOD_FLUENTCRM_PLUGIN.replace("$parts = self::build();", "$wpdb->query(\"UPDATE {$wpdb->prefix}fc_subscribers SET status = 'x'\"); $parts = self::build();"), true);
+  expect("raw SQL on the tag pivot in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("return array('id'", "$q = 'DELETE FROM wp_fc_subscriber_pivot'; return array('id'"), true);
+  expect("the lists table elsewhere", "includes/x.php", "<?php\n$t = $wpdb->prefix . 'fc_lists';", true);
+  expect("the tags table elsewhere", "includes/x.php", "<?php\n$t = 'FC_TAGS';", true);
+  expect("a foreign static call in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$t = $this->tags()->find($id);", "$t = Subscriber::where('id', $id);"), true);
+  expect("an unknown helper on self in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("self::int($t->id)", "self::write($t->id)"), true);
+  expect("the feature guard is fine, but not another feature method", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("EVC_Fluentcrm_Feature::assert_constructible(__CLASS__)", "EVC_Fluentcrm_Feature::tag_config()"), true);
+  expect("call_user_func in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("return FluentCrmApi('contacts');", "return call_user_func('FluentCrmApi', 'contacts');"), true);
+  expect("call_user_func_array in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "call_user_func_array(array($s, 'save'), array());"), true);
+  expect("forward_static_call in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "forward_static_call(array('X', 'y'));"), true);
+  expect("FluentCrmApi('lists') in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("FluentCrmApi('tags')", "FluentCrmApi('lists')"), true);
+  expect("FluentCrmApi with a variable in the gateway", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("FluentCrmApi('tags')", "FluentCrmApi($k)"), true);
+  expect("a contact's status assigned", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "$s->status = 'subscribed';"), true);
+  expect("a contact's name appended", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "$s->first_name .= 'x';"), true);
+  expect("a contact's field array written", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "$s->custom_fields['a'] = 1;"), true);
+  expect("a dynamic property write", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "$s->{$p} = 1;"), true);
+  expect("a null-coalescing property write", F.gateway, GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", "$s->email ??= 'x';"), true);
+  // Round 3: bypasses ...
+  const g = (code) => GOOD_FLUENTCRM_GATEWAY.replace("$ok = $s->id === $c;", code);
+  expect("a variable method call", F.gateway, g("$s->$m();"), true);
+  expect("a variable property read", F.gateway, g("$x = $s->$p;"), true);
+  expect("a call through an array element", F.gateway, g("$fns[0]($s);"), true);
+  expect("a call through a parenthesised expression", F.gateway, g("($this->fn)($s);"), true);
+  expect("a variable function call", F.gateway, g("$f($s);"), true);
+  expect("constructing another class", F.gateway, g("$q = new Foo();"), true);
+  expect("constructing a namespaced class", F.gateway, g("$q = new \\FluentCrm\\App\\Models\\Tag();"), true);
+  expect("constructing a class through a variable", F.gateway, g("$q = new $cls();"), true);
+  expect("a write chained off a method call", F.gateway, g("$this->subscriber($c)->status = 'x';"), true);
+  expect("a write through a property of $this", F.gateway, g("$this->last->status = 'x';"), true);
+  expect("an increment", F.gateway, g("$s->n++;"), true);
+  expect("a power-assign", F.gateway, g("$s->n **= 2;"), true);
+  expect("a shift-assign", F.gateway, g("$s->n <<= 2;"), true);
+  // ... and no false positives.
+  expect("<= is a comparison", F.gateway, g("$ok = $s->id <= $c;"), false);
+  expect(">= is a comparison", F.gateway, g("$ok = $s->id >= $c;"), false);
+  expect("<=> is a comparison", F.gateway, g("$ok = $s->id <=> $c;"), false);
+  expect("!= is a comparison", F.gateway, g("$ok = $s->id != $c;"), false);
+  expect("?? is a read", F.gateway, g("$ok = $s->user_id ?? null;"), false);
+  expect("the gateway's own exceptions", F.gateway, g("if (!$s) { throw new RuntimeException('x'); } $e = new \\InvalidArgumentException('y');"), false);
+  expect("its own property", F.gateway, g("$this->cache = $s;"), false);
+  expect("a cast before a parenthesis", F.gateway, g("$x = (string) ($s->email ?? '');"), false);
+  return bad;
+}
+
 export function selfTest() {
   const bad = [];
   const expect = (label, path, src, want) => {
@@ -925,5 +1146,5 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest());
 }

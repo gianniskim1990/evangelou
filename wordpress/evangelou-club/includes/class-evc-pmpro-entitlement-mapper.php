@@ -43,6 +43,9 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  * only counts with its own recorded provenance. PMPro's "active" status and
  * its expiry cron are never trusted on their own.
  *
+ * STAGE-06 round 3: with no PMPro row at all and ONLY failed Club payment facts (a Club order cancelled or
+ * failed before it was paid) the result is none with the extra flag "club_order_voided".
+ *
  * Without an active Club row, a well-formed live PENDING Club payment makes
  * the result pending_payment (STAGE-02: PMPro WooCommerce creates the row
  * only when the order is completed, so a bank transfer awaiting payment has
@@ -164,6 +167,10 @@ final class EVC_Pmpro_Entitlement_Mapper {
             }
         }
         if ($club_rows === array()) {
+            if ($s->memberships === array() && self::club_order_voided($s->payments, $this->config)) {
+                // STAGE-06 round 3: positive evidence of a Club order that was voided before it was paid.
+                return EVC_Entitlement::none(self::SOURCE, array('no_club_membership', 'club_order_voided'));
+            }
             return EVC_Entitlement::none(self::SOURCE, array($s->memberships === array() ? 'no_club_membership' : 'non_club_level_only'));
         }
         if ($active === array()) {
@@ -406,6 +413,26 @@ final class EVC_Pmpro_Entitlement_Mapper {
             }
         }
         return $awaiting;
+    }
+
+    /**
+     * STAGE-06 round 3: a Club order that ended unpaid (cancelled / failed) and nothing else: at least one
+     * payment fact, EVERY fact on an approved Club level, failed, never confirmed. Read only where the user
+     * has no PMPro row at all. Anything else (no facts, another level, a pending, confirmed or refunded fact)
+     * is not this evidence. A wrong level configuration therefore never produces it for a real member.
+     *
+     * @param EVC_Pmpro_Payment_Fact[] $payments
+     */
+    private static function club_order_voided(array $payments, EVC_Pmpro_Mapper_Config $config): bool {
+        if ($payments === array()) {
+            return false;
+        }
+        foreach ($payments as $p) {
+            if (!$config->is_club_level($p->level_id) || $p->status !== EVC_Pmpro_Payment_Fact::STATUS_FAILED || $p->confirmed_at_utc !== null) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private function same_payment(EVC_Pmpro_Payment_Fact $a, EVC_Pmpro_Payment_Fact $b): bool {

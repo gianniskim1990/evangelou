@@ -1393,3 +1393,73 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - Foundation: pull_request 41903894197 18/18; push 41903886651 18/18 after one re-run of the known BacsConfirmationTest Athens-chain flake (commerce PHP 8.4 / MySQL 8.0 / hpos, attempt 1).
   - Frontend: pull_request 41903894109 4/4 and push 41903886594 4/4. Both mutation shards (346 mutants) and the isolated-build check passed.
 - **BacsConfirmationTest flake.** Seen on PHP 7.4 / MariaDB on 5d8e1c6 and on PHP 8.4 / MySQL on 6598446. It is the real-clock test `test_expiry_and_an_early_renewal_follow_the_athens_chain` and is still not fixed (owned by the earlier commerce stage).
+
+## STAGE-06 — FluentCRM membership tags, default OFF (branch `feat/evc-fluentcrm-tags`, stacked on `feat/evc-member-ui`) — 2026-11-05
+- **Owner go.** The owner said «πάμε» (roadmap step 4, part 1). This is development only: no merge, no deploy, nothing enabled, no real or staging DB, no real FluentCRM call.
+- **Part 0: the BacsConfirmationTest flake is fixed** (its own commit, ba5f237).
+  - Root cause: `test_expiry_and_an_early_renewal_follow_the_athens_chain` confirmed the first payment with the REAL clock. The recorded Club period keeps the seconds of the verified instant, while the PMPro WooCommerce add-on writes minute-rounded "+1 month" dates from the order completion. When the clock fell on second :00 (about 1 run in 60), the two calendars coincided, no conflict was reported, and "unverified before alignment" read 'active'.
+  - Fix: an injected clock pinned one second before a whole minute (the sibling tests' pattern), with the renewal at that instant +1 minute. No assertion was loosened; an assertion that the recorded end is never on :00 was added.
+- **Built**, see `wordpress/evangelou-club/docs/fluentcrm-tags.md`.
+  - Flag `EVC_CLUB_FLUENTCRM_SYNC_ENABLED` (exact boolean true), plus six tag constants with NO defaults: `EVC_CLUB_FLUENTCRM_TAG_{ACTIVE,INACTIVE,PENDING}_{ID,NAME}`.
+  - Every ID is verified (it exists, and its title or slug equals the configured name). Any mismatch, missing FluentCRM (version below 3.2.5 or no API) or unconfigured Club membership source means no writes, an admin notice with a code, and a log line with the class name only.
+  - Exactly one of Active / Inactive / Pending payment per member contact. Tag 1, lists, status, consent, names and fields are never touched. Contacts are never created (counted as `no_contact`).
+  - Matching is by the WP user link (`getContactByUserId`) or e-mail (`getContact`), never `getContactByUserRef`, which writes the link.
+  - Lifecycle events only note the customer; the sync runs at shutdown (at most 20 per request). There is also a daily reconcile: an `add_option` lock, batches of 50, at most 500 per run, resumable.
+  - Tools page «Evangelou Club — FluentCRM» shows counts only.
+  - Packager guard: only the gateway reaches FluentCRM, and the never-touch methods are banned.
+- ~~Key finding: confirmed members are indeterminate.~~ **Corrected in round 2:** the production confirmation (STAGE-03D WooCommerce completion) issues PMPro's dates from the recorded payment, so confirmed members ARE active and get the Active tag (proven on the real stack). Only a PMPro membership without the Club's record (the add-on alone) is indeterminate → no write (`state_unknown`).
+- **Owner risk:** FluentCRM automations listening for "tag applied/removed" on these tags will fire, including on the first reconcile (now step 2 of the go-live checklist in the doc).
+- **FluentCRM 3.2.5 API.** The developer docs were verified. Not verified (no source reachable): the docs' version, the `FLUENTCRM_PLUGIN_VERSION` constant name and the runtime types. If the constant name is wrong, the sync fails closed with `api_unavailable`.
+- **Tests and mutants.**
+  - Unit `FluentcrmTagSyncTest` (20 tests). WP suite `wp-fluentcrm` (14 tests, TEST-ONLY fake `FluentCrmApi` that fails on any undocumented call), plus `wp-common` `FluentcrmOffTest`.
+  - Mutants: FT1–FT26 (membership runner) and FW1–FW16 (WP runner, new mode `fluentcrm`). All were killed locally.
+
+### STAGE-06 round 2 — independent review CHANGES REQUIRED, fixed (2026-11-05)
+- **OWNER DECISION D11** (relayed by the coordinator): Club members who are not FluentCRM contacts are NOT created, now or later. They are only counted (`no_contact`). Recorded in the doc in place of the open question.
+- **HIGH 1.** A first BACS order on hold (Pending) and then cancelled or voided unpaid: the mapper says `none`, and the Pending tag stayed forever. Fix in the sync: a non-member whose contact carries Active or Pending gets Inactive (exactly one tag). A non-member with only Inactive, none of the three tags, or no contact is not touched (`not_member`).
+- **MEDIUM 2.** The reconcile lock is now atomic and owned:
+  - `INSERT IGNORE` into `wp_options`, held only if `rows_affected === 1`;
+  - the value is `<until>|<random token>`;
+  - a stale lock is taken over with a conditional `UPDATE … WHERE option_value = <old>`;
+  - release is `DELETE … WHERE option_value = <ours>`.
+  - Tests cover two acquirers and the takeover race (via a seam).
+- **MEDIUM 3.** Tag 1 is refused by ID (`PROTECTED_IDS`) in `parse()` and `verify()`. Without mbstring the config fails closed (`mbstring_missing`). Names are normalised to Unicode NFC when intl is present.
+- **MEDIUM 4.** New guard rules:
+  - every shipped file: no FluentCRM table name (`fc_subscriber`, `fc_tag`, `fc_list`) in a string;
+  - the gateway: `::name(` against an allowlist; `FluentCrmApi('contacts'|'tags')` only; no `call_user_func*`; no property write on a variable other than `$this`.
+  - The concatenation limit is documented, and there are negative self-tests.
+- **MEDIUM 5.** Expired, or an ended active row, together with `renewal_pending` → Pending (the same before and after PMPro's expiry cron). The legacy row (active PMPro row, no Club payment, pending order) → Pending is in the doc table.
+- **MEDIUM 6.** New suite `wp-commerce-fluentcrm` (CI commerce job, HPOS and posts) on the real stack with the production wiring and the default member query; only FluentCRM is a fake. It covers:
+  - on-hold → Pending, then cancelled → Inactive;
+  - confirmed → Active, then full refund → Inactive;
+  - completed without the Club confirmation → no write;
+  - the reconcile.
+- **LOW.**
+  - A member-query failure midway keeps the counts and schedules the follow-up run.
+  - The gateway resolves FluentCRM lazily in `available()`.
+  - Two contacts on the same `user_id` cannot be detected through the documented API; documented as a residual risk.
+  - The go-live checklist now includes reviewing automations on tags 2/3/4.
+- **Mutants.**
+  - FT1–FT35: all killed locally.
+  - FW1–FW21: all killed locally.
+  - FC1–FC2 (mode `commerce_fluentcrm`, CI commerce job only: the plugin fetch is blocked by the proxy locally).
+- CI on 7c61551 (STAGE-06 round 2, PR #40): green on the first attempt, no re-runs. Foundation: push 42010613586 18/18 and pull_request 42010622437 18/18 (these include `wp-fluentcrm`, `wp-commerce-fluentcrm` on HPOS and posts, and the commerce mutation mode). Frontend: push 42010613595 4/4 and pull_request 42010622764 4/4.
+
+### STAGE-06 round 3 — re-review: all round-2 fixes accepted except N1; N1–N4 fixed (2026-11-05)
+- **N1 (MEDIUM).** Retiring is narrowed back to the spec ("unknown / non-member → no write").
+  - The mapper adds `club_order_voided` to `none` only when the user has no PMPro row at all and every payment fact is a failed, unconfirmed Club-level order.
+  - The sync retires (Active/Pending → Inactive) only with that flag. Any other `none` is a no-write `not_member`, including a hand-tagged outsider buying ordinary coffee.
+  - A wrong level ID fails closed: the reader's environment conflicts make every member `indeterminate`.
+  - Real-stack tests cover the outsider and the wrong level ID. The on-hold → Pending → cancelled → Inactive test is kept.
+- **N2 (LOW), gateway guard.** It now flags:
+  - `->$var`, `](` and `)(` (casts excepted), `$f(`;
+  - `new` of anything but RuntimeException or InvalidArgumentException;
+  - writes chained off anything but `$this`'s own properties, plus `++`/`--`, `**=`, `<<=`.
+  - `<=`, `>=` and `<=>` are no longer counted as writes. There are negative and positive self-tests.
+- **N3 (NIT).** The lock is refreshed by compare-and-swap after each batch, with a new value each time. A failed refresh stops the run cleanly: cursor saved, nothing released or scheduled.
+- **N4 (NIT).** Retries after a failure are capped at 3, with 5/10/20-minute backoff (`evc_club_fluentcrm_retries`). The daily hook now runs `reconcile_daily()`, which resets the budget; a successful run clears it.
+- **Mutants.** FT36–FT40, FW23–FW28 and FC3 were added; FW20/FW21 were re-aimed. Locally FT1–FT40 and FW1–FW28 were all killed. The FC mutants run in the CI commerce job only.
+- **Equivalent mutants (not added).** The voided check's status/confirmed_at redundancy is defence in depth; removing either alone is equivalent.
+- CI on 891c84a (STAGE-06 round 3, PR #40): green on the first attempt, with no re-runs.
+  - Foundation: push 42022027835 18/18, pull_request 42022035058 18/18.
+  - Frontend: push 42022027664 4/4, pull_request 42022034934 4/4.

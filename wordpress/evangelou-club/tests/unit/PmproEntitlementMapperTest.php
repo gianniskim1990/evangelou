@@ -148,6 +148,31 @@ final class PmproEntitlementMapperTest extends TestCase {
         }
     }
 
+    /** STAGE-06 round 3: "club_order_voided" only for no PMPro row and ONLY failed Club facts. */
+    public function test_a_club_order_voided_unpaid_is_flagged_and_nothing_else_is(): void {
+        $at = self::when('2026-10-20 08:00');
+        $failed = EVC_Pmpro_Fixture::payment('f', 'failed', null, null, null, 'row1', array('membership_row_ref' => null));
+        $failed2 = EVC_Pmpro_Fixture::payment('g', 'failed', null, null, null, 'row1', array('membership_row_ref' => null));
+        $other_failed = EVC_Pmpro_Fixture::payment('o', 'failed', null, null, null, 'row1', array('level_id' => EVC_Pmpro_Fixture::OTHER_LEVEL, 'membership_row_ref' => null));
+        $voided = self::map(EVC_Pmpro_Fixture::snapshot(array(), array($failed)), $at);
+        $this->assertSame('none', $voided->status());
+        $this->assertSame(array('no_club_membership', 'club_order_voided'), $voided->diagnostic_flags());
+        $this->assertContains('club_order_voided', self::map(EVC_Pmpro_Fixture::snapshot(array(), array($failed, $failed2)), $at)->diagnostic_flags(), 'two voided orders');
+        $cases = array(
+            'no payment at all' => EVC_Pmpro_Fixture::snapshot(array(), array()),
+            'only another level' => EVC_Pmpro_Fixture::snapshot(array(), array($other_failed)),
+            'a Club and another level' => EVC_Pmpro_Fixture::snapshot(array(), array($failed, $other_failed)),
+            'a PMPro row of another level' => EVC_Pmpro_Fixture::snapshot(array(EVC_Pmpro_Fixture::row('row9', 'active', '2026-11-15 12:00:00', EVC_Pmpro_Fixture::OTHER_LEVEL)), array($failed)),
+        );
+        foreach ($cases as $label => $snapshot) {
+            $e = self::map($snapshot, $at);
+            $this->assertSame('none', $e->status(), $label);
+            $this->assertNotContains('club_order_voided', $e->diagnostic_flags(), $label);
+        }
+        $pending = EVC_Pmpro_Fixture::payment('p', 'pending', null, null, null, 'row1', array('membership_row_ref' => null));
+        $this->assertSame('pending_payment', self::map(EVC_Pmpro_Fixture::snapshot(array(), array($failed, $pending)), $at)->status(), 'a pending order wins');
+    }
+
     public function test_without_an_awaiting_club_payment_the_negative_states_are_unchanged(): void {
         $at = self::when('2026-10-20 08:00');
         $failed = EVC_Pmpro_Fixture::payment('f', 'failed', null, null, null, 'row1', array('membership_row_ref' => null));
