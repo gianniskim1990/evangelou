@@ -1460,3 +1460,6 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **N4 (NIT).** Retries after a failure are capped at 3, with 5/10/20-minute backoff (`evc_club_fluentcrm_retries`). The daily hook now runs `reconcile_daily()`, which resets the budget; a successful run clears it.
 - **Mutants.** FT36–FT40, FW23–FW28 and FC3 were added; FW20/FW21 were re-aimed. Locally FT1–FT40 and FW1–FW28 were all killed. The FC mutants run in the CI commerce job only.
 - **Equivalent mutants (not added).** The voided check's status/confirmed_at redundancy is defence in depth; removing either alone is equivalent.
+- CI on 891c84a (STAGE-06 round 3, PR #40): green on the first attempt, with no re-runs.
+  - Foundation: push 42022027835 18/18, pull_request 42022035058 18/18.
+  - Frontend: push 42022027664 4/4, pull_request 42022034934 4/4.
