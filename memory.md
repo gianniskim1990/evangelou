@@ -1561,3 +1561,5 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **T1:** test_a_fresh_server_places_the_order_without_a_preceding_get resets `$GLOBALS['wp_rest_server']`. Store API RoutesController::get() builds NEW route objects on every rest_api_init, so a fresh server means a fresh Checkout::$order.
 - **Nits:** the refused guest leaves exactly one `checkout-draft` (session `store_api_draft_order`, customer 0). Greek operator note line 8 added.
 - **Mutants:** OB1–OB38 all killed locally (35 run, 0 survived); OB7, OB8 and OB31 patterns updated; new OB35–OB38 and OG18. Not a mutant: dropping the after_callbacks reset, because before_callbacks resets the context on the next request.
+- **CI on 8857477 (round 3 final), all first attempt:** foundation push 42240440821 18/18, foundation PR 42240448771 18/18, frontend push 42240440799 4/4, frontend PR 42240448875 4/4.
+- **CI on fa593b2 (round 4), all first attempt, no re-runs:** foundation push 42243420709 18/18 (commerce mutation 203/203 killed), foundation PR 42243428923 18/18, frontend push 42243420971 4/4, frontend PR 42243428994 4/4.
