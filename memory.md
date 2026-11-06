@@ -1563,3 +1563,39 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **Mutants:** OB1–OB38 all killed locally (35 run, 0 survived); OB7, OB8 and OB31 patterns updated; new OB35–OB38 and OG18. Not a mutant: dropping the after_callbacks reset, because before_callbacks resets the context on the next request.
 - **CI on 8857477 (round 3 final), all first attempt:** foundation push 42240440821 18/18, foundation PR 42240448771 18/18, frontend push 42240440799 4/4, frontend PR 42240448875 4/4.
 - **CI on fa593b2 (round 4), all first attempt, no re-runs:** foundation push 42243420709 18/18 (commerce mutation 203/203 killed), foundation PR 42243428923 18/18, frontend push 42243420971 4/4, frontend PR 42243428994 4/4.
+
+## STAGE-08 — pilot readiness: till account admin, readiness page, go-live runbook (branch `feat/evc-pilot-readiness`, stacked on `feat/evc-store-onboarding` 3354447) — 2026-11-06
+- **Owner said «Πάμε» at 2026-11-06 18:46 Athens.** Development only: no merge, deploy, enabling, real or staging DB, or migration.
+- **OWNER DECISION D18:** one shared staff account on the till tablet; no per-person accounts or PINs. Recorded in docs/admin-tools.md.
+- **New flag `EVC_CLUB_ADMIN_TOOLS_ENABLED`** (exact true, default OFF). `EVC_Admin_Tools_Plugin` boot/build/wire (packager ADMIN_TOOLS_RULES) builds:
+  - `EVC_Staff_Account_Service` (create / password / disable / enable / revoke, audit option `evc_club_staff_admin_audit` holding the newest 100 entries, last-login meta `evc_staff_last_login` via wp_login);
+  - `EVC_Staff_Account_Page` (top-level menu `evc-club`; POST on the load hook: nonce, then capability, then action; the password is rendered once in the POST answer, never stored);
+  - `EVC_Readiness` (read-only checks reusing the feature parsers, environment_conflicts, site_problem, same_site_url, tag_config/problem; seams db_config/connect/server);
+  - `EVC_Readiness_Page`.
+- **Capability:** `may_manage` = manage_options AND evc_manage_club, not the staff role, not multisite.
+- **Packager:**
+  - readiness files may not write (option/meta/transient/user/post writers, hooks, ->query/insert/update/delete/execute…);
+  - till files may not use error_log / print_r / var_export / var_dump / set_transient / setcookie / wp_cache_set;
+  - wp_set_password is allowed only in the service;
+  - the onboarding USER_WRITERS rule now allows wp_insert_user in the service file;
+  - readiness was added to the FluentCRM and onboarding allowlists (it names those classes; it builds nothing).
+  - Strings starting with "fluentcrm" are refused outside the gateway, so the readiness keys use `crm_*`.
+- **Tests:**
+  - New suites `wp-admin-tools` and `wp-commerce-admin-tools` (EVC_TEST_ADMIN_TOOLS_FLAG), each with a CI step; new mutation modes admin_tools and commerce_admin_tools.
+  - `AdminToolsOffTest` in wp-common.
+  - Locally: wp-admin-tools 19/19, plus the mutants AT1–AT17 (no AT5: excluding the staff role is equivalent, because staff never hold manage_options) and OB1–OB38, all 51 killed. ATC1–ATC2 run in CI only.
+- **Part D:**
+  - The registration cleanup now runs at most once per register() call (flag reset at each call). This is not mutation-tested, because the cleanup is triggered randomly.
+  - No TODO/FIXME in shipped code.
+- **Docs:**
+  - docs/admin-tools.md: D18, the pages, and the Greek operator note (lost tablet, a staff member leaves, when to change the password).
+  - docs/go-live.md:
+    - blockers T1–T7;
+    - the enable order, steps 0–8;
+    - the pilot plan;
+    - rollback per feature;
+    - known risks K1–K14;
+    - the TODO scan;
+    - a Greek section.
+  - store-onboarding.md: the same-/48 known risk and the once-per-request cleanup.
+- **CI on 3d0cea9 (STAGE-08), all first attempt, no re-runs:** foundation push 42258147068 18/18 (commerce mutation 205/205 killed), foundation PR 42258183972 18/18, frontend push 42258147155 4/4, frontend PR 42258183888 4/4.

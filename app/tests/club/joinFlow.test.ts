@@ -13,7 +13,7 @@ import { createDom, type DomHarness } from "../staff/support/dom";
  * STAGE-07 — DOM tests (jsdom) of the in-store join flow over a fake join-v1 client: register (browser checks,
  * server field codes, the "may already have an account" answer, rate limit, try_later, honeypot), the terms step WITHOUT any
  * marketing choice (owner decision D12), the offer's hand-off, the member / not-a-customer / unavailable pages, and
- * the tablet poster. No network, no browser storage. Round 2: the honeypot is named evc_extra (autocomplete off); round 3 changed only the server caps and the checkout guard (Store API, rounds 3-4).
+ * the tablet poster. No network, no browser storage. Round 2: the honeypot is named evc_extra (autocomplete off); round 3 changed only the server caps and the checkout guard (Store API, rounds 3-4); STAGE-08 changed no join UI.
  */
 
 let dom: DomHarness;
