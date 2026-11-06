@@ -1500,3 +1500,7 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   2. E-mail confirmation before payment.
   3. Only BACS at checkout?
   4. Rate limit on the shop Wi-Fi (one shared IP).
+- **CI on b1fdd0a** (STAGE-07 code SHA, PR #41): green on the first attempt, no re-runs.
+  - Foundation: push 42189175130 18/18, pull_request 42189180515 18/18. This includes wp-onboarding and wp-commerce-onboarding on HPOS and posts, plus the commerce mutation mode.
+  - Frontend: pull_request 42189180621 4/4, covering 361 mutants. There was no frontend push run because the fix commit touched no app paths; the app code is identical to e32c2bb, whose frontend push 42180756890 was 4/4.
+  - On e32c2bb, everything was green except OC3 (equivalent mutant, removed).
