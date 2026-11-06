@@ -75,13 +75,39 @@ final class EVC_Onboarding_Handoff {
         return add_query_arg('add-to-cart', (string) $this->config->product_id, wc_get_checkout_url());
     }
 
+    /**
+     * STAGE-07 round 2 (D15 / review 4): may WooCommerce take a NEW Club order from this customer? Not while a Club order
+     * is open, and not while the membership reads pending payment or unverified. An ACTIVE member may (the approved
+     * early renewal, D2), and so may an expired, cancelled or new customer. If anything cannot be read: no.
+     */
+    public function blocks_new_order(int $user_id): bool {
+        if ($this->config === null || $user_id < 1 || !function_exists('wc_get_orders')) {
+            return true;
+        }
+        try {
+            if ($this->has_open_club_order($user_id)) {
+                return true;
+            }
+            $state = EVC_Customer_Membership::describe($this->membership->entitlement_for($user_id, $this->clock->now()), $this->clock->now())['state'];
+        } catch (Throwable $e) {
+            return true;
+        }
+        return in_array($state, array(EVC_Customer_Membership::PENDING_PAYMENT, EVC_Customer_Membership::UNVERIFIED), true);
+    }
+
+    public function club_product_id(): ?int {
+        return $this->config === null ? null : $this->config->product_id;
+    }
+
+    /** ALL the customer's open orders are read (round 2: no page limit, so an older open Club order is never missed). */
     private function has_open_club_order(int $user_id): bool {
-        $orders = wc_get_orders(array('customer_id' => $user_id, 'status' => self::OPEN_STATUSES, 'type' => 'shop_order', 'limit' => 50, 'return' => 'objects'));
-        if (!is_array($orders)) {
+        $ids = wc_get_orders(array('customer_id' => $user_id, 'status' => self::OPEN_STATUSES, 'type' => 'shop_order', 'limit' => -1, 'return' => 'ids'));
+        if (!is_array($ids)) {
             throw new RuntimeException('Orders could not be read.');
         }
-        foreach ($orders as $order) {
-            if (!$order instanceof WC_Order || (int) $order->get_customer_id() !== $user_id) {
+        foreach ($ids as $id) {
+            $order = wc_get_order((int) $id);
+            if (!$order instanceof WC_Order) {
                 continue;
             }
             foreach ($order->get_items('line_item') as $item) {

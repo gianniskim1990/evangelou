@@ -106,6 +106,8 @@ describe("STAGE-07 join-v1 client", () => {
     assert.deepEqual(parseRegister(200, { result: "invalid", fields: { role: "x" } }), { kind: "error" });
     assert.deepEqual(parseRegister(200, { result: "ok", user_id: 5 }), { kind: "error" });
     assert.deepEqual(parseRegister(429, { error: { code: "rate_limited" } }), { kind: "rate_limited" });
+    assert.deepEqual(parseRegister(200, { result: "try_later" }), { kind: "try_later" });
+    assert.deepEqual(parseRegister(200, { result: "try_later", n: 3 }), { kind: "error" });
     assert.deepEqual(parseRegister(503, { result: "unavailable" }), { kind: "unavailable" });
     assert.deepEqual(parseRegister(401, { error: { code: "unauthorized" } }), { kind: "error" });
     assert.deepEqual(parseTerms(200, { result: "ok" }), { kind: "ok" });
@@ -134,7 +136,7 @@ describe("STAGE-07 join-v1 client", () => {
     assert.equal(calls[0].init.credentials, "same-origin");
     assert.equal(calls[0].init.redirect, "error");
     assert.equal((calls[0].init.headers as Record<string, string>)["X-WP-Nonce"], "0123456789");
-    assert.deepEqual(JSON.parse(String(calls[0].init.body)), { name: "Ελένη Μαρκοπούλου", phone: "6941234567", email: "e@example.gr", password: "kafes-sto-limani-7", website: "filled-by-a-bot" }, "the honeypot goes to the server as typed");
+    assert.deepEqual(JSON.parse(String(calls[0].init.body)), { name: "Ελένη Μαρκοπούλου", phone: "6941234567", email: "e@example.gr", password: "kafes-sto-limani-7", evc_extra: "filled-by-a-bot" }, "the honeypot goes to the server as typed");
     assert.equal((calls[1].init.headers as Record<string, string>)["X-WP-Nonce"], "abcdef0123", "the refreshed nonce");
     assert.deepEqual(JSON.parse(String(calls[1].init.body)), { accept: true });
   });

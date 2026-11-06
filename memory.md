@@ -1504,3 +1504,20 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - Foundation: push 42189175130 18/18, pull_request 42189180515 18/18. This includes wp-onboarding and wp-commerce-onboarding on HPOS and posts, plus the commerce mutation mode.
   - Frontend: pull_request 42189180621 4/4, covering 361 mutants. There was no frontend push run because the fix commit touched no app paths; the app code is identical to e32c2bb, whose frontend push 42180756890 was 4/4.
   - On e32c2bb, everything was green except OC3 (equivalent mutant, removed).
+
+### STAGE-07 round 2 — review fixes + owner decisions D13–D16 (2026-11-06)
+- **Owner decisions** (relayed by the coordinator; recorded in `docs/store-onboarding.md`):
+  - D13: the Club terms page exists; the technician sets `EVC_CLUB_TERMS_URL`; no URL in code; the fallback stays.
+  - D14: no e-mail confirmation step; straight to payment.
+  - D15: BACS is the only gateway for the Club product; no BACS → no gateway + Greek message (fail closed); other products unchanged.
+  - D16: the failure limit stays 10 per 5 minutes.
+- **Fixes.**
+  - Success caps: `EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR` (default 3) and `EVC_CLUB_JOIN_MAX_PER_HOUR` (default 30); exact int 1..1000, else the default. A slot is reserved before `wp_insert_user`; over a cap → 200 `try_later` (neutral Greek), nothing created, not a failure. Doc: enumeration and pre-registration remain possible (D14), recovery = password reset; `users_can_register` bypassed on purpose. Shop Wi-Fi = one client → 3 accounts/hour by default (doc tells the technician to raise the constant).
+  - Rate limiting: IPv6 keyed by /64, IPv4-mapped as IPv4; HMAC secret derived from `wp_salt('auth')` with label `evangelou-club/join-rate-limit-key/v1`. Counters are rows in wp_options (`evc_join_rl_<f|s|g>_<key>` = `count|start`, autoload no), one `INSERT … ON DUPLICATE KEY UPDATE` per event (no Club DB migration). Missing nonce → 403, NOT counted; foreign origin with a valid nonce → counted. Go-live check that REMOTE_ADDR is the real client. A real concurrent burst is not testable inside the WP test transaction; the test asserts one atomic statement per event instead.
+  - OC3 was not equivalent (limit 50). Now `limit => -1, return => ids`, the loop's own customer check removed (the query is the only customer filter), OC3 restored, OC6 added.
+  - New `EVC_Onboarding_Checkout_Guard` (wired in `wire()`, hooks in `boot()`): add-to-cart and after-checkout validation (Club bought alone; no second order while an open Club order or pending/unverified membership; active/ended member may renew, D2; guest Club checkout needs createaccount) + gateways filter (bacs only / empty) + no-methods message. Packager: only this file may use those four WooCommerce hooks.
+  - Pages: `DONOTCACHEPAGE` + `wp_get_nocache_headers()` in every response + `nocache_headers()` on emit.
+  - Nits: honeypot `evc_extra` (input `evc-join-extra`, autocomplete off); unused hash commented; phone documented as unverified; timing claim removed; controller nonce comment fixed.
+  - FluentCRM (from adf2a32): the refresh comes before the counts/cursor write (a lost lock writes nothing); a refresh DB error forgets the cached lock before throwing (defensive: the release path forgets it too, so dropping it is not observable — not a mutant).
+- **Mutants.** New/updated, killed locally: OR10–OR15, OB7–OB9 (patterns), OB19–OB28, FW30 (pattern), FW31; JM10 (pattern), JM16–JM18 (frontend total 361 → 364, 182 + 182). CI commerce only: OC1 (pattern now unique), OC3, OC6, OG1–OG13.
+- **Commerce tests** (CI only): the guard cart/checkout/gateway tests use the boot `cart` seam (no WC session cookie under PHPUnit) with the real filters and the real `WC_Payment_Gateways`; `can_add()` also swaps `WC()->cart` for a loaded fake so other plugins' validation sees the same cart.

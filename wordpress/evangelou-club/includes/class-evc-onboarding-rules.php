@@ -126,15 +126,40 @@ final class EVC_Onboarding_Rules {
     }
 
     /**
-     * The rate-limit key of a client address: an HMAC, so no IP address is ever stored. Empty when the address is
-     * missing (then the caller fails closed).
+     * The rate-limit key of a client address: an HMAC, so no IP address is ever stored. IPv4 addresses count one by
+     * one; an IPv6 address counts by its /64 network (one home or phone gets a whole /64, so a client could otherwise
+     * rotate through billions of addresses); an IPv4-mapped IPv6 address counts as its IPv4 address. Empty when the
+     * address is missing or not an IP address (then the caller fails closed).
      */
     public static function client_key(string $ip, string $secret): string {
         $ip = trim($ip);
-        if ($ip === '' || $secret === '') {
+        if ($secret === '' || filter_var($ip, FILTER_VALIDATE_IP) === false) {
             return '';
         }
-        return substr(hash_hmac('sha256', 'evc-join|' . $ip, $secret), 0, 32);
+        $packed = (string) inet_pton($ip);
+        if (strlen($packed) === 16 && substr($packed, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {
+            $packed = substr($packed, 12);
+        }
+        $subject = strlen($packed) === 4 ? 'v4|' . bin2hex($packed) : 'v6|' . bin2hex(substr($packed, 0, 8));
+        return substr(hash_hmac('sha256', 'evc-join|' . $subject, $secret), 0, 32);
+    }
+
+    /** The rate-limit secret: derived from a WordPress salt with its own label (never the salt itself). */
+    public static function derive_secret(string $salt): string {
+        return $salt === '' ? '' : hash_hmac('sha256', 'evangelou-club/join-rate-limit-key/v1', $salt);
+    }
+
+    /** A configured cap: a positive int up to 1000 (exact type), else the safe default. */
+    public static function cap($value, int $default): int {
+        return is_int($value) && $value >= 1 && $value <= 1000 ? $value : $default;
+    }
+
+    /** "count|window_start" as stored by the atomic counter -> [count, start], or null when unreadable. */
+    public static function parse_counter($value): ?array {
+        if (!is_string($value) || preg_match('/^(\d{1,9})\|(\d{1,12})$/D', $value, $m) !== 1) {
+            return null;
+        }
+        return array((int) $m[1], (int) $m[2]);
     }
 
     /**

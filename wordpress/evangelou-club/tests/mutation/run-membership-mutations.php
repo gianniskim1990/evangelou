@@ -2794,8 +2794,39 @@ $mutants = array(
     array(
         'id' => 'OR10-client-key-is-the-address',
         'file' => 'includes/class-evc-onboarding-rules.php',
-        'search' => '        return substr(hash_hmac(\'sha256\', \'evc-join|\' . $ip, $secret), 0, 32);',
+        'search' => '        return substr(hash_hmac(\'sha256\', \'evc-join|\' . $subject, $secret), 0, 32);',
         'replace' => '        return $ip;',
+    ),
+    // STAGE-07 round 2 (OR11-OR15): IPv6 /64 and mapped IPv4 keys, the derived secret, the configured caps, the counter.
+    array(
+        'id' => 'OR11-ipv6-keyed-per-address',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '\'v6|\' . bin2hex(substr($packed, 0, 8))',
+        'replace' => '\'v6|\' . bin2hex($packed)',
+    ),
+    array(
+        'id' => 'OR12-mapped-ipv4-not-unwrapped',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'if (strlen($packed) === 16 && substr($packed, 0, 12) === ',
+        'replace' => 'if (false && substr($packed, 0, 12) === ',
+    ),
+    array(
+        'id' => 'OR13-secret-is-the-salt-itself',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        return $salt === \'\' ? \'\' : hash_hmac(\'sha256\', \'evangelou-club/join-rate-limit-key/v1\', $salt);',
+        'replace' => '        return $salt;',
+    ),
+    array(
+        'id' => 'OR14-any-cap-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'is_int($value) && $value >= 1 && $value <= 1000 ? $value : $default;',
+        'replace' => 'is_int($value) ? $value : $default;',
+    ),
+    array(
+        'id' => 'OR15-counter-not-anchored',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '\'/^(\\d{1,9})\\|(\\d{1,12})$/D\'',
+        'replace' => '\'/(\\d{1,9})\\|(\\d{1,12})/\'',
     ),
 );
 

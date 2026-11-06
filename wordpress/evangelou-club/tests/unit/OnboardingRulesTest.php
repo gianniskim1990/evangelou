@@ -70,6 +70,47 @@ final class OnboardingRulesTest extends TestCase {
         $this->assertSame('', EVC_Onboarding_Rules::client_key('203.0.113.10', ''));
     }
 
+    public function test_ipv6_is_keyed_by_its_64_and_mapped_ipv4_by_its_address(): void {
+        $k = EVC_Onboarding_Rules::client_key('2001:db8:1:2::1', 's');
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/D', $k);
+        $this->assertSame($k, EVC_Onboarding_Rules::client_key('2001:db8:1:2:ffff:abcd:1234:9999', 's'), 'one /64 is one client');
+        $this->assertSame($k, EVC_Onboarding_Rules::client_key(' 2001:0db8:0001:0002:0000:0000:0000:0007 ', 's'), 'any spelling');
+        $this->assertNotSame($k, EVC_Onboarding_Rules::client_key('2001:db8:1:3::1', 's'), 'the next /64 is another client');
+        $this->assertNotSame($k, EVC_Onboarding_Rules::client_key('2001:db8:1:2::1', 't'));
+        $v4 = EVC_Onboarding_Rules::client_key('192.0.2.7', 's');
+        $this->assertSame($v4, EVC_Onboarding_Rules::client_key('::ffff:192.0.2.7', 's'), 'IPv4-mapped IPv6 = the IPv4 address');
+        $this->assertNotSame($v4, EVC_Onboarding_Rules::client_key('192.0.2.8', 's'), 'IPv4 is per address');
+        $this->assertNotSame($v4, EVC_Onboarding_Rules::client_key('::c000:207', 's'), 'not mapped: an IPv6 /64');
+        foreach (array('not-an-ip', '2001:db8::1/64', '999.1.1.1', '192.0.2.7 ') as $bad) {
+            $this->assertSame($bad === '192.0.2.7 ' ? $v4 : '', EVC_Onboarding_Rules::client_key($bad, 's'), $bad);
+        }
+    }
+
+    public function test_the_secret_is_derived_and_domain_separated(): void {
+        $d = EVC_Onboarding_Rules::derive_secret('salt-1');
+        $this->assertSame(hash_hmac('sha256', 'evangelou-club/join-rate-limit-key/v1', 'salt-1'), $d);
+        $this->assertNotSame('salt-1', $d);
+        $this->assertNotSame($d, EVC_Onboarding_Rules::derive_secret('salt-2'));
+        $this->assertSame('', EVC_Onboarding_Rules::derive_secret(''));
+    }
+
+    public function test_a_configured_cap(): void {
+        $this->assertSame(3, EVC_Onboarding_Rules::cap(null, 3));
+        $this->assertSame(1, EVC_Onboarding_Rules::cap(1, 3));
+        $this->assertSame(1000, EVC_Onboarding_Rules::cap(1000, 3));
+        foreach (array(0, -1, 1001, '5', 5.0, true, array(5)) as $bad) {
+            $this->assertSame(3, EVC_Onboarding_Rules::cap($bad, 3), var_export($bad, true));
+        }
+    }
+
+    public function test_the_stored_counter(): void {
+        $this->assertSame(array(4, 1700000000), EVC_Onboarding_Rules::parse_counter('4|1700000000'));
+        $this->assertSame(array(1, 0), EVC_Onboarding_Rules::parse_counter('1|0'));
+        foreach (array(null, '', '4', '4|', '|1', 'a|1', "4|1\n", '4|1|2', '1234567890|1', '1|1234567890123', 4) as $bad) {
+            $this->assertNull(EVC_Onboarding_Rules::parse_counter($bad), var_export($bad, true));
+        }
+    }
+
     public function test_the_failure_window(): void {
         $state = null;
         for ($i = 1; $i <= 9; $i++) {

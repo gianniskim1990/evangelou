@@ -6,8 +6,8 @@ defined('ABSPATH') || exit;
  *
  *   POST /join/account   PUBLIC (signed out). CSRF: X-WP-Nonce must be the page's wp_rest nonce for the signed-out
  *                        visitor AND an Origin header, when sent, must be this site. 200 {"result": ok | invalid
- *                        (+fields) | check_account | not_completed | signed_in}, 429 rate_limited, 403 forbidden
- *                        (nonce / origin), 503 {"result":"unavailable"}.
+ *                        (+fields) | check_account | not_completed | signed_in | try_later}, 429 rate_limited,
+ *                        403 forbidden (nonce / origin), 503 {"result":"unavailable"}.
  *   POST /join/terms     customer (EVC_Customer_Auth): {"accept": true} records the current Club terms.
  *   POST /join/checkout  customer: {"result":"ok","next":"member"|"checkout","url":…} or {"result":"terms_required"};
  *                        the URL is always built by the server (member area or the WooCommerce checkout), never
@@ -53,7 +53,11 @@ final class EVC_Rest_Join_Controller {
     /** @return WP_REST_Response */
     public function account(WP_REST_Request $request) {
         $ip = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
-        if (!self::same_origin($request) || !self::anonymous_nonce_ok($request)) {
+        if (!self::anonymous_nonce_ok($request)) {
+            // No (or no valid) page nonce: refused, and NOT counted (anyone could otherwise spend a client's budget).
+            return EVC_Rest_Security::error_response('forbidden', 403);
+        }
+        if (!self::same_origin($request)) {
             $this->registration->count_failure($ip);
             return EVC_Rest_Security::error_response('forbidden', 403);
         }
@@ -114,7 +118,10 @@ final class EVC_Rest_Join_Controller {
         return $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
     }
 
-    /** The page's wp_rest nonce, created for the signed-out visitor (core checks nonces only for signed-in users). */
+    /**
+     * The page's wp_rest nonce. WordPress core already refuses a PRESENT but invalid nonce before the route runs (for
+     * signed-out visitors too); a MISSING nonce reaches here and is refused by this check.
+     */
     private static function anonymous_nonce_ok(WP_REST_Request $request): bool {
         $nonce = $request->get_header('X-WP-Nonce');
         return is_string($nonce) && $nonce !== '' && wp_verify_nonce($nonce, 'wp_rest') !== false;

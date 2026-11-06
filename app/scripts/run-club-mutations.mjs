@@ -2174,8 +2174,8 @@ const mutants = [
   {
     id: "JM10-honeypot-not-sent",
     file: "customer/joinApi.ts",
-    search: "password: form.password, website: honeypot });",
-    replace: "password: form.password, website: \"\" });",
+    search: "password: form.password, evc_extra: honeypot });",
+    replace: "password: form.password, evc_extra: \"\" });",
   },
   {
     id: "JM11-checkout-url-ignored",
@@ -2206,6 +2206,24 @@ const mutants = [
     file: "customer/PosterApp.tsx",
     search: "<QrSvg text={config.joinUrl} size={420}",
     replace: "<QrSvg text={config.joinUrl + \"#poster\"} size={420}",
+  },
+  {
+    id: "JM16-try-later-not-parsed",
+    file: "customer/joinApi.ts",
+    search: "    case \"try_later\":\n",
+    replace: "",
+  },
+  {
+    id: "JM17-try-later-shown-as-rate-limit",
+    file: "customer/JoinApp.tsx",
+    search: "return setNotice({ body: JOIN_COPY.errors.tryLater });",
+    replace: "return setNotice({ body: JOIN_COPY.errors.rateLimited });",
+  },
+  {
+    id: "JM18-honeypot-autofill-name",
+    file: "customer/JoinApp.tsx",
+    search: "name=\"evc_extra\" type=\"text\"",
+    replace: "name=\"website\" type=\"text\"",
   },
 ];
 

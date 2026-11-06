@@ -308,7 +308,7 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         $this->assertSame(2, (int) get_option(EVC_Fluentcrm_Plugin::RETRY_OPTION), 'nor a retry-budget write');
         $this->assertCount(3, array_unique($seen), 'a new lock value after every batch');
         $this->assertSame($other, EVC_Fluentcrm_Plugin::lock_value(), 'the other run\'s lock is neither released nor touched');
-        $this->assertSame(3 * EVC_Fluentcrm_Plugin::BATCH, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION), 'the cursor is saved for whoever continues');
+        $this->assertSame(2 * EVC_Fluentcrm_Plugin::BATCH, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION), 'STAGE-07 round 2: the cursor of the batch whose refresh failed is NOT written (the other run owns it)');
         $this->assertFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK), 'no follow-up of its own');
         $mine = EVC_Fluentcrm_Plugin::acquire_lock();
         $this->assertNull($mine, 'the other run holds it');
@@ -333,7 +333,8 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         }
         $this->assertNotFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK), 'one follow-up');
         $this->assertSame(1, (int) get_option(EVC_Fluentcrm_Plugin::RETRY_OPTION), 'counted against the bounded budget');
-        $this->assertSame(array(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER => EVC_Fluentcrm_Plugin::BATCH), EVC_Fluentcrm_Plugin::status()['current'], 'the counts so far kept');
+        $this->assertSame(array(), EVC_Fluentcrm_Plugin::status()['current'], 'the batch whose lock could not be refreshed is neither counted ...');
+        $this->assertSame(0, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION), '... nor marked done: it is simply done again');
         $this->assertNull(EVC_Fluentcrm_Plugin::lock_value(), 'our own lock released');
         $this->assertStringContainsString('(RuntimeException)', (string) file_get_contents($this->log));
     }

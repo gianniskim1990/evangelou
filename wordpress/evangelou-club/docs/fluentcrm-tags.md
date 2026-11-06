@@ -165,10 +165,12 @@ another e-mail, it is not seen.
 
   - (round 3) after every batch the run moves the lock's end forward with the same compare-and-swap
     (a new value each time), so a run longer than 15 minutes is never taken over; if the swap fails the
-    lock is no longer ours and the run stops cleanly (cursor saved; STAGE-07: no status or retry-budget
-    write either, nothing released or scheduled). A database ERROR during the refresh is not a lost lock:
-    the run fails, keeps its counts, releases its own lock and schedules one follow-up from the bounded
-    retry budget.
+    lock is no longer ours and the run stops cleanly. STAGE-07 round 2: the batch's counts and cursor are
+    written only AFTER a successful refresh, so a run that lost its lock writes nothing at all (no cursor,
+    status or retry budget; nothing released or scheduled); the run that took the lock owns the cursor and
+    the last batch is simply done again (the sync is idempotent). A database ERROR during the refresh is
+    not a lost lock: the cached lock value is forgotten, the run fails without counting or saving that
+    batch, releases its own lock and schedules one follow-up from the bounded retry budget.
 
   It works in batches of 50 and handles at most 500 members per run, resuming from a saved cursor with
   a follow-up run 5 minutes later. If the member query fails, the counts so far are kept and a

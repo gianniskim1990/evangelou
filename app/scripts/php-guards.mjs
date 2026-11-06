@@ -1127,7 +1127,7 @@ export const ONBOARDING_RULES = Object.freeze({
   bootstrap: ONBOARDING_BOOTSTRAP,
   pluginClass: "EVC_Onboarding_Plugin",
   featureClass: "EVC_Onboarding_Feature",
-  guarded: ["EVC_Onboarding_Registration", "EVC_Onboarding_Handoff", "EVC_Onboarding_Shell", "EVC_Rest_Join_Controller"],
+  guarded: ["EVC_Onboarding_Registration", "EVC_Onboarding_Handoff", "EVC_Onboarding_Shell", "EVC_Rest_Join_Controller", "EVC_Onboarding_Checkout_Guard"],
   forbidden: [],
   allowlist: [
     "evangelou-club.php",
@@ -1136,6 +1136,7 @@ export const ONBOARDING_RULES = Object.freeze({
     "includes/onboarding/class-evc-onboarding-handoff.php",
     "includes/onboarding/class-evc-onboarding-shell.php",
     "includes/onboarding/class-evc-rest-join-controller.php",
+    "includes/onboarding/class-evc-onboarding-checkout-guard.php",
   ],
   guardedFiles: [
     ONBOARDING_BOOTSTRAP,
@@ -1143,12 +1144,16 @@ export const ONBOARDING_RULES = Object.freeze({
     "includes/onboarding/class-evc-onboarding-handoff.php",
     "includes/onboarding/class-evc-onboarding-shell.php",
     "includes/onboarding/class-evc-rest-join-controller.php",
+    "includes/onboarding/class-evc-onboarding-checkout-guard.php",
   ],
   memberLockFiles: null,
   forbiddenDefines: ["EVC_CLUB_ONBOARDING_ENABLED"],
   registrationFile: "includes/onboarding/class-evc-onboarding-registration.php",
   handoffFile: "includes/onboarding/class-evc-onboarding-handoff.php",
+  checkoutGuardFile: "includes/onboarding/class-evc-onboarding-checkout-guard.php",
 });
+// Round 2 (D15): only the checkout guard may change which gateways WooCommerce offers or veto the cart / checkout.
+const CHECKOUT_HOOKS = ["woocommerce_available_payment_gateways", "woocommerce_add_to_cart_validation", "woocommerce_after_checkout_validation", "woocommerce_no_available_payment_methods_message"];
 const USER_WRITERS = ["wp_insert_user", "wp_create_user", "wp_update_user", "register_new_user", "wp_set_auth_cookie", "wp_signon", "wp_set_current_user"];
 
 export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
@@ -1158,6 +1163,7 @@ export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
     const v = bare(tk.v).toLowerCase();
     if (path !== rules.registrationFile && USER_WRITERS.some((w) => (tk.t === "id" ? v === w : v.includes(w)))) problems.push(`${path}: creates or signs in a user (${tk.v}) outside the onboarding registration`);
     if (path !== rules.handoffFile && v.includes("add-to-cart")) problems.push(`${path}: builds an add-to-cart URL outside the onboarding hand-off`);
+    if (path !== rules.checkoutGuardFile && CHECKOUT_HOOKS.some((h) => v.includes(h))) problems.push(`${path}: hooks the WooCommerce cart / checkout / gateways (${tk.v}) outside the onboarding checkout guard`);
   }
   return problems;
 }
@@ -1174,7 +1180,7 @@ final class EVC_Onboarding_Plugin {
     private static function wire() {
         $h = new EVC_Onboarding_Handoff(null, $m, $c);
         $r = new EVC_Onboarding_Registration();
-        return array(new EVC_Onboarding_Shell($h, $a), new EVC_Rest_Join_Controller($r, $h));
+        return array(new EVC_Onboarding_Shell($h, $a), new EVC_Rest_Join_Controller($r, $h), new EVC_Onboarding_Checkout_Guard($h, $cart));
     }
 }`;
 
@@ -1197,6 +1203,11 @@ function onboardingSelfTest() {
   expect("a user created through a string", "includes/x.php", "<?php\ncall_user_func('wp_create_user', 'a', 'b');", true);
   expect("a sign-in elsewhere", "includes/x.php", "<?php\nwp_set_auth_cookie($id);", true);
   expect("a user switched elsewhere", O.handoffFile, "<?php\nwp_set_current_user(1);", true);
+  expect("checkout guard constructed elsewhere", "includes/x.php", "<?php\n$g = new EVC_Onboarding_Checkout_Guard($h);", true);
+  expect("gateways filtered elsewhere", "includes/customer/x.php", "<?php\nadd_filter('woocommerce_available_payment_gateways', 'f');", true);
+  expect("checkout vetoed elsewhere", "includes/x.php", "<?php\nadd_action('WooCommerce_After_Checkout_Validation', 'f', 20, 2);", true);
+  expect("cart vetoed elsewhere", "includes/x.php", "<?php\nadd_filter('woocommerce_add_to_cart_validation', 'f');", true);
+  expect("the guard may filter gateways", O.checkoutGuardFile, "<?php\nadd_filter('woocommerce_available_payment_gateways', array($this, 'gateways'), 100, 1);", false);
   expect("the registration may create users", O.registrationFile, "<?php\n$id = wp_insert_user($a); wp_set_auth_cookie($id);", false);
   expect("an add-to-cart URL elsewhere", "includes/x.php", "<?php\n$u = add_query_arg('add-to-cart', 5, $c);", true);
   expect("an add-to-cart URL in the registration", O.registrationFile, "<?php\n$u = 'ADD-TO-CART';", true);

@@ -61,13 +61,33 @@ final class EVC_Onboarding_Shell {
     }
 
     public function serve(): void {
-        $page = (string) get_query_var(self::QUERY_VAR);
-        if ($page !== '1' && $page !== self::POSTER) {
+        $response = $this->handle((string) get_query_var(self::QUERY_VAR), wp_get_current_user());
+        if ($response === null) {
             return;
         }
-        $response = $page === self::POSTER ? $this->poster(wp_get_current_user()) : $this->join(wp_get_current_user());
         self::emit($response);
         exit;
+    }
+
+    /**
+     * The response for this page, or null when the request is not ours. Round 2: every page of ours is kept out of
+     * any page cache: DONOTCACHEPAGE for caching plugins, WordPress's own no-cache headers (wp_get_nocache_headers)
+     * in every response, and nocache_headers() when it is sent.
+     *
+     * @return array{status:int,headers:array<string,string>,body:string,location:?string}|null
+     */
+    public function handle(string $page, WP_User $user): ?array {
+        if ($page !== '1' && $page !== self::POSTER) {
+            return null;
+        }
+        self::no_page_cache();
+        return $page === self::POSTER ? $this->poster($user) : $this->join($user);
+    }
+
+    public static function no_page_cache(): void {
+        if (!defined('DONOTCACHEPAGE')) {
+            define('DONOTCACHEPAGE', true);
+        }
     }
 
     /** @return array{status:int,headers:array<string,string>,body:string,location:?string} */
@@ -194,6 +214,11 @@ final class EVC_Onboarding_Shell {
     /** @return array<string,string> */
     private static function headers(string $csp): array {
         $headers = EVC_Rest_Security::security_headers();
+        foreach (wp_get_nocache_headers() as $name => $value) {
+            if (is_string($value)) {
+                $headers[$name] = $value; // Cache-Control: no-cache, must-revalidate, max-age=0, no-store, private; Expires
+            }
+        }
         $headers['Content-Security-Policy'] = $csp;
         $headers['X-Robots-Tag'] = 'noindex, nofollow';
         $headers['Content-Type'] = 'text/html; charset=utf-8';
@@ -201,6 +226,7 @@ final class EVC_Onboarding_Shell {
     }
 
     private static function emit(array $response): void {
+        nocache_headers();
         status_header($response['status']);
         foreach ($response['headers'] as $name => $value) {
             header($name . ': ' . $value);

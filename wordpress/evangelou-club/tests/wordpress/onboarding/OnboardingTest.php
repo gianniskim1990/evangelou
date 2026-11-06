@@ -57,18 +57,23 @@ final class OnboardingTest extends EVC_WP_Test_Case {
     }
 
     private static function form(array $override = array()): array {
-        return array_merge(array('name' => 'Μαρία Παπαδοπούλου', 'phone' => '694 123 4567', 'email' => 'maria.' . wp_generate_password(6, false, false) . '@example.gr', 'password' => 'kafes-sto-limani-7', 'website' => ''), $override);
+        return array_merge(array('name' => 'Μαρία Παπαδοπούλου', 'phone' => '694 123 4567', 'email' => 'maria.' . wp_generate_password(6, false, false) . '@example.gr', 'password' => 'kafes-sto-limani-7', 'evc_extra' => ''), $override);
     }
 
     /** A POST from the join page (its own Origin, the page's nonce unless given). */
+    /** $nonce: null = the page's nonce, 'none' = no X-WP-Nonce header at all. */
     private function post(string $route, $body, ?string $nonce = null, ?string $origin = 'self'): WP_REST_Response {
         $server = rest_get_server();
         $request = new WP_REST_Request('POST', '/' . EVC_Customer_Rest_Security::NAMESPACE_V1 . $route);
         $request->set_header('Content-Type', 'application/json');
         $request->set_body(is_string($body) ? $body : wp_json_encode($body));
         $nonce = $nonce ?? wp_create_nonce('wp_rest');
-        $request->set_header('X-WP-Nonce', $nonce);
-        $_SERVER['HTTP_X_WP_NONCE'] = $nonce;
+        if ($nonce === 'none') {
+            unset($_SERVER['HTTP_X_WP_NONCE']);
+        } else {
+            $request->set_header('X-WP-Nonce', $nonce);
+            $_SERVER['HTTP_X_WP_NONCE'] = $nonce;
+        }
         if ($origin !== null) {
             $request->set_header('Origin', $origin === 'self' ? EVC_Rest_Join_Controller::site_origin() : $origin);
         }
@@ -162,7 +167,7 @@ final class OnboardingTest extends EVC_WP_Test_Case {
 
     public function test_pages_are_private_and_framed_by_nobody(): void {
         $page = $this->parts()['shell']->join(new WP_User(0));
-        $this->assertSame('no-store, private, max-age=0', $page['headers']['Cache-Control']);
+        $this->assertSame('no-cache, must-revalidate, max-age=0, no-store, private', $page['headers']['Cache-Control'], "WordPress's own no-cache headers");
         $this->assertSame('noindex, nofollow', $page['headers']['X-Robots-Tag']);
         $this->assertStringContainsString("frame-ancestors 'none'", $page['headers']['Content-Security-Policy']);
         $this->assertStringContainsString('<meta name="referrer" content="no-referrer">', $page['body']);
@@ -219,10 +224,10 @@ final class OnboardingTest extends EVC_WP_Test_Case {
     }
 
     public function test_the_honeypot_creates_nothing(): void {
-        $form = self::form(array('website' => 'https://spam.example'));
+        $form = self::form(array('evc_extra' => 'https://spam.example'));
         $this->assertSame(array('result' => 'not_completed'), $this->post('/join/account', $form)->get_data());
         $this->assertFalse(get_user_by('email', $form['email']));
-        $this->assertSame(array('result' => 'not_completed'), $this->post('/join/account', self::form(array('website' => array('x'))))->get_data());
+        $this->assertSame(array('result' => 'not_completed'), $this->post('/join/account', self::form(array('evc_extra' => array('x'))))->get_data());
         $this->assertSame(2, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']));
     }
 
@@ -237,6 +242,9 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         $this->assertEnvelope($this->post('/join/account', $form, null, 'null'), 403, 'forbidden');
         $this->assertFalse(get_user_by('email', $form['email']));
         $this->assertSame(2, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'each origin refusal counted');
+        // No nonce at all: refused by the route, and NOT counted (anyone could otherwise spend a client's budget).
+        $this->assertEnvelope($this->post('/join/account', $form, 'none'), 403, 'forbidden');
+        $this->assertSame(2, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'a request without a nonce is not counted');
         $this->assertSame(array('result' => 'ok'), $this->post('/join/account', $form, null, null)->get_data(), 'no Origin header: the nonce alone binds it');
     }
 
@@ -259,9 +267,101 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         $_SERVER['REMOTE_ADDR'] = $other;
         $clock += EVC_Onboarding_Registration::WINDOW_SECONDS;
         $this->assertSame(array('result' => 'ok'), $this->post('/join/account', $form)->get_data(), 'after the window');
+        wp_set_current_user(0);
+        $this->post('/join/account', self::form(array('phone' => '')));
+        $this->assertSame(1, $this->parts()['registration']->failures($other), 'a failure after the window starts a new window');
+        $clock += 60;
+        $this->post('/join/account', self::form(array('phone' => '')));
+        $this->assertSame(2, $this->parts()['registration']->failures($other));
         $_SERVER['REMOTE_ADDR'] = '';
         wp_set_current_user(0);
         $this->assertSame(array('result' => 'unavailable'), $this->post('/join/account', self::form())->get_data(), 'no address: fail closed');
+    }
+
+    public function test_successes_are_capped_per_client_and_in_total(): void {
+        $this->assertSame(3, EVC_Onboarding_Registration::max_per_client_hour());
+        $this->assertSame(30, EVC_Onboarding_Registration::max_per_hour());
+        for ($i = 1; $i <= 3; $i++) {
+            $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form())->get_data(), "account $i");
+            wp_set_current_user(0);
+        }
+        $form = self::form();
+        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', $form)->get_data(), 'the 4th account from one client this hour');
+        $this->assertFalse(get_user_by('email', $form['email']), 'nothing created');
+        $this->assertSame(0, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'a success cap is not a failure');
+        // The total cap: 30 accounts an hour from all clients together.
+        for ($i = 4; $i <= 30; $i++) {
+            $_SERVER['REMOTE_ADDR'] = '198.51.100.' . $i;
+            $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form())->get_data(), "account $i");
+            wp_set_current_user(0);
+        }
+        $_SERVER['REMOTE_ADDR'] = '192.0.2.1';
+        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', self::form())->get_data(), 'the 31st account of the hour');
+        $this->assertSame(EVC_Onboarding_Rules::cap(0, 3), 3);
+        $this->assertSame(EVC_Onboarding_Rules::cap('10', 3), 3, 'only an int configures it');
+        $this->assertSame(EVC_Onboarding_Rules::cap(1001, 30), 30);
+        $this->assertSame(EVC_Onboarding_Rules::cap(12, 30), 12);
+    }
+
+    public function test_an_ipv6_client_counts_by_its_64_network(): void {
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:aa:bb::1';
+        $this->post('/join/account', self::form(array('phone' => '')));
+        $this->post('/join/account', self::form(array('phone' => '')));
+        $this->assertSame(2, $this->parts()['registration']->failures('2001:db8:aa:bb:ffff:ffff:ffff:fffe'), 'the same /64');
+        $this->assertSame(0, $this->parts()['registration']->failures('2001:db8:aa:bc::1'), 'another /64');
+        $this->assertSame(EVC_Onboarding_Registration::key_of('192.0.2.7'), EVC_Onboarding_Registration::key_of('::ffff:192.0.2.7'), 'IPv4-mapped = IPv4');
+    }
+
+    public function test_each_counted_event_is_one_atomic_statement_never_a_transient(): void {
+        global $wpdb;
+        $seen = array();
+        $log = function ($sql) use (&$seen) {
+            $seen[] = $sql;
+            return $sql;
+        };
+        add_filter('query', $log);
+        try {
+            $this->post('/join/account', self::form(array('phone' => '')));
+            $this->post('/join/account', self::form(array('phone' => ''))); // the second event finds the row
+        } finally {
+            remove_filter('query', $log);
+        }
+        $writes = array_values(array_filter($seen, function ($q) {
+            return strpos($q, 'evc_join_rl_') !== false && preg_match('/^\s*(INSERT|UPDATE|REPLACE|DELETE)/i', $q) === 1;
+        }));
+        $this->assertCount(2, array_filter($writes, function ($q) {
+            return stripos($q, 'ON DUPLICATE KEY UPDATE') !== false;
+        }), 'one INSERT … ON DUPLICATE KEY UPDATE per event');
+        foreach ($writes as $q) {
+            $this->assertMatchesRegularExpression('/^\s*(INSERT|DELETE)/i', $q, 'no read-modify-write UPDATE');
+        }
+        $this->assertSame(array(), array_values(array_filter($seen, function ($q) {
+            return stripos($q, '_transient_evc_join') !== false;
+        })), 'no transient');
+        $row = $wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'evc_join_rl_f_' . EVC_Onboarding_Registration::key_of($_SERVER['REMOTE_ADDR'])));
+        $this->assertMatchesRegularExpression('/^2\|\d+$/D', (string) $row, 'count and window start only, no address');
+        $this->assertSame(0, (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value LIKE %s", 'evc_join_rl_%', '%203.0.113%')));
+    }
+
+    public function test_the_pages_are_never_page_cached(): void {
+        $called = 0;
+        $count = function ($headers) use (&$called) {
+            $called++;
+            return $headers;
+        };
+        add_filter('nocache_headers', $count);
+        $this->assertNull($this->parts()['shell']->handle('', new WP_User(0)), 'not our page: nothing done');
+        $this->assertSame(0, $called);
+        $page = $this->parts()['shell']->handle('1', new WP_User(0));
+        $this->assertSame(200, $page['status']);
+        $this->assertTrue(defined('DONOTCACHEPAGE') && DONOTCACHEPAGE === true, 'caching plugins are told');
+        $this->assertGreaterThanOrEqual(1, $called, "WordPress's own no-cache headers");
+        $this->assertStringContainsString('no-store', $page['headers']['Cache-Control']);
+        $this->assertStringContainsString('max-age=0', $page['headers']['Cache-Control']);
+        $this->assertArrayHasKey('Expires', $page['headers']);
+        $poster = $this->parts()['shell']->handle('poster', new WP_User(0));
+        $this->assertSame(302, $poster['status']);
+        $this->assertStringContainsString('no-store', $poster['headers']['Cache-Control'], 'the sign-in redirect too');
     }
 
     public function test_the_registration_logs_nothing_about_the_person(): void {

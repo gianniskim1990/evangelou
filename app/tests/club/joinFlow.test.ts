@@ -164,14 +164,14 @@ describe("STAGE-07 join: the account step", () => {
   });
 
   it("server field codes come back as the same Greek messages, and other answers are explained", async () => {
-    const fake = fakeApi({ register: [{ kind: "invalid", fields: { email: "email_invalid", password: "password_weak" } }, { kind: "rate_limited" }, { kind: "not_completed" }, { kind: "error" }] });
+    const fake = fakeApi({ register: [{ kind: "invalid", fields: { email: "email_invalid", password: "password_weak" } }, { kind: "rate_limited" }, { kind: "try_later" }, { kind: "not_completed" }, { kind: "error" }] });
     await mount("register", fake);
     await fillValid();
     await submit();
     assert.equal(input("evc-join-email").getAttribute("aria-invalid"), "true");
     assert.match(text(), new RegExp(JOIN_MESSAGES.passwordWeak.slice(0, 20)));
     assert.ok(dom.document.activeElement === input("evc-join-email"));
-    for (const phrase of [/Πολλές προσπάθειες/, /Η εγγραφή δεν ολοκληρώθηκε/, /Δεν ήταν δυνατή η σύνδεση/]) {
+    for (const phrase of [/Πολλές προσπάθειες/, /δεν είναι δυνατή αυτή τη στιγμή/, /Η εγγραφή δεν ολοκληρώθηκε/, /Δεν ήταν δυνατή η σύνδεση/]) {
       await submit();
       assert.match(text(), phrase);
     }
@@ -180,8 +180,10 @@ describe("STAGE-07 join: the account step", () => {
   it("the honeypot is invisible, unfocusable and sent as typed", async () => {
     const fake = fakeApi({ register: [{ kind: "not_completed" }] });
     await mount("register", fake);
-    const pot = input("evc-join-website");
+    const pot = input("evc-join-extra");
     assert.equal(pot.tabIndex, -1);
+    assert.equal(pot.getAttribute("name"), "evc_extra", "not a name browsers autofill");
+    assert.equal(pot.getAttribute("autocomplete"), "off");
     assert.equal(pot.closest('[aria-hidden="true"]') !== null, true);
     await fillValid();
     await type(pot, "https://spam.example");

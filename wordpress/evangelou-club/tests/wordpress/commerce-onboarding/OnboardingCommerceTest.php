@@ -15,6 +15,8 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
     private $parts;
     /** @var string */
     private $asset_dir;
+    /** @var int[] the product ids the checkout guard sees in the cart (the boot 'cart' seam) */
+    private $cart = array();
 
     public function set_up() {
         parent::set_up();
@@ -29,7 +31,15 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         file_put_contents($this->asset_dir . '/manifest.json', wp_json_encode(array('customer.html' => array('file' => 'assets/customer-Ab12Cd34.js', 'isEntry' => true))));
         // The production wiring (real membership adapter, real hand-off over the configured Club product); only the
         // built assets are a stand-in.
-        EVC_Onboarding_Plugin::boot(array('assets' => new EVC_Staff_Assets($this->asset_dir, 'https://cdn.example.test/customer-app', EVC_Customer_Shell::ASSET_ENTRY)));
+        // The cart the checkout guard reads is a seam (the WooCommerce session cookie cannot be set under PHPUnit); the
+        // guard's own reader of WC()->cart is checked separately below.
+        $this->cart = array();
+        EVC_Onboarding_Plugin::boot(array(
+            'assets' => new EVC_Staff_Assets($this->asset_dir, 'https://cdn.example.test/customer-app', EVC_Customer_Shell::ASSET_ENTRY),
+            'cart' => function (): array {
+                return $this->cart;
+            },
+        ));
         rest_get_server();
         EVC_Onboarding_Plugin::parts()['controller']->register_routes(true);
     }
@@ -143,7 +153,7 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $email = 'tablet.' . wp_generate_password(6, false, false) . '@example.org';
         // 1. A new account from the public join page.
         $this->assertSame('register', EVC_Onboarding_Plugin::parts()['shell']->step(new WP_User(0)));
-        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', array('name' => 'Νίκος Γεωργίου', 'phone' => '6977000111', 'email' => $email, 'password' => 'ena-kafe-tin-imera', 'website' => ''))->get_data());
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', array('name' => 'Νίκος Γεωργίου', 'phone' => '6977000111', 'email' => $email, 'password' => 'ena-kafe-tin-imera', 'evc_extra' => ''))->get_data());
         $user = (int) get_user_by('email', $email)->ID;
         $this->login_as($user); // the browser now carries the new session
         $this->assertSame('terms', $this->step($user));
@@ -178,7 +188,7 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $existing = $this->customer();
         $email = get_userdata($existing)->user_email;
         $this->order($existing);
-        $r = $this->post('/join/account', array('name' => 'Άλλος Άνθρωπος', 'phone' => '6900000001', 'email' => strtoupper($email), 'password' => 'diaforetikos-kodikos', 'website' => ''));
+        $r = $this->post('/join/account', array('name' => 'Άλλος Άνθρωπος', 'phone' => '6900000001', 'email' => strtoupper($email), 'password' => 'diaforetikos-kodikos', 'evc_extra' => ''));
         $this->assertSame(array('result' => 'check_account'), $r->get_data());
         $this->assertSame(0, get_current_user_id());
         $this->assertCount(1, wc_get_orders(array('customer_id' => $existing, 'limit' => -1)));
@@ -238,6 +248,192 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         EVC_Onboarding_Handoff::accept_terms($user);
         $this->assertSame('offer', $this->step($user));
         $this->assertSame('checkout', $this->post('/join/checkout', array())->get_data()['next']);
+    }
+
+    private function coffee(): WC_Product_Simple {
+        $coffee = new WC_Product_Simple();
+        $coffee->set_name('Synthetic freddo');
+        $coffee->set_regular_price('3');
+        $coffee->set_status('publish');
+        $coffee->save();
+        return $coffee;
+    }
+
+    private function guard(): EVC_Onboarding_Checkout_Guard {
+        return EVC_Onboarding_Plugin::parts()['guard'];
+    }
+
+    /** WooCommerce's add-to-cart validation (every plugin's filter on it), with WC()->cart holding $this->cart. */
+    private function can_add(int $product_id): bool {
+        $saved = WC()->cart;
+        WC()->cart = self::fake_cart($this->cart);
+        try {
+            return (bool) apply_filters('woocommerce_add_to_cart_validation', true, $product_id, 1);
+        } finally {
+            WC()->cart = $saved;
+        }
+    }
+
+    /**
+     * A WC_Cart already loaded with these products (under PHPUnit no session cookie can be set, so the real cart is
+     * never loaded from a session): get_cart() / get_cart_contents() answer the lines as the real cart does.
+     */
+    private static function fake_cart(array $product_ids): WC_Cart {
+        $lines = array();
+        foreach ($product_ids as $i => $id) {
+            $lines['line' . $i] = array('key' => 'line' . $i, 'product_id' => $id, 'variation_id' => 0, 'variation' => array(), 'quantity' => 1, 'data' => wc_get_product($id));
+        }
+        return new class($lines) extends WC_Cart {
+            public function __construct(array $lines) {
+                $this->cart_contents = $lines;
+            }
+
+            public function get_cart() {
+                return $this->get_cart_contents();
+            }
+        };
+    }
+
+    /** @return string[] the Club's error codes among those WooCommerce's checkout validation collected */
+    private function checkout_errors(array $data = array()): array {
+        $errors = new WP_Error();
+        do_action('woocommerce_after_checkout_validation', $data, $errors);
+        return array_values(array_filter($errors->get_error_codes(), function ($code) {
+            return strpos((string) $code, 'evc_') === 0;
+        }));
+    }
+
+    /** @return string[] the gateways WooCommerce offers right now */
+    private function offered(): array {
+        return array_keys(WC()->payment_gateways()->get_available_payment_gateways());
+    }
+
+    // ---- round 2: the Club rules on the shop's own cart and checkout ----------------------------------
+
+    public function test_the_cart_takes_the_club_product_alone_and_never_twice(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $club = EVC_TEST_CLUB_PRODUCT;
+        $coffee = $this->coffee()->get_id();
+        $this->assertTrue($this->can_add($club), 'a guest with an empty cart (a saved ?add-to-cart= link): the checkout asks for an account');
+        $this->assertTrue($this->can_add($coffee), 'other products are untouched');
+        $this->cart = array($coffee);
+        $this->assertFalse($this->can_add($club), 'not into a cart with other products');
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::MIXED, $this->guard()->last_message);
+        $this->assertTrue($this->can_add($coffee));
+        $this->cart = array($club);
+        $this->guard()->last_message = null;
+        $this->assertFalse($this->can_add($coffee), 'nothing else into a cart with the Club product');
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::MIXED, $this->guard()->last_message);
+        $this->cart = array();
+        // A second device / a saved link while an order waits for its transfer.
+        $user = $this->customer();
+        $order = $this->order($user);
+        $this->login_as($user);
+        $this->guard()->last_message = null;
+        $this->assertFalse($this->can_add($club), 'an open Club order: no second one');
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::DUPLICATE, $this->guard()->last_message);
+        $this->assertTrue($this->can_add($coffee), 'the same customer can still buy coffee');
+        // Paid and confirmed: an active member may renew early (owner decision D2).
+        $this->confirm($order->get_id());
+        $this->assertSame('active', $this->me());
+        $this->assertTrue($this->can_add($club), 'early renewal stays possible');
+        $other = $this->customer();
+        $this->login_as($other);
+        $this->assertTrue($this->can_add($club), 'a new customer');
+    }
+
+    public function test_the_checkout_refuses_a_mixed_cart_a_guest_and_a_second_order(): void {
+        $club = EVC_TEST_CLUB_PRODUCT;
+        $coffee = $this->coffee()->get_id();
+        $this->cart = array($coffee);
+        $this->assertSame(array(), $this->checkout_errors(), 'a coffee checkout is untouched, even for a guest');
+        $this->cart = array($club);
+        $this->assertSame(array('evc_club_account_required'), $this->checkout_errors(array('createaccount' => 0)), 'a guest Club order could never be attributed');
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::ACCOUNT, $this->guard()->last_message);
+        $this->assertSame(array(), $this->checkout_errors(array('createaccount' => 1)), 'creating the account at the checkout is fine');
+        $user = $this->customer();
+        $this->login_as($user);
+        $this->assertSame(array(), $this->checkout_errors(), 'one Club item, a signed-in customer');
+        $this->cart = array($club, $coffee);
+        $this->assertSame(array('evc_club_mixed_cart'), $this->checkout_errors(), 'bought alone');
+        $this->cart = array($club);
+        $this->order($user, 'pending'); // the first device left an unpaid order
+        $this->assertSame(array('evc_club_duplicate_order'), $this->checkout_errors(), 'the second device');
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::DUPLICATE, $this->guard()->last_message);
+    }
+
+    public function test_bank_transfer_is_the_only_gateway_for_the_club_and_none_without_it(): void {
+        $gateways = WC()->payment_gateways()->payment_gateways();
+        $this->assertArrayHasKey('bacs', $gateways);
+        $this->assertArrayHasKey('cheque', $gateways);
+        $was = array($gateways['bacs']->enabled, $gateways['cheque']->enabled);
+        $gateways['bacs']->enabled = 'yes';
+        $gateways['cheque']->enabled = 'yes';
+        try {
+            $this->cart = array($this->coffee()->get_id());
+            $this->assertContains('bacs', $this->offered());
+            $this->assertContains('cheque', $this->offered(), 'other products keep every gateway');
+            $this->assertSame('Χωρίς τρόπο', apply_filters('woocommerce_no_available_payment_methods_message', 'Χωρίς τρόπο'));
+            $this->cart = array(EVC_TEST_CLUB_PRODUCT);
+            $this->assertSame(array('bacs'), $this->offered(), 'owner decision D15: only bank transfer');
+            $gateways['bacs']->enabled = 'no';
+            $this->assertSame(array(), $this->offered(), 'fail closed: no other gateway takes its place');
+            $this->assertSame(EVC_Onboarding_Checkout_Guard::NO_BACS, apply_filters('woocommerce_no_available_payment_methods_message', 'Χωρίς τρόπο'), 'and the customer is told why, in Greek');
+            $this->cart = array();
+            $this->assertContains('cheque', $this->offered(), 'without the Club product nothing changes');
+            $this->assertNotContains('bacs', $this->offered());
+        } finally {
+            $gateways['bacs']->enabled = $was[0];
+            $gateways['cheque']->enabled = $was[1];
+        }
+    }
+
+    public function test_the_guard_reads_the_real_woocommerce_cart(): void {
+        $saved = WC()->cart;
+        try {
+            $coffee = $this->coffee()->get_id();
+            WC()->cart = self::fake_cart(array(EVC_TEST_CLUB_PRODUCT, $coffee));
+            $this->assertSame(array(EVC_TEST_CLUB_PRODUCT, $coffee), EVC_Onboarding_Checkout_Guard::wc_cart_products());
+            WC()->cart = null;
+            $this->assertSame(array(), EVC_Onboarding_Checkout_Guard::wc_cart_products(), 'no cart: nothing');
+        } finally {
+            WC()->cart = $saved;
+        }
+    }
+
+    /** Round 2 (finding 3): the open-order check reads ALL the customer's open orders, never one page of the shop's. */
+    public function test_fifty_newer_open_orders_of_other_customers_never_hide_an_older_club_order(): void {
+        $user = $this->customer();
+        $this->order($user, 'on-hold', null, new DateTimeImmutable('-20 days'));
+        $others = array($this->customer(), $this->customer(), $this->customer());
+        for ($i = 0; $i < 55; $i++) {
+            $this->order($others[$i % 3], 'on-hold', null, new DateTimeImmutable('-' . (60 - $i) . ' minutes'));
+        }
+        $this->login_as($user);
+        EVC_Onboarding_Handoff::accept_terms($user);
+        $this->assertSame('member', $this->step($user), 'the older Club order is found');
+        $this->assertTrue(EVC_Onboarding_Plugin::parts()['handoff']->blocks_new_order($user));
+        $fresh = $this->customer();
+        $this->login_as($fresh);
+        EVC_Onboarding_Handoff::accept_terms($fresh);
+        $this->assertSame('offer', $this->step($fresh), "55 other customers' Club orders do not count for anyone else");
+        $this->assertFalse(EVC_Onboarding_Plugin::parts()['handoff']->blocks_new_order($fresh));
+    }
+
+    public function test_an_older_club_order_behind_fifty_open_orders_of_other_products_is_found(): void {
+        $user = $this->customer();
+        $this->order($user, 'on-hold', null, new DateTimeImmutable('-20 days'));
+        $coffee = $this->coffee();
+        for ($i = 0; $i < 51; $i++) {
+            $this->order($user, 'processing', $coffee, new DateTimeImmutable('-' . (60 - $i) . ' minutes'));
+        }
+        $this->assertCount(52, wc_get_orders(array('customer_id' => $user, 'status' => EVC_Onboarding_Handoff::OPEN_STATUSES, 'limit' => -1, 'return' => 'ids')));
+        $this->login_as($user);
+        EVC_Onboarding_Handoff::accept_terms($user);
+        $this->assertSame('member', $this->step($user), 'the 52nd open order is the Club one');
+        $this->assertSame('member', $this->post('/join/checkout', array())->get_data()['next']);
+        $this->cart = array();
+        $this->assertFalse($this->can_add(EVC_TEST_CLUB_PRODUCT), 'and the cart refuses a second one');
     }
 
     public function test_another_customers_open_order_never_counts(): void {

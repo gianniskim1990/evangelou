@@ -17,6 +17,7 @@ export type RegisterResult =
   | { kind: "not_completed" }
   | { kind: "signed_in" }
   | { kind: "rate_limited" }
+  | { kind: "try_later" }
   | { kind: "unavailable" }
   | { kind: "error" };
 
@@ -41,6 +42,7 @@ export function parseRegister(status: number, body: unknown): RegisterResult {
     case "ok":
     case "check_account":
     case "not_completed":
+    case "try_later":
     case "signed_in":
       return Object.keys(body).length === 1 ? { kind: body.result } : { kind: "error" };
     case "invalid": {
@@ -126,7 +128,7 @@ export function createJoinApi(
 
   return {
     async register(form, honeypot) {
-      const reply = await post("/join/account", { name: form.name, phone: form.phone, email: form.email, password: form.password, website: honeypot });
+      const reply = await post("/join/account", { name: form.name, phone: form.phone, email: form.email, password: form.password, evc_extra: honeypot });
       return reply ? parseRegister(reply.status, reply.body) : { kind: "error" };
     },
     async acceptTerms() {

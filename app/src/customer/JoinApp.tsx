@@ -120,6 +120,7 @@ export function JoinApp({ config, api, navigate }: { config: JoinConfig; api: Jo
       }
       if (r.kind === "check_account") return setNotice({ title: JOIN_COPY.checkAccount.title, body: JOIN_COPY.checkAccount.body, links: true });
       if (r.kind === "rate_limited") return setNotice({ body: JOIN_COPY.errors.rateLimited });
+      if (r.kind === "try_later") return setNotice({ body: JOIN_COPY.errors.tryLater });
       if (r.kind === "not_completed") return setNotice({ body: JOIN_COPY.errors.notCompleted });
       if (r.kind === "unavailable") return go("unavailable");
       setNotice({ body: JOIN_COPY.errors.failed });
@@ -172,8 +173,8 @@ export function JoinApp({ config, api, navigate }: { config: JoinConfig; api: Jo
           </div>
           {/* Honeypot: invisible to people and to assistive technology; a bot that fills it gets nothing. */}
           <div aria-hidden="true" style={{ position: "absolute", left: "-10000px", width: "1px", height: "1px", overflow: "hidden" }}>
-            <label htmlFor="evc-join-website">Website</label>
-            <input id="evc-join-website" name="website" type="text" tabIndex={-1} autoComplete="off" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} />
+            <label htmlFor="evc-join-extra">Μην το συμπληρώνετε</label>
+            <input id="evc-join-extra" name="evc_extra" type="text" tabIndex={-1} autoComplete="off" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} />
           </div>
           {noticeBlock}
           <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-4">

@@ -8,5 +8,6 @@ require_once $evc_onboarding . 'class-evc-onboarding-registration.php';
 require_once $evc_onboarding . 'class-evc-onboarding-handoff.php';
 require_once $evc_onboarding . 'class-evc-onboarding-shell.php';
 require_once $evc_onboarding . 'class-evc-rest-join-controller.php';
+require_once $evc_onboarding . 'class-evc-onboarding-checkout-guard.php';
 require_once $evc_onboarding . 'class-evc-onboarding-plugin.php';
 unset($evc_onboarding);
