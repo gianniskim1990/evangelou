@@ -86,6 +86,19 @@ final class OnboardingRulesTest extends TestCase {
         }
     }
 
+    public function test_the_ipv6_48_key(): void {
+        $n = EVC_Onboarding_Rules::network_key('2001:db8:aa:1::1', 's');
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/D', $n);
+        $this->assertSame($n, EVC_Onboarding_Rules::network_key('2001:db8:aa:ffff:1:2:3:4', 's'), 'one /48');
+        $this->assertNotSame($n, EVC_Onboarding_Rules::network_key('2001:db8:ab::1', 's'), 'another /48');
+        $this->assertNotSame($n, EVC_Onboarding_Rules::client_key('2001:db8:aa:1::1', 's'), 'never the /64 key');
+        $this->assertNotSame($n, EVC_Onboarding_Rules::network_key('2001:db8:aa:1::1', 't'));
+        foreach (array('192.0.2.7', '::ffff:192.0.2.7', '', 'not-an-ip') as $none) {
+            $this->assertSame('', EVC_Onboarding_Rules::network_key($none, 's'), $none);
+        }
+        $this->assertSame('', EVC_Onboarding_Rules::network_key('2001:db8::1', ''));
+    }
+
     public function test_the_secret_is_derived_and_domain_separated(): void {
         $d = EVC_Onboarding_Rules::derive_secret('salt-1');
         $this->assertSame(hash_hmac('sha256', 'evangelou-club/join-rate-limit-key/v1', 'salt-1'), $d);

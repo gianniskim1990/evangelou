@@ -144,6 +144,23 @@ final class EVC_Onboarding_Rules {
         return substr(hash_hmac('sha256', 'evc-join|' . $subject, $secret), 0, 32);
     }
 
+    /**
+     * Round 3 (R2): the key of the client's IPv6 /48 (a site's or provider's allocation), for an aggregate cap on
+     * top of the /64 one, so rotating through the 65,536 /64s of one /48 does not reach the total cap. Empty for an
+     * IPv4 (or IPv4-mapped) address, a missing address or a missing secret.
+     */
+    public static function network_key(string $ip, string $secret): string {
+        $ip = trim($ip);
+        if ($secret === '' || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false) {
+            return '';
+        }
+        $packed = (string) inet_pton($ip);
+        if (strlen($packed) !== 16 || substr($packed, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {
+            return '';
+        }
+        return substr(hash_hmac('sha256', 'evc-join|v6n|' . bin2hex(substr($packed, 0, 6)), $secret), 0, 32);
+    }
+
     /** The rate-limit secret: derived from a WordPress salt with its own label (never the salt itself). */
     public static function derive_secret(string $salt): string {
         return $salt === '' ? '' : hash_hmac('sha256', 'evangelou-club/join-rate-limit-key/v1', $salt);

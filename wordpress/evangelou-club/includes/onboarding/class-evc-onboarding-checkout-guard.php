@@ -13,6 +13,13 @@ defined('ABSPATH') || exit;
  *  - A Club checkout needs an account (a guest Club order could never be attributed to a member).
  *  - Owner decision D15: when the Club product is in the cart (or the order being paid), the ONLY gateway offered is
  *    bank transfer (`bacs`). If bank transfer is not available, NO gateway is offered and a Greek message says so.
+ *
+ * Both checkouts (round 3, R1): the classic shortcode checkout (woocommerce_after_checkout_validation) AND the Block
+ * Checkout / Store API (WooCommerce 11.2.1): woocommerce_store_api_cart_errors (mixed cart, second order; fired by
+ * CartController::validate_cart() before the order exists) and woocommerce_store_api_checkout_update_order_from_request
+ * (account required; POST only, throwing the Store API RouteException). Store API cart/add-item applies
+ * woocommerce_add_to_cart_validation itself and turns our notice into its error, so the same filter covers it. The
+ * gateway filter is the one both checkouts read.
  */
 final class EVC_Onboarding_Checkout_Guard {
     const GATEWAY = 'bacs';
@@ -36,8 +43,12 @@ final class EVC_Onboarding_Checkout_Guard {
     }
 
     public function register(): void {
-        add_filter('woocommerce_add_to_cart_validation', array($this, 'add_to_cart'), 20, 3);
+        // Priority 5: before other validators, so the customer sees the Club's own reason (a later validator never
+        // un-refuses; this one never overrides an earlier refusal either).
+        add_filter('woocommerce_add_to_cart_validation', array($this, 'add_to_cart'), 5, 3);
         add_action('woocommerce_after_checkout_validation', array($this, 'checkout'), 20, 2);
+        add_action('woocommerce_store_api_cart_errors', array($this, 'store_api_cart_errors'), 20, 2);
+        add_action('woocommerce_store_api_checkout_update_order_from_request', array($this, 'store_api_order'), 20, 2);
         add_filter('woocommerce_available_payment_gateways', array($this, 'gateways'), 100, 1);
         add_filter('woocommerce_no_available_payment_methods_message', array($this, 'no_methods_message'), 100, 1);
     }
@@ -69,24 +80,53 @@ final class EVC_Onboarding_Checkout_Guard {
         if (!$errors instanceof WP_Error) {
             return;
         }
-        $club = $this->handoff->club_product_id();
-        $cart = $this->cart();
-        if ($club === null || !in_array($club, $cart, true)) {
+        if (!$this->club_in_cart()) {
             return;
         }
-        if (array_diff($cart, array($club)) !== array()) {
-            $this->last_message = self::MIXED;
-            $errors->add('evc_club_mixed_cart', self::MIXED);
-        }
+        $this->cart_rules($errors);
         if (!is_user_logged_in()) {
             $creating = is_array($data) && !empty($data['createaccount']);
             if (!$creating) {
                 $this->last_message = self::ACCOUNT;
                 $errors->add('evc_club_account_required', self::ACCOUNT);
             }
+        }
+    }
+
+    /** woocommerce_store_api_cart_errors (Block Checkout): mixed cart and second order, before any order exists. */
+    public function store_api_cart_errors($errors, $cart = null): void {
+        if ($errors instanceof WP_Error && $this->club_in_cart()) {
+            $this->cart_rules($errors);
+        }
+    }
+
+    /**
+     * woocommerce_store_api_checkout_update_order_from_request (Block Checkout, POST /checkout only): a guest Club
+     * order needs the account that THIS checkout will create (registration enabled, and required or requested).
+     *
+     * @throws Exception the Store API RouteException (400) with the Greek reason
+     */
+    public function store_api_order($order, $request): void {
+        if (!$request instanceof WP_REST_Request || $request->get_method() !== 'POST' || is_user_logged_in() || !$this->club_in_cart()) {
             return;
         }
-        if ($this->handoff->blocks_new_order(get_current_user_id())) {
+        $checkout = WC()->checkout();
+        $creates = filter_var($checkout->is_registration_enabled(), FILTER_VALIDATE_BOOLEAN)
+            && (filter_var($checkout->is_registration_required(), FILTER_VALIDATE_BOOLEAN) || filter_var($request['create_account'], FILTER_VALIDATE_BOOLEAN));
+        if (!$creates) {
+            $this->last_message = self::ACCOUNT;
+            throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException('evc_club_account_required', esc_html(self::ACCOUNT), 400);
+        }
+    }
+
+    /** The rules of a cart holding the Club product, shared by both checkouts. */
+    private function cart_rules(WP_Error $errors): void {
+        $club = (int) $this->handoff->club_product_id();
+        if (array_diff($this->cart(), array($club)) !== array()) {
+            $this->last_message = self::MIXED;
+            $errors->add('evc_club_mixed_cart', self::MIXED);
+        }
+        if (is_user_logged_in() && $this->handoff->blocks_new_order(get_current_user_id())) {
             $this->last_message = self::DUPLICATE;
             $errors->add('evc_club_duplicate_order', self::DUPLICATE);
         }

@@ -2823,6 +2823,18 @@ $mutants = array(
         'replace' => 'is_int($value) ? $value : $default;',
     ),
     array(
+        'id' => 'OR16-ipv6-48-key-is-the-64-key',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '\'evc-join|v6n|\' . bin2hex(substr($packed, 0, 6))',
+        'replace' => '\'evc-join|v6|\' . bin2hex(substr($packed, 0, 8))',
+    ),
+    array(
+        'id' => 'OR17-mapped-ipv4-gets-a-48-key',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'if (strlen($packed) !== 16 || substr($packed, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {',
+        'replace' => 'if (strlen($packed) !== 16) {',
+    ),
+    array(
         'id' => 'OR15-counter-not-anchored',
         'file' => 'includes/class-evc-onboarding-rules.php',
         'search' => '\'/^(\\d{1,9})\\|(\\d{1,12})$/D\'',

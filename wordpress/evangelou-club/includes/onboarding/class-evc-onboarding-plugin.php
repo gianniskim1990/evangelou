@@ -20,7 +20,7 @@ final class EVC_Onboarding_Plugin {
     private static $parts;
 
     /**
-     * @param array{membership?:EVC_Membership_Adapter,clock?:EVC_Clock_Source,now?:callable,assets?:EVC_Staff_Assets,cart?:callable}|mixed $seams
+     * @param array{membership?:EVC_Membership_Adapter,clock?:EVC_Clock_Source,now?:callable,assets?:EVC_Staff_Assets,cart?:callable,row_ceiling?:int}|mixed $seams
      *        TEST seams (WordPress passes '' from plugins_loaded; anything but an array is ignored)
      */
     public static function boot($seams = null): void {
@@ -29,7 +29,7 @@ final class EVC_Onboarding_Plugin {
         }
         $seams = is_array($seams) ? $seams : array();
         try {
-            self::$parts = self::build($seams['membership'] ?? null, $seams['clock'] ?? null, $seams['now'] ?? null, $seams['assets'] ?? null, $seams['cart'] ?? null);
+            self::$parts = self::build($seams['membership'] ?? null, $seams['clock'] ?? null, $seams['now'] ?? null, $seams['assets'] ?? null, $seams['cart'] ?? null, $seams['row_ceiling'] ?? null);
         } catch (Throwable $e) {
             self::$parts = null;
             error_log('Evangelou Club: the onboarding stayed inert (' . get_class($e) . ' while wiring).');
@@ -40,16 +40,17 @@ final class EVC_Onboarding_Plugin {
         add_action('template_redirect', array(__CLASS__, 'serve'), 0);
         add_action('rest_api_init', array(__CLASS__, 'register_routes'));
         self::$parts['guard']->register();
+        add_action('admin_notices', array('EVC_Onboarding_Registration', 'admin_notice'));
     }
 
     /** @return array{shell:EVC_Onboarding_Shell,controller:EVC_Rest_Join_Controller,registration:EVC_Onboarding_Registration,handoff:EVC_Onboarding_Handoff,guard:EVC_Onboarding_Checkout_Guard} */
-    public static function build(?EVC_Membership_Adapter $membership = null, ?EVC_Clock_Source $clock = null, ?callable $now = null, ?EVC_Staff_Assets $assets = null, ?callable $cart = null): array {
-        return self::wire($membership ?? EVC_Customer_Plugin::membership_adapter(), $clock ?? new EVC_System_Clock(), $now, $assets ?? EVC_Onboarding_Shell::production_assets(), $cart);
+    public static function build(?EVC_Membership_Adapter $membership = null, ?EVC_Clock_Source $clock = null, ?callable $now = null, ?EVC_Staff_Assets $assets = null, ?callable $cart = null, ?int $row_ceiling = null): array {
+        return self::wire($membership ?? EVC_Customer_Plugin::membership_adapter(), $clock ?? new EVC_System_Clock(), $now, $assets ?? EVC_Onboarding_Shell::production_assets(), $cart, $row_ceiling);
     }
 
-    private static function wire(EVC_Membership_Adapter $membership, EVC_Clock_Source $clock, ?callable $now, EVC_Staff_Assets $assets, ?callable $cart): array {
+    private static function wire(EVC_Membership_Adapter $membership, EVC_Clock_Source $clock, ?callable $now, EVC_Staff_Assets $assets, ?callable $cart, ?int $row_ceiling): array {
         $handoff = new EVC_Onboarding_Handoff(EVC_Commerce_Source_Config::from_constants(), $membership, $clock);
-        $registration = new EVC_Onboarding_Registration($now);
+        $registration = new EVC_Onboarding_Registration($now, $row_ceiling);
         return array(
             'shell' => new EVC_Onboarding_Shell($handoff, $assets),
             'controller' => new EVC_Rest_Join_Controller($registration, $handoff),

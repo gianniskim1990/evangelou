@@ -7,7 +7,7 @@ defined('ABSPATH') || exit;
  *   POST /join/account   PUBLIC (signed out). CSRF: X-WP-Nonce must be the page's wp_rest nonce for the signed-out
  *                        visitor AND an Origin header, when sent, must be this site. 200 {"result": ok | invalid
  *                        (+fields) | check_account | not_completed | signed_in | try_later}, 429 rate_limited,
- *                        403 forbidden (nonce / origin), 503 {"result":"unavailable"}.
+ *                        403 forbidden (nonce / origin; neither is counted as a failure), 503 {"result":"unavailable"}.
  *   POST /join/terms     customer (EVC_Customer_Auth): {"accept": true} records the current Club terms.
  *   POST /join/checkout  customer: {"result":"ok","next":"member"|"checkout","url":…} or {"result":"terms_required"};
  *                        the URL is always built by the server (member area or the WooCommerce checkout), never
@@ -58,7 +58,7 @@ final class EVC_Rest_Join_Controller {
             return EVC_Rest_Security::error_response('forbidden', 403);
         }
         if (!self::same_origin($request)) {
-            $this->registration->count_failure($ip);
+            // Round 3 (R4): NOT counted either; a foreign page could otherwise spend a client's failure budget.
             return EVC_Rest_Security::error_response('forbidden', 403);
         }
         $body = $request->get_json_params();

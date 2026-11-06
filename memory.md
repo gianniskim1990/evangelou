@@ -1523,3 +1523,24 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **Commerce tests** (CI only): the guard cart/checkout/gateway tests use the boot `cart` seam (no WC session cookie under PHPUnit) with the real filters and the real `WC_Payment_Gateways`; `can_add()` also swaps `WC()->cart` for a loaded fake so other plugins' validation sees the same cart.
 - **CI on bad2c10:** only `OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice` failed (all 6 commerce jobs, line 321): adding the Club product to a cart with coffee was already refused by an EARLIER validator in the real chain (PMPro WooCommerce or WooCommerce, priority < 20), so the guard never ran and its message stayed null. Fix: the test asserts the full chain refuses AND the guard's own add_to_cart() refuses with its message; it also asserts the guard is hooked at 20 (OG11 now also killed by the gateway test). Every other new commerce test passed there.
 - **CI on 4fdb75d:** all tests green; commerce mutation mode 196/198: OC6 (limit 50) and OG13 (open-order check in blocks_new_order) SURVIVED, because an on-hold Club order on its own already reads as pending_payment through the membership adapter, so the open-order check only decides when the membership reads EXPIRED and a renewal waits. Fix: the 51-orders test now uses an expired membership + a waiting renewal behind 51 newer open coffee orders (killer for OC6 and OG13).
+
+### STAGE-07 round 3 — re-review ACCEPT WITH NITS; R1 required before go-live (2026-11-06)
+- **Owner decision D17:** `EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR` default 3 → 10 (docs table + Greek answers).
+- **R1 Block Checkout (Store API, WooCommerce 11.2.1 source checked):**
+  - Store API `cart/add-item` applies `woocommerce_add_to_cart_validation` and converts our wc_add_notice to its 400 error, so no `woocommerce_store_api_validate_add_to_cart` hook was needed. The guard's add-to-cart filter moved to priority 5, so the Club's own message wins.
+  - `woocommerce_store_api_cart_errors` (CartController::validate_cart, before the draft order) adds mixed/duplicate → 409.
+  - `woocommerce_store_api_checkout_update_order_from_request` (POST only) throws a RouteException 400 `evc_club_account_required` for a guest unless registration is enabled and (required or create_account).
+  - The gateway filter covers the Store API cart `payment_methods` and the POST (`woocommerce_rest_checkout_payment_method_disabled`).
+  - Real-stack tests via rest_do_request on /wc/store/v1 (nonce check and WC cookies filtered off; the guard reads the real cart via the seam fallback).
+  - Packager CHECKOUT_HOOKS extended.
+  - Go-live step 5 records which checkout the live site uses.
+- **R2:** per-/48 bucket 'n' (`EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR`, default 10); total default 100. When the total cap is hit: one PII-free error_log line per hour (bump of bucket 'a' === 1) + option `evc_club_join_cap_alert` → Greek admin notice (manage_options, 24 h). Still blocking; documented as a DoS lever.
+- **R4:** a foreign Origin is no longer counted; `count_failure()` removed; OB20 retired; OB19 now drops the missing-nonce refusal.
+- **R5:** a bounded COUNT (LIMIT ceiling) of `evc_join_rl_f_%` rows; at 5000 (seam `row_ceiling`): cleanup first, then no new failure row (an existing row is updated with one atomic UPDATE) and no account (try_later). The cleanup DELETE runs with suppress_errors (deadlocks ignored, not logged).
+- **R6:** documented as accepted. The confirmer does NOT refuse a second paid order; it chains it as the next month, with no overlap (WcCompletionTest::test_bulk_completion_of_two_orders, test_early_renewal_keeps_the_paid_row_active_until_the_new_row_exists). One transfer never funds two orders (BacsConfirmationTest::test_one_bank_transfer_cannot_fund_two_orders / test_one_order_cannot_be_funded_by_two_transfers).
+- **R7:** duplicated password paragraph removed; squatter line reworded.
+- **Mutants:**
+  - killed locally: OR16–OR17, OB29–OB34, OB8/OB23 (new patterns), OB19 (new form);
+  - CI-only: OG14–OG17 (+ OG9 pattern).
+  - Local WP mutation run over all OB*: 31 killed, 0 survived after the OB19 fix.
+- The local WooCommerce clone /home/claude/woocommerce (11.2.1, blob-less sparse) can be extended with `git sparse-checkout add <path>`; used for src/StoreApi.

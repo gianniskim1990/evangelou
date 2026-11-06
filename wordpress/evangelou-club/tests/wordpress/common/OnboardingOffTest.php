@@ -24,9 +24,10 @@ final class OnboardingOffTest extends EVC_WP_Test_Case {
             $this->assertFalse(has_action($hook, array('EVC_Onboarding_Plugin', $method)), $hook);
         }
         $this->assertNotContains(EVC_Onboarding_Shell::QUERY_VAR, apply_filters('query_vars', array()));
-        foreach (array('woocommerce_add_to_cart_validation', 'woocommerce_after_checkout_validation', 'woocommerce_available_payment_gateways', 'woocommerce_no_available_payment_methods_message') as $hook) {
+        foreach (array('woocommerce_add_to_cart_validation', 'woocommerce_after_checkout_validation', 'woocommerce_available_payment_gateways', 'woocommerce_no_available_payment_methods_message', 'woocommerce_store_api_cart_errors', 'woocommerce_store_api_checkout_update_order_from_request') as $hook) {
             $this->assertFalse(has_filter($hook), $hook . ': the Club cart and checkout rules exist only with the flag');
         }
+        $this->assertFalse(has_action('admin_notices', array('EVC_Onboarding_Registration', 'admin_notice')), 'no admin notice while off');
         do_action('rest_api_init', rest_get_server());
         foreach (array_keys(rest_get_server()->get_routes()) as $route) {
             $this->assertStringNotContainsString('/join', $route);

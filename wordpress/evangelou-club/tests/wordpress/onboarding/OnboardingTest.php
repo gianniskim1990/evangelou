@@ -44,8 +44,8 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         parent::tear_down();
     }
 
-    private function boot(?callable $now = null): void {
-        EVC_Onboarding_Plugin::boot(array('assets' => new EVC_Staff_Assets($this->asset_dir, self::ASSET_URL, EVC_Customer_Shell::ASSET_ENTRY), 'now' => $now));
+    private function boot(?callable $now = null, ?int $row_ceiling = null): void {
+        EVC_Onboarding_Plugin::boot(array('assets' => new EVC_Staff_Assets($this->asset_dir, self::ASSET_URL, EVC_Customer_Shell::ASSET_ENTRY), 'now' => $now, 'row_ceiling' => $row_ceiling));
         rest_get_server();
         $this->parts()['controller']->register_routes(true); // these parts answer (a test may boot again with its own clock)
     }
@@ -241,10 +241,12 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         $this->assertEnvelope($this->post('/join/account', $form, null, 'https://evil.example'), 403, 'forbidden');
         $this->assertEnvelope($this->post('/join/account', $form, null, 'null'), 403, 'forbidden');
         $this->assertFalse(get_user_by('email', $form['email']));
-        $this->assertSame(2, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'each origin refusal counted');
+        $this->assertSame(0, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'round 3 (R4): an origin refusal is not counted');
         // No nonce at all: refused by the route, and NOT counted (anyone could otherwise spend a client's budget).
         $this->assertEnvelope($this->post('/join/account', $form, 'none'), 403, 'forbidden');
-        $this->assertSame(2, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'a request without a nonce is not counted');
+        $this->assertSame(0, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'a request without a nonce is not counted');
+        $this->post('/join/account', self::form(array('phone' => '')));
+        $this->assertSame(1, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'while invalid input still is');
         $this->assertSame(array('result' => 'ok'), $this->post('/join/account', $form, null, null)->get_data(), 'no Origin header: the nonce alone binds it');
     }
 
@@ -279,28 +281,110 @@ final class OnboardingTest extends EVC_WP_Test_Case {
     }
 
     public function test_successes_are_capped_per_client_and_in_total(): void {
-        $this->assertSame(3, EVC_Onboarding_Registration::max_per_client_hour());
-        $this->assertSame(30, EVC_Onboarding_Registration::max_per_hour());
-        for ($i = 1; $i <= 3; $i++) {
+        $this->assertSame(10, EVC_Onboarding_Registration::max_per_client_hour(), 'owner decision D17');
+        $this->assertSame(10, EVC_Onboarding_Registration::max_per_network_hour());
+        $this->assertSame(100, EVC_Onboarding_Registration::max_per_hour());
+        for ($i = 1; $i <= 10; $i++) {
             $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form())->get_data(), "account $i");
             wp_set_current_user(0);
         }
         $form = self::form();
-        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', $form)->get_data(), 'the 4th account from one client this hour');
+        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', $form)->get_data(), 'the 11th account from one client this hour');
         $this->assertFalse(get_user_by('email', $form['email']), 'nothing created');
         $this->assertSame(0, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'a success cap is not a failure');
-        // The total cap: 30 accounts an hour from all clients together.
-        for ($i = 4; $i <= 30; $i++) {
-            $_SERVER['REMOTE_ADDR'] = '198.51.100.' . $i;
+        $this->assertSame('', EVC_Onboarding_Registration::admin_notice_html(time()), 'a client cap alerts nobody');
+        // The total cap: 100 accounts an hour from all clients together.
+        for ($i = 11; $i <= 100; $i++) {
+            $_SERVER['REMOTE_ADDR'] = '198.51.' . intdiv($i, 200) . '.' . $i;
             $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form())->get_data(), "account $i");
             wp_set_current_user(0);
         }
         $_SERVER['REMOTE_ADDR'] = '192.0.2.1';
-        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', self::form())->get_data(), 'the 31st account of the hour');
+        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', self::form())->get_data(), 'the 101st account of the hour: still blocking');
+        $_SERVER['REMOTE_ADDR'] = '192.0.2.2';
+        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', self::form())->get_data());
+        // One PII-free log line per hour, and the admin notice.
+        $log = (string) file_get_contents($this->log);
+        $this->assertSame(1, substr_count($log, 'the hourly limit of new Club accounts'), 'logged once, not per refusal');
+        $this->assertStringNotContainsString('192.0.2', $log);
+        $notice = EVC_Onboarding_Registration::admin_notice_html(time());
+        $this->assertStringContainsString('EVC_CLUB_JOIN_MAX_PER_HOUR', $notice);
+        $this->assertStringContainsString('100 ανά ώρα', $notice);
+        $this->assertSame('', EVC_Onboarding_Registration::admin_notice_html(time() + DAY_IN_SECONDS + 1), 'gone after a day');
+        $this->assertNotFalse(has_action('admin_notices', array('EVC_Onboarding_Registration', 'admin_notice')));
+        wp_set_current_user(self::factory()->user->create(array('role' => 'administrator')));
+        ob_start();
+        EVC_Onboarding_Registration::admin_notice();
+        $this->assertSame($notice, ob_get_clean(), 'administrators see it');
+        wp_set_current_user(self::factory()->user->create(array('role' => 'customer')));
+        ob_start();
+        EVC_Onboarding_Registration::admin_notice();
+        $this->assertSame('', ob_get_clean(), 'nobody else');
         $this->assertSame(EVC_Onboarding_Rules::cap(0, 3), 3);
         $this->assertSame(EVC_Onboarding_Rules::cap('10', 3), 3, 'only an int configures it');
         $this->assertSame(EVC_Onboarding_Rules::cap(1001, 30), 30);
         $this->assertSame(EVC_Onboarding_Rules::cap(12, 30), 12);
+    }
+
+    public function test_an_ipv6_48_has_its_own_aggregate_cap(): void {
+        for ($i = 1; $i <= 10; $i++) {
+            $_SERVER['REMOTE_ADDR'] = '2001:db8:aa:' . dechex($i) . '::1'; // ten different /64s of one /48
+            $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form())->get_data(), "account $i");
+            wp_set_current_user(0);
+        }
+        $this->assertSame(10, $this->parts()['registration']->network_successes('2001:db8:aa:ffff::9'));
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:aa:ff::1'; // an 11th /64 of the same /48
+        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', self::form())->get_data(), 'the /48 is full');
+        $_SERVER['REMOTE_ADDR'] = '2001:db8:ab:1::1'; // another /48
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form())->get_data());
+        wp_set_current_user(0);
+        $this->assertSame(0, $this->parts()['registration']->network_successes('192.0.2.5'), 'IPv4 has no /48 bucket');
+        $this->assertSame('', EVC_Onboarding_Registration::network_key_of('::ffff:192.0.2.5'));
+        $this->assertSame(EVC_Onboarding_Registration::network_key_of('2001:db8:aa::1'), EVC_Onboarding_Registration::network_key_of('2001:db8:aa:ffff:1:2:3:4'));
+        $this->assertNotSame(EVC_Onboarding_Registration::network_key_of('2001:db8:aa::1'), EVC_Onboarding_Registration::key_of('2001:db8:aa::1'), 'a separate bucket');
+    }
+
+    /** Round 3 (R5): the counter rows are bounded; above the ceiling nothing new is written and nobody is signed up. */
+    public function test_the_counter_rows_are_bounded_and_registration_fails_closed_above_the_ceiling(): void {
+        global $wpdb;
+        $clock = 1_900_000_000;
+        $this->boot(function () use (&$clock) {
+            return $clock;
+        }, 3);
+        foreach (array('198.51.100.1', '198.51.100.2', '198.51.100.3') as $ip) {
+            $_SERVER['REMOTE_ADDR'] = $ip;
+            $this->post('/join/account', self::form(array('phone' => '')));
+        }
+        $rows = function () use ($wpdb): int {
+            return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like('evc_join_rl_f_') . '%'));
+        };
+        $this->assertSame(3, $rows());
+        $_SERVER['REMOTE_ADDR'] = '198.51.100.4';
+        $this->post('/join/account', self::form(array('phone' => '')));
+        $this->assertSame(3, $rows(), 'no new failure row above the ceiling');
+        $this->assertSame(0, $this->parts()['registration']->failures('198.51.100.4'));
+        $_SERVER['REMOTE_ADDR'] = '198.51.100.1';
+        $this->post('/join/account', self::form(array('phone' => '')));
+        $this->assertSame(2, $this->parts()['registration']->failures('198.51.100.1'), 'an existing row still counts (one atomic UPDATE)');
+        $_SERVER['REMOTE_ADDR'] = '198.51.100.9';
+        $form = self::form();
+        $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', $form)->get_data(), 'fail closed: no account while the rows are full');
+        $this->assertFalse(get_user_by('email', $form['email']));
+        // Two hours later the expired rows are cleaned up and sign-up works again. A failing cleanup (a deadlock) is
+        // ignored and never logged.
+        $clock += 2 * EVC_Onboarding_Registration::SUCCESS_WINDOW_SECONDS + 1;
+        $deadlock = function ($sql) {
+            return strpos($sql, 'DELETE FROM') === 0 && strpos($sql, 'SUBSTRING_INDEX(option_value') !== false ? 'DELETE FROM evc_no_such_table_deadlock' : $sql;
+        };
+        add_filter('query', $deadlock);
+        try {
+            $this->assertSame(array('result' => 'try_later'), $this->post('/join/account', self::form())->get_data(), 'the cleanup failed: still closed');
+        } finally {
+            remove_filter('query', $deadlock);
+        }
+        $this->assertStringNotContainsString('evc_no_such_table', (string) file_get_contents($this->log), 'a failed cleanup is not logged');
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form())->get_data(), 'the cleanup freed the rows');
+        $this->assertLessThanOrEqual(3, $rows());
     }
 
     public function test_an_ipv6_client_counts_by_its_64_network(): void {

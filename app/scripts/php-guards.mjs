@@ -1153,7 +1153,16 @@ export const ONBOARDING_RULES = Object.freeze({
   checkoutGuardFile: "includes/onboarding/class-evc-onboarding-checkout-guard.php",
 });
 // Round 2 (D15): only the checkout guard may change which gateways WooCommerce offers or veto the cart / checkout.
-const CHECKOUT_HOOKS = ["woocommerce_available_payment_gateways", "woocommerce_add_to_cart_validation", "woocommerce_after_checkout_validation", "woocommerce_no_available_payment_methods_message"];
+// Round 3 (R1): the Block Checkout / Store API hooks too.
+const CHECKOUT_HOOKS = [
+  "woocommerce_available_payment_gateways",
+  "woocommerce_add_to_cart_validation",
+  "woocommerce_after_checkout_validation",
+  "woocommerce_no_available_payment_methods_message",
+  "woocommerce_store_api_cart_errors",
+  "woocommerce_store_api_checkout_update_order_from_request",
+  "woocommerce_store_api_validate_add_to_cart",
+];
 const USER_WRITERS = ["wp_insert_user", "wp_create_user", "wp_update_user", "register_new_user", "wp_set_auth_cookie", "wp_signon", "wp_set_current_user"];
 
 export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
@@ -1207,6 +1216,9 @@ function onboardingSelfTest() {
   expect("gateways filtered elsewhere", "includes/customer/x.php", "<?php\nadd_filter('woocommerce_available_payment_gateways', 'f');", true);
   expect("checkout vetoed elsewhere", "includes/x.php", "<?php\nadd_action('WooCommerce_After_Checkout_Validation', 'f', 20, 2);", true);
   expect("cart vetoed elsewhere", "includes/x.php", "<?php\nadd_filter('woocommerce_add_to_cart_validation', 'f');", true);
+  expect("Store API cart errors elsewhere", "includes/x.php", "<?php\nadd_action('woocommerce_store_api_cart_errors', 'f', 10, 2);", true);
+  expect("Store API order hook elsewhere", "includes/x.php", "<?php\nadd_action('woocommerce_store_api_checkout_update_order_from_request', 'f', 10, 2);", true);
+  expect("the guard may hook the Store API", O.checkoutGuardFile, "<?php\nadd_action('woocommerce_store_api_cart_errors', array($this, 'store_api_cart_errors'), 20, 2);", false);
   expect("the guard may filter gateways", O.checkoutGuardFile, "<?php\nadd_filter('woocommerce_available_payment_gateways', array($this, 'gateways'), 100, 1);", false);
   expect("the registration may create users", O.registrationFile, "<?php\n$id = wp_insert_user($a); wp_set_auth_cookie($id);", false);
   expect("an add-to-cart URL elsewhere", "includes/x.php", "<?php\n$u = add_query_arg('add-to-cart', 5, $c);", true);

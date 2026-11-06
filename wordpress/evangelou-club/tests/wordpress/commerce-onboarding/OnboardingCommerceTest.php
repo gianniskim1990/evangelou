@@ -15,7 +15,7 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
     private $parts;
     /** @var string */
     private $asset_dir;
-    /** @var int[] the product ids the checkout guard sees in the cart (the boot 'cart' seam) */
+    /** @var int[]|null the product ids the checkout guard sees (the boot 'cart' seam); null = the real WooCommerce cart */
     private $cart = array();
 
     public function set_up() {
@@ -37,7 +37,7 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         EVC_Onboarding_Plugin::boot(array(
             'assets' => new EVC_Staff_Assets($this->asset_dir, 'https://cdn.example.test/customer-app', EVC_Customer_Shell::ASSET_ENTRY),
             'cart' => function (): array {
-                return $this->cart;
+                return $this->cart ?? EVC_Onboarding_Checkout_Guard::wc_cart_products();
             },
         ));
         rest_get_server();
@@ -337,7 +337,7 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $club = EVC_TEST_CLUB_PRODUCT;
         $coffee = $this->coffee()->get_id();
-        $this->assertSame(20, has_filter('woocommerce_add_to_cart_validation', array($this->guard(), 'add_to_cart')), 'hooked by boot()');
+        $this->assertSame(5, has_filter('woocommerce_add_to_cart_validation', array($this->guard(), 'add_to_cart')), 'hooked by boot(), before other validators');
         $this->assertTrue($this->can_add($club), 'a guest with an empty cart (a saved ?add-to-cart= link): the checkout asks for an account');
         $this->assertTrue($this->can_add($coffee), 'other products are untouched');
         $this->cart = array($coffee);
@@ -465,6 +465,159 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $this->guard()->last_message = null;
         $this->assertFalse($this->guard()->add_to_cart(true, EVC_TEST_CLUB_PRODUCT, 1));
         $this->assertSame(EVC_Onboarding_Checkout_Guard::DUPLICATE, $this->guard()->last_message);
+    }
+
+    // ---- round 3 (R1): the Block Checkout, through the real Store API ---------------------------------
+
+    /** The Store API with the REAL WooCommerce cart and session (nonce check and cookies off: no browser here). */
+    private function store_api(?int $user): void {
+        add_filter('woocommerce_store_api_disable_nonce_check', '__return_true');
+        add_filter('woocommerce_set_cookie_enabled', '__return_false');
+        if ($user !== null) {
+            $this->login_as($user);
+        } else {
+            wp_set_current_user(0);
+        }
+        if (WC()->cart === null || WC()->session === null) {
+            wc_load_cart();
+        }
+        WC()->customer = new WC_Customer(get_current_user_id(), true);
+        WC()->cart->empty_cart();
+        $this->cart = null; // the guard reads the real cart
+    }
+
+    private function store(string $method, string $route, ?array $body = null): WP_REST_Response {
+        $request = new WP_REST_Request($method, '/wc/store/v1' . $route);
+        if ($body !== null) {
+            $request->set_header('Content-Type', 'application/json');
+            $request->set_body(wp_json_encode($body));
+        }
+        return rest_ensure_response(rest_do_request($request));
+    }
+
+    private function add_item(int $product_id): WP_REST_Response {
+        return $this->store('POST', '/cart/add-item', array('id' => $product_id, 'quantity' => 1));
+    }
+
+    /** @return int[] the product ids of the Store API cart */
+    private function store_cart(): array {
+        $r = $this->store('GET', '/cart');
+        $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+        return array_map('intval', array_column($r->get_data()['items'], 'id'));
+    }
+
+    private function place_order(string $email, string $method = 'bacs', array $extra = array()): WP_REST_Response {
+        $address = array('first_name' => 'Ελένη', 'last_name' => 'Δοκιμή', 'company' => '', 'address_1' => 'Ομονοίας 1', 'address_2' => '', 'city' => 'Καβάλα', 'state' => '', 'postcode' => '65403', 'country' => 'GR', 'phone' => '6900000000');
+        return $this->store('POST', '/checkout', array_merge(array('billing_address' => $address + array('email' => $email), 'shipping_address' => $address, 'payment_method' => $method), $extra));
+    }
+
+    private static function open_club_orders(int $user): int {
+        return count(wc_get_orders(array('customer_id' => $user, 'status' => EVC_Onboarding_Handoff::OPEN_STATUSES, 'limit' => -1, 'return' => 'ids')));
+    }
+
+    public function test_the_store_api_cart_keeps_the_club_product_alone_and_never_twice(): void {
+        $user = $this->customer();
+        $this->store_api($user);
+        $coffee = $this->coffee()->get_id();
+        $this->assertSame(201, $this->add_item($coffee)->get_status());
+        $r = $this->add_item(EVC_TEST_CLUB_PRODUCT);
+        $this->assertSame(400, $r->get_status(), wp_json_encode($r->get_data()));
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::MIXED, $r->get_data()['message'], 'Store API add-item applies woocommerce_add_to_cart_validation and shows our reason');
+        $this->assertSame(array($coffee), $this->store_cart());
+        WC()->cart->empty_cart();
+        $this->assertSame(201, $this->add_item(EVC_TEST_CLUB_PRODUCT)->get_status());
+        $r = $this->add_item($coffee);
+        $this->assertSame(400, $r->get_status());
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::MIXED, $r->get_data()['message']);
+        $this->assertSame(array(EVC_TEST_CLUB_PRODUCT), $this->store_cart());
+        WC()->cart->empty_cart();
+        $this->order($user); // waiting for its transfer (another device)
+        $r = $this->add_item(EVC_TEST_CLUB_PRODUCT);
+        $this->assertSame(400, $r->get_status());
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::DUPLICATE, $r->get_data()['message']);
+        $this->assertSame(array(), $this->store_cart());
+    }
+
+    public function test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account(): void {
+        $user = $this->customer();
+        $this->store_api($user);
+        // A cart that bypassed the add-to-cart rules (e.g. filled before the flag was on): the checkout still refuses.
+        remove_all_filters('woocommerce_add_to_cart_validation');
+        $coffee = $this->coffee()->get_id();
+        $this->add_item($coffee);
+        $this->add_item(EVC_TEST_CLUB_PRODUCT);
+        $this->assertSame(array($coffee, EVC_TEST_CLUB_PRODUCT), $this->store_cart());
+        $email = get_userdata($user)->user_email;
+        $r = $this->place_order($email);
+        $this->assertSame(409, $r->get_status(), wp_json_encode($r->get_data()));
+        $this->assertStringContainsString('evc_club_mixed_cart', (string) wp_json_encode($r->get_data()));
+        $this->assertSame(0, self::open_club_orders($user));
+        // The Club product alone, signed in: the order is placed by bank transfer (on-hold).
+        WC()->cart->empty_cart();
+        $this->add_item(EVC_TEST_CLUB_PRODUCT);
+        $r = $this->place_order($email);
+        $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+        $this->assertSame('on-hold', $r->get_data()['status']);
+        $this->assertSame(1, self::open_club_orders($user));
+        // A second Club order while the first waits: refused before any order exists.
+        $this->add_item(EVC_TEST_CLUB_PRODUCT);
+        $r = $this->place_order($email);
+        $this->assertSame(409, $r->get_status(), wp_json_encode($r->get_data()));
+        $this->assertStringContainsString('evc_club_duplicate_order', (string) wp_json_encode($r->get_data()));
+        $this->assertSame(1, self::open_club_orders($user));
+        // A guest whose checkout creates no account: refused with the Greek reason.
+        $this->store_api(null);
+        remove_all_filters('woocommerce_add_to_cart_validation');
+        update_option('woocommerce_enable_guest_checkout', 'yes');
+        update_option('woocommerce_enable_signup_and_login_from_checkout', 'no');
+        update_option('woocommerce_registration_generate_username', 'yes');
+        update_option('woocommerce_registration_generate_password', 'no');
+        add_filter('woocommerce_checkout_registration_required', '__return_false', 999);
+        $this->add_item(EVC_TEST_CLUB_PRODUCT);
+        $guest = 'guest.' . wp_generate_password(6, false, false) . '@example.org';
+        $r = $this->place_order($guest);
+        $this->assertSame(400, $r->get_status(), wp_json_encode($r->get_data()));
+        $this->assertSame('evc_club_account_required', $r->get_data()['code']);
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::ACCOUNT, $r->get_data()['message']);
+        $this->assertSame(array(), wc_get_orders(array('billing_email' => $guest, 'status' => EVC_Onboarding_Handoff::OPEN_STATUSES, 'limit' => -1, 'return' => 'ids')));
+        // The same guest creating the account at this checkout: accepted, and the order belongs to that account.
+        update_option('woocommerce_enable_signup_and_login_from_checkout', 'yes');
+        $r = $this->place_order($guest, 'bacs', array('create_account' => true, 'customer_password' => 'Ena-kafe-tin-imera-7'));
+        $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+        $account = get_user_by('email', $guest);
+        $this->assertInstanceOf(WP_User::class, $account);
+        $this->assertSame((int) $account->ID, wc_get_order((int) $r->get_data()['order_id'])->get_customer_id());
+    }
+
+    public function test_the_block_checkout_offers_only_bank_transfer_for_the_club(): void {
+        $user = $this->customer();
+        $this->store_api($user);
+        $gateways = WC()->payment_gateways()->payment_gateways();
+        $was = array($gateways['bacs']->enabled, $gateways['cheque']->enabled);
+        $gateways['bacs']->enabled = 'yes';
+        $gateways['cheque']->enabled = 'yes';
+        try {
+            $this->add_item($this->coffee()->get_id());
+            $methods = $this->store('GET', '/cart')->get_data()['payment_methods'];
+            $this->assertContains('bacs', $methods);
+            $this->assertContains('cheque', $methods, 'other products keep every gateway');
+            WC()->cart->empty_cart();
+            $this->add_item(EVC_TEST_CLUB_PRODUCT);
+            $this->assertSame(array('bacs'), $this->store('GET', '/cart')->get_data()['payment_methods'], 'D15 in the Block Checkout too');
+            $email = get_userdata($user)->user_email;
+            $r = $this->place_order($email, 'cheque');
+            $this->assertSame(400, $r->get_status(), wp_json_encode($r->get_data()));
+            $this->assertSame('woocommerce_rest_checkout_payment_method_disabled', $r->get_data()['code']);
+            $this->assertSame(0, self::open_club_orders($user));
+            $gateways['bacs']->enabled = 'no';
+            $this->assertSame(array(), $this->store('GET', '/cart')->get_data()['payment_methods'], 'fail closed');
+            $r = $this->place_order($email, 'bacs');
+            $this->assertSame(400, $r->get_status(), wp_json_encode($r->get_data()));
+            $this->assertSame(0, self::open_club_orders($user));
+        } finally {
+            $gateways['bacs']->enabled = $was[0];
+            $gateways['cheque']->enabled = $was[1];
+        }
     }
 
     public function test_another_customers_open_order_never_counts(): void {
