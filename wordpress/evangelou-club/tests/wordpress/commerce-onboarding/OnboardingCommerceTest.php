@@ -439,20 +439,32 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $this->assertFalse(EVC_Onboarding_Plugin::parts()['handoff']->blocks_new_order($fresh));
     }
 
-    public function test_an_older_club_order_behind_fifty_open_orders_of_other_products_is_found(): void {
+    /**
+     * An on-hold Club order alone already reads as "pending payment" through the membership, so the open-order check
+     * is what matters when the membership reads ENDED and a renewal waits: that renewal must be found behind 51 newer
+     * open orders of other products (round 2, finding 3).
+     */
+    public function test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $user = $this->customer();
-        $this->order($user, 'on-hold', null, new DateTimeImmutable('-20 days'));
+        $at = self::at7('-40 days');
+        $first = $this->order($user, 'on-hold', null, $at->modify('-1 hour'));
+        $this->confirm($first->get_id(), $at);
+        $this->login_as($user);
+        $this->assertSame('expired', $this->me(), 'the paid month ended');
+        $this->order($user, 'on-hold', null, new DateTimeImmutable('-3 days')); // the renewal by bank transfer, waiting
         $coffee = $this->coffee();
         for ($i = 0; $i < 51; $i++) {
             $this->order($user, 'processing', $coffee, new DateTimeImmutable('-' . (60 - $i) . ' minutes'));
         }
         $this->assertCount(52, wc_get_orders(array('customer_id' => $user, 'status' => EVC_Onboarding_Handoff::OPEN_STATUSES, 'limit' => -1, 'return' => 'ids')));
-        $this->login_as($user);
         EVC_Onboarding_Handoff::accept_terms($user);
-        $this->assertSame('member', $this->step($user), 'the 52nd open order is the Club one');
+        $this->assertSame('member', $this->step($user), 'the oldest of 52 open orders is the waiting renewal');
         $this->assertSame('member', $this->post('/join/checkout', array())->get_data()['next']);
-        $this->cart = array();
-        $this->assertFalse($this->can_add(EVC_TEST_CLUB_PRODUCT), 'and the cart refuses a second one');
+        $this->assertTrue(EVC_Onboarding_Plugin::parts()['handoff']->blocks_new_order($user), 'and the cart / checkout refuse a second one');
+        $this->guard()->last_message = null;
+        $this->assertFalse($this->guard()->add_to_cart(true, EVC_TEST_CLUB_PRODUCT, 1));
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::DUPLICATE, $this->guard()->last_message);
     }
 
     public function test_another_customers_open_order_never_counts(): void {

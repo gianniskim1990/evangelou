@@ -194,8 +194,10 @@ are untouched.
   - an ended membership with a waiting renewal is never doubled;
   - a cancelled order or a non-Club order leaves the offer open;
   - another customer's order never counts;
-  - an older Club order is found behind 55 newer open Club orders of other customers, and behind 51 newer open
-    orders of the same customer for other products;
+  - an older Club order is found behind 55 newer open Club orders of other customers;
+  - an ended membership's waiting renewal is found behind 51 newer open orders of the same customer for other
+    products (an on-hold Club order on its own already reads as "pending payment" through the membership, so the
+    open-order check decides only in this case; the first version of this test could not tell `limit 50` apart);
   - the cart: Club product alone, never into or with other products, never a second order (open order), early
     renewal for an active member;
   - the checkout validation: mixed cart, guest without an account, second order;

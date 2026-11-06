@@ -1377,7 +1377,7 @@ $mutants = array(
         array('OnboardingCommerceTest::test_another_customers_open_order_never_counts')),
     array('OC6-only-fifty-open-orders-read', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
         '\'limit\' => -1, \'return\' => \'ids\'', '\'limit\' => 50, \'return\' => \'ids\'',
-        array('OnboardingCommerceTest::test_an_older_club_order_behind_fifty_open_orders_of_other_products_is_found')),
+        array('OnboardingCommerceTest::test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found')),
     array('OC4-any-product-counts', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
         ' && (int) $item->get_product_id() === $this->config->product_id', '',
         array('OnboardingCommerceTest::test_a_cancelled_order_or_an_order_of_something_else_leaves_the_offer_open')),
@@ -1427,7 +1427,7 @@ $mutants = array(
         '            if ($this->has_open_club_order($user_id)) {
                 return true;', '            if (false) {
                 return true;',
-        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
+        array('OnboardingCommerceTest::test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
