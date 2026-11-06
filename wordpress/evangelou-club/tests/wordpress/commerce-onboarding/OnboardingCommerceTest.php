@@ -507,6 +507,9 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
     }
 
     private function place_order(string $email, string $method = 'bacs', array $extra = array()): WP_REST_Response {
+        // A browser places each order in a new PHP request. Here the Store API's checkout route object lives on between
+        // requests and a POST reuses the order it last held; its GET re-reads the session's draft, as a new request does.
+        $this->store('GET', '/checkout');
         $address = array('first_name' => 'Ελένη', 'last_name' => 'Δοκιμή', 'company' => '', 'address_1' => 'Ομονοίας 1', 'address_2' => '', 'city' => 'Καβάλα', 'state' => '', 'postcode' => '65403', 'country' => 'GR', 'phone' => '6900000000');
         return $this->store('POST', '/checkout', array_merge(array('billing_address' => $address + array('email' => $email), 'shipping_address' => $address, 'payment_method' => $method), $extra));
     }
