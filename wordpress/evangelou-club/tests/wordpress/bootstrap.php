@@ -85,6 +85,17 @@ if ($evc_onboarding_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-08: the Club admin-pages constant, fixed per PHPUnit process: EVC_TEST_ADMIN_TOOLS_FLAG=enabled defines
+// EVC_CLUB_ADMIN_TOOLS_ENABLED as boolean true (the wp-admin-tools and wp-commerce-admin-tools suites); unset/disabled
+// leaves it undefined (every other suite).
+$evc_admin_tools_mode = getenv('EVC_TEST_ADMIN_TOOLS_FLAG');
+if ($evc_admin_tools_mode === 'enabled') {
+    define('EVC_CLUB_ADMIN_TOOLS_ENABLED', true);
+} elseif ($evc_admin_tools_mode !== false && $evc_admin_tools_mode !== '' && $evc_admin_tools_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_ADMIN_TOOLS_FLAG must be enabled or disabled.\n");
+    exit(1);
+}
+
 // STAGE-03D review: TEST-ONLY hook so the suites may construct the WooCommerce-completion classes with the
 // feature constant OFF (EVC_Wc_Completion_Feature::assert_constructible; the packager refuses it in shipped files).
 define('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);

@@ -1475,6 +1475,78 @@ $mutants = array(
     array('OG18-pay-for-order-reads-the-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         '        if ($this->paying !== null) {', '        if (false) {',
         array('OnboardingCommerceTest::test_paying_an_existing_club_order_through_the_store_api_is_bank_transfer_only')),
+    // STAGE-08 (AT1-AT17, modes disabled / admin_tools; ATC1-ATC2, mode commerce_admin_tools): the Club admin pages.
+    array('AT1-flag-accepts-truthy-values', 'disabled', 'includes/admin/class-evc-admin-tools-feature.php',
+        '        return $value === true;', '        return (bool) $value;',
+        array('AdminToolsOffTest::test_off_by_default_nothing_exists')),
+    array('AT2-boot-gate-removed', 'disabled', 'includes/admin/class-evc-admin-tools-plugin.php',
+        '        if (!EVC_Admin_Tools_Feature::enabled()) {
+            return;
+        }
+', '',
+        array('AdminToolsOffTest::test_off_by_default_nothing_exists')),
+    array('AT3-service-constructible-when-off', 'disabled', 'includes/admin/class-evc-staff-account-service.php',
+        '        EVC_Admin_Tools_Feature::assert_constructible(__CLASS__);
+', '',
+        array('AdminToolsOffTest::test_the_classes_refuse_construction_while_off')),
+    array('AT4-club-capability-not-required', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        ' && user_can($user, EVC_Staff_Role::CAP_MANAGE)', '',
+        array('StaffAccountAdminTest::test_nobody_but_a_club_administrator_may_act')),
+    array('AT6-second-shared-account-created', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if ($this->accounts() !== array()) {', '        if (false) {',
+        array('StaffAccountAdminTest::test_the_shared_account_is_created_once_with_the_staff_role_only')),
+    array('AT7-nonce-not-checked', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
+        '        if (wp_verify_nonce($nonce, self::NONCE_ACTION) === false) {', '        if (false) {',
+        array('StaffAccountAdminTest::test_a_missing_or_wrong_nonce_changes_nothing')),
+    array('AT8-new-password-keeps-sessions', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        $password = self::generate_password();
+        wp_set_password($password, $user_id);
+        WP_Session_Tokens::get_instance($user_id)->destroy_all();
+', '        $password = self::generate_password();
+        wp_set_password($password, $user_id);
+',
+        array('StaffAccountAdminTest::test_a_new_password_is_strong_shown_once_and_signs_the_tablet_out')),
+    array('AT9-password-for-any-account', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if (!$this->is_staff($user_id)) {
+            return $this->done(\'password\'', '        if (false) {
+            return $this->done(\'password\'',
+        array('StaffAccountAdminTest::test_only_staff_accounts_can_be_targeted')),
+    array('AT10-over-privileged-account-left-enabled', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '            update_user_meta($user_id, EVC_Staff_Auth::DISABLED_META, \'1\');
+', '',
+        array('StaffAccountAdminTest::test_an_account_given_more_than_the_staff_role_stays_disabled')),
+    array('AT11-refusals-not-audited', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        $this->audit($action, $target, self::FORBIDDEN);
+', '',
+        array('StaffAccountAdminTest::test_nobody_but_a_club_administrator_may_act')),
+    array('AT12-weak-password-accepted', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        'strlen($password) >= 20 && ', '',
+        array('StaffAccountAdminTest::test_the_shared_account_is_created_once_with_the_staff_role_only')),
+    array('AT13-schema-behind-target-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '$applied >= $target ? self::OK : self::WRONG', 'self::OK',
+        array('ReadinessTest::test_the_club_database_missing_unreachable_or_at_the_target_schema')),
+    array('AT14-proxy-header-values-shown', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '                $headers[] = substr($h, 5);', '                $headers[] = substr($h, 5) . \'=\' . $this->server[$h];',
+        array('ReadinessTest::test_the_server_checks_show_names_never_values')),
+    array('AT15-any-timezone-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '\'Ζώνη ώρας του ιστότοπου\', $zone === EVC_Membership_Calendar::ZONE ? self::OK : self::WRONG,', '\'Ζώνη ώρας του ιστότοπου\', self::OK,',
+        array('ReadinessTest::test_the_server_checks_show_names_never_values')),
+    array('AT16-duplicate-accounts-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        if (count($accounts) > 1) {
+            return array(self::row(\'staff_account\'', '        if (false) {
+            return array(self::row(\'staff_account\'',
+        array('StaffAccountAdminTest::test_more_than_one_shared_account_is_a_warning_and_nothing_is_deleted')),
+    array('AT17-last-login-of-anyone', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if (EVC_Staff_Role::has_staff_role($user)) {
+            update_user_meta((int) $user->ID, self::LAST_LOGIN_META', '        if (true) {
+            update_user_meta((int) $user->ID, self::LAST_LOGIN_META',
+        array('StaffAccountAdminTest::test_the_last_sign_in_time_is_recorded_without_any_address')),
+    array('ATC1-shop-conflicts-ignored', 'commerce_admin_tools', 'includes/admin/class-evc-readiness.php',
+        '$conflicts === array() ? self::OK : self::WRONG', 'self::OK',
+        array('ReadinessCommerceTest::test_a_wrong_price_a_shared_cart_or_no_bank_transfer_read_wrong')),
+    array('ATC2-bank-transfer-off-reads-ok', 'commerce_admin_tools', 'includes/admin/class-evc-readiness.php',
+        '($bacs[\'enabled\'] ?? \'\') === \'yes\'', 'true',
+        array('ReadinessCommerceTest::test_a_wrong_price_a_shared_cart_or_no_bank_transfer_read_wrong')),
     array('OG17-add-to-cart-after-other-validators', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         'array($this, \'add_to_cart\'), 5, 3);', 'array($this, \'add_to_cart\'), 20, 3);',
         array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
@@ -1531,6 +1603,14 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
         // STAGE-07: the same over the real commerce site.
         $suite = 'wp-commerce-onboarding';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled'));
+    } elseif ($mode === 'admin_tools') {
+        // STAGE-08: EVC_CLUB_ADMIN_TOOLS_ENABLED = true, no commerce plugins.
+        $suite = 'wp-admin-tools';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'disabled', 'EVC_TEST_ADMIN_TOOLS_FLAG' => 'enabled'));
+    } elseif ($mode === 'commerce_admin_tools') {
+        // STAGE-08: the readiness checks over the real commerce site (customer + onboarding + admin pages ON).
+        $suite = 'wp-commerce-admin-tools';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled', 'EVC_TEST_ADMIN_TOOLS_FLAG' => 'enabled'));
     } elseif ($mode === 'fluentcrm') {
         // STAGE-06: EVC_CLUB_FLUENTCRM_SYNC_ENABLED = true + the six tag constants + the TEST-ONLY fake FluentCRM API.
         $suite = 'wp-fluentcrm';
@@ -1559,7 +1639,7 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
 // commerce mutants, which need the real plugins (EVC_TEST_COMMERCE_PLUGINS) and their own CI job.
 $evc_commerce_only = in_array('--mode=commerce', $argv, true);
 $mutants = array_values(array_filter($mutants, function ($m) use ($evc_commerce_only) {
-    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding'), true) === $evc_commerce_only;
+    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding', 'commerce_admin_tools'), true) === $evc_commerce_only;
 }));
 if ($evc_commerce_only && (string) getenv('EVC_TEST_COMMERCE_PLUGINS') === '') {
     fwrite(STDERR, "ABORT: --mode=commerce needs EVC_TEST_COMMERCE_PLUGINS.\n");
@@ -1571,7 +1651,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm', 'onboarding') as $mode) {
+foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding', 'commerce_admin_tools') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm', 'onboarding', 'admin_tools') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

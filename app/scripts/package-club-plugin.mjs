@@ -14,7 +14,7 @@ import { execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, QR_RULES, REDEMPTION_RULES, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, problemsFor, qrProblemsFor, redemptionProblemsFor, selfTest } from "./php-guards.mjs";
+import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, problemsFor, qrProblemsFor, redemptionProblemsFor, selfTest } from "./php-guards.mjs";
 import { storageProblems, storageSelfTest } from "./storage-guard.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -218,6 +218,7 @@ const sawMemberSync = new Set();
 const sawQr = new Set();
 const sawFluentcrm = new Set();
 const sawOnboarding = new Set();
+const sawAdminTools = new Set();
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
   const path = f.replace(/\\/g, "/");
@@ -253,6 +254,11 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   for (const problem of problemsFor(path, text, ONBOARDING_RULES).concat(onboardingProblemsFor(path, text))) {
     fail(problem);
   }
+  // STAGE-08: the Club admin pages only behind EVC_CLUB_ADMIN_TOOLS_ENABLED; readiness never writes; no password leaks.
+  if (ADMIN_TOOLS_RULES.guardedFiles.includes(path)) sawAdminTools.add(path);
+  for (const problem of problemsFor(path, text, ADMIN_TOOLS_RULES).concat(adminToolsProblemsFor(path, text))) {
+    fail(problem);
+  }
   // STAGE-05C: the QR pieces only at their one construction site, behind the customer / staff opt-ins.
   if (Object.values(QR_RULES).includes(path)) sawQr.add(path);
   for (const problem of qrProblemsFor(path, text)) {
@@ -262,6 +268,7 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
 if (sawQr.size !== Object.values(QR_RULES).length) fail("a STAGE-05C QR file is missing from the package");
 if (sawFluentcrm.size !== 2) fail("a STAGE-06 FluentCRM file (plugin or gateway) is missing from the package");
 if (sawOnboarding.size !== ONBOARDING_RULES.guardedFiles.length) fail("a STAGE-07 onboarding file is missing from the package");
+if (sawAdminTools.size !== ADMIN_TOOLS_RULES.guardedFiles.length) fail("a STAGE-08 admin-tools file is missing from the package");
 if (!sawBootstrap) fail("the STAGE-03D bootstrap file is missing from the package");
 if (!sawMigrationsBootstrap) fail("the STAGE-04A migrations bootstrap file is missing from the package");
 if (sawMemberSync.size !== 3) fail("a STAGE-05B member-sync file (sync, SQL store or core) is missing from the package");

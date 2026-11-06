@@ -910,7 +910,8 @@ export const FLUENTCRM_RULES = Object.freeze({
   featureClass: "EVC_Fluentcrm_Feature",
   guarded: ["EVC_Fluentcrm_Api_Gateway", "EVC_Fluentcrm_Tag_Sync"],
   forbidden: [],
-  allowlist: ["evangelou-club.php", FLUENTCRM_BOOTSTRAP, FLUENTCRM_GATEWAY, "includes/class-evc-fluentcrm-tags.php"],
+  // STAGE-08: the read-only readiness checks may NAME the plugin (EVC_Fluentcrm_Plugin::problem(), read-only), never build it.
+  allowlist: ["evangelou-club.php", FLUENTCRM_BOOTSTRAP, FLUENTCRM_GATEWAY, "includes/class-evc-fluentcrm-tags.php", "includes/admin/class-evc-readiness.php"],
   guardedFiles: [FLUENTCRM_BOOTSTRAP, FLUENTCRM_GATEWAY],
   memberLockFiles: null,
   forbiddenDefines: [
@@ -1137,6 +1138,8 @@ export const ONBOARDING_RULES = Object.freeze({
     "includes/onboarding/class-evc-onboarding-shell.php",
     "includes/onboarding/class-evc-rest-join-controller.php",
     "includes/onboarding/class-evc-onboarding-checkout-guard.php",
+    // STAGE-08: the readiness checks reuse EVC_Onboarding_Shell::same_site_url() (D13 terms URL); they construct nothing.
+    "includes/admin/class-evc-readiness.php",
   ],
   guardedFiles: [
     ONBOARDING_BOOTSTRAP,
@@ -1164,13 +1167,15 @@ const CHECKOUT_HOOKS = [
   "woocommerce_store_api_validate_add_to_cart",
 ];
 const USER_WRITERS = ["wp_insert_user", "wp_create_user", "wp_update_user", "register_new_user", "wp_set_auth_cookie", "wp_signon", "wp_set_current_user"];
+// STAGE-08: the shared till account service may CREATE that one account (wp_insert_user) and nothing else of the list.
+const STAFF_ACCOUNT_SERVICE = "includes/admin/class-evc-staff-account-service.php";
 
 export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
   const problems = [];
   for (const tk of tokenize(src)) {
     if (tk.t !== "id" && tk.t !== "str") continue;
     const v = bare(tk.v).toLowerCase();
-    if (path !== rules.registrationFile && USER_WRITERS.some((w) => (tk.t === "id" ? v === w : v.includes(w)))) problems.push(`${path}: creates or signs in a user (${tk.v}) outside the onboarding registration`);
+    if (path !== rules.registrationFile && USER_WRITERS.some((w) => (tk.t === "id" ? v === w : v.includes(w)) && !(path === STAFF_ACCOUNT_SERVICE && w === "wp_insert_user"))) problems.push(`${path}: creates or signs in a user (${tk.v}) outside the onboarding registration`);
     if (path !== rules.handoffFile && v.includes("add-to-cart")) problems.push(`${path}: builds an add-to-cart URL outside the onboarding hand-off`);
     if (path !== rules.checkoutGuardFile && CHECKOUT_HOOKS.some((h) => v.includes(h))) problems.push(`${path}: hooks the WooCommerce cart / checkout / gateways (${tk.v}) outside the onboarding checkout guard`);
   }
@@ -1275,5 +1280,108 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest(), adminToolsSelfTest());
+}
+
+// ---- STAGE-08 rule set: the Club admin pages, only behind EVC_CLUB_ADMIN_TOOLS_ENABLED --------------------------------
+// A. The STAGE-03D construction rules with their own bootstrap and gate: the till-account service and page and the
+//    readiness checks and page are constructed only inside EVC_Admin_Tools_Plugin::wire() (reached only via build() <-
+//    boot() after `if (!EVC_Admin_Tools_Feature::enabled()) { return; }`); their names appear only in the allowlisted
+//    files; no shipped file defines EVC_CLUB_ADMIN_TOOLS_ENABLED.
+// B. adminToolsProblemsFor(): the readiness files NEVER write (no option / meta / transient / user / post writer, no
+//    write on a database handle, no hook that could act); the till-account files never log or cache (no error_log,
+//    print_r, var_export, set_transient, setcookie), so a generated password cannot leak; and only the service file
+//    writes a password (wp_set_password).
+const ADMIN_TOOLS_BOOTSTRAP = "includes/admin/class-evc-admin-tools-plugin.php";
+export const ADMIN_TOOLS_RULES = Object.freeze({
+  bootstrap: ADMIN_TOOLS_BOOTSTRAP,
+  pluginClass: "EVC_Admin_Tools_Plugin",
+  featureClass: "EVC_Admin_Tools_Feature",
+  guarded: ["EVC_Staff_Account_Service", "EVC_Staff_Account_Page", "EVC_Readiness", "EVC_Readiness_Page"],
+  forbidden: [],
+  allowlist: [
+    "evangelou-club.php",
+    ADMIN_TOOLS_BOOTSTRAP,
+    "includes/admin/class-evc-staff-account-service.php",
+    "includes/admin/class-evc-staff-account-page.php",
+    "includes/admin/class-evc-readiness.php",
+    "includes/admin/class-evc-readiness-page.php",
+  ],
+  guardedFiles: [
+    ADMIN_TOOLS_BOOTSTRAP,
+    "includes/admin/class-evc-staff-account-service.php",
+    "includes/admin/class-evc-staff-account-page.php",
+    "includes/admin/class-evc-readiness.php",
+    "includes/admin/class-evc-readiness-page.php",
+  ],
+  memberLockFiles: null,
+  forbiddenDefines: ["EVC_CLUB_ADMIN_TOOLS_ENABLED"],
+  readOnlyFiles: ["includes/admin/class-evc-readiness.php", "includes/admin/class-evc-readiness-page.php"],
+  secretFiles: ["includes/admin/class-evc-staff-account-service.php", "includes/admin/class-evc-staff-account-page.php"],
+  passwordFile: "includes/admin/class-evc-staff-account-service.php",
+});
+const READ_ONLY_FORBIDDEN = ["update_option", "add_option", "delete_option", "update_site_option", "update_user_meta", "add_user_meta", "delete_user_meta",
+  "set_transient", "delete_transient", "wp_insert_user", "wp_update_user", "wp_delete_user", "wp_set_password", "wp_insert_post", "wp_update_post",
+  "wp_delete_post", "add_action", "add_filter", "do_action", "wp_schedule_event", "wp_schedule_single_event", "flush_rewrite_rules", "error_log"];
+const READ_ONLY_METHODS = ["query", "insert", "update", "delete", "replace", "execute", "exec_raw", "transactional", "save"];
+const SECRET_FORBIDDEN = ["error_log", "print_r", "var_export", "var_dump", "set_transient", "set_site_transient", "setcookie", "wp_cache_set", "update_option_password"];
+
+export function adminToolsProblemsFor(path, src, rules = ADMIN_TOOLS_RULES) {
+  const problems = [];
+  const tokens = tokenize(src);
+  tokens.forEach((tk, k) => {
+    if (tk.t !== "id") return;
+    const v = bare(tk.v).toLowerCase();
+    const call = tokens[k + 1]?.v === "(";
+    const member = tokens[k - 1]?.v === "->" || tokens[k - 1]?.v === "::";
+    if (rules.readOnlyFiles.includes(path)) {
+      if (call && !member && READ_ONLY_FORBIDDEN.includes(v)) problems.push(`${path}: writes or hooks (${tk.v}) in a read-only readiness file`);
+      if (call && tokens[k - 1]?.v === "->" && READ_ONLY_METHODS.includes(v)) problems.push(`${path}: calls ->${tk.v}() in a read-only readiness file`);
+    }
+    if (rules.secretFiles.includes(path) && call && !member && SECRET_FORBIDDEN.includes(v)) problems.push(`${path}: ${tk.v}() could leak a generated password`);
+    if (path !== rules.passwordFile && call && !member && v === "wp_set_password") problems.push(`${path}: sets a password outside the till-account service`);
+  });
+  return problems;
+}
+
+const GOOD_ADMIN_TOOLS = `<?php
+final class EVC_Admin_Tools_Plugin {
+    public static function boot($seams = null): void {
+        if (!EVC_Admin_Tools_Feature::enabled()) {
+            return;
+        }
+        $p = self::build();
+    }
+    public static function build() { return self::wire(); }
+    private static function wire() {
+        $s = new EVC_Staff_Account_Service();
+        $r = new EVC_Readiness($s);
+        return array(new EVC_Staff_Account_Page($s), new EVC_Readiness_Page($r));
+    }
+}`;
+
+function adminToolsSelfTest() {
+  const bad = [];
+  const A = ADMIN_TOOLS_RULES;
+  const expect = (label, path, src, want) => {
+    const got = problemsFor(path, src, A).length + adminToolsProblemsFor(path, src).length + onboardingProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`admin tools ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good bootstrap", A.bootstrap, GOOD_ADMIN_TOOLS, false);
+  expect("gate missing", A.bootstrap, GOOD_ADMIN_TOOLS.replace("if (!EVC_Admin_Tools_Feature::enabled()) {\n            return;\n        }", ""), true);
+  expect("service built elsewhere", "includes/x.php", "<?php\n$s = new EVC_Staff_Account_Service();", true);
+  expect("readiness named outside the allowlist", "includes/x.php", "<?php\nfunction f(EVC_Readiness $r) { return $r; }", true);
+  expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_ADMIN_TOOLS_ENABLED', true);", true);
+  expect("readiness writes an option", A.readOnlyFiles[0], "<?php\nupdate_option('x', 1);", true);
+  expect("readiness writes the Club DB", A.readOnlyFiles[0], "<?php\n$db->execute('DELETE FROM t');", true);
+  expect("readiness hooks something", A.readOnlyFiles[1], "<?php\nadd_action('init', 'f');", true);
+  expect("readiness reads", A.readOnlyFiles[0], "<?php\n$v = get_option('x'); $r = $db->fetch_one('SELECT 1');", false);
+  expect("password logged", A.passwordFile, "<?php\nerror_log($password);", true);
+  expect("password cached", A.secretFiles[1], "<?php\nset_transient('p', $password, 60);", true);
+  expect("password set elsewhere", "includes/x.php", "<?php\nwp_set_password('x', 1);", true);
+  expect("the service may set a password", A.passwordFile, "<?php\nwp_set_password($p, $id);", false);
+  expect("the service may create the account", A.passwordFile, "<?php\n$id = wp_insert_user(array());", false);
+  expect("the service may not sign anyone in", A.passwordFile, "<?php\nwp_set_auth_cookie($id);", true);
+  expect("a user created elsewhere still refused", "includes/admin/class-evc-readiness-page.php", "<?php\n$id = wp_insert_user(array());", true);
+  return bad;
 }
