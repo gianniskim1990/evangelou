@@ -223,18 +223,22 @@ final class EVC_Fluentcrm_Plugin {
                     $cursor = $id;
                     $done++;
                 }
-                $status['current'] = self::add_counts($status['current'], $counts);
-                update_option(self::CURSOR_OPTION, $cursor, false);
                 // Round 3: push the lock's end forward after every batch, so a long run is never taken over.
-                // Not ours any more (another run took it): stop here; that run goes on from the saved cursor.
+                // Not ours any more (another run took it): stop here, BEFORE writing the cursor (STAGE-07 round 2):
+                // that run owns the cursor now; this batch is simply done again (the sync is idempotent).
                 $lock = self::refresh_lock($lock);
                 if ($lock === null) {
                     break;
                 }
+                $status['current'] = self::add_counts($status['current'], $counts);
+                update_option(self::CURSOR_OPTION, $cursor, false);
             }
             if ($lock === null) {
-                // stopped cleanly: nothing scheduled, nothing released
-            } elseif ($finished) {
+                // Stopped cleanly (STAGE-07 nit): the lock is another run's now, so this run writes nothing more —
+                // no status, no retry budget, no schedule, no release; that run owns the counts from here.
+                return $done;
+            }
+            if ($finished) {
                 $status['last'] = $status['current'];
                 $status['last_finished_at'] = time();
                 $status['current'] = array();
@@ -272,7 +276,13 @@ final class EVC_Fluentcrm_Plugin {
     public static function refresh_lock(string $mine): ?string {
         global $wpdb;
         $next = (time() + self::LOCK_TTL) . '|' . bin2hex(random_bytes(16));
+        $wpdb->last_error = '';
         $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $next, self::LOCK_OPTION, $mine));
+        if ($wpdb->last_error !== '') {
+            self::forget_cached_lock();
+            // STAGE-07 nit: a database error is not a lost lock: the run fails, which schedules ONE bounded follow-up.
+            throw new RuntimeException('The reconcile lock could not be refreshed.');
+        }
         $ok = (int) $wpdb->rows_affected === 1;
         self::forget_cached_lock();
         return $ok ? $next : null;

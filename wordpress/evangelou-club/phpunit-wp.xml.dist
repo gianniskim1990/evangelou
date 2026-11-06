@@ -59,5 +59,13 @@
         <testsuite name="wp-commerce-fluentcrm">
             <directory>tests/wordpress/commerce-fluentcrm</directory>
         </testsuite>
+        <!-- STAGE-07: in-store onboarding ON (EVC_TEST_ONBOARDING_FLAG=enabled + EVC_TEST_CUSTOMER_FLAG=enabled), no commerce plugins. -->
+        <testsuite name="wp-onboarding">
+            <directory>tests/wordpress/onboarding</directory>
+        </testsuite>
+        <!-- STAGE-07: the same over the REAL commerce site (EVC_TEST_COMMERCE_PLUGINS, CI commerce job). -->
+        <testsuite name="wp-commerce-onboarding">
+            <directory>tests/wordpress/commerce-onboarding</directory>
+        </testsuite>
     </testsuites>
 </phpunit>

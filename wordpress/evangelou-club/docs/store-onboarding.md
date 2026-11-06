@@ -1,0 +1,340 @@
+# In-store QR onboarding (STAGE-07)
+
+**Status: built and tested, default OFF.** Nothing is hooked, registered or served unless wp-config.php defines
+`EVC_CLUB_ONBOARDING_ENABLED` as the boolean `true` **and** the customer surface is on
+(`EVC_CLUB_CUSTOMER_ENABLED === true`, because the flow ends in the member area). Enabling it on any real site is a
+separate owner and technician step. It has not been done.
+
+## What it does
+
+A customer at the till scans the QR on the shop tablet. A short mobile flow follows, with the approved UI-02
+onboarding screens (register → consents → offer) connected to the real site:
+
+1. **Account.** Name, Greek mobile, e-mail (required) and password, by the existing CUSTOMER-01 rules. A customer
+   who already has an account signs in instead, on the normal WordPress login, which returns to the join page.
+2. **Terms.** Only the Club terms, required. **No marketing or newsletter choice is shown** (owner decision D12).
+3. **Offer.** "Πληρωμή 20 €" opens the shop's existing WooCommerce checkout with the existing Club product in the
+   cart, straight away: there is **no e-mail confirmation step** (owner decision D14). The payment is by bank
+   transfer only (owner decision D15) and stays pending until the shop confirms it through the existing STAGE-03D
+   path. No new payment code.
+4. **Member area** (`/club-member/`, STAGE-05D). It shows "pending payment" and, once the shop confirms, the
+   member QR.
+
+A signed-in customer who already has an active membership, a membership the Club cannot verify yet, or an open Club
+order is **never** sent to pay again. They go to the member area instead.
+
+## Owner decisions
+
+| | Decision (2026-11-06) | Where it is built |
+|---|---|---|
+| D12 | No newsletter or marketing choice; the onboarding never touches FluentCRM. | below |
+| D13 | The Club terms page already exists. The technician sets `EVC_CLUB_TERMS_URL` to it; no URL ships in code. Without it, the terms step shows the terms sentence and the privacy link only (the current fallback). | Configuration |
+| D14 | No e-mail confirmation step: from the account straight to the terms and payment. | Security: what remains possible |
+| D15 | Bank transfer (`bacs`) is the ONLY payment method for the Club subscription. If it is not available, no method is offered and a Greek message says so (fail closed). Other products are unchanged. | WooCommerce cart and checkout |
+| D16 | The failure limit stays at 10 failures per 5 minutes per client. | Security: abuse protection |
+| D17 | The per-client success cap default is 10 new accounts per hour (was 3). | Configuration, Security |
+
+### D12
+
+**Decided by the owner (2026-11-06):** the onboarding has no newsletter checkbox for now. It does not create, change
+or tag any FluentCRM contact. The STAGE-06 tag sync, when the owner enables it, is the only FluentCRM path.
+
+> **Απόφαση ιδιοκτήτη (D12):** Στην εγγραφή στο κατάστημα δεν υπάρχει επιλογή για newsletter. Η εγγραφή δεν
+> δημιουργεί, δεν αλλάζει και δεν βάζει ετικέτες σε επαφές του FluentCRM.
+
+This rests on one FluentCRM setting that must stay as audited: **FluentCRM → Settings → General → "create new
+FluentCRM contacts on WP user registration" must remain unchecked** (it was unchecked in the audit). If someone
+checks it, FluentCRM itself would create a contact for every new account. This plugin never calls FluentCRM; the
+packager guard enforces that.
+
+## Configuration (wp-config.php)
+
+```php
+define('EVC_CLUB_CUSTOMER_ENABLED', true);      // already required by the member area
+define('EVC_CLUB_ONBOARDING_ENABLED', true);    // exact boolean true only
+define('EVC_CLUB_TERMS_URL', 'https://…/oroi-club/'); // D13: the EXISTING Club terms page, same site only
+// Optional success caps (exact int 1..1000; anything else means the default):
+define('EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR', 10);  // new accounts per client address per hour (default 10, D17)
+define('EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR', 30); // new accounts per IPv6 /48 per hour (default 30)
+define('EVC_CLUB_JOIN_MAX_PER_HOUR', 100);        // new accounts per hour in total (default 100)
+```
+
+**Shop Wi-Fi.** Customers on the shop's Wi-Fi share one public address, so by default **10 accounts per hour** can
+be created from it (D17; customers on mobile data are separate clients). If the shop expects more sign-ups an hour
+on its Wi-Fi, the technician raises `EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR` (the total cap still applies).
+
+The checkout hand-off also needs the existing commerce source constants (`EVC_CLUB_MEMBERSHIP_SOURCE`, the level,
+the product and the evidence key). Without them, the join flow says "unavailable" and never opens a checkout. The
+privacy link is WordPress's own privacy policy page, when one is set.
+
+## Pages and routes
+
+| What | Where | Who |
+|---|---|---|
+| Join page | `/club/join/` (plain permalinks: `/?evc_club_join=1`) | anyone |
+| Tablet poster | `/club/join/poster/` (plain: `/?evc_club_join=poster`) | the shared Club staff account, shop managers (`manage_woocommerce`), administrators; signed out → WordPress login |
+| `POST …/evangelou-club-customer/v1/join/account` | public | creates the account |
+| `POST …/join/terms` | customer (cookie + nonce) | records the current Club terms |
+| `POST …/join/checkout` | customer | `member` or `checkout`, with a server-built URL |
+
+All pages are private and no-store, with `noindex`, no-referrer, nosniff, `frame-ancestors 'none'` and a self-only
+CSP. They are never page-cached: `DONOTCACHEPAGE` is defined for caching plugins and WordPress's own no-cache
+headers (`wp_get_nocache_headers()`, sent with `nocache_headers()`) are part of every response. The poster's QR encodes **only** the public join URL plus the fixed marker `src=store`: no secret, no nonce and
+nothing about anyone. The front end refuses any other parameter. The poster needs no network once loaded and has a
+reload button.
+
+## Security
+
+- **Accounts.** Created with WordPress core (`wp_insert_user`, role `customer`), then signed in
+  (`wp_set_auth_cookie`). No e-mail is sent by this step. The login name is random (`club_` + 12 hex), so it reveals
+  nothing. The billing name, e-mail, phone (`+3069…`) and country are prefilled for the checkout.
+- **WordPress's "Anyone can register" setting is bypassed on purpose.** This is a separate, flag-gated sign-up of
+  Club customers only (role `customer`, never any other role); it works whether that core setting is on or off, and
+  it does not turn on the core registration form.
+- **The phone number is unverified.** Anyone can type any number. It is stored only as the WooCommerce billing phone
+  to prefill the checkout. It must never identify a member, look up an account, or become a phone directory.
+- **Existing e-mail.** It is never attached to, signed into or changed. The answer is the neutral `check_account`
+  ("Ίσως έχετε ήδη λογαριασμό — συνδεθείτε ή επαναφέρετε τον κωδικό"), the same for every reason an e-mail cannot be
+  used (it exists as an e-mail or as a user name, or the account could not be created). The server hashes the
+  password on this path as on the success path; no timing guarantee is claimed.
+- **What remains possible (D14, honest limits).** Without an e-mail confirmation step:
+  - *Enumeration:* a successful registration necessarily shows that the e-mail was free, and `check_account` hints
+    that it may not be. The success and failure caps below slow this down; they do not prevent it.
+  - *Pre-registration:* someone can create an account with another person's e-mail before that person does. The
+    real owner of the e-mail recovers it with **"Ξέχασα τον κωδικό"** (WordPress password reset, which goes to that
+    e-mail). Until then, the squatter can place an **unpaid** bank-transfer order on that account; it stays
+    unconfirmed (no membership, no card) unless the shop confirms a matching transfer, which the shop does by hand.
+- **Password policy** (the server; the browser only hints): 10–128 characters, not a known common password, not one
+  repeated character, and not containing the e-mail's name or the mobile number.
+- **Abuse protection.**
+  - **Failures** (D16): at most 10 per 5 minutes per client, then 429 until the window ends. Failures are invalid
+    input, an existing e-mail and the honeypot. **Round 4 (B1):** also at most **30 per 5 minutes per IPv6 /48 in
+    aggregate** (`MAX_NETWORK_FAILURES`), then 429 for the whole /48 until the window ends. Chosen sensibly rather
+    than 10: a mobile carrier puts unrelated customers in one /48 (the reason for N1 below), and 10 failures shared by
+    a whole carrier would lock real customers out over typing mistakes; 30 still bounds the failure rows one /48
+    can write to about 30 per 5 minutes, instead of up to 65,536.
+  - **Successes:** at most `EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR` (default 10, D17) new accounts per client per hour,
+    `EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR` (default **30**, coordinator decision N1 in round 4: mobile carriers share a
+    /48 among unrelated customers) per IPv6 **/48** per hour (an aggregate bucket on top of the /64 one, so one
+    allocation cannot rotate through its 65,536 /64s), and `EVC_CLUB_JOIN_MAX_PER_HOUR` (default
+    100) in total per hour. A slot is reserved **before** the account is created; over a cap the answer is the neutral
+    `try_later` ("Η εγγραφή δεν είναι δυνατή αυτή τη στιγμή. Δοκιμάστε ξανά αργότερα ή ρωτήστε στο ταμείο."), nothing
+    is created, and it is not counted as a failure.
+  - **The total cap is a lever for denial of service, and it stays blocking.** Anyone who can create 100 accounts
+    an hour from many addresses (or /48s) stops QR sign-up for everyone until the hour ends; that is the price of a
+    hard ceiling on account creation. When it is hit, ONE line without personal data is logged per hour ("the
+    hourly limit of new Club accounts (EVC_CLUB_JOIN_MAX_PER_HOUR) was reached …") and administrators see a Greek
+    admin notice for 24 hours. The technician tunes `EVC_CLUB_JOIN_MAX_PER_HOUR` (or turns the flag off) and checks
+    the new accounts.
+  - **Neither a missing nonce nor a foreign `Origin` is counted** (round 3, R4): both are refused with 403, and
+    counting them would let another site spend a client's budget. WordPress core refuses a request with an invalid
+    nonce before the route.
+  - **The client** is `REMOTE_ADDR`: an IPv4 address as is, an IPv4-mapped IPv6 address as its IPv4 address, and any
+    other IPv6 address by its **/64** network (one household or phone usually holds a whole /64). The key is an HMAC
+    of that with a secret **derived** from the WordPress `AUTH_SALT` with its own label
+    (`evangelou-club/join-rate-limit-key/v1`), so it is never the salt itself and no address is stored.
+  - **Counters are atomic.** Each event is ONE `INSERT … ON DUPLICATE KEY UPDATE` on a row of the WordPress options
+    table (`evc_join_rl_<f|s|n|g|a>_<key>`, value `count|window_start`, autoload off): parallel requests cannot both see
+    the old count. The options table was chosen so that no Club database migration is needed. Expired rows are
+    deleted now and then (they hold only a count and a time). A concurrent burst is not driven by a test (the WordPress
+    test case runs in one transaction on one connection); the tests assert instead that every counted event is one
+    such statement, never a read-modify-write or a transient, which is what makes the burst safe.
+  - **The failure rows are bounded, and the bound can never close sign-up** (round 3 R5, reworked in round 4 B1).
+    Before a failure row is written, a bounded count on the `option_name` index (`SELECT COUNT(*) FROM (… LIMIT
+    5000)`) checks the failure rows (`f_` per client, `m_` per /48). At 5000 (`ROW_CEILING`), expired rows are
+    deleted first; **failure rows are deleted as soon as their own 5-minute window is over** (a separate `DELETE`
+    using `WINDOW_SECONDS`, in every cleanup; other rows live two hours). If still full, **no new failure row is
+    written** (an existing row is still counted with one atomic `UPDATE`), and the shop is told: one log line
+    without personal data and a Greek admin notice, at most once an hour. **Account creation is never refused
+    because of the ceiling:** in round 3 it was, which let about 5000 invalid POSTs (one /48 had 65,536 /64s and no
+    /48 failure limit) close sign-up for two hours, again and again. Now a flood can at most stop failures from NEW
+    clients being counted for five minutes; the per-/48 failure limit above makes even that need many /48s. A
+    deadlock or lock wait in a cleanup `DELETE` is ignored and not logged; a later cleanup removes the rows.
+  - A hidden honeypot field (`evc_extra`, `autocomplete="off"`, a name browsers do not autofill); no CAPTCHA service.
+- **CSRF.** Every write needs the page's `wp_rest` nonce (see above). An `Origin` header, when sent, must be this
+  site. The terms and checkout routes use the customer
+  authorization of the member area (cookie, own nonce check, customer accounts only).
+- **No open redirect.** Every URL the flow uses comes from the server's bootstrap or answer and is checked to be this
+  site, on the server and again in the browser. `?redirect_to=` and `?next=` on the join page are ignored.
+- **No personal data in logs.** Only class names on a wiring failure; the tests assert it.
+- **Construction and guards.** The registration, hand-off, shell, REST controller and checkout guard are constructed
+  only in `EVC_Onboarding_Plugin::wire()`, behind the gate. They also refuse construction while the flag is off. The
+  packager enforces that creating or signing in a user happens only in the registration file, that an add-to-cart
+  URL is built only in the hand-off file, and that only the checkout guard hooks the WooCommerce cart, checkout and
+  gateway filters (`app/scripts/php-guards.mjs`, STAGE-07 rules, with self-tests).
+
+## WooCommerce cart and checkout (round 2)
+
+With the flag on, `EVC_Onboarding_Checkout_Guard` applies the Club rules on the shop's own cart and checkout, so they
+hold outside the join flow too (a second device, a saved `?add-to-cart=` link). Products other than the Club product
+are untouched.
+
+- **Bought alone (mixed-cart decision).** The Club subscription is bought on its own: adding it to a cart that holds
+  other products is refused, adding other products to a cart that holds it is refused, and a checkout of a mixed
+  cart is refused ("Η συνδρομή του Evangelou Club αγοράζεται μόνη της…"). Reason: the Club verifies a Club order only
+  as exactly one Club item at 20.00 EUR (`EVC_Wp_Commerce_Pmpro_Reader`); a mixed order would never become a
+  membership. The product is also sold individually (quantity 1). On the real stack an earlier validator in the
+  WooCommerce chain (not this plugin) already refuses adding the Club product to a cart with other products; the
+  guard never overrides an earlier refusal, and the tests check the guard's own answer separately.
+- **No second order** (add-to-cart validation and both checkouts, below): refused
+  while the customer has an open Club order (pending, on-hold, processing) or a membership that reads pending
+  payment or unverified, the same rule as the join page. An **active** or ended member may buy it again (early
+  renewal, decision D2).
+- **An account is required.** A guest Club checkout is refused unless the customer creates an account at that
+  checkout; a guest order could never be attributed to a member.
+- **Bank transfer only (D15).** `woocommerce_available_payment_gateways`: when the Club product is in the cart, or is
+  in the order being paid, only `bacs` is offered. "The order being paid" is the classic "pay for order" page
+  (`is_checkout_pay_page()`) and, round 4 (G1), the Store API route `POST /wc/store/v1/checkout/{id}` (WooCommerce
+  11.2.1 `CheckoutOrder`): it checks the chosen gateway against `get_available_payment_gateways()` before any Store
+  API action fires, so the guard reads that order's items from `rest_request_before_callbacks` until
+  `rest_request_after_callbacks` of that request, never the session cart. If bank transfer is disabled, the list is empty and
+  `woocommerce_no_available_payment_methods_message` shows: "Η συνδρομή του Club πληρώνεται μόνο με τραπεζική
+  μεταφορά, που δεν είναι διαθέσιμη αυτή τη στιγμή. Ρωτήστε στο κατάστημα."
+- **Both checkouts (round 3, R1).** WooCommerce 8.3+ uses the **Block Checkout** (Store API) by default, which
+  does not fire `woocommerce_after_checkout_validation`. On the pinned WooCommerce 11.2.1:
+  - Store API `cart/add-item` applies `woocommerce_add_to_cart_validation` itself and turns the guard's notice into
+    its error, so the same filter (now at priority 5, before other validators, so the customer sees the Club's own
+    reason) covers the classic cart and the Store API;
+  - `woocommerce_store_api_cart_errors` (fired by the checkout's cart validation, before any order exists): mixed
+    cart and second order (HTTP 409 with `evc_club_mixed_cart` / `evc_club_duplicate_order`);
+  - `woocommerce_store_api_checkout_update_order_from_request` (POST `/checkout` only): a guest Club checkout is
+    refused with a Store API `RouteException` (400 `evc_club_account_required`, the Greek message) unless that
+    checkout creates the account (registration enabled, and required or `create_account`);
+  - the gateway filter is the one both checkouts read: the Store API cart lists only `bacs` for the Club product (or
+    nothing when it is off), and a POST with another method is refused by WooCommerce
+    (`woocommerce_rest_checkout_payment_method_disabled`).
+- **Accepted race (R6).** Two checkouts of the same customer at the same instant (two devices, within the same
+  second) can both pass these checks and leave two unpaid bank-transfer orders. That is accepted: the shop's manual
+  confirmation of a transfer is the final gate. Confirming one transfer never funds two orders and one order is
+  never funded by two transfers (`BacsConfirmationTest::test_one_bank_transfer_cannot_fund_two_orders`,
+  `test_one_order_cannot_be_funded_by_two_transfers`). If the shop does confirm two paid orders, the periods never
+  overlap: the second one is chained after the first as an early renewal, with no paid time lost or added
+  (`WcCompletionTest::test_bulk_completion_of_two_orders`, `test_early_renewal_keeps_the_paid_row_active_until_the_new_row_exists`).
+  The confirmer does not refuse a second paid order; it adds it as the next month. The shop should cancel the
+  unpaid duplicate instead of confirming it.
+- **Open orders are read in full.** The check reads all of the customer's open orders (`limit => -1`, ids only), so
+  an older open Club order is found however many newer orders exist.
+
+## Tests
+
+- **PHP unit** `OnboardingRulesTest`: name, mobile, required e-mail, password policy, failure window, client key
+  (IPv6 /64, IPv4-mapped, invalid input), the derived secret, the configured caps, the stored counter.
+- **WordPress** `wp-onboarding` (customer + onboarding flags):
+  - the pages, steps and poster access;
+  - private headers;
+  - a new account as a signed-in customer;
+  - an existing e-mail never attached or revealed;
+  - field codes, honeypot, bad nonce, missing nonce and foreign origin (neither counted);
+  - the failure limit, including the window, a new window and another address;
+  - the success caps per client (10), per IPv6 /48 (30) and in total (100) → `try_later`; the total cap's single
+    log line per hour and the admin notice (administrators only, 24 hours);
+  - the failures per IPv6 /48 (30 per 5 minutes in aggregate, then 429 for the /48; another /48 and IPv4 unaffected);
+  - the bounded failure rows: no new failure row at the ceiling, an existing row still counted, **a valid sign-up
+    still accepted**, one log line and the admin notice, a failing cleanup ignored and not logged, and the failure
+    rows deleted five minutes after their window started;
+  - IPv6 counted by /64, IPv4-mapped counted as IPv4;
+  - one atomic statement per counted event, no transient, no address stored;
+  - `DONOTCACHEPAGE` and the no-cache headers on every page;
+  - no personal data in logs or options;
+  - terms with version;
+  - authorization of the signed-in routes;
+  - no checkout without a configured product.
+
+  `wp-common` `OnboardingOffTest` proves that nothing exists while the flag is off.
+- **Real WooCommerce** `wp-commerce-onboarding` (CI commerce job, HPOS and posts storage):
+  - the whole journey: new account → terms → checkout hand-off → on-hold order → member area pending → the shop
+    confirms → active → member QR;
+  - an existing e-mail creates nothing;
+  - an active member goes straight to the member area;
+  - pending, on-hold and processing orders are never doubled;
+  - an ended membership with a waiting renewal is never doubled;
+  - a cancelled order or a non-Club order leaves the offer open;
+  - another customer's order never counts;
+  - an older Club order is found behind 55 newer open Club orders of other customers;
+  - an ended membership's waiting renewal is found behind 51 newer open orders of the same customer for other
+    products (an on-hold Club order on its own already reads as "pending payment" through the membership, so the
+    open-order check decides only in this case; the first version of this test could not tell `limit 50` apart);
+  - the cart: Club product alone, never into or with other products, never a second order (open order), early
+    renewal for an active member;
+  - the checkout validation: mixed cart, guest without an account, second order;
+  - the gateways with the real `WC_Payment_Gateways`: other products keep every gateway, the Club product gets only
+    `bacs`, and nothing (with the Greek message) when bank transfer is off;
+  - the guard's reader of the WooCommerce cart;
+  - the Block Checkout through the real Store API (`/wc/store/v1/cart/add-item`, `/cart`, `/checkout`): mixed cart,
+    second order, a guest refused (only the Store API's own draft is left, exactly in `checkout-draft`) and then
+    accepted when creating the account, bank transfer only, nothing when it is off;
+  - paying an existing Club order through `POST /wc/store/v1/checkout/{id}` with an empty session cart: cheque
+    refused, bank transfer accepted, another order still payable by cheque (G1);
+  - a fresh REST server (new route objects, as in a new request) placing the order with no preceding GET (T1).
+- **Frontend**:
+  - `joinModel.test.ts`: rules pinned to the approved CUSTOMER-01 rules, same-site configs, strict join-v1 client (including `try_later` and the `evc_extra` body key);
+  - `joinFlow.test.ts`: jsdom flow, accessibility (labels, described errors, focus), D12 with a single checkbox,
+    double tap, poster QR, the `try_later` message, the honeypot's name and `autocomplete`.
+- **Mutants**:
+  - OR1–OR17 (rules);
+  - OB1–OB38 (WordPress; OB33 is now "the ceiling closes sign-up"; OB20 retired in round 3 because a refused origin is no longer counted; OB2/OB10 not added: the customer-flag requirement is not observable in any suite, and the
+    origin comparison is covered by OB9);
+  - OC1–OC6 (real commerce; round 2 restored OC3, because the order query is now the only customer filter, and added
+    OC6 for the page limit) and OG1–OG18 (the checkout guard, OG14–OG17 for the Block Checkout, OG18 for paying an
+    existing order through the Store API);
+  - JM1–JM18 (frontend).
+
+## Operator note (Greek): how to put up the tablet poster
+
+> **Οδηγίες για το κατάστημα — η αφίσα εγγραφής στο tablet**
+>
+> 1. Στο tablet του ταμείου ανοίξτε τον browser και συνδεθείτε με τον λογαριασμό του Club (ή με λογαριασμό
+>    διαχειριστή του καταστήματος).
+> 2. Ανοίξτε τη διεύθυνση **…/club/join/poster/** (ή **…/?evc_club_join=poster**, αν ο ιστότοπος δεν έχει «όμορφα»
+>    links). Θα δείτε ένα μεγάλο QR και τον τίτλο «Ένας καφές κάθε μέρα. Γραφτείτε τώρα.»
+> 3. Αφήστε τη σελίδα ανοιχτή σε πλήρη οθόνη, με την οθόνη να μη σβήνει (Ρυθμίσεις → Οθόνη → «Αυτόματο κλείδωμα:
+>    Ποτέ» όσο είναι ανοιχτό το κατάστημα).
+> 4. Ο πελάτης σκανάρει το QR με την κάμερα του κινητού του και ακολουθεί τα βήματα στο δικό του κινητό. Στο tablet
+>    δεν πληκτρολογεί τίποτα.
+> 5. Αν το tablet χάσει το internet, το QR **συνεχίζει να λειτουργεί**: είναι σταθερό και δεν περιέχει κανένα
+>    προσωπικό στοιχείο. Αν η σελίδα κολλήσει, πατήστε **«Ανανέωση»**.
+> 6. Η πληρωμή γίνεται με τραπεζική μεταφορά, όπως σήμερα. Όταν δείτε τη μεταφορά, ολοκληρώστε την παραγγελία στο
+>    WooCommerce («Ολοκληρωμένη») και ο πελάτης βλέπει αμέσως την κάρτα μέλους του.
+> 7. Αν πελάτης πει ότι «υπάρχει ήδη λογαριασμός», να συνδεθεί ή να πατήσει «Επαναφορά κωδικού». Το κατάστημα δεν
+>    αλλάζει ποτέ λογαριασμούς πελατών με βάση το τηλέφωνο ή το όνομα.
+> 8. Δύο παραγγελίες Club σε αναμονή για τον ίδιο πελάτη → επιβεβαιώστε μόνο αυτή με την κατάθεση, ακυρώστε την άλλη.
+
+## Owner answers (Greek, 2026-11-06)
+
+1. **Όροι του Club (D13):** Η σελίδα των όρων υπάρχει ήδη. Ο τεχνικός βάζει τη διεύθυνσή της στη ρύθμιση
+   `EVC_CLUB_TERMS_URL`. Χωρίς τη ρύθμιση εμφανίζεται μόνο η πρόταση των όρων και ο σύνδεσμος της πολιτικής απορρήτου.
+2. **Επιβεβαίωση e-mail (D14):** Όχι. Από τον λογαριασμό κατευθείαν στην πληρωμή. Αν κάποιος γράψει λογαριασμό με
+   ξένο e-mail, ο πραγματικός κάτοχος τον παίρνει πίσω με «Ξέχασα τον κωδικό».
+3. **Τρόποι πληρωμής (D15):** Για τη συνδρομή μόνο τραπεζική μεταφορά. Αν δεν είναι διαθέσιμη, δεν εμφανίζεται
+   κανένας τρόπος πληρωμής και ο πελάτης βλέπει μήνυμα. Τα άλλα προϊόντα δεν αλλάζουν.
+4. **Όριο προσπαθειών (D16):** Μένει 10 λανθασμένες προσπάθειες ανά 5 λεπτά. Επιπλέον, από την ίδια διεύθυνση
+   γίνονται έως 10 νέοι λογαριασμοί την ώρα (απόφαση D17· έως 30 ανά δίκτυο IPv6 /48 και έως 100 συνολικά την
+   ώρα). Στο Wi-Fi του καταστήματος όλοι οι πελάτες
+   φαίνονται από την ίδια διεύθυνση: αν χρειάζεστε περισσότερους, ο τεχνικός αυξάνει τη ρύθμιση
+   `EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR`.
+
+## Go-live checklist (owner + technician; nothing here is done by this stage)
+
+1. Set `EVC_CLUB_TERMS_URL` to the existing Club terms page (D13); decide the success caps for the shop Wi-Fi.
+2. **`REMOTE_ADDR` is the real client.** Behind a reverse proxy, load balancer or CDN (Cloudflare and the like),
+   `REMOTE_ADDR` is the proxy's address, and then every customer shares ONE budget (10 accounts an hour for the whole
+   site, and 10 failures lock everyone out). Before enabling: open a page that shows `$_SERVER['REMOTE_ADDR']` from a
+   phone on mobile data and from the shop Wi-Fi, and check that each shows its own public address. If not, the
+   server (not this plugin) must restore the client address from the trusted proxy only (nginx `real_ip`, Apache
+   `mod_remoteip`, Cloudflare's documented module). This plugin never reads `X-Forwarded-For` itself.
+3. **FluentCRM must not see new accounts (D12).** All three must hold:
+   - FluentCRM → Settings → General → "create new FluentCRM contacts on WP user registration" stays **unchecked**;
+   - no FluentCRM automation funnel with a **"New User Sign Up"** (user registration) trigger is active, or every
+     such funnel excludes the `customer` role;
+   - the FluentCRM **WooCommerce integration** (customer / order sync into contacts) is **off**, or excludes these
+     customers (otherwise the Club checkout itself creates a contact).
+4. On **staging**: the customer flag and the onboarding flag; pretty permalinks or the `?evc_club_join=` links; the
+   poster on a test tablet; one test account through the whole flow with a test bank transfer that the shop
+   confirms; a cart with the Club product shows only bank transfer; a cart with coffee shows the usual methods.
+5. **Which checkout does the live site use?** Open WooCommerce → Settings → Advanced → Page setup → Checkout page,
+   then edit that page: a **Checkout block** means the Block Checkout (Store API); a `[woocommerce_checkout]`
+   shortcode (or a "Classic Checkout" block) means the classic checkout. Record which one, with the date, in the
+   go-live notes. Both are covered by the guard; the staging test in step 4 must use the same one as live.
+6. Confirm a page cache (plugin or host) does not cache `/club/join/` (it should honour `DONOTCACHEPAGE` and the
+   no-cache headers; exclude the path by hand if the host cache ignores them).
+7. Only then set `EVC_CLUB_ONBOARDING_ENABLED` to `true` in production (owner approval required).

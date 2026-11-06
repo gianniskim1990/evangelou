@@ -32,6 +32,7 @@
  * CX1-CX4: admin entry points; CN1-CN2: the construction guard).
  * And STAGE-05B (MS6: the member-sync construction guard).
  * And STAGE-06 (FT1-FT40: FluentCRM membership tags).
+ * And STAGE-07 (OR1-OR10: in-store onboarding rules).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2732,6 +2733,112 @@ $mutants = array(
         'file' => 'includes/class-evc-fluentcrm-tags.php',
         'search' => '                if (!in_array(self::VOIDED_FLAG, $entitlement->diagnostic_flags(), true)) {',
         'replace' => '                if (false) {',
+    ),
+    // STAGE-07 (OR1-OR10): in-store onboarding rules - name, mobile, required e-mail, password policy, failure window, client key.
+    array(
+        'id' => 'OR1-one-word-name-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        } elseif (strpos($name, \' \') === false) {',
+        'replace' => '        } elseif (false) {',
+    ),
+    array(
+        'id' => 'OR2-mobile-not-anchored',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'preg_match(\'/^69\\d{8}$/D\', $national)',
+        'replace' => 'preg_match(\'/69\\d{8}/\', $national)',
+    ),
+    array(
+        'id' => 'OR3-email-optional',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        if (trim($email_raw) === \'\') {
+            $errors[\'email\'] = self::EMAIL_MISSING;',
+        'replace' => '        if (false) {
+            $errors[\'email\'] = self::EMAIL_MISSING;',
+    ),
+    array(
+        'id' => 'OR4-password-min-six',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        if ($length < self::PASSWORD_MIN) {',
+        'replace' => '        if ($length < 6) {',
+    ),
+    array(
+        'id' => 'OR5-common-passwords-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'in_array($lower, self::COMMON_PASSWORDS, true) || ',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'OR6-email-name-in-password-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        if (strlen($local) >= 4 && strpos($lower, strtolower($local)) !== false) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'OR7-mobile-in-password-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        if (strlen($digits) === 8 && strpos(',
+        'replace' => '        if (false && strpos(',
+    ),
+    array(
+        'id' => 'OR8-tenth-failure-not-blocked',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '&& (int) $state[0] >= $max;',
+        'replace' => '&& (int) $state[0] > $max;',
+    ),
+    array(
+        'id' => 'OR9-failure-window-never-resets',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => ' || $now - (int) $state[1] >= $window) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'OR10-client-key-is-the-address',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        return substr(hash_hmac(\'sha256\', \'evc-join|\' . $subject, $secret), 0, 32);',
+        'replace' => '        return $ip;',
+    ),
+    // STAGE-07 round 2 (OR11-OR15): IPv6 /64 and mapped IPv4 keys, the derived secret, the configured caps, the counter.
+    array(
+        'id' => 'OR11-ipv6-keyed-per-address',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '\'v6|\' . bin2hex(substr($packed, 0, 8))',
+        'replace' => '\'v6|\' . bin2hex($packed)',
+    ),
+    array(
+        'id' => 'OR12-mapped-ipv4-not-unwrapped',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'if (strlen($packed) === 16 && substr($packed, 0, 12) === ',
+        'replace' => 'if (false && substr($packed, 0, 12) === ',
+    ),
+    array(
+        'id' => 'OR13-secret-is-the-salt-itself',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        return $salt === \'\' ? \'\' : hash_hmac(\'sha256\', \'evangelou-club/join-rate-limit-key/v1\', $salt);',
+        'replace' => '        return $salt;',
+    ),
+    array(
+        'id' => 'OR14-any-cap-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'is_int($value) && $value >= 1 && $value <= 1000 ? $value : $default;',
+        'replace' => 'is_int($value) ? $value : $default;',
+    ),
+    array(
+        'id' => 'OR16-ipv6-48-key-is-the-64-key',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '\'evc-join|v6n|\' . bin2hex(substr($packed, 0, 6))',
+        'replace' => '\'evc-join|v6|\' . bin2hex(substr($packed, 0, 8))',
+    ),
+    array(
+        'id' => 'OR17-mapped-ipv4-gets-a-48-key',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'if (strlen($packed) !== 16 || substr($packed, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {',
+        'replace' => 'if (strlen($packed) !== 16) {',
+    ),
+    array(
+        'id' => 'OR15-counter-not-anchored',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '\'/^(\\d{1,9})\\|(\\d{1,12})$/D\'',
+        'replace' => '\'/(\\d{1,9})\\|(\\d{1,12})/\'',
     ),
 );
 

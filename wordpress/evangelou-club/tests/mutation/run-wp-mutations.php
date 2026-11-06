@@ -1234,6 +1234,255 @@ $mutants = array(
     array('FC3-retires-without-the-voided-evidence', 'commerce_fluentcrm', 'includes/class-evc-fluentcrm-tags.php',
         '                if (!in_array(self::VOIDED_FLAG, $entitlement->diagnostic_flags(), true)) {', '                if (false) {',
         array('FluentcrmCommerceTest::test_an_outsider_tagged_by_hand_who_buys_something_else_is_never_touched')),
+    // STAGE-07 (FW29-FW30): accepted STAGE-06 nits - no writes after a lost lock; a refresh DB error is a failed run.
+    array('FW29-lost-lock-still-writes-status', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '                return $done;
+            }
+            if ($finished) {', '            }
+            if ($finished) {',
+        array('FluentcrmTagSyncWpTest::test_the_lock_is_refreshed_after_every_batch_and_a_lost_lock_stops_the_run')),
+    array('FW30-refresh-db-error-taken-as-lost-lock', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '        if ($wpdb->last_error !== \'\') {
+            self::forget_cached_lock();
+            // STAGE-07 nit', '        if (false) {
+            self::forget_cached_lock();
+            // STAGE-07 nit',
+        array('FluentcrmTagSyncWpTest::test_a_database_error_while_refreshing_the_lock_schedules_one_bounded_follow_up')),
+    // STAGE-07 round 2 (FW31): the cursor is written only AFTER the lock was refreshed (never after a lost lock).
+    array('FW31-cursor-written-before-the-refresh', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '                $lock = self::refresh_lock($lock);
+                if ($lock === null) {
+                    break;
+                }
+                $status[\'current\'] = self::add_counts($status[\'current\'], $counts);
+                update_option(self::CURSOR_OPTION, $cursor, false);', '                update_option(self::CURSOR_OPTION, $cursor, false);
+                $lock = self::refresh_lock($lock);
+                if ($lock === null) {
+                    break;
+                }
+                $status[\'current\'] = self::add_counts($status[\'current\'], $counts);',
+        array('FluentcrmTagSyncWpTest::test_the_lock_is_refreshed_after_every_batch_and_a_lost_lock_stops_the_run')),
+    // STAGE-07 (OB1-OB18, mode onboarding / disabled; OC1-OC5, mode commerce_onboarding): in-store onboarding.
+    array('OB1-flag-accepts-truthy-values', 'onboarding', 'includes/onboarding/class-evc-onboarding-feature.php',
+        '        return $value === true;', '        return (bool) $value;',
+        array('OnboardingTest::test_the_flag_needs_both_constants_as_boolean_true')),
+    array('OB3-boot-gate-removed', 'disabled', 'includes/onboarding/class-evc-onboarding-plugin.php',
+        '        if (!EVC_Onboarding_Feature::enabled()) {
+            return;
+        }
+        $seams', '        $seams',
+        array('OnboardingOffTest::test_off_by_default_nothing_exists')),
+    array('OB4-registration-constructible-when-off', 'disabled', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        EVC_Onboarding_Feature::assert_constructible(__CLASS__);
+', '',
+        array('OnboardingOffTest::test_the_classes_refuse_construction_while_off')),
+    array('OB5-honeypot-ignored', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        if (!is_string($honeypot) || $honeypot !== \'\') {', '        if (false) {',
+        array('OnboardingTest::test_the_honeypot_creates_nothing')),
+    array('OB6-email-taken-as-user-name-not-checked', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        ' || username_exists($email) !== false', '',
+        array('OnboardingTest::test_an_existing_email_is_never_attached_or_revealed')),
+    array('OB7-rate-limit-not-enforced', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        'if (EVC_Onboarding_Rules::blocked($this->read(\'f\', $key), $now, self::WINDOW_SECONDS, self::MAX_FAILURES)', 'if (false',
+        array('OnboardingTest::test_ten_failures_in_five_minutes_block_the_address')),
+    array('OB8-invalid-input-not-counted', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '            $this->count_failure_of($key, $network, $now);
+            return array(\'outcome\' => self::INVALID', '            return array(\'outcome\' => self::INVALID',
+        array('OnboardingTest::test_ten_failures_in_five_minutes_block_the_address')),
+    array('OB9-origin-not-checked', 'onboarding', 'includes/onboarding/class-evc-rest-join-controller.php',
+        '        if (!self::same_origin($request)) {', '        if (false) {',
+        array('OnboardingTest::test_a_bad_nonce_or_another_origin_is_refused')),
+    array('OB11-signed-in-may-register-again', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        if (is_user_logged_in()) {
+            return array(\'outcome\' => self::SIGNED_IN);', '        if (false) {
+            return array(\'outcome\' => self::SIGNED_IN);',
+        array('OnboardingTest::test_a_new_account_is_a_signed_in_customer_with_exactly_what_was_typed')),
+    array('OB12-terms-accepted-without-true', 'onboarding', 'includes/onboarding/class-evc-rest-join-controller.php',
+        '($body[\'accept\'] ?? null) !== true', 'empty($body[\'accept\'])',
+        array('OnboardingTest::test_terms_are_recorded_with_their_version_only_for_the_customer_themself')),
+    array('OB13-terms-version-not-checked', 'onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '        return is_array($meta) && ($meta[\'version\'] ?? null) === EVC_Onboarding_Rules::TERMS_VERSION;', '        return is_array($meta);',
+        array('OnboardingTest::test_terms_are_recorded_with_their_version_only_for_the_customer_themself')),
+    array('OB14-poster-for-any-account', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        if (!self::may_show_poster($user)) {', '        if (false) {',
+        array('OnboardingTest::test_the_poster_is_for_the_shop_only_and_encodes_only_the_join_url')),
+    array('OB15-poster-carries-a-nonce', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        $config = array(\'mode\' => \'poster\', \'joinUrl\' => self::join_url(true), \'appVersion\' => EVC_CLUB_VERSION);', '        $config = array(\'mode\' => \'poster\', \'joinUrl\' => self::join_url(true), \'appVersion\' => EVC_CLUB_VERSION, \'nonce\' => wp_create_nonce(\'wp_rest\'));',
+        array('OnboardingTest::test_the_poster_is_for_the_shop_only_and_encodes_only_the_join_url')),
+    array('OB16-other-hosts-are-same-site', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        ' || strtolower($parts[\'host\']) !== strtolower($site[\'host\'])', '',
+        array('OnboardingTest::test_redirect_parameters_are_never_used')),
+    array('OB17-staff-account-may-join', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        if (EVC_Customer_Auth::check_customer($user) !== null) {
+            return \'not_customer\';', '        if (false) {
+            return \'not_customer\';',
+        array('OnboardingTest::test_the_steps_of_a_signed_in_account')),
+    array('OB18-store-marker-dropped', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        return $from_store ? add_query_arg(\'src\', self::STORE_MARKER, $url) : $url;', '        return $url;',
+        array('OnboardingTest::test_the_poster_is_for_the_shop_only_and_encodes_only_the_join_url')),
+    // STAGE-07 round 2 (OB19-OB27): success caps, atomic counters, the nonce rule, IPv6 /64, never page-cached.
+    // Round 3: no counting call exists any more for a refused request, so OB19 now drops the missing-nonce refusal.
+    array('OB19-missing-nonce-accepted', 'onboarding', 'includes/onboarding/class-evc-rest-join-controller.php',
+        '        if (!self::anonymous_nonce_ok($request)) {', '        if (false) {',
+        array('OnboardingTest::test_a_bad_nonce_or_another_origin_is_refused')),
+    // OB20 retired in round 3 (R4): an origin refusal is no longer counted, so there is no counting call to remove;
+    // the test asserts 0 failures after two origin refusals.
+    array('OB21-client-success-cap-ignored', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        ' > self::max_per_client_hour()', ' > 1000',
+        array('OnboardingTest::test_successes_are_capped_per_client_and_in_total')),
+    array('OB22-total-success-cap-ignored', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        ' > self::max_per_hour()', ' > 1000',
+        array('OnboardingTest::test_successes_are_capped_per_client_and_in_total')),
+    array('OB23-counter-window-never-ends', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        'IF(CAST(SUBSTRING_INDEX(option_value, \'|\', -1) AS UNSIGNED) <= %d, %s, ', 'IF(0 AND %d, %s, ',
+        array('OnboardingTest::test_ten_failures_in_five_minutes_block_the_address')),
+    array('OB24-counter-read-modify-write', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        $fresh = \'1|\' . $now;
+        $wpdb->query(', '        $fresh = \'1|\' . $now;
+        $old = $this->read($bucket, $key);
+        if ($old !== null) {
+            $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s", ($old[0] + 1) . \'|\' . $old[1], $name));
+            return $old[0] + 1;
+        }
+        $wpdb->query(',
+        array('OnboardingTest::test_each_counted_event_is_one_atomic_statement_never_a_transient')),
+    array('OB25-ipv6-counted-per-address', 'onboarding', 'includes/class-evc-onboarding-rules.php',
+        '\'v6|\' . bin2hex(substr($packed, 0, 8))', '\'v6|\' . bin2hex($packed)',
+        array('OnboardingTest::test_an_ipv6_client_counts_by_its_64_network')),
+    array('OB26-page-cache-not-told', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        self::no_page_cache();
+', '',
+        array('OnboardingTest::test_the_pages_are_never_page_cached')),
+    array('OB27-no-cache-headers-dropped', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        foreach (wp_get_nocache_headers() as $name => $value) {', '        foreach (array() as $name => $value) {',
+        array('OnboardingTest::test_the_pages_are_never_page_cached')),
+    // STAGE-07 round 3 (OB29-OB34): the /48 cap, the total-cap alert, the bounded counter rows.
+    array('OB29-ipv6-48-cap-ignored', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        ' > self::max_per_network_hour()', ' > 1000',
+        array('OnboardingTest::test_an_ipv6_48_has_its_own_aggregate_cap')),
+    array('OB30-total-cap-never-alerted', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '            $this->alert_total_cap($now);
+', '',
+        array('OnboardingTest::test_successes_are_capped_per_client_and_in_total')),
+    array('OB31-alert-on-every-refusal', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '\'total-cap\', self::SUCCESS_WINDOW_SECONDS, $now) !== 1) {', '\'total-cap\', self::SUCCESS_WINDOW_SECONDS, $now) !== 1 && false) {',
+        array('OnboardingTest::test_successes_are_capped_per_client_and_in_total')),
+    array('OB32-failure-rows-unbounded', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        if (!$existing_only) {', '        if (true) {',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
+    // Round 4 (B1): the ceiling must never close sign-up (the round-3 behaviour is now the mutant).
+    array('OB33-sign-up-closed-at-the-ceiling', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        // The failure-row ceiling is deliberately NOT consulted here (round 4, B1).
+', '        if ($this->failure_rows_full($now)) {
+            return array(\'outcome\' => self::TRY_LATER);
+        }
+',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
+    array('OB34-cleanup-errors-logged', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '$was = $wpdb->suppress_errors(true);', '$was = $wpdb->suppress_errors(false);',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
+    // STAGE-07 round 4 (OB35-OB38, B1): /48 failures, expired failure rows, the row-ceiling alert.
+    array('OB35-ipv6-48-failures-not-blocking', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        ' || ($network !== \'\' && EVC_Onboarding_Rules::blocked(', ' || (false && EVC_Onboarding_Rules::blocked(',
+        array('OnboardingTest::test_failures_are_also_limited_per_ipv6_48')),
+    array('OB36-ipv6-48-failures-not-counted', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '            $this->count_in(\'m\', $network, $now, $full);
+', '',
+        array('OnboardingTest::test_failures_are_also_limited_per_ipv6_48')),
+    array('OB37-expired-failure-rows-kept', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        'foreach (array(\'f_\', \'m_\') as $bucket) {', 'foreach (array() as $bucket) {',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
+    array('OB38-row-ceiling-never-alerted', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '            $this->alert_rows_full($now);
+', '',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
+    array('OB28-guard-constructible-when-off', 'disabled', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        EVC_Onboarding_Feature::assert_constructible(__CLASS__);
+', '',
+        array('OnboardingOffTest::test_the_checkout_guard_refuses_construction_while_off')),
+    array('OC1-open-order-not-checked', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '            if ($this->has_open_club_order($user_id)) {
+                return self::NEXT_MEMBER;', '            if (false) {
+                return self::NEXT_MEMBER;',
+        array('OnboardingCommerceTest::test_an_ended_membership_with_a_waiting_renewal_order_is_not_sent_to_pay_twice')),
+    array('OC2-active-member-sent-to-pay', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        'const MEMBER_STATES = array(EVC_Customer_Membership::ACTIVE, ', 'const MEMBER_STATES = array(',
+        array('OnboardingCommerceTest::test_a_signed_in_active_member_goes_straight_to_the_member_area')),
+    // Round 2: OC3 restored (the order query is the ONLY customer filter now), OC6 (every open order is read).
+    array('OC3-any-customers-order-counts', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '\'customer_id\' => $user_id, \'status\' => self::OPEN_STATUSES', '\'status\' => self::OPEN_STATUSES',
+        array('OnboardingCommerceTest::test_another_customers_open_order_never_counts')),
+    array('OC6-only-fifty-open-orders-read', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '\'limit\' => -1, \'return\' => \'ids\'', '\'limit\' => 50, \'return\' => \'ids\'',
+        array('OnboardingCommerceTest::test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found')),
+    array('OC4-any-product-counts', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        ' && (int) $item->get_product_id() === $this->config->product_id', '',
+        array('OnboardingCommerceTest::test_a_cancelled_order_or_an_order_of_something_else_leaves_the_offer_open')),
+    array('OC5-checkout-without-terms', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '        return self::terms_accepted($user_id) ? self::NEXT_CHECKOUT : self::NEXT_TERMS;', '        return self::NEXT_CHECKOUT;',
+        array('OnboardingCommerceTest::test_from_the_tablet_qr_to_the_member_qr')),
+    // STAGE-07 round 2 (OG1-OG13, mode commerce_onboarding): the Club rules on WooCommerce's own cart and checkout.
+    array('OG1-every-gateway-for-the-club', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        return isset($gateways[self::GATEWAY]) ? array(self::GATEWAY => $gateways[self::GATEWAY]) : array();', '        return $gateways;',
+        array('OnboardingCommerceTest::test_bank_transfer_is_the_only_gateway_for_the_club_and_none_without_it')),
+    array('OG2-other-gateways-when-bacs-is-off', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        ' ? array(self::GATEWAY => $gateways[self::GATEWAY]) : array();', ' ? array(self::GATEWAY => $gateways[self::GATEWAY]) : $gateways;',
+        array('OnboardingCommerceTest::test_bank_transfer_is_the_only_gateway_for_the_club_and_none_without_it')),
+    array('OG3-no-greek-reason-without-bacs', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        return $this->club_in_cart() ? self::NO_BACS : $message;', '        return $message;',
+        array('OnboardingCommerceTest::test_bank_transfer_is_the_only_gateway_for_the_club_and_none_without_it')),
+    array('OG4-club-into-a-mixed-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '(($adding_club && $cart_has_other) || ', '((false) || ',
+        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
+    array('OG5-other-products-into-a-club-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        ' || (!$adding_club && $cart_has_club)) {', ') {',
+        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
+    array('OG6-second-order-into-the-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($adding_club && is_user_logged_in() && $this->handoff->blocks_new_order(get_current_user_id())) {', '        if (false) {',
+        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
+    array('OG7-mixed-checkout-accepted', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '            $errors->add(\'evc_club_mixed_cart\', self::MIXED);
+', '',
+        array('OnboardingCommerceTest::test_the_checkout_refuses_a_mixed_cart_a_guest_and_a_second_order')),
+    array('OG8-guest-club-checkout-accepted', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '            if (!$creating) {', '            if (false) {',
+        array('OnboardingCommerceTest::test_the_checkout_refuses_a_mixed_cart_a_guest_and_a_second_order')),
+    array('OG9-second-order-at-the-checkout', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if (is_user_logged_in() && $this->handoff->blocks_new_order(get_current_user_id())) {', '        if (false) {',
+        array('OnboardingCommerceTest::test_the_checkout_refuses_a_mixed_cart_a_guest_and_a_second_order', 'OnboardingCommerceTest::test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account')),
+    array('OG10-active-member-may-not-renew', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '        return in_array($state, array(EVC_Customer_Membership::PENDING_PAYMENT, EVC_Customer_Membership::UNVERIFIED), true);', '        return true;',
+        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
+    array('OG11-guard-never-hooked', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-plugin.php',
+        '        self::$parts[\'guard\']->register();
+', '',
+        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice', 'OnboardingCommerceTest::test_bank_transfer_is_the_only_gateway_for_the_club_and_none_without_it')),
+    array('OG12-cart-lines-not-read', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '                $ids[] = (int) ($line[\'product_id\'] ?? 0);', '                $ids[] = 0;',
+        array('OnboardingCommerceTest::test_the_guard_reads_the_real_woocommerce_cart')),
+    // STAGE-07 round 3 (OG14-OG17, R1): the Block Checkout through the real Store API.
+    array('OG14-store-api-cart-rules-ignored', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($errors instanceof WP_Error && $this->club_in_cart()) {', '        if (false) {',
+        array('OnboardingCommerceTest::test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account')),
+    array('OG15-store-api-guest-accepted', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if (!$creates) {', '        if (false) {',
+        array('OnboardingCommerceTest::test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account')),
+    array('OG16-store-api-create-account-ignored', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        ' || filter_var($request[\'create_account\'], FILTER_VALIDATE_BOOLEAN));', ');',
+        array('OnboardingCommerceTest::test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account')),
+    // STAGE-07 round 4 (OG18, G1): paying an existing order through the Store API reads that order. (Not ending the
+    // context in rest_request_after_callbacks is not a mutant: the next request's rest_request_before_callbacks resets it.)
+    array('OG18-pay-for-order-reads-the-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($this->paying !== null) {', '        if (false) {',
+        array('OnboardingCommerceTest::test_paying_an_existing_club_order_through_the_store_api_is_bank_transfer_only')),
+    array('OG17-add-to-cart-after-other-validators', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        'array($this, \'add_to_cart\'), 5, 3);', 'array($this, \'add_to_cart\'), 20, 3);',
+        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
+    array('OG13-open-order-does-not-block-the-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '            if ($this->has_open_club_order($user_id)) {
+                return true;', '            if (false) {
+                return true;',
+        array('OnboardingCommerceTest::test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -1274,6 +1523,14 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
         // STAGE-06 round 2: the real commerce site + EVC_CLUB_FLUENTCRM_SYNC_ENABLED + the TEST-ONLY fake FluentCRM API.
         $suite = 'wp-commerce-fluentcrm';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_FLUENTCRM_FLAG' => 'enabled'));
+    } elseif ($mode === 'onboarding') {
+        // STAGE-07: customer flag ON + EVC_CLUB_ONBOARDING_ENABLED = true, no commerce plugins.
+        $suite = 'wp-onboarding';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled'));
+    } elseif ($mode === 'commerce_onboarding') {
+        // STAGE-07: the same over the real commerce site.
+        $suite = 'wp-commerce-onboarding';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled'));
     } elseif ($mode === 'fluentcrm') {
         // STAGE-06: EVC_CLUB_FLUENTCRM_SYNC_ENABLED = true + the six tag constants + the TEST-ONLY fake FluentCRM API.
         $suite = 'wp-fluentcrm';
@@ -1302,7 +1559,7 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
 // commerce mutants, which need the real plugins (EVC_TEST_COMMERCE_PLUGINS) and their own CI job.
 $evc_commerce_only = in_array('--mode=commerce', $argv, true);
 $mutants = array_values(array_filter($mutants, function ($m) use ($evc_commerce_only) {
-    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm'), true) === $evc_commerce_only;
+    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding'), true) === $evc_commerce_only;
 }));
 if ($evc_commerce_only && (string) getenv('EVC_TEST_COMMERCE_PLUGINS') === '') {
     fwrite(STDERR, "ABORT: --mode=commerce needs EVC_TEST_COMMERCE_PLUGINS.\n");
@@ -1314,7 +1571,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm') as $mode) {
+foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm', 'onboarding') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

@@ -215,6 +215,14 @@ jobs:
           if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/fluentcrm-junit.xml" 40; fi
           exit $rc
 
+      - name: WordPress suite - in-store onboarding ON (STAGE-07, customer flag ON, test environment only)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_ONBOARDING_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-onboarding --log-junit "$RUNNER_TEMP/onboarding-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/onboarding-junit.xml" 40; fi
+          exit $rc
+
       - name: Authorization mutation tests (real WordPress)
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-wp-mutations.php
@@ -318,6 +326,14 @@ jobs:
           EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_FLUENTCRM_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-commerce-fluentcrm --log-junit "$RUNNER_TEMP/commerce-fluentcrm-junit.xml"
           rc=$?
           if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/commerce-fluentcrm-junit.xml" 40; fi
+          exit $rc
+
+      - name: Commerce suite - in-store onboarding over the real stack (STAGE-07, customer + onboarding flags ON)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_ONBOARDING_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-commerce-onboarding --log-junit "$RUNNER_TEMP/commerce-onboarding-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/commerce-onboarding-junit.xml" 40; fi
           exit $rc
 
       - name: Commerce source mutation tests (real plugins)

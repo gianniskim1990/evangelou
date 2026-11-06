@@ -74,6 +74,17 @@ if ($evc_fluentcrm_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-07: the onboarding constant, fixed per PHPUnit process: EVC_TEST_ONBOARDING_FLAG=enabled defines
+// EVC_CLUB_ONBOARDING_ENABLED as boolean true (the wp-onboarding and wp-commerce-onboarding suites, which also set the
+// customer flag); unset/disabled leaves it undefined (every other suite).
+$evc_onboarding_mode = getenv('EVC_TEST_ONBOARDING_FLAG');
+if ($evc_onboarding_mode === 'enabled') {
+    define('EVC_CLUB_ONBOARDING_ENABLED', true);
+} elseif ($evc_onboarding_mode !== false && $evc_onboarding_mode !== '' && $evc_onboarding_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_ONBOARDING_FLAG must be enabled or disabled.\n");
+    exit(1);
+}
+
 // STAGE-03D review: TEST-ONLY hook so the suites may construct the WooCommerce-completion classes with the
 // feature constant OFF (EVC_Wc_Completion_Feature::assert_constructible; the packager refuses it in shipped files).
 define('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);

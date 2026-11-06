@@ -897,6 +897,8 @@ final class EVC_Wc_Completion_Plugin {
 // Round 3: in the gateway also no variable member (->$x), no call of an expression result (]( or )(, casts
 // excepted), no variable function call ($f(), `new` only of its own exceptions, and no write chained off
 // anything but $this's own property ($this->x(...)->p = / $this->a->b =); <=, >=, <=> are not writes.
+// STAGE-07 nits: in the gateway no "{$" / "${" inside a string and none of the built-ins that call a callable
+// (array_map, usort, preg_replace_callback, ...). A string callable handed to some other built-in remains a limit.
 // LIMITATION (documented): a token guard cannot follow names assembled at run time from string pieces
 // (e.g. 'fc_' . 'tags', 'create' . 'OrUpdate'); the gateway's small, reviewed surface and the test-only fake
 // FluentCRM (which fails on any undocumented call) cover that gap, not this guard.
@@ -924,7 +926,11 @@ const FLUENTCRM_NEVER = ["createorupdate", "getcontactbyuserref", "attachlists",
 const FLUENTCRM_GATEWAY_FORBIDDEN_CALLS = ["do_action", "apply_filters", "add_action", "add_filter", "do_action_ref_array", "apply_filters_ref_array", "wp_mail"];
 const FLUENTCRM_TABLES = ["fc_subscriber", "fc_tag", "fc_list"];
 const FLUENTCRM_GATEWAY_STATIC = { self: ["int", "row", "tag_id", "version_supported"], static: ["int", "row", "tag_id", "version_supported"], evc_fluentcrm_feature: ["assert_constructible"] };
-const FLUENTCRM_DYNAMIC_CALLS = ["call_user_func", "call_user_func_array", "forward_static_call", "forward_static_call_array"];
+const FLUENTCRM_DYNAMIC_CALLS = ["call_user_func", "call_user_func_array", "forward_static_call", "forward_static_call_array",
+  // STAGE-07 nit: built-ins that call a callable (a string callable passed to them is a hidden call).
+  "array_map", "array_filter", "array_walk", "array_walk_recursive", "array_reduce", "usort", "uasort", "uksort", "iterator_apply",
+  "register_shutdown_function", "register_tick_function", "set_error_handler", "set_exception_handler", "spl_autoload_register",
+  "preg_replace_callback", "preg_replace_callback_array", "ob_start", "header_register_callback"];
 /** The gateway may construct only its own exceptions. */
 const FLUENTCRM_GATEWAY_NEW = ["runtimeexception", "invalidargumentexception"];
 const reachesFluentcrm = (v) => v.startsWith("fluentcrm") || v.startsWith("fluent_crm") || v.includes("fluentcrmapi") || v.includes("\\fluentcrm\\") || v.startsWith("fluentcampaign");
@@ -939,6 +945,8 @@ export function fluentcrmProblemsFor(path, src, rules = FLUENTCRM_RULES) {
     if (!gateway && reachesFluentcrm(v)) problems.push(`${path}: reaches FluentCRM (${tk.t === "str" ? "string" : tk.v}) outside the gateway`);
     if (FLUENTCRM_NEVER.some((n) => (tk.t === "id" ? v === n || v.endsWith("\\" + n) : v.includes(n)))) problems.push(`${path}: names a never-touch FluentCRM method (${tk.v})`);
     if (tk.t === "str" && FLUENTCRM_TABLES.some((t) => v.includes(t))) problems.push(`${path}: names a FluentCRM table in a string`);
+    // STAGE-07 nit: "{$x->m()}" / "${x}" inside a string runs code; none in the gateway.
+    if (gateway && tk.t === "str" && (tk.v.includes("{$") || tk.v.includes("${"))) problems.push(`${path}: the gateway interpolates code in a string`);
     if (gateway && tk.t === "id") {
       if (tokens[k - 1]?.v === "->" && tokens[k + 1]?.v === "(" && !FLUENTCRM_GATEWAY_METHODS.includes(v) && !["contacts", "tags", "subscriber"].includes(v)) problems.push(`${path}: the gateway calls ->${tk.v}()`);
       if (FLUENTCRM_GATEWAY_FORBIDDEN_CALLS.includes(v) && tokens[k + 1]?.v === "(") problems.push(`${path}: the gateway calls ${tk.v}()`);
@@ -1096,6 +1104,127 @@ function fluentcrmSelfTest() {
   expect("the gateway's own exceptions", F.gateway, g("if (!$s) { throw new RuntimeException('x'); } $e = new \\InvalidArgumentException('y');"), false);
   expect("its own property", F.gateway, g("$this->cache = $s;"), false);
   expect("a cast before a parenthesis", F.gateway, g("$x = (string) ($s->email ?? '');"), false);
+  // STAGE-07 nits.
+  expect("a method call interpolated in a string", F.gateway, g('$x = "{$s->save()}";'), true);
+  expect("a variable interpolated in a string", F.gateway, g('$x = "${s}";'), true);
+  expect("a string callable to array_map", F.gateway, g("$x = array_map('FluentCrmApi', array('lists'));"), true);
+  expect("a string callable to usort", F.gateway, g("usort($a, 'evil');"), true);
+  expect("preg_replace_callback", F.gateway, g("$x = preg_replace_callback('/a/', 'f', $y);"), true);
+  expect("a plain single-quoted string with braces is fine", F.gateway, g("$x = '{not code}';"), false);
+  return bad;
+}
+
+// ---- STAGE-07 rule set: in-store QR onboarding, only behind EVC_CLUB_ONBOARDING_ENABLED -------------------------
+// A. The STAGE-03D construction rules with their own bootstrap and gate: the registration, the hand-off, the join
+//    page shell and the join REST controller are constructed only inside EVC_Onboarding_Plugin::wire() (reached only
+//    via build() <- boot() after `if (!EVC_Onboarding_Feature::enabled()) { return; }`); their names appear only in
+//    the allowlisted files; no shipped file defines EVC_CLUB_ONBOARDING_ENABLED.
+// B. onboardingProblemsFor(): creating a user or signing one in (wp_insert_user / wp_create_user / wp_update_user /
+//    register_new_user / wp_set_auth_cookie / wp_signon / wp_set_current_user) only in the registration file; an
+//    add-to-cart URL only in the hand-off file (identifiers and strings, any case).
+const ONBOARDING_BOOTSTRAP = "includes/onboarding/class-evc-onboarding-plugin.php";
+export const ONBOARDING_RULES = Object.freeze({
+  bootstrap: ONBOARDING_BOOTSTRAP,
+  pluginClass: "EVC_Onboarding_Plugin",
+  featureClass: "EVC_Onboarding_Feature",
+  guarded: ["EVC_Onboarding_Registration", "EVC_Onboarding_Handoff", "EVC_Onboarding_Shell", "EVC_Rest_Join_Controller", "EVC_Onboarding_Checkout_Guard"],
+  forbidden: [],
+  allowlist: [
+    "evangelou-club.php",
+    ONBOARDING_BOOTSTRAP,
+    "includes/onboarding/class-evc-onboarding-registration.php",
+    "includes/onboarding/class-evc-onboarding-handoff.php",
+    "includes/onboarding/class-evc-onboarding-shell.php",
+    "includes/onboarding/class-evc-rest-join-controller.php",
+    "includes/onboarding/class-evc-onboarding-checkout-guard.php",
+  ],
+  guardedFiles: [
+    ONBOARDING_BOOTSTRAP,
+    "includes/onboarding/class-evc-onboarding-registration.php",
+    "includes/onboarding/class-evc-onboarding-handoff.php",
+    "includes/onboarding/class-evc-onboarding-shell.php",
+    "includes/onboarding/class-evc-rest-join-controller.php",
+    "includes/onboarding/class-evc-onboarding-checkout-guard.php",
+  ],
+  memberLockFiles: null,
+  forbiddenDefines: ["EVC_CLUB_ONBOARDING_ENABLED"],
+  registrationFile: "includes/onboarding/class-evc-onboarding-registration.php",
+  handoffFile: "includes/onboarding/class-evc-onboarding-handoff.php",
+  checkoutGuardFile: "includes/onboarding/class-evc-onboarding-checkout-guard.php",
+});
+// Round 2 (D15): only the checkout guard may change which gateways WooCommerce offers or veto the cart / checkout.
+// Round 3 (R1): the Block Checkout / Store API hooks too.
+const CHECKOUT_HOOKS = [
+  "woocommerce_available_payment_gateways",
+  "woocommerce_add_to_cart_validation",
+  "woocommerce_after_checkout_validation",
+  "woocommerce_no_available_payment_methods_message",
+  "woocommerce_store_api_cart_errors",
+  "woocommerce_store_api_checkout_update_order_from_request",
+  "woocommerce_store_api_validate_add_to_cart",
+];
+const USER_WRITERS = ["wp_insert_user", "wp_create_user", "wp_update_user", "register_new_user", "wp_set_auth_cookie", "wp_signon", "wp_set_current_user"];
+
+export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
+  const problems = [];
+  for (const tk of tokenize(src)) {
+    if (tk.t !== "id" && tk.t !== "str") continue;
+    const v = bare(tk.v).toLowerCase();
+    if (path !== rules.registrationFile && USER_WRITERS.some((w) => (tk.t === "id" ? v === w : v.includes(w)))) problems.push(`${path}: creates or signs in a user (${tk.v}) outside the onboarding registration`);
+    if (path !== rules.handoffFile && v.includes("add-to-cart")) problems.push(`${path}: builds an add-to-cart URL outside the onboarding hand-off`);
+    if (path !== rules.checkoutGuardFile && CHECKOUT_HOOKS.some((h) => v.includes(h))) problems.push(`${path}: hooks the WooCommerce cart / checkout / gateways (${tk.v}) outside the onboarding checkout guard`);
+  }
+  return problems;
+}
+
+const GOOD_ONBOARDING = `<?php
+final class EVC_Onboarding_Plugin {
+    public static function boot($seams = null): void {
+        if (!EVC_Onboarding_Feature::enabled()) {
+            return;
+        }
+        $p = self::build();
+    }
+    public static function build() { return self::wire(); }
+    private static function wire() {
+        $h = new EVC_Onboarding_Handoff(null, $m, $c);
+        $r = new EVC_Onboarding_Registration();
+        return array(new EVC_Onboarding_Shell($h, $a), new EVC_Rest_Join_Controller($r, $h), new EVC_Onboarding_Checkout_Guard($h, $cart));
+    }
+}`;
+
+function onboardingSelfTest() {
+  const bad = [];
+  const O = ONBOARDING_RULES;
+  const expect = (label, path, src, want) => {
+    const got = problemsFor(path, src, O).length + onboardingProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`onboarding ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good bootstrap", O.bootstrap, GOOD_ONBOARDING, false);
+  expect("gate missing", O.bootstrap, GOOD_ONBOARDING.replace("if (!EVC_Onboarding_Feature::enabled()) {\n            return;\n        }", ""), true);
+  expect("gate of another feature", O.bootstrap, GOOD_ONBOARDING.replace("EVC_Onboarding_Feature::enabled", "EVC_Customer_Feature::enabled"), true);
+  expect("registration constructed elsewhere", "includes/x.php", "<?php\n$r = new EVC_Onboarding_Registration();", true);
+  expect("controller constructed outside wire()", O.bootstrap, GOOD_ONBOARDING.replace("public static function build() {", "public static function build() { new EVC_Rest_Join_Controller(1, 2);"), true);
+  expect("hand-off named outside the allowlist", "includes/x.php", "<?php\nfunction f(EVC_Onboarding_Handoff $h) { return $h; }", true);
+  expect("build() from another file", "includes/x.php", "<?php\nEVC_Onboarding_Plugin::build();", true);
+  expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_ONBOARDING_ENABLED', true);", true);
+  expect("a user created elsewhere", "includes/customer/x.php", "<?php\n$id = wp_insert_user(array());", true);
+  expect("a user created through a string", "includes/x.php", "<?php\ncall_user_func('wp_create_user', 'a', 'b');", true);
+  expect("a sign-in elsewhere", "includes/x.php", "<?php\nwp_set_auth_cookie($id);", true);
+  expect("a user switched elsewhere", O.handoffFile, "<?php\nwp_set_current_user(1);", true);
+  expect("checkout guard constructed elsewhere", "includes/x.php", "<?php\n$g = new EVC_Onboarding_Checkout_Guard($h);", true);
+  expect("gateways filtered elsewhere", "includes/customer/x.php", "<?php\nadd_filter('woocommerce_available_payment_gateways', 'f');", true);
+  expect("checkout vetoed elsewhere", "includes/x.php", "<?php\nadd_action('WooCommerce_After_Checkout_Validation', 'f', 20, 2);", true);
+  expect("cart vetoed elsewhere", "includes/x.php", "<?php\nadd_filter('woocommerce_add_to_cart_validation', 'f');", true);
+  expect("Store API cart errors elsewhere", "includes/x.php", "<?php\nadd_action('woocommerce_store_api_cart_errors', 'f', 10, 2);", true);
+  expect("Store API order hook elsewhere", "includes/x.php", "<?php\nadd_action('woocommerce_store_api_checkout_update_order_from_request', 'f', 10, 2);", true);
+  expect("the guard may hook the Store API", O.checkoutGuardFile, "<?php\nadd_action('woocommerce_store_api_cart_errors', array($this, 'store_api_cart_errors'), 20, 2);", false);
+  expect("the guard may filter gateways", O.checkoutGuardFile, "<?php\nadd_filter('woocommerce_available_payment_gateways', array($this, 'gateways'), 100, 1);", false);
+  expect("the registration may create users", O.registrationFile, "<?php\n$id = wp_insert_user($a); wp_set_auth_cookie($id);", false);
+  expect("an add-to-cart URL elsewhere", "includes/x.php", "<?php\n$u = add_query_arg('add-to-cart', 5, $c);", true);
+  expect("an add-to-cart URL in the registration", O.registrationFile, "<?php\n$u = 'ADD-TO-CART';", true);
+  expect("the hand-off builds it", O.handoffFile, "<?php\n$u = add_query_arg('add-to-cart', 5, $c);", false);
+  expect("a comment mention is fine", "includes/x.php", "<?php\n// wp_insert_user() add-to-cart\n$x = 1;", false);
   return bad;
 }
 
@@ -1146,5 +1275,5 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest());
 }

@@ -114,4 +114,6 @@ require_once $evc_includes . 'class-evc-staff-role-upgrade.php';
 require_once $evc_includes . 'class-evc-customer-membership.php';
 // STAGE-06 FluentCRM membership tags, pure core (definitions only; wired solely behind EVC_CLUB_FLUENTCRM_SYNC_ENABLED).
 require_once $evc_includes . 'class-evc-fluentcrm-tags.php';
+// STAGE-07 in-store onboarding, pure rules (definitions only; used behind EVC_CLUB_ONBOARDING_ENABLED).
+require_once $evc_includes . 'class-evc-onboarding-rules.php';
 unset($evc_includes);
