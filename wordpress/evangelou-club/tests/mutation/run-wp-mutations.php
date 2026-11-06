@@ -1419,7 +1419,7 @@ $mutants = array(
     array('OG11-guard-never-hooked', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-plugin.php',
         '        self::$parts[\'guard\']->register();
 ', '',
-        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
+        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice', 'OnboardingCommerceTest::test_bank_transfer_is_the_only_gateway_for_the_club_and_none_without_it')),
     array('OG12-cart-lines-not-read', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         '                $ids[] = (int) ($line[\'product_id\'] ?? 0);', '                $ids[] = 0;',
         array('OnboardingCommerceTest::test_the_guard_reads_the_real_woocommerce_cart')),

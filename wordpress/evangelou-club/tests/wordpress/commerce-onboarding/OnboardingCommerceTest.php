@@ -294,6 +294,29 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         };
     }
 
+    /**
+     * The guard's own answer for this cart (the full WooCommerce chain may already refuse before it: PMPro WooCommerce
+     * also has rules on membership products, and the guard never overrides an earlier refusal).
+     */
+    private function guard_refuses(int $product_id, string $message): void {
+        $this->assertFalse($this->can_add($product_id), 'the shop refuses it (' . self::validators() . ')');
+        $this->guard()->last_message = null;
+        $this->assertFalse($this->guard()->add_to_cart(true, $product_id, 1), 'the Club guard refuses it on its own');
+        $this->assertSame($message, $this->guard()->last_message);
+    }
+
+    private static function validators(): string {
+        $names = array();
+        $hook = $GLOBALS['wp_filter']['woocommerce_add_to_cart_validation'] ?? null;
+        foreach ($hook instanceof WP_Hook ? $hook->callbacks : array() as $priority => $callbacks) {
+            foreach ($callbacks as $cb) {
+                $f = $cb['function'];
+                $names[] = $priority . ':' . (is_string($f) ? $f : (is_array($f) ? (is_object($f[0]) ? get_class($f[0]) : $f[0]) . '::' . $f[1] : 'closure'));
+            }
+        }
+        return implode(', ', $names);
+    }
+
     /** @return string[] the Club's error codes among those WooCommerce's checkout validation collected */
     private function checkout_errors(array $data = array()): array {
         $errors = new WP_Error();
@@ -314,24 +337,20 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
         $club = EVC_TEST_CLUB_PRODUCT;
         $coffee = $this->coffee()->get_id();
+        $this->assertSame(20, has_filter('woocommerce_add_to_cart_validation', array($this->guard(), 'add_to_cart')), 'hooked by boot()');
         $this->assertTrue($this->can_add($club), 'a guest with an empty cart (a saved ?add-to-cart= link): the checkout asks for an account');
         $this->assertTrue($this->can_add($coffee), 'other products are untouched');
         $this->cart = array($coffee);
-        $this->assertFalse($this->can_add($club), 'not into a cart with other products');
-        $this->assertSame(EVC_Onboarding_Checkout_Guard::MIXED, $this->guard()->last_message);
+        $this->guard_refuses($club, EVC_Onboarding_Checkout_Guard::MIXED); // not into a cart with other products
         $this->assertTrue($this->can_add($coffee));
         $this->cart = array($club);
-        $this->guard()->last_message = null;
-        $this->assertFalse($this->can_add($coffee), 'nothing else into a cart with the Club product');
-        $this->assertSame(EVC_Onboarding_Checkout_Guard::MIXED, $this->guard()->last_message);
+        $this->guard_refuses($coffee, EVC_Onboarding_Checkout_Guard::MIXED); // nothing else into a cart with the Club product
         $this->cart = array();
         // A second device / a saved link while an order waits for its transfer.
         $user = $this->customer();
         $order = $this->order($user);
         $this->login_as($user);
-        $this->guard()->last_message = null;
-        $this->assertFalse($this->can_add($club), 'an open Club order: no second one');
-        $this->assertSame(EVC_Onboarding_Checkout_Guard::DUPLICATE, $this->guard()->last_message);
+        $this->guard_refuses($club, EVC_Onboarding_Checkout_Guard::DUPLICATE); // an open Club order: no second one
         $this->assertTrue($this->can_add($coffee), 'the same customer can still buy coffee');
         // Paid and confirmed: an active member may renew early (owner decision D2).
         $this->confirm($order->get_id());

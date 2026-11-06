@@ -148,7 +148,9 @@ are untouched.
   other products is refused, adding other products to a cart that holds it is refused, and a checkout of a mixed
   cart is refused ("Η συνδρομή του Evangelou Club αγοράζεται μόνη της…"). Reason: the Club verifies a Club order only
   as exactly one Club item at 20.00 EUR (`EVC_Wp_Commerce_Pmpro_Reader`); a mixed order would never become a
-  membership. The product is also sold individually (quantity 1).
+  membership. The product is also sold individually (quantity 1). On the real stack an earlier validator in the
+  WooCommerce chain (not this plugin) already refuses adding the Club product to a cart with other products; the
+  guard never overrides an earlier refusal, and the tests check the guard's own answer separately.
 - **No second order** (`woocommerce_add_to_cart_validation` and `woocommerce_after_checkout_validation`): refused
   while the customer has an open Club order (pending, on-hold, processing) or a membership that reads pending
   payment or unverified, the same rule as the join page. An **active** or ended member may buy it again (early
