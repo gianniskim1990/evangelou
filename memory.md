@@ -1598,3 +1598,4 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
     - the TODO scan;
     - a Greek section.
   - store-onboarding.md: the same-/48 known risk and the once-per-request cleanup.
+- **CI on 3d0cea9 (STAGE-08), all first attempt, no re-runs:** foundation push 42258147068 18/18 (commerce mutation 205/205 killed), foundation PR 42258183972 18/18, frontend push 42258147155 4/4, frontend PR 42258183888 4/4.
