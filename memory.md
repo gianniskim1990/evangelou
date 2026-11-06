@@ -1493,7 +1493,8 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - Frontend: `joinModel` and `joinFlow`.
 - **Mutants.**
   - Killed locally: OR1–OR10, OB1–OB18 and JM1–JM15. The frontend total goes 346 → 361 (181 + 180).
-  - CI commerce job only: OC1–OC5.
+  - CI commerce job only: OC1, OC2, OC4 and OC5.
+  - OC3 survived on e32c2bb and was removed: dropping the order query's customer filter is equivalent, because the loop checks the customer again (two layers on purpose).
 - **Open owner questions (Greek in the doc):**
   1. URL of the Club terms page.
   2. E-mail confirmation before payment.

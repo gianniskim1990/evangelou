@@ -122,7 +122,8 @@ reload button.
   - OR1–OR10 (rules);
   - OB1–OB18 (WordPress; OB2/OB10 not added: the customer-flag requirement is not observable in any suite, and the
     origin comparison is covered by OB9);
-  - OC1–OC5 (real commerce);
+  - OC1, OC2, OC4, OC5 (real commerce; OC3, dropping the order query's customer filter, is equivalent because the
+    loop checks each order's customer again, and was removed after it survived in CI);
   - JM1–JM15 (frontend).
 
 ## Operator note (Greek): how to put up the tablet poster

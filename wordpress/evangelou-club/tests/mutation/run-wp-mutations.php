@@ -1310,9 +1310,8 @@ $mutants = array(
     array('OC2-active-member-sent-to-pay', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
         'const MEMBER_STATES = array(EVC_Customer_Membership::ACTIVE, ', 'const MEMBER_STATES = array(',
         array('OnboardingCommerceTest::test_a_signed_in_active_member_goes_straight_to_the_member_area')),
-    array('OC3-orders-of-every-customer', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
-        '\'customer_id\' => $user_id, ', '',
-        array('OnboardingCommerceTest::test_another_customers_open_order_never_counts')),
+    // OC3 (dropping the customer filter of the order query) is NOT a mutant: equivalent, because the loop checks the
+    // customer of every order again (two layers on purpose; removing either one alone changes nothing observable).
     array('OC4-any-product-counts', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
         ' && (int) $item->get_product_id() === $this->config->product_id', '',
         array('OnboardingCommerceTest::test_a_cancelled_order_or_an_order_of_something_else_leaves_the_offer_open')),
