@@ -579,7 +579,9 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $this->assertSame(400, $r->get_status(), wp_json_encode($r->get_data()));
         $this->assertSame('evc_club_account_required', $r->get_data()['code']);
         $this->assertSame(EVC_Onboarding_Checkout_Guard::ACCOUNT, $r->get_data()['message']);
-        $this->assertSame(array(), wc_get_orders(array('billing_email' => $guest, 'status' => EVC_Onboarding_Handoff::OPEN_STATUSES, 'limit' => -1, 'return' => 'ids')));
+        // No order was placed: at most the Store API's own unplaced draft is left (HPOS keeps it as an unpaid draft or
+        // pending order of no customer), never one awaiting a bank transfer.
+        $this->assertSame(array(), wc_get_orders(array('billing_email' => $guest, 'status' => array('on-hold', 'processing', 'completed'), 'limit' => -1, 'return' => 'ids')));
         // The same guest creating the account at this checkout: accepted, and the order belongs to that account.
         update_option('woocommerce_enable_signup_and_login_from_checkout', 'yes');
         $r = $this->place_order($guest, 'bacs', array('create_account' => true, 'customer_password' => 'Ena-kafe-tin-imera-7'));

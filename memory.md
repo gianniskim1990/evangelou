@@ -1544,3 +1544,4 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
   - CI-only: OG14–OG17 (+ OG9 pattern).
   - Local WP mutation run over all OB*: 31 killed, 0 survived after the OB19 fix.
 - The local WooCommerce clone /home/claude/woocommerce (11.2.1, blob-less sparse) can be extended with `git sparse-checkout add <path>`; used for src/StoreApi.
+- **CI on fb86b6e:** in all commerce jobs, only the guest assertion of the Block Checkout test failed (line 582). After our RouteException, the Store API leaves its own unplaced order for the guest's e-mail in an open status (WC 10.8+ creates the order at POST). Fix: assert that no order for that e-mail is on-hold/processing/completed, i.e. no bank-transfer order was placed. All other new Store API tests passed.
