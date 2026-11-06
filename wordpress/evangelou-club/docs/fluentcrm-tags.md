@@ -165,7 +165,10 @@ another e-mail, it is not seen.
 
   - (round 3) after every batch the run moves the lock's end forward with the same compare-and-swap
     (a new value each time), so a run longer than 15 minutes is never taken over; if the swap fails the
-    lock is no longer ours and the run stops cleanly (cursor saved, nothing released or scheduled).
+    lock is no longer ours and the run stops cleanly (cursor saved; STAGE-07: no status or retry-budget
+    write either, nothing released or scheduled). A database ERROR during the refresh is not a lost lock:
+    the run fails, keeps its counts, releases its own lock and schedules one follow-up from the bounded
+    retry budget.
 
   It works in batches of 50 and handles at most 500 members per run, resuming from a saved cursor with
   a follow-up run 5 minutes later. If the member query fails, the counts so far are kept and a
@@ -282,6 +285,11 @@ enforces the following (round 2 additions marked +):
 - \+ (round 3) in the gateway: no variable member (`->$x`), no call of an expression result (`](` or
   `)(`, casts excepted), no variable function call (`$f(`), and `new` only of its own exceptions
   (`RuntimeException`, `InvalidArgumentException`).
+
+- \+ (STAGE-07) in the gateway: no code interpolated in a string (`"{$x->m()}"`, `"${x}"`) and none of the
+  built-ins that call a callable (`array_map`, `array_filter`, `usort`, `preg_replace_callback`, …), so a
+  string callable cannot be smuggled through them. A string callable handed to some other built-in
+  remains a documented limit.
 
 Limitation: a token guard cannot follow names assembled at run time from string pieces (for example
 `'fc_' . 'tags'`). The gateway's small reviewed surface and the test-only fake FluentCRM, which fails on

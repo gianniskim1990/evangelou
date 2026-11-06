@@ -1234,6 +1234,18 @@ $mutants = array(
     array('FC3-retires-without-the-voided-evidence', 'commerce_fluentcrm', 'includes/class-evc-fluentcrm-tags.php',
         '                if (!in_array(self::VOIDED_FLAG, $entitlement->diagnostic_flags(), true)) {', '                if (false) {',
         array('FluentcrmCommerceTest::test_an_outsider_tagged_by_hand_who_buys_something_else_is_never_touched')),
+    // STAGE-07 (FW29-FW30): accepted STAGE-06 nits - no writes after a lost lock; a refresh DB error is a failed run.
+    array('FW29-lost-lock-still-writes-status', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '                return $done;
+            }
+            if ($finished) {', '            }
+            if ($finished) {',
+        array('FluentcrmTagSyncWpTest::test_the_lock_is_refreshed_after_every_batch_and_a_lost_lock_stops_the_run')),
+    array('FW30-refresh-db-error-taken-as-lost-lock', 'fluentcrm', 'includes/fluentcrm/class-evc-fluentcrm-plugin.php',
+        '        if ($wpdb->last_error !== \'\') {
+            // STAGE-07 nit', '        if (false) {
+            // STAGE-07 nit',
+        array('FluentcrmTagSyncWpTest::test_a_database_error_while_refreshing_the_lock_schedules_one_bounded_follow_up')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */

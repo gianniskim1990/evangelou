@@ -302,7 +302,10 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
             }
             return range($after + 1, $after + $limit);
         });
+        update_option(EVC_Fluentcrm_Plugin::RETRY_OPTION, 2, false);
         $this->assertSame(3 * EVC_Fluentcrm_Plugin::BATCH, EVC_Fluentcrm_Plugin::reconcile(), 'stopped after the batch whose refresh failed');
+        $this->assertSame(array(), EVC_Fluentcrm_Plugin::status()['current'], 'STAGE-07 nit: no status write after losing the lock');
+        $this->assertSame(2, (int) get_option(EVC_Fluentcrm_Plugin::RETRY_OPTION), 'nor a retry-budget write');
         $this->assertCount(3, array_unique($seen), 'a new lock value after every batch');
         $this->assertSame($other, EVC_Fluentcrm_Plugin::lock_value(), 'the other run\'s lock is neither released nor touched');
         $this->assertSame(3 * EVC_Fluentcrm_Plugin::BATCH, (int) get_option(EVC_Fluentcrm_Plugin::CURSOR_OPTION), 'the cursor is saved for whoever continues');
@@ -310,6 +313,29 @@ final class FluentcrmTagSyncWpTest extends EVC_WP_Test_Case {
         $mine = EVC_Fluentcrm_Plugin::acquire_lock();
         $this->assertNull($mine, 'the other run holds it');
         $this->assertNull(EVC_Fluentcrm_Plugin::refresh_lock('1|not-mine'));
+    }
+
+    /** STAGE-07 nit: a database error while refreshing the lock is a failed run (one bounded follow-up), not a lost lock. */
+    public function test_a_database_error_while_refreshing_the_lock_schedules_one_bounded_follow_up(): void {
+        $this->boot_with(new EVC_Mock_Membership_Adapter(), function (int $after, int $limit) {
+            return $after === 0 ? range(1, $limit) : array();
+        });
+        $break = function ($sql) {
+            return (strpos($sql, 'UPDATE') === 0 && strpos($sql, EVC_Fluentcrm_Plugin::LOCK_OPTION) !== false) ? 'UPDATE evc_no_such_table SET x = 1' : $sql;
+        };
+        add_filter('query', $break);
+        $GLOBALS['wpdb']->suppress_errors(true);
+        try {
+            $this->assertSame(EVC_Fluentcrm_Plugin::BATCH, EVC_Fluentcrm_Plugin::reconcile());
+        } finally {
+            remove_filter('query', $break);
+            $GLOBALS['wpdb']->suppress_errors(false);
+        }
+        $this->assertNotFalse(wp_next_scheduled(EVC_Fluentcrm_Plugin::CONTINUE_HOOK), 'one follow-up');
+        $this->assertSame(1, (int) get_option(EVC_Fluentcrm_Plugin::RETRY_OPTION), 'counted against the bounded budget');
+        $this->assertSame(array(EVC_Fluentcrm_Tag_Sync::OUTCOME_NOT_MEMBER => EVC_Fluentcrm_Plugin::BATCH), EVC_Fluentcrm_Plugin::status()['current'], 'the counts so far kept');
+        $this->assertNull(EVC_Fluentcrm_Plugin::lock_value(), 'our own lock released');
+        $this->assertStringContainsString('(RuntimeException)', (string) file_get_contents($this->log));
     }
 
     /** N4 (round 3): after failures, at most three follow-up runs (5, 10, 20 minutes), then the next daily run. */
