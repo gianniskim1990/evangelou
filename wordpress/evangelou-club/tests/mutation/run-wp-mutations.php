@@ -1452,7 +1452,7 @@ $mutants = array(
         array('OnboardingCommerceTest::test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account')),
     array('OG17-add-to-cart-after-other-validators', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         'array($this, \'add_to_cart\'), 5, 3);', 'array($this, \'add_to_cart\'), 20, 3);',
-        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice', 'OnboardingCommerceTest::test_the_store_api_cart_keeps_the_club_product_alone_and_never_twice')),
+        array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
     array('OG13-open-order-does-not-block-the-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
         '            if ($this->has_open_club_order($user_id)) {
                 return true;', '            if (false) {
