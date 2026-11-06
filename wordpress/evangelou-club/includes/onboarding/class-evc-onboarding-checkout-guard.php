@@ -20,6 +20,11 @@ defined('ABSPATH') || exit;
  * (account required; POST only, throwing the Store API RouteException). Store API cart/add-item applies
  * woocommerce_add_to_cart_validation itself and turns our notice into its error, so the same filter covers it. The
  * gateway filter is the one both checkouts read.
+ *
+ * Paying an existing order (round 4, G1): the classic "pay for order" page reads the order (wc_cart_products). For
+ * the Store API route POST /wc/store/v1/checkout/{id} (CheckoutOrder, WooCommerce 11.2.1), which checks the gateway
+ * against get_available_payment_gateways() before any Store API action fires, the guard reads THAT order's items
+ * for the whole request (rest_request_before_callbacks .. rest_request_after_callbacks), never the session cart.
  */
 final class EVC_Onboarding_Checkout_Guard {
     const GATEWAY = 'bacs';
@@ -34,6 +39,8 @@ final class EVC_Onboarding_Checkout_Guard {
     private $cart_products;
     /** @var string|null the last refusal (tests; customers see it as a WooCommerce notice / checkout error) */
     public $last_message;
+    /** @var int[]|null the products of the order paid through the Store API in this request (null = the cart) */
+    private $paying;
 
     /** @param callable(): int[]|null $cart_products TEST seam; default: the product ids of the WooCommerce cart / order being paid */
     public function __construct(EVC_Onboarding_Handoff $handoff, ?callable $cart_products = null) {
@@ -49,6 +56,8 @@ final class EVC_Onboarding_Checkout_Guard {
         add_action('woocommerce_after_checkout_validation', array($this, 'checkout'), 20, 2);
         add_action('woocommerce_store_api_cart_errors', array($this, 'store_api_cart_errors'), 20, 2);
         add_action('woocommerce_store_api_checkout_update_order_from_request', array($this, 'store_api_order'), 20, 2);
+        add_filter('rest_request_before_callbacks', array($this, 'start_of_request'), 10, 3);
+        add_filter('rest_request_after_callbacks', array($this, 'end_of_request'), 10, 1);
         add_filter('woocommerce_available_payment_gateways', array($this, 'gateways'), 100, 1);
         add_filter('woocommerce_no_available_payment_methods_message', array($this, 'no_methods_message'), 100, 1);
     }
@@ -107,7 +116,10 @@ final class EVC_Onboarding_Checkout_Guard {
      * @throws Exception the Store API RouteException (400) with the Greek reason
      */
     public function store_api_order($order, $request): void {
-        if (!$request instanceof WP_REST_Request || $request->get_method() !== 'POST' || is_user_logged_in() || !$this->club_in_cart()) {
+        if (!$request instanceof WP_REST_Request || $request->get_method() !== 'POST') {
+            return;
+        }
+        if (self::is_pay_for_order($request) || is_user_logged_in() || !$this->club_in_cart()) {
             return;
         }
         $checkout = WC()->checkout();
@@ -117,6 +129,26 @@ final class EVC_Onboarding_Checkout_Guard {
             $this->last_message = self::ACCOUNT;
             throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException('evc_club_account_required', esc_html(self::ACCOUNT), 400);
         }
+    }
+
+    /** rest_request_before_callbacks: paying an existing order through the Store API reads that order's items. */
+    public function start_of_request($response, $handler = null, $request = null) {
+        $this->paying = null;
+        if ($request instanceof WP_REST_Request && self::is_pay_for_order($request)) {
+            $order = wc_get_order((int) $request['id']);
+            $this->paying = $order instanceof WC_Order ? self::order_products($order) : array();
+        }
+        return $response;
+    }
+
+    private static function is_pay_for_order(WP_REST_Request $request): bool {
+        return $request->get_method() === 'POST' && preg_match('#^/wc/store(?:/v\d+)?/checkout/\d+$#D', (string) $request->get_route()) === 1;
+    }
+
+    /** rest_request_after_callbacks: the order being paid applies to one request only. */
+    public function end_of_request($response) {
+        $this->paying = null;
+        return $response;
     }
 
     /** The rules of a cart holding the Club product, shared by both checkouts. */
@@ -152,6 +184,9 @@ final class EVC_Onboarding_Checkout_Guard {
 
     /** @return int[] */
     private function cart(): array {
+        if ($this->paying !== null) {
+            return $this->paying;
+        }
         try {
             $ids = ($this->cart_products)();
         } catch (Throwable $e) {
@@ -169,19 +204,23 @@ final class EVC_Onboarding_Checkout_Guard {
         return false;
     }
 
+    /** @return int[] */
+    private static function order_products(WC_Order $order): array {
+        $ids = array();
+        foreach ($order->get_items('line_item') as $item) {
+            if ($item instanceof WC_Order_Item_Product) {
+                $ids[] = (int) $item->get_product_id();
+            }
+        }
+        return $ids;
+    }
+
     /** @return int[] the products of the WooCommerce cart, or of the order on the "pay for order" page */
     public static function wc_cart_products(): array {
         $ids = array();
         if (function_exists('is_checkout_pay_page') && is_checkout_pay_page()) {
             $order = wc_get_order((int) get_query_var('order-pay'));
-            if ($order instanceof WC_Order) {
-                foreach ($order->get_items('line_item') as $item) {
-                    if ($item instanceof WC_Order_Item_Product) {
-                        $ids[] = (int) $item->get_product_id();
-                    }
-                }
-            }
-            return $ids;
+            return $order instanceof WC_Order ? self::order_products($order) : array();
         }
         if (function_exists('WC') && WC()->cart !== null) {
             foreach (WC()->cart->get_cart() as $line) {

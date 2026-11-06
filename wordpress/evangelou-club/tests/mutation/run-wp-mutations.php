@@ -1283,10 +1283,10 @@ $mutants = array(
         ' || username_exists($email) !== false', '',
         array('OnboardingTest::test_an_existing_email_is_never_attached_or_revealed')),
     array('OB7-rate-limit-not-enforced', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
-        '        if (EVC_Onboarding_Rules::blocked($this->read(\'f\', $key), $now, self::WINDOW_SECONDS, self::MAX_FAILURES)) {', '        if (false) {',
+        'if (EVC_Onboarding_Rules::blocked($this->read(\'f\', $key), $now, self::WINDOW_SECONDS, self::MAX_FAILURES)', 'if (false',
         array('OnboardingTest::test_ten_failures_in_five_minutes_block_the_address')),
     array('OB8-invalid-input-not-counted', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
-        '            $this->count_failure_of($key, $now);
+        '            $this->count_failure_of($key, $network, $now);
             return array(\'outcome\' => self::INVALID', '            return array(\'outcome\' => self::INVALID',
         array('OnboardingTest::test_ten_failures_in_five_minutes_block_the_address')),
     array('OB9-origin-not-checked', 'onboarding', 'includes/onboarding/class-evc-rest-join-controller.php',
@@ -1365,17 +1365,37 @@ $mutants = array(
 ', '',
         array('OnboardingTest::test_successes_are_capped_per_client_and_in_total')),
     array('OB31-alert-on-every-refusal', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
-        'SUCCESS_WINDOW_SECONDS, $now) !== 1) {', 'SUCCESS_WINDOW_SECONDS, $now) !== 1 && false) {',
+        '\'total-cap\', self::SUCCESS_WINDOW_SECONDS, $now) !== 1) {', '\'total-cap\', self::SUCCESS_WINDOW_SECONDS, $now) !== 1 && false) {',
         array('OnboardingTest::test_successes_are_capped_per_client_and_in_total')),
     array('OB32-failure-rows-unbounded', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
-        '        if (!$this->failure_rows_full($now)) {', '        if (true) {',
-        array('OnboardingTest::test_the_counter_rows_are_bounded_and_registration_fails_closed_above_the_ceiling')),
-    array('OB33-sign-up-open-above-the-ceiling', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
-        '        if ($this->failure_rows_full($now)) {', '        if (false) {',
-        array('OnboardingTest::test_the_counter_rows_are_bounded_and_registration_fails_closed_above_the_ceiling')),
+        '        if (!$existing_only) {', '        if (true) {',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
+    // Round 4 (B1): the ceiling must never close sign-up (the round-3 behaviour is now the mutant).
+    array('OB33-sign-up-closed-at-the-ceiling', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        // The failure-row ceiling is deliberately NOT consulted here (round 4, B1).
+', '        if ($this->failure_rows_full($now)) {
+            return array(\'outcome\' => self::TRY_LATER);
+        }
+',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
     array('OB34-cleanup-errors-logged', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
         '$was = $wpdb->suppress_errors(true);', '$was = $wpdb->suppress_errors(false);',
-        array('OnboardingTest::test_the_counter_rows_are_bounded_and_registration_fails_closed_above_the_ceiling')),
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
+    // STAGE-07 round 4 (OB35-OB38, B1): /48 failures, expired failure rows, the row-ceiling alert.
+    array('OB35-ipv6-48-failures-not-blocking', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        ' || ($network !== \'\' && EVC_Onboarding_Rules::blocked(', ' || (false && EVC_Onboarding_Rules::blocked(',
+        array('OnboardingTest::test_failures_are_also_limited_per_ipv6_48')),
+    array('OB36-ipv6-48-failures-not-counted', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '            $this->count_in(\'m\', $network, $now, $full);
+', '',
+        array('OnboardingTest::test_failures_are_also_limited_per_ipv6_48')),
+    array('OB37-expired-failure-rows-kept', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        'foreach (array(\'f_\', \'m_\') as $bucket) {', 'foreach (array() as $bucket) {',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
+    array('OB38-row-ceiling-never-alerted', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '            $this->alert_rows_full($now);
+', '',
+        array('OnboardingTest::test_the_failure_rows_are_bounded_and_never_close_sign_up')),
     array('OB28-guard-constructible-when-off', 'disabled', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         '        EVC_Onboarding_Feature::assert_constructible(__CLASS__);
 ', '',
@@ -1450,6 +1470,11 @@ $mutants = array(
     array('OG16-store-api-create-account-ignored', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         ' || filter_var($request[\'create_account\'], FILTER_VALIDATE_BOOLEAN));', ');',
         array('OnboardingCommerceTest::test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account')),
+    // STAGE-07 round 4 (OG18, G1): paying an existing order through the Store API reads that order. (Not ending the
+    // context in rest_request_after_callbacks is not a mutant: the next request's rest_request_before_callbacks resets it.)
+    array('OG18-pay-for-order-reads-the-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($this->paying !== null) {', '        if (false) {',
+        array('OnboardingCommerceTest::test_paying_an_existing_club_order_through_the_store_api_is_bank_transfer_only')),
     array('OG17-add-to-cart-after-other-validators', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         'array($this, \'add_to_cart\'), 5, 3);', 'array($this, \'add_to_cart\'), 20, 3);',
         array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),

@@ -55,7 +55,7 @@ define('EVC_CLUB_ONBOARDING_ENABLED', true);    // exact boolean true only
 define('EVC_CLUB_TERMS_URL', 'https://…/oroi-club/'); // D13: the EXISTING Club terms page, same site only
 // Optional success caps (exact int 1..1000; anything else means the default):
 define('EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR', 10);  // new accounts per client address per hour (default 10, D17)
-define('EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR', 10); // new accounts per IPv6 /48 per hour (default 10)
+define('EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR', 30); // new accounts per IPv6 /48 per hour (default 30)
 define('EVC_CLUB_JOIN_MAX_PER_HOUR', 100);        // new accounts per hour in total (default 100)
 ```
 
@@ -108,10 +108,15 @@ reload button.
   repeated character, and not containing the e-mail's name or the mobile number.
 - **Abuse protection.**
   - **Failures** (D16): at most 10 per 5 minutes per client, then 429 until the window ends. Failures are invalid
-    input, an existing e-mail and the honeypot.
+    input, an existing e-mail and the honeypot. **Round 4 (B1):** also at most **30 per 5 minutes per IPv6 /48 in
+    aggregate** (`MAX_NETWORK_FAILURES`), then 429 for the whole /48 until the window ends. Chosen sensibly rather
+    than 10: a mobile carrier puts unrelated customers in one /48 (the reason for N1 below), and 10 failures shared by
+    a whole carrier would lock real customers out over typing mistakes; 30 still bounds the failure rows one /48
+    can write to about 30 per 5 minutes, instead of up to 65,536.
   - **Successes:** at most `EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR` (default 10, D17) new accounts per client per hour,
-    `EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR` (default 10) per IPv6 **/48** per hour (an aggregate bucket on top of the
-    /64 one, so one allocation cannot rotate through its 65,536 /64s), and `EVC_CLUB_JOIN_MAX_PER_HOUR` (default
+    `EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR` (default **30**, coordinator decision N1 in round 4: mobile carriers share a
+    /48 among unrelated customers) per IPv6 **/48** per hour (an aggregate bucket on top of the /64 one, so one
+    allocation cannot rotate through its 65,536 /64s), and `EVC_CLUB_JOIN_MAX_PER_HOUR` (default
     100) in total per hour. A slot is reserved **before** the account is created; over a cap the answer is the neutral
     `try_later` ("Η εγγραφή δεν είναι δυνατή αυτή τη στιγμή. Δοκιμάστε ξανά αργότερα ή ρωτήστε στο ταμείο."), nothing
     is created, and it is not counted as a failure.
@@ -134,11 +139,17 @@ reload button.
     deleted now and then (they hold only a count and a time). A concurrent burst is not driven by a test (the WordPress
     test case runs in one transaction on one connection); the tests assert instead that every counted event is one
     such statement, never a read-modify-write or a transient, which is what makes the burst safe.
-  - **The rows are bounded** (round 3, R5). Before a failure row is written, a bounded count on the `option_name`
-    index (`SELECT COUNT(*) FROM (… LIMIT 5000)`) checks the failure rows. At 5000 (`ROW_CEILING`), expired rows are
-    cleaned up first; if still full, **no new failure row is written** (an existing client's row is still counted
-    with one atomic `UPDATE`), and **no account is created** (`try_later`, fail closed) until rows expire. A
-    deadlock or lock wait in the cleanup `DELETE` is ignored and not logged; a later cleanup removes the rows.
+  - **The failure rows are bounded, and the bound can never close sign-up** (round 3 R5, reworked in round 4 B1).
+    Before a failure row is written, a bounded count on the `option_name` index (`SELECT COUNT(*) FROM (… LIMIT
+    5000)`) checks the failure rows (`f_` per client, `m_` per /48). At 5000 (`ROW_CEILING`), expired rows are
+    deleted first; **failure rows are deleted as soon as their own 5-minute window is over** (a separate `DELETE`
+    using `WINDOW_SECONDS`, in every cleanup; other rows live two hours). If still full, **no new failure row is
+    written** (an existing row is still counted with one atomic `UPDATE`), and the shop is told: one log line
+    without personal data and a Greek admin notice, at most once an hour. **Account creation is never refused
+    because of the ceiling:** in round 3 it was, which let about 5000 invalid POSTs (one /48 had 65,536 /64s and no
+    /48 failure limit) close sign-up for two hours, again and again. Now a flood can at most stop failures from NEW
+    clients being counted for five minutes; the per-/48 failure limit above makes even that need many /48s. A
+    deadlock or lock wait in a cleanup `DELETE` is ignored and not logged; a later cleanup removes the rows.
   - A hidden honeypot field (`evc_extra`, `autocomplete="off"`, a name browsers do not autofill); no CAPTCHA service.
 - **CSRF.** Every write needs the page's `wp_rest` nonce (see above). An `Origin` header, when sent, must be this
   site. The terms and checkout routes use the customer
@@ -171,8 +182,12 @@ are untouched.
   renewal, decision D2).
 - **An account is required.** A guest Club checkout is refused unless the customer creates an account at that
   checkout; a guest order could never be attributed to a member.
-- **Bank transfer only (D15).** `woocommerce_available_payment_gateways`: when the Club product is in the cart (or is
-  the order on the "pay for order" page), only `bacs` is offered. If bank transfer is disabled, the list is empty and
+- **Bank transfer only (D15).** `woocommerce_available_payment_gateways`: when the Club product is in the cart, or is
+  in the order being paid, only `bacs` is offered. "The order being paid" is the classic "pay for order" page
+  (`is_checkout_pay_page()`) and, round 4 (G1), the Store API route `POST /wc/store/v1/checkout/{id}` (WooCommerce
+  11.2.1 `CheckoutOrder`): it checks the chosen gateway against `get_available_payment_gateways()` before any Store
+  API action fires, so the guard reads that order's items from `rest_request_before_callbacks` until
+  `rest_request_after_callbacks` of that request, never the session cart. If bank transfer is disabled, the list is empty and
   `woocommerce_no_available_payment_methods_message` shows: "Η συνδρομή του Club πληρώνεται μόνο με τραπεζική
   μεταφορά, που δεν είναι διαθέσιμη αυτή τη στιγμή. Ρωτήστε στο κατάστημα."
 - **Both checkouts (round 3, R1).** WooCommerce 8.3+ uses the **Block Checkout** (Store API) by default, which
@@ -211,10 +226,12 @@ are untouched.
   - an existing e-mail never attached or revealed;
   - field codes, honeypot, bad nonce, missing nonce and foreign origin (neither counted);
   - the failure limit, including the window, a new window and another address;
-  - the success caps per client (10), per IPv6 /48 (10) and in total (100) → `try_later`; the total cap's single
+  - the success caps per client (10), per IPv6 /48 (30) and in total (100) → `try_later`; the total cap's single
     log line per hour and the admin notice (administrators only, 24 hours);
-  - the bounded counter rows: no new failure row and no account above the ceiling, an existing row still counted,
-    a failing cleanup ignored and not logged, sign-up open again once expired rows are removed;
+  - the failures per IPv6 /48 (30 per 5 minutes in aggregate, then 429 for the /48; another /48 and IPv4 unaffected);
+  - the bounded failure rows: no new failure row at the ceiling, an existing row still counted, **a valid sign-up
+    still accepted**, one log line and the admin notice, a failing cleanup ignored and not logged, and the failure
+    rows deleted five minutes after their window started;
   - IPv6 counted by /64, IPv4-mapped counted as IPv4;
   - one atomic statement per counted event, no transient, no address stored;
   - `DONOTCACHEPAGE` and the no-cache headers on every page;
@@ -242,17 +259,24 @@ are untouched.
   - the checkout validation: mixed cart, guest without an account, second order;
   - the gateways with the real `WC_Payment_Gateways`: other products keep every gateway, the Club product gets only
     `bacs`, and nothing (with the Greek message) when bank transfer is off;
-  - the guard's reader of the WooCommerce cart.
+  - the guard's reader of the WooCommerce cart;
+  - the Block Checkout through the real Store API (`/wc/store/v1/cart/add-item`, `/cart`, `/checkout`): mixed cart,
+    second order, a guest refused (only the Store API's own draft is left, exactly in `checkout-draft`) and then
+    accepted when creating the account, bank transfer only, nothing when it is off;
+  - paying an existing Club order through `POST /wc/store/v1/checkout/{id}` with an empty session cart: cheque
+    refused, bank transfer accepted, another order still payable by cheque (G1);
+  - a fresh REST server (new route objects, as in a new request) placing the order with no preceding GET (T1).
 - **Frontend**:
   - `joinModel.test.ts`: rules pinned to the approved CUSTOMER-01 rules, same-site configs, strict join-v1 client (including `try_later` and the `evc_extra` body key);
   - `joinFlow.test.ts`: jsdom flow, accessibility (labels, described errors, focus), D12 with a single checkbox,
     double tap, poster QR, the `try_later` message, the honeypot's name and `autocomplete`.
 - **Mutants**:
   - OR1–OR17 (rules);
-  - OB1–OB34 (WordPress; OB20 retired in round 3 because a refused origin is no longer counted; OB2/OB10 not added: the customer-flag requirement is not observable in any suite, and the
+  - OB1–OB38 (WordPress; OB33 is now "the ceiling closes sign-up"; OB20 retired in round 3 because a refused origin is no longer counted; OB2/OB10 not added: the customer-flag requirement is not observable in any suite, and the
     origin comparison is covered by OB9);
   - OC1–OC6 (real commerce; round 2 restored OC3, because the order query is now the only customer filter, and added
-    OC6 for the page limit) and OG1–OG17 (the checkout guard, OG14–OG17 for the Block Checkout);
+    OC6 for the page limit) and OG1–OG18 (the checkout guard, OG14–OG17 for the Block Checkout, OG18 for paying an
+    existing order through the Store API);
   - JM1–JM18 (frontend).
 
 ## Operator note (Greek): how to put up the tablet poster
@@ -273,6 +297,7 @@ are untouched.
 >    WooCommerce («Ολοκληρωμένη») και ο πελάτης βλέπει αμέσως την κάρτα μέλους του.
 > 7. Αν πελάτης πει ότι «υπάρχει ήδη λογαριασμός», να συνδεθεί ή να πατήσει «Επαναφορά κωδικού». Το κατάστημα δεν
 >    αλλάζει ποτέ λογαριασμούς πελατών με βάση το τηλέφωνο ή το όνομα.
+> 8. Δύο παραγγελίες Club σε αναμονή για τον ίδιο πελάτη → επιβεβαιώστε μόνο αυτή με την κατάθεση, ακυρώστε την άλλη.
 
 ## Owner answers (Greek, 2026-11-06)
 
@@ -283,7 +308,7 @@ are untouched.
 3. **Τρόποι πληρωμής (D15):** Για τη συνδρομή μόνο τραπεζική μεταφορά. Αν δεν είναι διαθέσιμη, δεν εμφανίζεται
    κανένας τρόπος πληρωμής και ο πελάτης βλέπει μήνυμα. Τα άλλα προϊόντα δεν αλλάζουν.
 4. **Όριο προσπαθειών (D16):** Μένει 10 λανθασμένες προσπάθειες ανά 5 λεπτά. Επιπλέον, από την ίδια διεύθυνση
-   γίνονται έως 10 νέοι λογαριασμοί την ώρα (απόφαση D17· έως 10 ανά δίκτυο IPv6 /48 και έως 100 συνολικά την
+   γίνονται έως 10 νέοι λογαριασμοί την ώρα (απόφαση D17· έως 30 ανά δίκτυο IPv6 /48 και έως 100 συνολικά την
    ώρα). Στο Wi-Fi του καταστήματος όλοι οι πελάτες
    φαίνονται από την ίδια διεύθυνση: αν χρειάζεστε περισσότερους, ο τεχνικός αυξάνει τη ρύθμιση
    `EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR`.

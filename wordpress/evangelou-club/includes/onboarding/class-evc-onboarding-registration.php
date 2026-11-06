@@ -14,13 +14,16 @@ defined('ABSPATH') || exit;
  *  - Abuse protection, all counters ATOMIC in the WordPress options table (one INSERT … ON DUPLICATE KEY UPDATE per
  *    event; no transient read-modify-write), keyed by an HMAC of the client address (IPv6 by its /64), never the
  *    address itself:
- *      failures   at most 10 per 5 minutes per client (owner decision D16), then 429 until the window ends;
+ *      failures   at most 10 per 5 minutes per client (owner decision D16) and 30 per 5 minutes per IPv6 /48 in
+ *                 aggregate (round 4, B1), then 429 until the window ends;
  *      successes  at most EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR (default 10, owner decision D17) per client,
- *                 EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR (default 10) per IPv6 /48 and EVC_CLUB_JOIN_MAX_PER_HOUR
+ *                 EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR (default 30) per IPv6 /48 and EVC_CLUB_JOIN_MAX_PER_HOUR
  *                 (default 100) in total per hour, reserved BEFORE the account is created ("try_later" when hit;
  *                 the total cap also logs one PII-free line per hour and shows an admin notice);
- *    plus a honeypot field; no CAPTCHA service. The counter rows are bounded: above ROW_CEILING failure rows no new
- *    failure row is written and no account is created (fail closed) until expired rows are cleaned up.
+ *    plus a honeypot field; no CAPTCHA service. The failure rows are bounded: a failure row is deleted once its own
+ *    5-minute window is over, and at ROW_CEILING failure rows no NEW failure row is written (existing ones still
+ *    count) and the shop is told (log line + admin notice, once an hour). Account creation is NEVER refused because
+ *    of the ceiling (round 4, B1): the ceiling must not become a way to close sign-up.
  *  - Nothing about the person is logged; FluentCRM is never called (owner decision D12).
  */
 final class EVC_Onboarding_Registration {
@@ -29,15 +32,20 @@ final class EVC_Onboarding_Registration {
     const SUCCESS_WINDOW_SECONDS = 3600;
     /** Owner decision D17 (2026-11-06): 10 new accounts per client and hour (was 3). */
     const DEFAULT_MAX_PER_CLIENT_HOUR = 10;
-    const DEFAULT_MAX_PER_NETWORK_HOUR = 10;
+    /** Coordinator decision (round 4, N1): mobile carriers share a /48 among unrelated customers. */
+    const DEFAULT_MAX_PER_NETWORK_HOUR = 30;
+    /** Failures per IPv6 /48 per 5 minutes, in aggregate (round 4, B1): bounds the rows one /48 can write. */
+    const MAX_NETWORK_FAILURES = 30;
     const DEFAULT_MAX_PER_HOUR = 100;
     const PER_CLIENT_CONSTANT = 'EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR';
     const NETWORK_CONSTANT = 'EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR';
     const GLOBAL_CONSTANT = 'EVC_CLUB_JOIN_MAX_PER_HOUR';
-    /** Above this many failure rows: no new failure row, no new account (fail closed) until the cleanup frees rows. */
+    /** At this many failure rows (f_ and m_): no NEW failure row until expired rows are deleted. Sign-up stays open. */
     const ROW_CEILING = 5000;
     /** When the total cap was last hit (a time only; the admin notice reads it). */
     const ALERT_OPTION = 'evc_club_join_cap_alert';
+    /** When the failure rows last reached the ceiling (a time only; the admin notice reads it). */
+    const ROWS_ALERT_OPTION = 'evc_club_join_rows_alert';
     /** Counter rows in wp_options: evc_join_rl_<f|s|n|g|a>_<key> (failures, successes per client / per /48 / total, alert), value "count|window_start" (autoload off). */
     const COUNTER_PREFIX = 'evc_join_rl_';
     /**
@@ -108,7 +116,9 @@ final class EVC_Onboarding_Registration {
             return array('outcome' => self::UNAVAILABLE);
         }
         $now = ($this->now)();
-        if (EVC_Onboarding_Rules::blocked($this->read('f', $key), $now, self::WINDOW_SECONDS, self::MAX_FAILURES)) {
+        $network = self::network_key_of($ip);
+        if (EVC_Onboarding_Rules::blocked($this->read('f', $key), $now, self::WINDOW_SECONDS, self::MAX_FAILURES)
+            || ($network !== '' && EVC_Onboarding_Rules::blocked($this->read('m', $network), $now, self::WINDOW_SECONDS, self::MAX_NETWORK_FAILURES))) {
             return array('outcome' => self::RATE_LIMITED);
         }
         if (is_user_logged_in()) {
@@ -116,12 +126,12 @@ final class EVC_Onboarding_Registration {
         }
         $honeypot = $input[self::HONEYPOT] ?? '';
         if (!is_string($honeypot) || $honeypot !== '') {
-            $this->count_failure_of($key, $now);
+            $this->count_failure_of($key, $network, $now);
             return array('outcome' => self::NOT_COMPLETED);
         }
         $errors = EVC_Onboarding_Rules::validate($input);
         if ($errors !== array()) {
-            $this->count_failure_of($key, $now);
+            $this->count_failure_of($key, $network, $now);
             return array('outcome' => self::INVALID, 'fields' => $errors);
         }
         $password = (string) $input['password'];
@@ -132,18 +142,14 @@ final class EVC_Onboarding_Registration {
         $email = (string) EVC_Onboarding_Rules::normalise_email((string) $input['email']);
         if (email_exists($email) !== false || username_exists($email) !== false || !is_email($email)) {
             wp_hash_password($password);
-            $this->count_failure_of($key, $now);
+            $this->count_failure_of($key, $network, $now);
             return array('outcome' => self::CHECK_ACCOUNT);
         }
         if (get_role(self::ROLE) === null) {
             return array('outcome' => self::UNAVAILABLE);
         }
-        // Too many counter rows (a flood from many addresses): fail closed, no account, until the cleanup frees rows.
-        if ($this->failure_rows_full($now)) {
-            return array('outcome' => self::TRY_LATER);
-        }
         // Success caps: a slot is RESERVED atomically before the account exists (a burst cannot overshoot the cap).
-        $network = self::network_key_of($ip);
+        // The failure-row ceiling is deliberately NOT consulted here (round 4, B1).
         if ($this->bump('s', $key, self::SUCCESS_WINDOW_SECONDS, $now) > self::max_per_client_hour()
             || ($network !== '' && $this->bump('n', $network, self::SUCCESS_WINDOW_SECONDS, $now) > self::max_per_network_hour())) {
             return array('outcome' => self::TRY_LATER);
@@ -167,7 +173,7 @@ final class EVC_Onboarding_Registration {
         ));
         if (is_wp_error($user_id) || (int) $user_id < 1) {
             // e.g. the e-mail was taken a moment ago by a parallel request: the same answer as an existing account.
-            $this->count_failure_of($key, $now);
+            $this->count_failure_of($key, $network, $now);
             return array('outcome' => self::CHECK_ACCOUNT);
         }
         $user_id = (int) $user_id;
@@ -199,18 +205,40 @@ final class EVC_Onboarding_Registration {
         return $network === '' ? 0 : $this->current('n', $network, self::SUCCESS_WINDOW_SECONDS);
     }
 
-    /** The admin notice after the total cap was hit in the last 24 hours ('' otherwise; no personal data). */
+    /** The failures counted for this client's IPv6 /48 right now (0 for IPv4). */
+    public function network_failures(string $ip): int {
+        $network = self::network_key_of($ip);
+        return $network === '' ? 0 : $this->current('m', $network, self::WINDOW_SECONDS);
+    }
+
+    /** The admin notices of the last 24 hours ('' when none; no personal data). */
     public static function admin_notice_html(int $now): string {
-        $at = (int) get_option(self::ALERT_OPTION, 0);
-        if ($at <= 0 || $now - $at > DAY_IN_SECONDS || $at > $now + 60) {
-            return '';
+        $html = '';
+        $at = self::recent_alert(self::ALERT_OPTION, $now);
+        if ($at !== null) {
+            $html .= self::notice(sprintf(
+                'Evangelou Club: Συμπληρώθηκε το ωριαίο όριο νέων λογαριασμών από το QR του καταστήματος (%1$d ανά ώρα) στις %2$s. Οι νέες εγγραφές περιμένουν μέχρι να περάσει η ώρα. Αν πρόκειται για πραγματική κίνηση και όχι για επίθεση, ο τεχνικός μπορεί να αυξήσει τη ρύθμιση %3$s.',
+                self::max_per_hour(),
+                wp_date('d/m/Y H:i', $at),
+                self::GLOBAL_CONSTANT
+            ));
         }
-        $text = sprintf(
-            'Evangelou Club: Συμπληρώθηκε το ωριαίο όριο νέων λογαριασμών από το QR του καταστήματος (%1$d ανά ώρα) στις %2$s. Οι νέες εγγραφές περιμένουν μέχρι να περάσει η ώρα. Αν πρόκειται για πραγματική κίνηση και όχι για επίθεση, ο τεχνικός μπορεί να αυξήσει τη ρύθμιση %3$s.',
-            self::max_per_hour(),
-            wp_date('d/m/Y H:i', $at),
-            self::GLOBAL_CONSTANT
-        );
+        $at = self::recent_alert(self::ROWS_ALERT_OPTION, $now);
+        if ($at !== null) {
+            $html .= self::notice(sprintf(
+                'Evangelou Club: Στις %1$s καταγράφηκαν πάρα πολλές αποτυχημένες προσπάθειες εγγραφής από το QR (πιθανή επίθεση). Οι εγγραφές συνεχίζουν κανονικά· νέες αποτυχίες δεν καταγράφονται μέχρι να λήξουν οι παλιές (5 λεπτά). Αν επαναλαμβάνεται, ο τεχνικός μπορεί να ελέγξει την κίνηση ή να κλείσει προσωρινά τη ρύθμιση EVC_CLUB_ONBOARDING_ENABLED.',
+                wp_date('d/m/Y H:i', $at)
+            ));
+        }
+        return $html;
+    }
+
+    private static function recent_alert(string $option, int $now): ?int {
+        $at = (int) get_option($option, 0);
+        return $at <= 0 || $now - $at > DAY_IN_SECONDS || $at > $now + 60 ? null : $at;
+    }
+
+    private static function notice(string $text): string {
         return '<div class="notice notice-warning"><p>' . esc_html($text) . '</p></div>';
     }
 
@@ -231,13 +259,33 @@ final class EVC_Onboarding_Registration {
         update_option(self::ALERT_OPTION, $now, false);
     }
 
+    /** One PII-free log line and the admin notice, at most once per hour, when the failure rows reach the ceiling. */
+    private function alert_rows_full(int $now): void {
+        if ($this->bump('a', 'rows-full', self::SUCCESS_WINDOW_SECONDS, $now) !== 1) {
+            return;
+        }
+        error_log('Evangelou Club: the failed QR sign-up attempts reached the row ceiling; new failures are not recorded until old ones expire (sign-up stays open).');
+        update_option(self::ROWS_ALERT_OPTION, $now, false);
+    }
+
     /**
-     * A failure of this client. Above the row ceiling only an EXISTING row is counted (one atomic UPDATE): no new
-     * row is written, so a flood from many addresses cannot grow the options table without bound.
+     * A failure of this client (and of its IPv6 /48). At the row ceiling only EXISTING rows are counted (one atomic
+     * UPDATE each): no new row is written, so a flood from many addresses cannot grow the options table without bound.
      */
-    private function count_failure_of(string $key, int $now): void {
-        if (!$this->failure_rows_full($now)) {
-            $this->bump('f', $key, self::WINDOW_SECONDS, $now);
+    private function count_failure_of(string $key, string $network, int $now): void {
+        $full = $this->failure_rows_full($now);
+        if ($full) {
+            $this->alert_rows_full($now);
+        }
+        $this->count_in('f', $key, $now, $full);
+        if ($network !== '') {
+            $this->count_in('m', $network, $now, $full);
+        }
+    }
+
+    private function count_in(string $bucket, string $key, int $now, bool $existing_only): void {
+        if (!$existing_only) {
+            $this->bump($bucket, $key, self::WINDOW_SECONDS, $now);
             return;
         }
         global $wpdb;
@@ -245,11 +293,11 @@ final class EVC_Onboarding_Registration {
             "UPDATE {$wpdb->options} SET option_value = " . self::NEXT_VALUE_SQL . ' WHERE option_name = %s',
             $now - self::WINDOW_SECONDS,
             '1|' . $now,
-            self::COUNTER_PREFIX . 'f_' . $key
+            self::COUNTER_PREFIX . $bucket . '_' . $key
         ));
     }
 
-    /** Whether the failure rows reached the ceiling (a bounded count on the option_name index; cleaned up first). */
+    /** Whether the failure rows reached the ceiling (a bounded count on the option_name index; expired ones deleted first). */
     private function failure_rows_full(int $now): bool {
         if ($this->count_failure_rows() < $this->row_ceiling) {
             return false;
@@ -261,19 +309,24 @@ final class EVC_Onboarding_Registration {
     private function count_failure_rows(): int {
         global $wpdb;
         return (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM {$wpdb->options} WHERE option_name LIKE %s LIMIT %d) AS evc_rows",
+            "SELECT COUNT(*) FROM (SELECT 1 FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s LIMIT %d) AS evc_rows",
             $wpdb->esc_like(self::COUNTER_PREFIX . 'f_') . '%',
+            $wpdb->esc_like(self::COUNTER_PREFIX . 'm_') . '%',
             $this->row_ceiling
         ));
     }
 
     /**
-     * Removes expired rows (only a count and a time each). A deadlock or lock wait here is ignored and not logged:
-     * the rows are simply removed by a later cleanup.
+     * Removes expired rows (only a count and a time each): failure rows (f_, m_) as soon as their own 5-minute window
+     * is over (round 4, B1), every other row two hours after its window started. A deadlock or lock wait here is
+     * ignored and not logged: the rows are simply removed by a later cleanup.
      */
     private function cleanup(int $now): void {
         global $wpdb;
         $was = $wpdb->suppress_errors(true);
+        foreach (array('f_', 'm_') as $bucket) {
+            $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s AND CAST(SUBSTRING_INDEX(option_value, '|', -1) AS UNSIGNED) <= %d", $wpdb->esc_like(self::COUNTER_PREFIX . $bucket) . '%', $now - self::WINDOW_SECONDS));
+        }
         $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s AND CAST(SUBSTRING_INDEX(option_value, '|', -1) AS UNSIGNED) + %d < %d", $wpdb->esc_like(self::COUNTER_PREFIX) . '%', 2 * self::SUCCESS_WINDOW_SECONDS, $now));
         $wpdb->suppress_errors($was);
     }

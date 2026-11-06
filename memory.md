@@ -1549,3 +1549,15 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **CI on 4520041:** foundation push 42216602093 completed success (attempt 1); frontend push 42216602043 4/4 and frontend PR 42216608555 success; foundation PR 42216608588 was still running when this was written.
 - **CI on 4520041 (final, first attempt everywhere):** foundation push 42216602093 18/18, foundation PR 42216608588 18/18, frontend push 42216602043 4/4, frontend PR 42216608555 4/4.
 - **CI on ec74b38:** all tests green on every storage, frontend push and PR 4/4. The commerce mutation mode was 201/202: OG17 (priority 20) was killed by the classic cart test, but its second named killer, the Store API cart test, passed. On the Store API add-item path no earlier validator refused, so our message showed even at priority 20. Fix: OG17 names only the classic cart test.
+
+### STAGE-07 round 4 — final review CHANGES REQUIRED on B1 (2026-11-06)
+- **B1:** the row ceiling no longer refuses account creation; round 3's TRY_LATER at the ceiling became mutant OB33.
+  - Failure rows (f_, m_) are deleted once their own 5-minute window is over (a separate DELETE with WINDOW_SECONDS in every cleanup; the cleanup runs before the ceiling decision).
+  - At the ceiling: no NEW failure row (existing rows are UPDATEd), plus one PII-free log line and a Greek admin notice (`evc_club_join_rows_alert`, bucket 'a' key 'rows-full', once an hour).
+  - New per-/48 failure bucket 'm': 30 per 5 minutes in aggregate (`MAX_NETWORK_FAILURES`), then 429 for the /48.
+  - **Deviation from the coordinator's "same 10" rule:** I chose 30 rather than 10, because carriers share a /48 (same reason as N1). This is documented.
+- **G1:** Store API POST /wc/store/v1/checkout/{id} (CheckoutOrder, WC 11.2.1) checks the gateway in update_order_from_request BEFORE any Store API action fires. The guard therefore sets the order's product ids in `rest_request_before_callbacks` and clears them in `rest_request_after_callbacks`; `cart()` prefers them. Tested on the real stack: a cheque payment of the Club order is refused, bacs is accepted, a coffee order paid by cheque still works.
+- **N1** (coordinator decision): `EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR` default 10 → 30.
+- **T1:** test_a_fresh_server_places_the_order_without_a_preceding_get resets `$GLOBALS['wp_rest_server']`. Store API RoutesController::get() builds NEW route objects on every rest_api_init, so a fresh server means a fresh Checkout::$order.
+- **Nits:** the refused guest leaves exactly one `checkout-draft` (session `store_api_draft_order`, customer 0). Greek operator note line 8 added.
+- **Mutants:** OB1–OB38 all killed locally (35 run, 0 survived); OB7, OB8 and OB31 patterns updated; new OB35–OB38 and OG18. Not a mutant: dropping the after_callbacks reset, because before_callbacks resets the context on the next request.

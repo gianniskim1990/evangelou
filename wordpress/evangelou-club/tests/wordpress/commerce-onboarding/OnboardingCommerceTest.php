@@ -509,9 +509,14 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
     private function place_order(string $email, string $method = 'bacs', array $extra = array()): WP_REST_Response {
         // A browser places each order in a new PHP request. Here the Store API's checkout route object lives on between
         // requests and a POST reuses the order it last held; its GET re-reads the session's draft, as a new request does.
+        // (test_a_fresh_server_places_the_order_without_a_preceding_get shows the same without the GET.)
         $this->store('GET', '/checkout');
+        return $this->store('POST', '/checkout', self::checkout_body($email, $method, $extra));
+    }
+
+    private static function checkout_body(string $email, string $method = 'bacs', array $extra = array()): array {
         $address = array('first_name' => 'Ελένη', 'last_name' => 'Δοκιμή', 'company' => '', 'address_1' => 'Ομονοίας 1', 'address_2' => '', 'city' => 'Καβάλα', 'state' => '', 'postcode' => '65403', 'country' => 'GR', 'phone' => '6900000000');
-        return $this->store('POST', '/checkout', array_merge(array('billing_address' => $address + array('email' => $email), 'shipping_address' => $address, 'payment_method' => $method), $extra));
+        return array_merge(array('billing_address' => $address + array('email' => $email), 'shipping_address' => $address, 'payment_method' => $method), $extra);
     }
 
     private static function open_club_orders(int $user): int {
@@ -582,9 +587,12 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $this->assertSame(400, $r->get_status(), wp_json_encode($r->get_data()));
         $this->assertSame('evc_club_account_required', $r->get_data()['code']);
         $this->assertSame(EVC_Onboarding_Checkout_Guard::ACCOUNT, $r->get_data()['message']);
-        // No order was placed: at most the Store API's own unplaced draft is left (HPOS keeps it as an unpaid draft or
-        // pending order of no customer), never one awaiting a bank transfer.
-        $this->assertSame(array(), wc_get_orders(array('billing_email' => $guest, 'status' => array('on-hold', 'processing', 'completed'), 'limit' => -1, 'return' => 'ids')));
+        // No order was placed: only the Store API's own draft is left, exactly in "checkout-draft".
+        $this->assertSame(array(), wc_get_orders(array('billing_email' => $guest, 'status' => array('pending', 'on-hold', 'processing', 'completed', 'cancelled', 'failed', 'refunded'), 'limit' => -1, 'return' => 'ids')));
+        $draft = wc_get_order((int) WC()->session->get('store_api_draft_order', 0));
+        $this->assertInstanceOf(WC_Order::class, $draft);
+        $this->assertSame('checkout-draft', $draft->get_status());
+        $this->assertSame(0, $draft->get_customer_id());
         // The same guest creating the account at this checkout: accepted, and the order belongs to that account.
         update_option('woocommerce_enable_signup_and_login_from_checkout', 'yes');
         $r = $this->place_order($guest, 'bacs', array('create_account' => true, 'customer_password' => 'Ena-kafe-tin-imera-7'));
@@ -592,6 +600,55 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $account = get_user_by('email', $guest);
         $this->assertInstanceOf(WP_User::class, $account);
         $this->assertSame((int) $account->ID, wc_get_order((int) $r->get_data()['order_id'])->get_customer_id());
+    }
+
+    /** Round 4 (T1): a fresh REST server (new route objects, as in a new request) places the order with no GET first. */
+    public function test_a_fresh_server_places_the_order_without_a_preceding_get(): void {
+        $user = $this->customer();
+        $this->store_api($user);
+        $this->add_item(EVC_TEST_CLUB_PRODUCT);
+        $GLOBALS['wp_rest_server'] = null;
+        rest_get_server();
+        $r = $this->store('POST', '/checkout', self::checkout_body(get_userdata($user)->user_email));
+        $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+        $this->assertSame('on-hold', $r->get_data()['status']);
+        $this->assertSame(1, self::open_club_orders($user));
+    }
+
+    /**
+     * Round 4 (G1): paying an EXISTING order through the Store API (POST /wc/store/v1/checkout/{id}) reads that order's
+     * items, not the session cart: a Club order is paid by bank transfer only, other orders keep every gateway.
+     */
+    public function test_paying_an_existing_club_order_through_the_store_api_is_bank_transfer_only(): void {
+        $user = $this->customer();
+        $this->store_api($user);
+        $gateways = WC()->payment_gateways()->payment_gateways();
+        $was = array($gateways['bacs']->enabled, $gateways['cheque']->enabled);
+        $gateways['bacs']->enabled = 'yes';
+        $gateways['cheque']->enabled = 'yes';
+        try {
+            $club = $this->order($user, 'pending');
+            $coffee = $this->order($user, 'pending', $this->coffee());
+            $this->assertSame(array(), $this->store_cart(), 'the session cart is empty');
+            $pay = function (WC_Order $order, string $method): WP_REST_Response {
+                return $this->store('POST', '/checkout/' . $order->get_id(), self::checkout_body('club.billing@example.org', $method));
+            };
+            $r = $pay($club, 'cheque');
+            $this->assertSame(400, $r->get_status(), wp_json_encode($r->get_data()));
+            $this->assertSame('woocommerce_rest_checkout_payment_method_disabled', $r->get_data()['code']);
+            $this->assertSame('pending', wc_get_order($club->get_id())->get_status());
+            $r = $pay($coffee, 'cheque');
+            $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+            $this->assertSame('on-hold', wc_get_order($coffee->get_id())->get_status(), 'another order keeps its gateways');
+            $r = $pay($club, 'bacs');
+            $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+            $this->assertSame('on-hold', wc_get_order($club->get_id())->get_status());
+            $this->add_item($this->coffee()->get_id());
+            $this->assertContains('cheque', $this->store('GET', '/cart')->get_data()['payment_methods'], 'the order context ended with its request');
+        } finally {
+            $gateways['bacs']->enabled = $was[0];
+            $gateways['cheque']->enabled = $was[1];
+        }
     }
 
     public function test_the_block_checkout_offers_only_bank_transfer_for_the_club(): void {
