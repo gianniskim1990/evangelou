@@ -205,7 +205,7 @@ are untouched.
     `bacs`, and nothing (with the Greek message) when bank transfer is off;
   - the guard's reader of the WooCommerce cart.
 - **Frontend**:
-  - `joinModel.test.ts`: rules pinned to the approved CUSTOMER-01 rules, same-site configs, strict join-v1 client;
+  - `joinModel.test.ts`: rules pinned to the approved CUSTOMER-01 rules, same-site configs, strict join-v1 client (including `try_later` and the `evc_extra` body key);
   - `joinFlow.test.ts`: jsdom flow, accessibility (labels, described errors, focus), D12 with a single checkbox,
     double tap, poster QR, the `try_later` message, the honeypot's name and `autocomplete`.
 - **Mutants**:
