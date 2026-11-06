@@ -50,18 +50,19 @@ export function CustomerPreview(props: Props) {
 
 // ---- Shared chrome ------------------------------------------------------------------
 
-export function Onboarding({ step, title, lede, aside, children, go }: { step: number; title: string; lede: string; aside?: ReactNode; children: ReactNode; go: (s: CustomerScreen) => void }) {
+/** STAGE-07: `steps` (optional) names the steps of the in-store join flow; the approved default is unchanged. */
+export function Onboarding({ step, title, lede, aside, children, go, steps = ONBOARDING_STEPS }: { step: number; title: string; lede: string; aside?: ReactNode; children: ReactNode; go: (s: CustomerScreen) => void; steps?: readonly string[] }) {
   return (
     <div className="min-h-[calc(100svh-52px)] bg-[var(--stone)]">
       <header className="mx-auto flex max-w-[1180px] items-center justify-between px-5 py-5 md:px-10 md:py-7">
         <button type="button" onClick={() => go("welcome")} aria-label="Evangelou Club, αρχική σελίδα" className="press -my-1.5 rounded-[4px] py-1.5">
           <Logo className="h-8 md:h-10" />
         </button>
-        <span className="t-small t-num text-[var(--ink-2)]">Βήμα {step + 1} από {ONBOARDING_STEPS.length}</span>
+        <span className="t-small t-num text-[var(--ink-2)]">Βήμα {step + 1} από {steps.length}</span>
       </header>
       <main className="mx-auto grid max-w-[1180px] grid-cols-[minmax(0,1fr)] gap-x-20 gap-y-8 px-5 pb-16 md:px-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:pt-6">
         <section>
-          <Steps steps={ONBOARDING_STEPS} active={step} />
+          <Steps steps={[...steps]} active={step} />
           <h1 className="t-headline mt-10 max-w-[14ch] text-[var(--roast)]">{title}</h1>
           <p className="t-lede mt-4 max-w-[42ch] text-[var(--ink-2)]">{lede}</p>
           {aside}
@@ -162,10 +163,10 @@ function Newsletter({ go }: { go: (s: CustomerScreen) => void }) {
  * (which only leads to its "payment is not connected" step, never to a payment)
  * and its own secondary link; without them the approved, disabled button stays.
  */
-export function Offer({ go, onPay, secondary }: { go: (s: CustomerScreen) => void; onPay?: () => void; secondary?: { label: string; onClick: () => void } }) {
+export function Offer({ go, onPay, secondary, steps, live }: { go: (s: CustomerScreen) => void; onPay?: () => void; secondary?: { label: string; onClick: () => void }; steps?: readonly string[]; live?: { note: string } }) {
   const included = ONBOARDING_COPY.offer.included;
   return (
-    <Onboarding step={2} go={go} title={ONBOARDING_COPY.offer.title} lede={ONBOARDING_COPY.offer.lede}>
+    <Onboarding step={2} go={go} title={ONBOARDING_COPY.offer.title} lede={ONBOARDING_COPY.offer.lede} steps={steps}>
       <div className="on-dark rounded-[22px] bg-[var(--roast)] px-6 pt-7 pb-8 text-[var(--milk)] md:px-9 md:pt-9">
         <p className="t-label text-[var(--brass)]">Evangelou Club</p>
         <p className="mt-5 flex items-baseline gap-3">
@@ -183,7 +184,11 @@ export function Offer({ go, onPay, secondary }: { go: (s: CustomerScreen) => voi
           <button type="button" onClick={secondary ? secondary.onClick : () => go("dashboard")} className="t-label -my-1 py-3 text-[var(--milk)]/75 underline decoration-[var(--brass-soft)] underline-offset-[6px] hover:text-[var(--milk)]">{secondary ? secondary.label : "Δείτε τον λογαριασμό μέλους"}</button>
         </div>
       </div>
+      {live ? (
+        <p className="t-small mt-6 max-w-[52ch] text-[var(--ink-2)]">{live.note}</p>
+      ) : (
       <PreviewNote className="mt-6">{onPay ? "Δεν υπάρχει πληρωμή στην προεπισκόπηση: το κουμπί δεν χρεώνει τίποτα και η συνδρομή μένει σε αναμονή πληρωμής." : "Δεν υπάρχει πληρωμή στην προεπισκόπηση: το κουμπί είναι ανενεργό και καμία χρέωση δεν γίνεται."}</PreviewNote>
+      )}
     </Onboarding>
   );
 }

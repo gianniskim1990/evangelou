@@ -1463,3 +1463,39 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - CI on 891c84a (STAGE-06 round 3, PR #40): green on the first attempt, with no re-runs.
   - Foundation: push 42022027835 18/18, pull_request 42022035058 18/18.
   - Frontend: push 42022027664 4/4, pull_request 42022034934 4/4.
+
+## STAGE-07 — in-store QR onboarding, default OFF (branch `feat/evc-store-onboarding`, stacked on `feat/evc-fluentcrm-tags` 607b1eb) — 2026-11-06
+- **Owner go.** The owner said «πάμε» on 2026-11-06 at 08:45 Athens (roadmap step 4, part 2). This is development only: no merge, deploy, enabling, real or staging DB, real FluentCRM, or migration.
+- **OWNER DECISION D12.** No newsletter checkbox in the onboarding for now. The onboarding never creates, changes or tags a FluentCRM contact; the STAGE-06 tag sync is the only FluentCRM path. It depends on FluentCRM's "create contacts on WP user registration" setting staying unchecked (doc + go-live checklist).
+- **Separate first commit adf2a32 (accepted STAGE-06 nits).**
+  - A run that lost its lock writes no status and no retry budget.
+  - A DB error in `refresh_lock` throws, giving one bounded follow-up.
+  - The gateway guard flags `"{$` / `"${` strings and the callable-taking built-ins (array_map, usort, preg_replace_callback, …).
+  - Mutants FW29–FW30.
+- **Built** (`docs/store-onboarding.md`).
+  - **Flag.** `EVC_CLUB_ONBOARDING_ENABLED` (exact boolean true), effective only together with `EVC_CLUB_CUSTOMER_ENABLED`.
+  - **Pages.**
+    - `/club/join/` (plain: `?evc_club_join=1`): public. The server computes the step: register | terms | offer | member | not_customer | unavailable.
+    - `/club/join/poster/`: Club staff account, shop managers and administrators only. The QR encodes ONLY the join URL plus `src=store`; offline-tolerant, with a reload button.
+  - **Routes** (namespace evangelou-club-customer/v1, contract join-v1).
+    - `/join/account` (public): page nonce (core checks it) + same Origin; `wp_insert_user` with role customer, then `wp_set_auth_cookie`.
+      - An existing e-mail gets a neutral `check_account`, with the same hashing work. It is never attached or revealed.
+      - 10 failures per 5 minutes per HMAC(REMOTE_ADDR) → 429. Honeypot `website`.
+      - Password: 10–128 characters, not common, not one repeated character, not containing the e-mail name or the mobile.
+    - `/join/terms`: customer only; stores `_evc_club_terms` = {version club-terms-v1, accepted_at}.
+    - `/join/checkout`: customer only. Returns member, or `checkout` = WooCommerce checkout with `?add-to-cart=<Club product>`. Never a second order: an open Club order (pending/on-hold/processing), or a membership that is active, pending payment or unverified, goes to the member area. An unreadable membership answers "unavailable".
+  - **Frontend.** The same customer bundle with a bootstrap "mode" (join / poster): `JoinApp`, `PosterApp`, `joinConfig` (every URL same-site), `joinApi` (strict), `joinRules` (pinned to the CUSTOMER-01 rules). Additive props on the approved components: `Onboarding.steps`, `Offer.steps`/`live`, `QrSvg.label`/`kind`.
+  - **Guards.** STAGE-07 packager rules: construction only in `EVC_Onboarding_Plugin::wire()` behind the gate; user creation and sign-in only in the registration file; add-to-cart only in the hand-off file.
+- **Tests.**
+  - PHP unit: `OnboardingRulesTest`.
+  - `wp-onboarding`: 15 tests. `OnboardingOffTest` in wp-common.
+  - `wp-commerce-onboarding` (real stack, CI only: the full journey up to the member QR, plus dedupe cases).
+  - Frontend: `joinModel` and `joinFlow`.
+- **Mutants.**
+  - Killed locally: OR1–OR10, OB1–OB18 and JM1–JM15. The frontend total goes 346 → 361 (181 + 180).
+  - CI commerce job only: OC1–OC5.
+- **Open owner questions (Greek in the doc):**
+  1. URL of the Club terms page.
+  2. E-mail confirmation before payment.
+  3. Only BACS at checkout?
+  4. Rate limit on the shop Wi-Fi (one shared IP).

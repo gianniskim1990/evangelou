@@ -1246,6 +1246,79 @@ $mutants = array(
             // STAGE-07 nit', '        if (false) {
             // STAGE-07 nit',
         array('FluentcrmTagSyncWpTest::test_a_database_error_while_refreshing_the_lock_schedules_one_bounded_follow_up')),
+    // STAGE-07 (OB1-OB18, mode onboarding / disabled; OC1-OC5, mode commerce_onboarding): in-store onboarding.
+    array('OB1-flag-accepts-truthy-values', 'onboarding', 'includes/onboarding/class-evc-onboarding-feature.php',
+        '        return $value === true;', '        return (bool) $value;',
+        array('OnboardingTest::test_the_flag_needs_both_constants_as_boolean_true')),
+    array('OB3-boot-gate-removed', 'disabled', 'includes/onboarding/class-evc-onboarding-plugin.php',
+        '        if (!EVC_Onboarding_Feature::enabled()) {
+            return;
+        }
+        $seams', '        $seams',
+        array('OnboardingOffTest::test_off_by_default_nothing_exists')),
+    array('OB4-registration-constructible-when-off', 'disabled', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        EVC_Onboarding_Feature::assert_constructible(__CLASS__);
+', '',
+        array('OnboardingOffTest::test_the_classes_refuse_construction_while_off')),
+    array('OB5-honeypot-ignored', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        if (!is_string($honeypot) || $honeypot !== \'\') {', '        if (false) {',
+        array('OnboardingTest::test_the_honeypot_creates_nothing')),
+    array('OB6-email-taken-as-user-name-not-checked', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        ' || username_exists($email) !== false', '',
+        array('OnboardingTest::test_an_existing_email_is_never_attached_or_revealed')),
+    array('OB7-rate-limit-not-enforced', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        if (EVC_Onboarding_Rules::blocked($state, $now, self::WINDOW_SECONDS, self::MAX_FAILURES)) {', '        if (false) {',
+        array('OnboardingTest::test_ten_failures_in_five_minutes_block_the_address')),
+    array('OB8-invalid-input-not-counted', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '            $this->fail($key, $state, $now);
+            return array(\'outcome\' => self::INVALID', '            return array(\'outcome\' => self::INVALID',
+        array('OnboardingTest::test_ten_failures_in_five_minutes_block_the_address')),
+    array('OB9-origin-not-checked', 'onboarding', 'includes/onboarding/class-evc-rest-join-controller.php',
+        '        if (!self::same_origin($request) || !self::anonymous_nonce_ok($request)) {', '        if (!self::anonymous_nonce_ok($request)) {',
+        array('OnboardingTest::test_a_bad_nonce_or_another_origin_is_refused')),
+    array('OB11-signed-in-may-register-again', 'onboarding', 'includes/onboarding/class-evc-onboarding-registration.php',
+        '        if (is_user_logged_in()) {
+            return array(\'outcome\' => self::SIGNED_IN);', '        if (false) {
+            return array(\'outcome\' => self::SIGNED_IN);',
+        array('OnboardingTest::test_a_new_account_is_a_signed_in_customer_with_exactly_what_was_typed')),
+    array('OB12-terms-accepted-without-true', 'onboarding', 'includes/onboarding/class-evc-rest-join-controller.php',
+        '($body[\'accept\'] ?? null) !== true', 'empty($body[\'accept\'])',
+        array('OnboardingTest::test_terms_are_recorded_with_their_version_only_for_the_customer_themself')),
+    array('OB13-terms-version-not-checked', 'onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '        return is_array($meta) && ($meta[\'version\'] ?? null) === EVC_Onboarding_Rules::TERMS_VERSION;', '        return is_array($meta);',
+        array('OnboardingTest::test_terms_are_recorded_with_their_version_only_for_the_customer_themself')),
+    array('OB14-poster-for-any-account', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        if (!self::may_show_poster($user)) {', '        if (false) {',
+        array('OnboardingTest::test_the_poster_is_for_the_shop_only_and_encodes_only_the_join_url')),
+    array('OB15-poster-carries-a-nonce', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        $config = array(\'mode\' => \'poster\', \'joinUrl\' => self::join_url(true), \'appVersion\' => EVC_CLUB_VERSION);', '        $config = array(\'mode\' => \'poster\', \'joinUrl\' => self::join_url(true), \'appVersion\' => EVC_CLUB_VERSION, \'nonce\' => wp_create_nonce(\'wp_rest\'));',
+        array('OnboardingTest::test_the_poster_is_for_the_shop_only_and_encodes_only_the_join_url')),
+    array('OB16-other-hosts-are-same-site', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        ' || strtolower($parts[\'host\']) !== strtolower($site[\'host\'])', '',
+        array('OnboardingTest::test_redirect_parameters_are_never_used')),
+    array('OB17-staff-account-may-join', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        if (EVC_Customer_Auth::check_customer($user) !== null) {
+            return \'not_customer\';', '        if (false) {
+            return \'not_customer\';',
+        array('OnboardingTest::test_the_steps_of_a_signed_in_account')),
+    array('OB18-store-marker-dropped', 'onboarding', 'includes/onboarding/class-evc-onboarding-shell.php',
+        '        return $from_store ? add_query_arg(\'src\', self::STORE_MARKER, $url) : $url;', '        return $url;',
+        array('OnboardingTest::test_the_poster_is_for_the_shop_only_and_encodes_only_the_join_url')),
+    array('OC1-open-order-not-checked', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '            if ($this->has_open_club_order($user_id)) {', '            if (false) {',
+        array('OnboardingCommerceTest::test_an_ended_membership_with_a_waiting_renewal_order_is_not_sent_to_pay_twice')),
+    array('OC2-active-member-sent-to-pay', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        'const MEMBER_STATES = array(EVC_Customer_Membership::ACTIVE, ', 'const MEMBER_STATES = array(',
+        array('OnboardingCommerceTest::test_a_signed_in_active_member_goes_straight_to_the_member_area')),
+    array('OC3-orders-of-every-customer', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '\'customer_id\' => $user_id, ', '',
+        array('OnboardingCommerceTest::test_another_customers_open_order_never_counts')),
+    array('OC4-any-product-counts', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        ' && (int) $item->get_product_id() === $this->config->product_id', '',
+        array('OnboardingCommerceTest::test_a_cancelled_order_or_an_order_of_something_else_leaves_the_offer_open')),
+    array('OC5-checkout-without-terms', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
+        '        return self::terms_accepted($user_id) ? self::NEXT_CHECKOUT : self::NEXT_TERMS;', '        return self::NEXT_CHECKOUT;',
+        array('OnboardingCommerceTest::test_from_the_tablet_qr_to_the_member_qr')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -1286,6 +1359,14 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
         // STAGE-06 round 2: the real commerce site + EVC_CLUB_FLUENTCRM_SYNC_ENABLED + the TEST-ONLY fake FluentCRM API.
         $suite = 'wp-commerce-fluentcrm';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_FLUENTCRM_FLAG' => 'enabled'));
+    } elseif ($mode === 'onboarding') {
+        // STAGE-07: customer flag ON + EVC_CLUB_ONBOARDING_ENABLED = true, no commerce plugins.
+        $suite = 'wp-onboarding';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled'));
+    } elseif ($mode === 'commerce_onboarding') {
+        // STAGE-07: the same over the real commerce site.
+        $suite = 'wp-commerce-onboarding';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled'));
     } elseif ($mode === 'fluentcrm') {
         // STAGE-06: EVC_CLUB_FLUENTCRM_SYNC_ENABLED = true + the six tag constants + the TEST-ONLY fake FluentCRM API.
         $suite = 'wp-fluentcrm';
@@ -1314,7 +1395,7 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
 // commerce mutants, which need the real plugins (EVC_TEST_COMMERCE_PLUGINS) and their own CI job.
 $evc_commerce_only = in_array('--mode=commerce', $argv, true);
 $mutants = array_values(array_filter($mutants, function ($m) use ($evc_commerce_only) {
-    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm'), true) === $evc_commerce_only;
+    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding'), true) === $evc_commerce_only;
 }));
 if ($evc_commerce_only && (string) getenv('EVC_TEST_COMMERCE_PLUGINS') === '') {
     fwrite(STDERR, "ABORT: --mode=commerce needs EVC_TEST_COMMERCE_PLUGINS.\n");
@@ -1326,7 +1407,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm') as $mode) {
+foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm', 'onboarding') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

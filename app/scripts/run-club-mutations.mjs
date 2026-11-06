@@ -2116,6 +2116,97 @@ const mutants = [
     search: "    throw (signal.aborted ? \"aborted\" : \"unavailable\") satisfies CameraFailure;",
     replace: "    throw \"unavailable\" satisfies CameraFailure;",
   },
+  // STAGE-07 (JM1-JM15): in-store join flow and tablet poster.
+  {
+    id: "JM1-config-url-of-another-site",
+    file: "customer/joinConfig.ts",
+    search: "    if (url.origin !== origin || (url.protocol !== \"https:\" && url.protocol !== \"http:\")) return null;\n    return url.href;",
+    replace: "    return url.href;",
+  },
+  {
+    id: "JM2-poster-url-with-extra-data",
+    file: "customer/joinConfig.ts",
+    search: "    if (!(name === \"evc_club_join\" && value === \"1\") && !(name === \"src\" && value === \"store\")) return { ok: false, reason: \"join_url\" };\n",
+    replace: "",
+  },
+  {
+    id: "JM3-poster-config-with-extra-keys",
+    file: "customer/joinConfig.ts",
+    search: "  if (keys !== \"appVersion,joinUrl,mode\") return { ok: false, reason: \"unexpected_keys\" };\n",
+    replace: "",
+  },
+  {
+    id: "JM4-checkout-url-not-checked",
+    file: "customer/joinApi.ts",
+    search: "  const url = sameOrigin(body.url, origin);\n  return url ? { kind: body.next, url } : { kind: \"error\" };",
+    replace: "  return { kind: body.next, url: String(body.url) };",
+  },
+  {
+    id: "JM5-register-answer-with-extra-keys",
+    file: "customer/joinApi.ts",
+    search: "      return Object.keys(body).length === 1 ? { kind: body.result } : { kind: \"error\" };",
+    replace: "      return { kind: body.result };",
+  },
+  {
+    id: "JM6-unknown-step-accepted",
+    file: "customer/joinConfig.ts",
+    search: "  if (typeof d.step !== \"string\" || !(JOIN_STEPS_ALLOWED as readonly string[]).includes(d.step)) return { ok: false, reason: \"step\" };\n",
+    replace: "",
+  },
+  {
+    id: "JM7-double-tap-sends-twice",
+    file: "customer/JoinApp.tsx",
+    search: "    if (busyRef.current) return;\n",
+    replace: "",
+  },
+  {
+    id: "JM8-new-account-goes-elsewhere",
+    file: "customer/JoinApp.tsx",
+    search: "      if (r.kind === \"ok\" || r.kind === \"signed_in\") return navigate(config.joinUrl);",
+    replace: "      if (r.kind === \"ok\" || r.kind === \"signed_in\") return navigate(config.memberUrl);",
+  },
+  {
+    id: "JM9-terms-not-required",
+    file: "customer/JoinApp.tsx",
+    search: "<Btn onClick={() => void acceptTerms()} disabled={!terms || busy}",
+    replace: "<Btn onClick={() => void acceptTerms()} disabled={busy}",
+  },
+  {
+    id: "JM10-honeypot-not-sent",
+    file: "customer/joinApi.ts",
+    search: "password: form.password, website: honeypot });",
+    replace: "password: form.password, website: \"\" });",
+  },
+  {
+    id: "JM11-checkout-url-ignored",
+    file: "customer/JoinApp.tsx",
+    search: "      if (r.kind === \"checkout\" || r.kind === \"member\") return navigate(r.url);",
+    replace: "      if (r.kind === \"checkout\" || r.kind === \"member\") return navigate(config.memberUrl);",
+  },
+  {
+    id: "JM12-browser-checks-skipped",
+    file: "customer/JoinApp.tsx",
+    search: "    if (Object.keys(found).length > 0) return showErrors(found);\n",
+    replace: "",
+  },
+  {
+    id: "JM13-password-min-two",
+    file: "customer/joinRules.ts",
+    search: "  if (length < PASSWORD_MIN) return JOIN_MESSAGES.passwordShort;",
+    replace: "  if (length < 2) return JOIN_MESSAGES.passwordShort;",
+  },
+  {
+    id: "JM14-email-optional",
+    file: "customer/joinRules.ts",
+    search: "  if (email === \"\") errors.email = JOIN_MESSAGES.emailMissing;",
+    replace: "  if (email === \"\") void 0;",
+  },
+  {
+    id: "JM15-poster-qr-of-another-text",
+    file: "customer/PosterApp.tsx",
+    search: "<QrSvg text={config.joinUrl} size={420}",
+    replace: "<QrSvg text={config.joinUrl + \"#poster\"} size={420}",
+  },
 ];
 
 // ---- Driver ---------------------------------------------------------------

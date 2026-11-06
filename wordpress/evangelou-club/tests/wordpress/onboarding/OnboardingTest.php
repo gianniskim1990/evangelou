@@ -1,0 +1,307 @@
+<?php
+/**
+ * STAGE-07 wp-onboarding suite: EVC_CLUB_ONBOARDING_ENABLED + EVC_CLUB_CUSTOMER_ENABLED (both exact true), staff
+ * flag OFF, no commerce plugins (so the hand-off answers "unavailable"; the checkout path is the commerce suite).
+ * Real WordPress: users, nonces, transients, REST dispatch.
+ */
+final class OnboardingTest extends EVC_WP_Test_Case {
+    const ASSET_URL = 'https://cdn.example.test/customer-app';
+
+    /** @var string */
+    private $asset_dir;
+    /** @var string */
+    private $log;
+
+    public function set_up() {
+        parent::set_up();
+        if (get_role('customer') === null) {
+            add_role('customer', 'Customer', array('read' => true)); // WooCommerce's role (no WooCommerce in this suite)
+        }
+        add_filter('send_auth_cookies', '__return_false'); // the CLI test run cannot send cookies; the user is still set
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.' . wp_rand(10, 250);
+        $this->asset_dir = sys_get_temp_dir() . '/evc-join-assets-' . wp_generate_password(8, false, false);
+        mkdir($this->asset_dir . '/assets', 0777, true);
+        foreach (array('assets/customer-Ab12Cd34.js', 'assets/customer-Ef56Gh78.css') as $file) {
+            file_put_contents($this->asset_dir . '/' . $file, '/* test asset */');
+        }
+        file_put_contents($this->asset_dir . '/manifest.json', wp_json_encode(array(
+            'customer.html' => array('file' => 'assets/customer-Ab12Cd34.js', 'isEntry' => true, 'css' => array('assets/customer-Ef56Gh78.css')),
+        )));
+        $this->log = (string) tempnam(sys_get_temp_dir(), 'evc-log');
+        ini_set('error_log', $this->log);
+        $this->boot();
+    }
+
+    public function tear_down() {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($this->asset_dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $f) {
+            $f->isDir() ? rmdir($f->getPathname()) : unlink($f->getPathname());
+        }
+        rmdir($this->asset_dir);
+        $log = (string) file_get_contents($this->log);
+        ini_restore('error_log');
+        @unlink($this->log);
+        $this->assertStringNotContainsString('@example', $log, 'no personal data in the log');
+        parent::tear_down();
+    }
+
+    private function boot(?callable $now = null): void {
+        EVC_Onboarding_Plugin::boot(array('assets' => new EVC_Staff_Assets($this->asset_dir, self::ASSET_URL, EVC_Customer_Shell::ASSET_ENTRY), 'now' => $now));
+        rest_get_server();
+        $this->parts()['controller']->register_routes(true); // these parts answer (a test may boot again with its own clock)
+    }
+
+    private function parts(): array {
+        $parts = EVC_Onboarding_Plugin::parts();
+        $this->assertIsArray($parts);
+        return $parts;
+    }
+
+    private static function form(array $override = array()): array {
+        return array_merge(array('name' => 'Μαρία Παπαδοπούλου', 'phone' => '694 123 4567', 'email' => 'maria.' . wp_generate_password(6, false, false) . '@example.gr', 'password' => 'kafes-sto-limani-7', 'website' => ''), $override);
+    }
+
+    /** A POST from the join page (its own Origin, the page's nonce unless given). */
+    private function post(string $route, $body, ?string $nonce = null, ?string $origin = 'self'): WP_REST_Response {
+        $server = rest_get_server();
+        $request = new WP_REST_Request('POST', '/' . EVC_Customer_Rest_Security::NAMESPACE_V1 . $route);
+        $request->set_header('Content-Type', 'application/json');
+        $request->set_body(is_string($body) ? $body : wp_json_encode($body));
+        $nonce = $nonce ?? wp_create_nonce('wp_rest');
+        $request->set_header('X-WP-Nonce', $nonce);
+        $_SERVER['HTTP_X_WP_NONCE'] = $nonce;
+        if ($origin !== null) {
+            $request->set_header('Origin', $origin === 'self' ? EVC_Rest_Join_Controller::site_origin() : $origin);
+        }
+        $auth = $server->check_authentication();
+        $result = is_wp_error($auth) ? rest_convert_error_to_response($auth) : $server->dispatch($request);
+        return apply_filters('rest_post_dispatch', rest_ensure_response($result), $server, $request);
+    }
+
+    private function config(array $page): array {
+        $this->assertSame(200, $page['status'], $page['body']);
+        $this->assertSame(1, preg_match('#<script type="application/json" id="evc-customer-config">(.*?)</script>#s', $page['body'], $m));
+        $config = json_decode($m[1], true);
+        $this->assertIsArray($config);
+        return $config;
+    }
+
+    // ---- flag and pages -----------------------------------------------------------------------------
+
+    public function test_the_flag_needs_both_constants_as_boolean_true(): void {
+        $this->assertTrue(EVC_Onboarding_Feature::enabled());
+        foreach (array(1, '1', 'true', 'yes', array(true), null, false) as $value) {
+            $this->assertFalse(EVC_Onboarding_Feature::is_enabled_value($value), var_export($value, true));
+        }
+        $this->assertNotFalse(has_action('template_redirect', array('EVC_Onboarding_Plugin', 'serve')));
+        $this->assertContains(EVC_Onboarding_Shell::QUERY_VAR, apply_filters('query_vars', array()));
+        $routes = rest_get_server()->get_routes();
+        foreach (array('/account', '/terms', '/checkout') as $route) {
+            $this->assertArrayHasKey('/' . EVC_Customer_Rest_Security::NAMESPACE_V1 . '/join' . $route, $routes, $route);
+        }
+    }
+
+    public function test_the_join_page_is_public_and_starts_with_the_account(): void {
+        $config = $this->config($this->parts()['shell']->join(new WP_User(0)));
+        $this->assertSame('join', $config['mode']);
+        $this->assertSame('register', $config['step']);
+        $this->assertTrue(wp_verify_nonce($config['nonce'], 'wp_rest') !== false, 'the nonce of the signed-out visitor');
+        $home = wp_parse_url(home_url('/'), PHP_URL_HOST);
+        foreach (array('restBase', 'joinUrl', 'memberUrl', 'loginUrl', 'logoutUrl', 'lostPasswordUrl') as $key) {
+            $this->assertSame($home, wp_parse_url($config[$key], PHP_URL_HOST), $key);
+        }
+        $this->assertStringContainsString(rawurlencode(EVC_Onboarding_Shell::join_url()), $config['loginUrl'], 'sign-in returns to the join page');
+        $this->assertSame(EVC_Customer_Shell::shell_url(), $config['memberUrl']);
+    }
+
+    public function test_redirect_parameters_are_never_used(): void {
+        $_GET['redirect_to'] = 'https://evil.example/steal';
+        $_GET['next'] = '//evil.example';
+        $_REQUEST = array_merge($_REQUEST, $_GET);
+        try {
+            $page = $this->parts()['shell']->join(new WP_User(0));
+        } finally {
+            unset($_GET['redirect_to'], $_GET['next'], $_REQUEST['redirect_to'], $_REQUEST['next']);
+        }
+        $this->assertStringNotContainsString('evil.example', $page['body']);
+        $customer = $this->factory()->user->create(array('role' => 'customer'));
+        wp_set_current_user($customer);
+        $r = $this->post('/join/checkout', array('url' => 'https://evil.example', 'redirect_to' => 'https://evil.example'));
+        $this->assertStringNotContainsString('evil.example', (string) wp_json_encode($r->get_data()));
+        $this->assertSame('', EVC_Onboarding_Shell::same_site_url('https://evil.example/terms'));
+        $this->assertSame('', EVC_Onboarding_Shell::same_site_url('javascript:alert(1)'));
+        $this->assertSame('', EVC_Onboarding_Shell::same_site_url('//evil.example/x'));
+        $host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+        $this->assertSame('', EVC_Onboarding_Shell::same_site_url('https://' . $host . '.evil.example/x'), 'a look-alike host');
+        $this->assertSame('', EVC_Onboarding_Shell::same_site_url('https://' . $host . ':8443/x'), 'another port');
+        $this->assertSame(home_url('/terms/'), EVC_Onboarding_Shell::same_site_url(home_url('/terms/')));
+    }
+
+    public function test_the_steps_of_a_signed_in_account(): void {
+        $shell = $this->parts()['shell'];
+        $admin = $this->factory()->user->create(array('role' => 'administrator'));
+        $this->assertSame('not_customer', $shell->step(get_userdata($admin)));
+        $this->assertSame('not_customer', $shell->step(get_userdata($this->create_staff_user())));
+        $customer = $this->factory()->user->create(array('role' => 'customer'));
+        $this->assertSame('unavailable', $shell->step(get_userdata($customer)), 'no Club product configured in this suite: never a checkout');
+    }
+
+    public function test_the_poster_is_for_the_shop_only_and_encodes_only_the_join_url(): void {
+        $shell = $this->parts()['shell'];
+        $anon = $shell->poster(new WP_User(0));
+        $this->assertSame(302, $anon['status']);
+        $this->assertStringStartsWith(wp_login_url(), (string) $anon['location']);
+        $this->assertSame(403, $shell->poster(get_userdata($this->factory()->user->create(array('role' => 'customer'))))['status']);
+        $this->assertSame(403, $shell->poster(get_userdata($this->factory()->user->create(array('role' => 'subscriber'))))['status']);
+        foreach (array(get_userdata($this->factory()->user->create(array('role' => 'administrator'))), get_userdata($this->create_staff_user())) as $user) {
+            $config = $this->config($shell->poster($user));
+            $this->assertSame(array('mode', 'joinUrl', 'appVersion'), array_keys($config), 'no nonce, no REST base, nothing about anyone');
+            $this->assertSame(EVC_Onboarding_Shell::join_url(true), $config['joinUrl']);
+        }
+        $this->assertSame(add_query_arg('src', 'store', EVC_Onboarding_Shell::join_url()), EVC_Onboarding_Shell::join_url(true));
+    }
+
+    public function test_pages_are_private_and_framed_by_nobody(): void {
+        $page = $this->parts()['shell']->join(new WP_User(0));
+        $this->assertSame('no-store, private, max-age=0', $page['headers']['Cache-Control']);
+        $this->assertSame('noindex, nofollow', $page['headers']['X-Robots-Tag']);
+        $this->assertStringContainsString("frame-ancestors 'none'", $page['headers']['Content-Security-Policy']);
+        $this->assertStringContainsString('<meta name="referrer" content="no-referrer">', $page['body']);
+    }
+
+    // ---- account creation --------------------------------------------------------------------------
+
+    public function test_a_new_account_is_a_signed_in_customer_with_exactly_what_was_typed(): void {
+        $form = self::form(array('email' => '  New.Member@Example.GR '));
+        $r = $this->post('/join/account', $form);
+        $this->assertSame(200, $r->get_status());
+        $this->assertSame(array('result' => 'ok'), $r->get_data());
+        $user = get_user_by('email', 'new.member@example.gr');
+        $this->assertInstanceOf(WP_User::class, $user);
+        $this->assertSame(array('customer'), array_values($user->roles));
+        $this->assertSame($user->ID, get_current_user_id(), 'signed in');
+        $this->assertNull(EVC_Customer_Auth::check_customer($user), 'a customer account of the member area');
+        $this->assertTrue(wp_check_password($form['password'], $user->user_pass, $user->ID));
+        $this->assertSame('Μαρία', get_user_meta($user->ID, 'first_name', true));
+        $this->assertSame('Παπαδοπούλου', get_user_meta($user->ID, 'last_name', true));
+        $this->assertSame('+306941234567', get_user_meta($user->ID, 'billing_phone', true));
+        $this->assertSame('new.member@example.gr', get_user_meta($user->ID, 'billing_email', true));
+        $this->assertMatchesRegularExpression('/^club_[0-9a-f]{12}$/D', $user->user_login, 'the login name reveals nothing');
+        $this->assertFalse(EVC_Onboarding_Handoff::terms_accepted($user->ID), 'the terms are a separate step');
+        // Signed in now: a second registration is refused (no second account from the same session).
+        $this->assertSame(array('result' => 'signed_in'), $this->post('/join/account', self::form())->get_data());
+    }
+
+    public function test_an_existing_email_is_never_attached_or_revealed(): void {
+        $existing = $this->factory()->user->create(array('role' => 'customer', 'user_email' => 'known@example.gr', 'user_pass' => 'their-own-password-1'));
+        $before = get_userdata($existing);
+        $answers = array();
+        foreach (array('known@example.gr', ' KNOWN@example.gr ', 'known@example.gr') as $email) {
+            $r = $this->post('/join/account', self::form(array('email' => $email, 'password' => 'attacker-pass-99')));
+            $answers[] = array($r->get_status(), $r->get_data());
+        }
+        $this->assertSame(array_fill(0, 3, array(200, array('result' => 'check_account'))), $answers);
+        $this->assertSame(0, get_current_user_id(), 'never signed in to it');
+        $after = get_userdata($existing);
+        $this->assertSame($before->user_pass, $after->user_pass, 'never changed');
+        $this->assertSame('', (string) get_user_meta($existing, 'billing_phone', true));
+        $this->assertCount(1, get_users(array('search' => '*known@example.gr*', 'search_columns' => array('user_email'))));
+        // The same answer when the e-mail is taken as a USER NAME: nothing tells the two apart.
+        $this->factory()->user->create(array('user_login' => 'other@example.gr', 'user_email' => 'unrelated@example.gr'));
+        $this->assertSame(array('result' => 'check_account'), $this->post('/join/account', self::form(array('email' => 'other@example.gr')))->get_data());
+    }
+
+    public function test_invalid_input_answers_with_field_codes_only(): void {
+        $r = $this->post('/join/account', self::form(array('name' => 'Μαρία', 'phone' => '2510123456', 'email' => 'x@y', 'password' => 'short')));
+        $this->assertSame(array('result' => 'invalid', 'fields' => array('name' => 'name_one_word', 'phone' => 'phone_invalid', 'email' => 'email_invalid', 'password' => 'password_short')), $r->get_data());
+        $this->assertSame(0, get_current_user_id());
+        $this->assertEnvelope($this->post('/join/account', '{not json'), 400, 'invalid_request');
+        $this->assertSame(array('result' => 'invalid', 'fields' => array('name' => 'name_missing', 'phone' => 'phone_missing', 'email' => 'email_missing', 'password' => 'password_short')), $this->post('/join/account', '[]')->get_data());
+    }
+
+    public function test_the_honeypot_creates_nothing(): void {
+        $form = self::form(array('website' => 'https://spam.example'));
+        $this->assertSame(array('result' => 'not_completed'), $this->post('/join/account', $form)->get_data());
+        $this->assertFalse(get_user_by('email', $form['email']));
+        $this->assertSame(array('result' => 'not_completed'), $this->post('/join/account', self::form(array('website' => array('x'))))->get_data());
+        $this->assertSame(2, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']));
+    }
+
+    public function test_a_bad_nonce_or_another_origin_is_refused(): void {
+        $form = self::form();
+        // A wrong or empty nonce: WordPress core refuses it before the route runs (rest_cookie_invalid_nonce -> 401 envelope).
+        $this->assertEnvelope($this->post('/join/account', $form, 'deadbeef00'), 401, 'unauthorized');
+        $this->assertEnvelope($this->post('/join/account', $form, ''), 401, 'unauthorized');
+        $this->assertFalse(get_user_by('email', $form['email']));
+        // Another origin (a cross-site form or script carrying a stolen page nonce): refused by the route itself.
+        $this->assertEnvelope($this->post('/join/account', $form, null, 'https://evil.example'), 403, 'forbidden');
+        $this->assertEnvelope($this->post('/join/account', $form, null, 'null'), 403, 'forbidden');
+        $this->assertFalse(get_user_by('email', $form['email']));
+        $this->assertSame(2, $this->parts()['registration']->failures($_SERVER['REMOTE_ADDR']), 'each origin refusal counted');
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', $form, null, null)->get_data(), 'no Origin header: the nonce alone binds it');
+    }
+
+    public function test_ten_failures_in_five_minutes_block_the_address(): void {
+        $clock = 1_900_000_000;
+        $this->boot(function () use (&$clock) {
+            return $clock;
+        });
+        for ($i = 0; $i < EVC_Onboarding_Registration::MAX_FAILURES; $i++) {
+            $this->assertSame('invalid', $this->post('/join/account', self::form(array('phone' => '')))->get_data()['result']);
+            $clock += 20;
+        }
+        $form = self::form();
+        $this->assertEnvelope($this->post('/join/account', $form), 429, 'rate_limited');
+        $this->assertFalse(get_user_by('email', $form['email']), 'even a valid form waits');
+        $other = $_SERVER['REMOTE_ADDR'];
+        $_SERVER['REMOTE_ADDR'] = '198.51.100.7';
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form())->get_data(), 'another address is not affected');
+        wp_set_current_user(0);
+        $_SERVER['REMOTE_ADDR'] = $other;
+        $clock += EVC_Onboarding_Registration::WINDOW_SECONDS;
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', $form)->get_data(), 'after the window');
+        $_SERVER['REMOTE_ADDR'] = '';
+        wp_set_current_user(0);
+        $this->assertSame(array('result' => 'unavailable'), $this->post('/join/account', self::form())->get_data(), 'no address: fail closed');
+    }
+
+    public function test_the_registration_logs_nothing_about_the_person(): void {
+        $form = self::form(array('email' => 'private.person@example.gr'));
+        $this->post('/join/account', $form);
+        $this->assertStringNotContainsString('private.person', (string) file_get_contents($this->log));
+        $this->assertSame(0, (int) $GLOBALS['wpdb']->get_var($GLOBALS['wpdb']->prepare("SELECT COUNT(*) FROM {$GLOBALS['wpdb']->options} WHERE option_value LIKE %s", '%private.person%')), 'not in any option or transient');
+    }
+
+    // ---- terms and hand-off ------------------------------------------------------------------------
+
+    public function test_terms_are_recorded_with_their_version_only_for_the_customer_themself(): void {
+        $customer = $this->factory()->user->create(array('role' => 'customer'));
+        $this->login_as($customer);
+        $this->assertSame(array('result' => 'invalid'), $this->post('/join/terms', array('accept' => 'yes'))->get_data());
+        $this->assertSame(array('result' => 'invalid'), $this->post('/join/terms', array())->get_data());
+        $this->assertFalse(EVC_Onboarding_Handoff::terms_accepted($customer));
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/terms', array('accept' => true, 'user_id' => 1))->get_data());
+        $this->assertTrue(EVC_Onboarding_Handoff::terms_accepted($customer));
+        $meta = get_user_meta($customer, EVC_Onboarding_Handoff::TERMS_META, true);
+        $this->assertSame(array('version', 'accepted_at'), array_keys($meta));
+        $this->assertSame(EVC_Onboarding_Rules::TERMS_VERSION, $meta['version']);
+        $this->assertFalse(EVC_Onboarding_Handoff::terms_accepted(1), 'never someone else');
+        update_user_meta($customer, EVC_Onboarding_Handoff::TERMS_META, array('version' => 'club-terms-v0', 'accepted_at' => 'x'));
+        $this->assertFalse(EVC_Onboarding_Handoff::terms_accepted($customer), 'an older version is asked again');
+    }
+
+    public function test_the_signed_in_routes_need_a_customer_with_a_nonce(): void {
+        wp_set_current_user(0);
+        $this->assertEnvelope($this->post('/join/terms', array('accept' => true)), 401, 'unauthorized');
+        $this->assertEnvelope($this->post('/join/checkout', array()), 401, 'unauthorized');
+        $admin = $this->factory()->user->create(array('role' => 'administrator'));
+        $this->login_as($admin);
+        $this->assertEnvelope($this->post('/join/terms', array('accept' => true)), 403, 'forbidden');
+        $customer = $this->factory()->user->create(array('role' => 'customer'));
+        $this->login_as($customer);
+        $this->assertEnvelope($this->post('/join/terms', array('accept' => true), 'deadbeef00'), 401, 'unauthorized');
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/terms', array('accept' => true))->get_data());
+        $r = $this->post('/join/checkout', array());
+        $this->assertSame(503, $r->get_status());
+        $this->assertSame(array('result' => 'unavailable'), $r->get_data(), 'no Club product configured: never a checkout');
+    }
+}

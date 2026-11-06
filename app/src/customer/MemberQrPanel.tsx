@@ -12,7 +12,8 @@ import { encodeQr } from "./qrEncode";
 
 const ATHENS_DATE = new Intl.DateTimeFormat("el-GR", { timeZone: "Europe/Athens", day: "numeric", month: "long", year: "numeric" });
 
-export function QrSvg({ text, size = 196 }: { text: string; size?: number }) {
+/** STAGE-07: `label` / `kind` (optional) for the tablet poster; the member card's defaults are unchanged. */
+export function QrSvg({ text, size = 196, label = "Ο κωδικός QR της κάρτας μέλους σας", kind = "member" }: { text: string; size?: number; label?: string; kind?: "member" | "join" }) {
   const matrix = useMemo(() => encodeQr(text), [text]);
   const n = matrix.length;
   const quiet = 4;
@@ -22,7 +23,7 @@ export function QrSvg({ text, size = 196 }: { text: string; size?: number }) {
     return d;
   }, [matrix, n]);
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${n + quiet * 2} ${n + quiet * 2}`} role="img" aria-label="Ο κωδικός QR της κάρτας μέλους σας" shapeRendering="crispEdges" className="block" data-evc-qr="member">
+    <svg width={size} height={size} viewBox={`0 0 ${n + quiet * 2} ${n + quiet * 2}`} role="img" aria-label={label} shapeRendering="crispEdges" className="block" data-evc-qr={kind}>
       <rect width={n + quiet * 2} height={n + quiet * 2} fill="#ffffff" />
       <path d={path} fill="#000000" />
     </svg>

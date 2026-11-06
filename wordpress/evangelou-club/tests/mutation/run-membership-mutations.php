@@ -32,6 +32,7 @@
  * CX1-CX4: admin entry points; CN1-CN2: the construction guard).
  * And STAGE-05B (MS6: the member-sync construction guard).
  * And STAGE-06 (FT1-FT40: FluentCRM membership tags).
+ * And STAGE-07 (OR1-OR10: in-store onboarding rules).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2732,6 +2733,69 @@ $mutants = array(
         'file' => 'includes/class-evc-fluentcrm-tags.php',
         'search' => '                if (!in_array(self::VOIDED_FLAG, $entitlement->diagnostic_flags(), true)) {',
         'replace' => '                if (false) {',
+    ),
+    // STAGE-07 (OR1-OR10): in-store onboarding rules - name, mobile, required e-mail, password policy, failure window, client key.
+    array(
+        'id' => 'OR1-one-word-name-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        } elseif (strpos($name, \' \') === false) {',
+        'replace' => '        } elseif (false) {',
+    ),
+    array(
+        'id' => 'OR2-mobile-not-anchored',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'preg_match(\'/^69\\d{8}$/D\', $national)',
+        'replace' => 'preg_match(\'/69\\d{8}/\', $national)',
+    ),
+    array(
+        'id' => 'OR3-email-optional',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        if (trim($email_raw) === \'\') {
+            $errors[\'email\'] = self::EMAIL_MISSING;',
+        'replace' => '        if (false) {
+            $errors[\'email\'] = self::EMAIL_MISSING;',
+    ),
+    array(
+        'id' => 'OR4-password-min-six',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        if ($length < self::PASSWORD_MIN) {',
+        'replace' => '        if ($length < 6) {',
+    ),
+    array(
+        'id' => 'OR5-common-passwords-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => 'in_array($lower, self::COMMON_PASSWORDS, true) || ',
+        'replace' => '',
+    ),
+    array(
+        'id' => 'OR6-email-name-in-password-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        if (strlen($local) >= 4 && strpos($lower, strtolower($local)) !== false) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'OR7-mobile-in-password-accepted',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        if (strlen($digits) === 8 && strpos(',
+        'replace' => '        if (false && strpos(',
+    ),
+    array(
+        'id' => 'OR8-tenth-failure-not-blocked',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '&& (int) $state[0] >= $max;',
+        'replace' => '&& (int) $state[0] > $max;',
+    ),
+    array(
+        'id' => 'OR9-failure-window-never-resets',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => ' || $now - (int) $state[1] >= $window) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'OR10-client-key-is-the-address',
+        'file' => 'includes/class-evc-onboarding-rules.php',
+        'search' => '        return substr(hash_hmac(\'sha256\', \'evc-join|\' . $ip, $secret), 0, 32);',
+        'replace' => '        return $ip;',
     ),
 );
 

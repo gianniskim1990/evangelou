@@ -18,6 +18,7 @@ require_once EVC_CLUB_PATH . 'includes/staff/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/customer/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/admin/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/fluentcrm/bootstrap.php';
+require_once EVC_CLUB_PATH . 'includes/onboarding/bootstrap.php';
 
 // Staff authentication foundation (Task 1C-C). Role-scoped session policy,
 // admin guard and login throttling are active for users holding the
@@ -56,3 +57,9 @@ add_action('plugins_loaded', array('EVC_Club_Migrations_Plugin', 'boot'));
 // (docs/fluentcrm-tags.md). Never creates contacts, never touches lists, status, consent or other tags.
 register_deactivation_hook(__FILE__, array('EVC_Fluentcrm_Plugin', 'deactivate'));
 add_action('plugins_loaded', array('EVC_Fluentcrm_Plugin', 'boot'));
+
+// STAGE-07: in-store QR onboarding (public /club/join page, tablet poster, join routes). ONLY when wp-config.php
+// defines EVC_CLUB_ONBOARDING_ENABLED as boolean true AND the customer surface is on (default: OFF = nothing hooked).
+// It never touches FluentCRM (owner decision D12) and adds nothing about payments (the existing WooCommerce checkout).
+register_deactivation_hook(__FILE__, array('EVC_Onboarding_Plugin', 'deactivate'));
+add_action('plugins_loaded', array('EVC_Onboarding_Plugin', 'boot'));

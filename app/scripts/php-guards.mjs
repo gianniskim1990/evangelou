@@ -1114,6 +1114,97 @@ function fluentcrmSelfTest() {
   return bad;
 }
 
+// ---- STAGE-07 rule set: in-store QR onboarding, only behind EVC_CLUB_ONBOARDING_ENABLED -------------------------
+// A. The STAGE-03D construction rules with their own bootstrap and gate: the registration, the hand-off, the join
+//    page shell and the join REST controller are constructed only inside EVC_Onboarding_Plugin::wire() (reached only
+//    via build() <- boot() after `if (!EVC_Onboarding_Feature::enabled()) { return; }`); their names appear only in
+//    the allowlisted files; no shipped file defines EVC_CLUB_ONBOARDING_ENABLED.
+// B. onboardingProblemsFor(): creating a user or signing one in (wp_insert_user / wp_create_user / wp_update_user /
+//    register_new_user / wp_set_auth_cookie / wp_signon / wp_set_current_user) only in the registration file; an
+//    add-to-cart URL only in the hand-off file (identifiers and strings, any case).
+const ONBOARDING_BOOTSTRAP = "includes/onboarding/class-evc-onboarding-plugin.php";
+export const ONBOARDING_RULES = Object.freeze({
+  bootstrap: ONBOARDING_BOOTSTRAP,
+  pluginClass: "EVC_Onboarding_Plugin",
+  featureClass: "EVC_Onboarding_Feature",
+  guarded: ["EVC_Onboarding_Registration", "EVC_Onboarding_Handoff", "EVC_Onboarding_Shell", "EVC_Rest_Join_Controller"],
+  forbidden: [],
+  allowlist: [
+    "evangelou-club.php",
+    ONBOARDING_BOOTSTRAP,
+    "includes/onboarding/class-evc-onboarding-registration.php",
+    "includes/onboarding/class-evc-onboarding-handoff.php",
+    "includes/onboarding/class-evc-onboarding-shell.php",
+    "includes/onboarding/class-evc-rest-join-controller.php",
+  ],
+  guardedFiles: [
+    ONBOARDING_BOOTSTRAP,
+    "includes/onboarding/class-evc-onboarding-registration.php",
+    "includes/onboarding/class-evc-onboarding-handoff.php",
+    "includes/onboarding/class-evc-onboarding-shell.php",
+    "includes/onboarding/class-evc-rest-join-controller.php",
+  ],
+  memberLockFiles: null,
+  forbiddenDefines: ["EVC_CLUB_ONBOARDING_ENABLED"],
+  registrationFile: "includes/onboarding/class-evc-onboarding-registration.php",
+  handoffFile: "includes/onboarding/class-evc-onboarding-handoff.php",
+});
+const USER_WRITERS = ["wp_insert_user", "wp_create_user", "wp_update_user", "register_new_user", "wp_set_auth_cookie", "wp_signon", "wp_set_current_user"];
+
+export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
+  const problems = [];
+  for (const tk of tokenize(src)) {
+    if (tk.t !== "id" && tk.t !== "str") continue;
+    const v = bare(tk.v).toLowerCase();
+    if (path !== rules.registrationFile && USER_WRITERS.some((w) => (tk.t === "id" ? v === w : v.includes(w)))) problems.push(`${path}: creates or signs in a user (${tk.v}) outside the onboarding registration`);
+    if (path !== rules.handoffFile && v.includes("add-to-cart")) problems.push(`${path}: builds an add-to-cart URL outside the onboarding hand-off`);
+  }
+  return problems;
+}
+
+const GOOD_ONBOARDING = `<?php
+final class EVC_Onboarding_Plugin {
+    public static function boot($seams = null): void {
+        if (!EVC_Onboarding_Feature::enabled()) {
+            return;
+        }
+        $p = self::build();
+    }
+    public static function build() { return self::wire(); }
+    private static function wire() {
+        $h = new EVC_Onboarding_Handoff(null, $m, $c);
+        $r = new EVC_Onboarding_Registration();
+        return array(new EVC_Onboarding_Shell($h, $a), new EVC_Rest_Join_Controller($r, $h));
+    }
+}`;
+
+function onboardingSelfTest() {
+  const bad = [];
+  const O = ONBOARDING_RULES;
+  const expect = (label, path, src, want) => {
+    const got = problemsFor(path, src, O).length + onboardingProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`onboarding ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good bootstrap", O.bootstrap, GOOD_ONBOARDING, false);
+  expect("gate missing", O.bootstrap, GOOD_ONBOARDING.replace("if (!EVC_Onboarding_Feature::enabled()) {\n            return;\n        }", ""), true);
+  expect("gate of another feature", O.bootstrap, GOOD_ONBOARDING.replace("EVC_Onboarding_Feature::enabled", "EVC_Customer_Feature::enabled"), true);
+  expect("registration constructed elsewhere", "includes/x.php", "<?php\n$r = new EVC_Onboarding_Registration();", true);
+  expect("controller constructed outside wire()", O.bootstrap, GOOD_ONBOARDING.replace("public static function build() {", "public static function build() { new EVC_Rest_Join_Controller(1, 2);"), true);
+  expect("hand-off named outside the allowlist", "includes/x.php", "<?php\nfunction f(EVC_Onboarding_Handoff $h) { return $h; }", true);
+  expect("build() from another file", "includes/x.php", "<?php\nEVC_Onboarding_Plugin::build();", true);
+  expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_ONBOARDING_ENABLED', true);", true);
+  expect("a user created elsewhere", "includes/customer/x.php", "<?php\n$id = wp_insert_user(array());", true);
+  expect("a user created through a string", "includes/x.php", "<?php\ncall_user_func('wp_create_user', 'a', 'b');", true);
+  expect("a sign-in elsewhere", "includes/x.php", "<?php\nwp_set_auth_cookie($id);", true);
+  expect("a user switched elsewhere", O.handoffFile, "<?php\nwp_set_current_user(1);", true);
+  expect("the registration may create users", O.registrationFile, "<?php\n$id = wp_insert_user($a); wp_set_auth_cookie($id);", false);
+  expect("an add-to-cart URL elsewhere", "includes/x.php", "<?php\n$u = add_query_arg('add-to-cart', 5, $c);", true);
+  expect("an add-to-cart URL in the registration", O.registrationFile, "<?php\n$u = 'ADD-TO-CART';", true);
+  expect("the hand-off builds it", O.handoffFile, "<?php\n$u = add_query_arg('add-to-cart', 5, $c);", false);
+  expect("a comment mention is fine", "includes/x.php", "<?php\n// wp_insert_user() add-to-cart\n$x = 1;", false);
+  return bad;
+}
+
 export function selfTest() {
   const bad = [];
   const expect = (label, path, src, want) => {
@@ -1161,5 +1252,5 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest());
 }
