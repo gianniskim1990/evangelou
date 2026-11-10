@@ -113,6 +113,8 @@ reload button.
     than 10: a mobile carrier puts unrelated customers in one /48 (the reason for N1 below), and 10 failures shared by
     a whole carrier would lock real customers out over typing mistakes; 30 still bounds the failure rows one /48
     can write to about 30 per 5 minutes, instead of up to 65,536.
+    **Known risk (STAGE-08):** unrelated customers of one carrier /48 can still be locked out together for 5
+    minutes; see [go-live.md](go-live.md) K1 for the monitoring during the pilot.
   - **Successes:** at most `EVC_CLUB_JOIN_MAX_PER_CLIENT_HOUR` (default 10, D17) new accounts per client per hour,
     `EVC_CLUB_JOIN_MAX_PER_NETWORK_HOUR` (default **30**, coordinator decision N1 in round 4: mobile carriers share a
     /48 among unrelated customers) per IPv6 **/48** per hour (an aggregate bucket on top of the /64 one, so one
@@ -149,7 +151,8 @@ reload button.
     because of the ceiling:** in round 3 it was, which let about 5000 invalid POSTs (one /48 had 65,536 /64s and no
     /48 failure limit) close sign-up for two hours, again and again. Now a flood can at most stop failures from NEW
     clients being counted for five minutes; the per-/48 failure limit above makes even that need many /48s. A
-    deadlock or lock wait in a cleanup `DELETE` is ignored and not logged; a later cleanup removes the rows.
+    deadlock or lock wait in a cleanup `DELETE` is ignored and not logged; a later cleanup removes the rows. The
+    cleanup runs at most once per request (STAGE-08).
   - A hidden honeypot field (`evc_extra`, `autocomplete="off"`, a name browsers do not autofill); no CAPTCHA service.
 - **CSRF.** Every write needs the page's `wp_rest` nonce (see above). An `Origin` header, when sent, must be this
   site. The terms and checkout routes use the customer

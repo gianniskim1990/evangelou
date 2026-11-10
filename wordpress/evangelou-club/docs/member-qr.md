@@ -13,7 +13,7 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
 | **D6** διάρκεια / αλλαγή | «Ίδιος μέχρι να ζητηθεί νέος». Ο QR δεν λήγει. Αλλάζει μόνο όταν ο πελάτης πατήσει «νέο QR» ή όταν ο διαχειριστής ακυρώσει τον παλιό. Το κινητό τον κρατά. |
 | **D7** στιγμιότυπο οθόνης | «Ναι, το δεχόμαστε». Μια φωτογραφία οθόνης του QR δουλεύει. Ο ένας καφές ανά ημέρα Αθήνας περιορίζει κάθε απώλεια. |
 | **D8** τι βλέπει το ταμείο | «Μικρό όνομα + κατάσταση»: «ενεργό», «όχι ενεργό» ή «ο καφές πάρθηκε σήμερα». Ποτέ επώνυμο, τηλέφωνο, e-mail ή άλλα στοιχεία. |
-| **D9** λάθος σαρώσεις | Περίπου **10 αποτυχίες ανά 5 λεπτά, ανά tablet**. Ο μετρητής ζει σε έναν νέο μικρό πίνακα (μετάβαση 003). Εγκρίθηκε ο **κώδικας**. Η εφαρμογή του 003 στο staging/παραγωγή χρειάζεται **ξεχωριστή** έγκριση. |
+| **D9** λάθος σαρώσεις | Περίπου **10 αποτυχίες ανά 5 λεπτά, ανά tablet**. Ο μετρητής ζει σε έναν νέο μικρό πίνακα (μετάβαση 003). Εγκρίθηκε ο **κώδικας**. Η εφαρμογή του 003 εγκρίθηκε **μόνο στο staging** (D19, 2026-11-10)· στην παραγωγή χρειάζεται **ξεχωριστή** έγκριση. |
 | **D9α** νέα σύνδεση tablet | «Όχι, μένει έτσι». Οι **επιτυχημένες** νέες συνδέσεις του tablet δεν έχουν όριο (το `EVC_Login_Throttle` μετρά μόνο λάθος κωδικούς). Κάθε νέα σύνδεση δίνει νέες ~10 προσπάθειες. **Αποδεκτός κίνδυνος**, χωρίς νέο κώδικα. |
 | **D10** ακύρωση QR | «Όχι, μόνο ο διαχειριστής». Το tablet μόνο σαρώνει. |
 
@@ -527,7 +527,8 @@ hand-off ones, is false even if the user has it).
   - a positive integer (exact type) → that version;
   - anything else → refusal `migrations_target_invalid`.
 
-  The technician sets `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` ONLY after the owner's go-ahead.
+  The technician sets `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` ONLY after the owner's go-ahead for that database.
+  Owner decision D19 (2026-11-10): approved for the STAGING Club database only; production still needs its own approval.
   `EVC_Migrator::migrate(int $up_to)` stops at the target. The argument is REQUIRED (round 4): there
   is no argument-less call that applies everything; PHP refuses one. Tests pass `PHP_INT_MAX`.
 - Tests in `ClubMigrationsTest`:

@@ -2,6 +2,7 @@
 
 ## CURRENT STATE (keep this section current; update it at every task transition)
 
+- **As of 2026-11-10 (newest first):** STAGE-08 round 2 on `feat/evc-pilot-readiness` (Draft PR #42, base `feat/evc-store-onboarding`); see «STAGE-08 round 2», «TECHNICIAN ANSWERS 2026-11-10» and «OWNER DECISION D19» at the end of this file. Still nothing merged, deployed or enabled. The bullets below are the older state and are kept as history.
 - **As of 2026-11-03.** Stack tip `feat/evc-member-qr` (STAGE-05C, Draft PR, base `feat/evc-member-sync` = Draft PR #37 STAGE-05B, base `feat/evc-staff-redemption` = Draft PR #36 STAGE-05A, base `feat/evc-club-migrations` = Draft PR #35). Before it: `feat/evc-club-migrations` (STAGE-04A, code SHA `b0357be`, CI run 40475996174 18/18), `feat/evc-wc-completion` (Draft PR #34), `feat/evc-bacs-issuance` (Draft PR #33), … PR #31. None merged.
 - `main` @ `9024989` has DIVERGED from the stack (memory-only commits on main; no `wordpress/` folder on main). Any future merge needs a deliberate `memory.md` reconciliation.
 - Nothing of the Club is merged, deployed or active. Flags `EVC_CLUB_STAFF_ENABLED` / `EVC_CLUB_CUSTOMER_ENABLED` / `EVC_CLUB_WC_COMPLETION_ENABLED` / `EVC_CLUB_MIGRATIONS_ENABLED` / `EVC_CLUB_REDEMPTION_SOURCE` OFF; production redeem = 503. Owner approved (2026-10-27) applying migrations 001+002 on the STAGING Club DB only (performed by owner/technician; no result reported here yet).
@@ -1563,3 +1564,86 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **Mutants:** OB1–OB38 all killed locally (35 run, 0 survived); OB7, OB8 and OB31 patterns updated; new OB35–OB38 and OG18. Not a mutant: dropping the after_callbacks reset, because before_callbacks resets the context on the next request.
 - **CI on 8857477 (round 3 final), all first attempt:** foundation push 42240440821 18/18, foundation PR 42240448771 18/18, frontend push 42240440799 4/4, frontend PR 42240448875 4/4.
 - **CI on fa593b2 (round 4), all first attempt, no re-runs:** foundation push 42243420709 18/18 (commerce mutation 203/203 killed), foundation PR 42243428923 18/18, frontend push 42243420971 4/4, frontend PR 42243428994 4/4.
+
+## STAGE-08 — pilot readiness: till account admin, readiness page, go-live runbook (branch `feat/evc-pilot-readiness`, stacked on `feat/evc-store-onboarding` 3354447) — 2026-11-06
+- **Owner said «Πάμε» at 2026-11-06 18:46 Athens.** Development only: no merge, deploy, enabling, real or staging DB, or migration.
+- **OWNER DECISION D18:** one shared staff account on the till tablet; no per-person accounts or PINs. Recorded in docs/admin-tools.md.
+- **New flag `EVC_CLUB_ADMIN_TOOLS_ENABLED`** (exact true, default OFF). `EVC_Admin_Tools_Plugin` boot/build/wire (packager ADMIN_TOOLS_RULES) builds:
+  - `EVC_Staff_Account_Service` (create / password / disable / enable / revoke, audit option `evc_club_staff_admin_audit` holding the newest 100 entries, last-login meta `evc_staff_last_login` via wp_login);
+  - `EVC_Staff_Account_Page` (top-level menu `evc-club`; POST on the load hook: nonce, then capability, then action; the password is rendered once in the POST answer, never stored);
+  - `EVC_Readiness` (read-only checks reusing the feature parsers, environment_conflicts, site_problem, same_site_url, tag_config/problem; seams db_config/connect/server);
+  - `EVC_Readiness_Page`.
+- **Capability:** `may_manage` = manage_options AND evc_manage_club, not the staff role, not multisite.
+- **Packager:**
+  - readiness files may not write (option/meta/transient/user/post writers, hooks, ->query/insert/update/delete/execute…);
+  - till files may not use error_log / print_r / var_export / var_dump / set_transient / setcookie / wp_cache_set;
+  - wp_set_password is allowed only in the service;
+  - the onboarding USER_WRITERS rule now allows wp_insert_user in the service file;
+  - readiness was added to the FluentCRM and onboarding allowlists (it names those classes; it builds nothing).
+  - Strings starting with "fluentcrm" are refused outside the gateway, so the readiness keys use `crm_*`.
+- **Tests:**
+  - New suites `wp-admin-tools` and `wp-commerce-admin-tools` (EVC_TEST_ADMIN_TOOLS_FLAG), each with a CI step; new mutation modes admin_tools and commerce_admin_tools.
+  - `AdminToolsOffTest` in wp-common.
+  - Locally: wp-admin-tools 19/19, plus the mutants AT1–AT17 (no AT5: excluding the staff role is equivalent, because staff never hold manage_options) and OB1–OB38, all 51 killed. ATC1–ATC2 run in CI only.
+- **Part D:**
+  - The registration cleanup now runs at most once per register() call (flag reset at each call). This is not mutation-tested, because the cleanup is triggered randomly.
+  - No TODO/FIXME in shipped code.
+- **Docs:**
+  - docs/admin-tools.md: D18, the pages, and the Greek operator note (lost tablet, a staff member leaves, when to change the password).
+  - docs/go-live.md:
+    - blockers T1–T7;
+    - the enable order, steps 0–8;
+    - the pilot plan;
+    - rollback per feature;
+    - known risks K1–K14;
+    - the TODO scan;
+    - a Greek section.
+  - store-onboarding.md: the same-/48 known risk and the once-per-request cleanup.
+- **CI on 3d0cea9 (STAGE-08), all first attempt, no re-runs:** foundation push 42258147068 18/18 (commerce mutation 205/205 killed), foundation PR 42258183972 18/18, frontend push 42258147155 4/4, frontend PR 42258183888 4/4.
+
+### STAGE-08 round 2 — independent review of 3d0cea9: ACCEPT WITH NITS, all items fixed (2026-11-10)
+- New builder session (the previous one was lost); restarted from this log. Development only: no merge, deploy, enabling, real or staging DB, SFTP / MySQL connection, FluentCRM or migration run.
+- **1 (MEDIUM) readiness green while the payment path is off:**
+  - new rows in «Κατάστημα»: `payment_provenance` (OK only for the exact `'club_db_v1'`; pure `EVC_Readiness::provenance_status()`, the same `===` rule as `EVC_Customer_Qr_Backend::provenance_recorded()`; no shared parser outside the QR allowlist existed) and `lookup_key` (`EVC_Club_Qr_Services::is_lookup_secret()`, >= 32 bytes; value and length never shown);
+  - TEST seam `constants` (boot seams → build → EVC_Readiness);
+  - go-live.md steps 3 and 5 name these rows.
+- **2 (LOW–MED) packager bypasses:**
+  - new static read-only `EVC_Staff_Account_Reader::accounts()` (includes/admin/class-evc-staff-account-reader.php); the service delegates to it; `EVC_Readiness` no longer receives the service (constructor = db_config, connect, server, constants);
+  - read-only files = readiness, readiness page, reader. Banned there: WordPress writers / hooks (incl. update_user_option, wp_cache_* writes, call_user_func*, forward_static_call*) as calls AND as strings; writer methods via `->`/`::` (create, set_password, set_disabled, revoke_all, record_login, process, handle_load, delete_all_activity, revoke_all_staff_sessions, destroy*, caps/roles, plus the DB writers); `$var::`; SQL-write strings (SQL_WRITE regex); `EVC_Staff_Account_Service` only as `::may_manage(`; `EVC_Admin_Tools_Plugin` never; `EVC_Club_Qr_Services` only as `::is_lookup_secret(` (QR_NAMES allowlist widened to the readiness file only);
+  - password-leak list: add_query_arg / wp_redirect / wp_safe_redirect banned outright in the till-account files; update_option, add_option, update_site_option, update_user_meta, add_user_meta, update_user_option, wp_cache_add / replace, header, do_action(_ref_array), apply_filters(_ref_array) banned when an argument carries the password (a `$…pass…` variable or a 'password' string); the fake `update_option_password` entry removed;
+  - a negative self-test for each rule (selfTest now also runs qrProblemsFor for the admin-tools cases); each new rule was checked by disabling it (the self-test then fails);
+  - docs/admin-tools.md lists exactly what is enforced and what is not (run-time assembled names).
+- **3:** `set_password` refuses, and `set_disabled(false)` (enable) refuses, an account that is not `is_restricted_staff_account` → `not_restricted`; disable stays allowed; the page shows neither button for it; the Greek message is generic now.
+- **4:** nonce action `evc_club_staff_account|<action>|<user ID>` (`EVC_Staff_Account_Page::nonce_action()`); the action and user are parsed before the nonce check; the password answer sends `Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private` through a TEST-seamed header callable (`header` seam).
+- **5:** `generate_password()` returns ?string after at most `PASSWORD_ATTEMPTS` = 10 tries; create / password return `failed` with nothing changed.
+- **6:** schema row: no ledger table (information_schema check) = «Λείπει»; a table that cannot be read, or a check that throws = new status `unreadable` «Δεν διαβάζεται», pointing at the migrations page. go-live T1 no longer says a green DB row closes error 1044.
+- **7:** docs/admin-tools.md: only requests that reach the service are audited (a bad nonce is not); showing the password is not audited separately (accepted); audit spam by an admin without evc_manage_club (informational, newest 100 kept); nonce re-use within its lifetime (accepted).
+- **Mutants AT18–AT30** (mode admin_tools): provenance any value / undefined, short lookup key, unreadable ledger, password / enable for an over-privileged account, unbound nonce / nonce not bound to the account, no-store header dropped, weak password accepted, create / password ignoring a failed generator, one attempt only. All killed locally by their named assertion tests (targeted run, wp-admin-tools 27/27 green). AT28's test catches the WordPress notice of a password-less wp_insert_user so the kill is an assertion failure.
+- **Existing mutants re-pointed:** AT7 (the nonce check now reads `self::nonce_action($action, $user)`) and AT8 (a null check now sits between generate_password() and wp_set_password()). Runner subset AT1–AT30: total=29 killed=29 (sources restored).
+- **Not run locally:** the commerce suites (downloads.wordpress.org is blocked by the sandbox proxy, so the pinned WooCommerce zip cannot be fetched): ReadinessCommerceTest's new assertions and ATC1–ATC2 are CI-only.
+- **Local environment note:** the old scratch MariaDB datadir had an unknown root password; a fresh one was initialised in the scratchpad (`mdb2`, root / test-only password from env.sh), test databases only.
+
+- **Local full WP mutation run on c4521e3's tree** (MariaDB 10.11, PHP 8.3, separate copy): total=241 killed=241. An earlier local run reported OB23 (onboarding, untouched here) SURVIVED once; the rerun killed it, so it looks like a local timing flake: watch it, it was not changed.
+- **CI on c4521e3 (STAGE-08 round 2), all first attempt, no re-runs, 45/45 check runs success:** foundation push 42793942178 18/18 (WP mutation 241/241, commerce mutation 205/205 killed), foundation PR 42793949368 18/18, frontend push 42793942175 4/4, frontend PR 42793949341 4/4.
+- **Staging package:** built locally from c4521e3 with `npm run package:club-plugin` + `zip -qr` (as CI does): /home/claude/evangelou-staging-package/evangelou-club-c4521e3.zip, SHA-256 d9f74f33f0291f81922a06aac2730e9728ac15fbb0e563692154c2535a0786f6 (files=166, commit stamp c4521e3). Not uploaded anywhere. CI artifacts of the same SHA: `evangelou-club-plugin-package` id 13751973422 (push run) and 13752044045 (PR run); their zips differ byte-wise from the local one (zip timestamps); the content comparison could not be done (artifact download host blocked by the sandbox proxy).
+
+### TECHNICIAN ANSWERS 2026-11-10 (relayed by the coordinator; NO secrets recorded)
+- **SFTP host:** the hosting provider's server, given by the technician privately (`evangelouprofiterole.gr:22` times out). The host name was removed from memory.md and docs/go-live.md in STAGE-08 round 3 because the repository is public; git history still contains it (owner informed).
+- **No phpMyAdmin** for the Club DB; the technician uses **MySQL Workbench** to that same hosting-provider server.
+- **The Club DB is the STAGING Club database** (11:32 Athens update).
+- **Club DB user** (name deliberately not recorded in the repo): the technician states it "has full access" to its Club database. **T1 (error 1044): reported fixed, verify on the migrations status page.**
+- **Club DB password:** it had been the same as the plugin password previously shared in chat (exposed). The owner reports (11:32 Athens) the technician **rotated** it → **T3 closed for the Club DB**; the WordPress DB password rotation is still to be confirmed (go-live.md T3).
+- **MySQL server timezone = Europe/Athens.** This does NOT close **T2**, which is the WordPress setting (Settings → General → Timezone, still a fixed UTC+3 until changed). go-live.md makes the distinction explicit.
+- None of this was verified from the development side (no server access by the builder).
+
+### OWNER DECISION D19 — 2026-11-10 11:38 Athens: migration 003 on STAGING approved
+- The owner answered «ναι»: apply migration 003 on the **STAGING** Club DB only (technician: `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` on staging, backup first). **Production** still needs its own approval for 001, 002 and 003.
+- **Staging install:** the plugin is already installed on the staging WordPress (which uses the staging Club DB), but it is an earlier build; the technician will replace it with the new package (go-live.md T8).
+- Docs updated: go-live.md (T1, T2, T3, T7, new T8, technician answers, step 2, Greek section), club-db-migrations.md, member-qr.md (D9 row and the 003 note).
+
+### STAGE-08 round 3 (reviewer nits on c4521e3, verdict ACCEPT WITH NITS) — code 764fc61
+- **Guards (app/scripts/php-guards.mjs):** read-only files now use an ALLOWLIST of EVC_* static calls / string callables / pairs (`READ_ONLY_STATIC_ALLOW`); `EVC_X::class`, `new EVC_X`, `static::`/`parent::` calls and variable method names refused; more WP writers (wp_logout, wp_clear_auth_cookie, wp_destroy_*_sessions, wp_trash_post/untrash) and writer methods (migrate, apply, revoke_current, prune_activity, on_logout, handle_admin_revoke, destroy_all_for_all_users, register, unregister). SQL write patterns widened (INSERT any form, REPLACE t, UPDATE … SET incl. `{$wpdb->options}` / multi-table, DELETE … FROM, CREATE DEFINER, REVOKE, DUMPFILE, SET GLOBAL, CALL). Password leak: `$result` / `->result` carry the password unless indexed by another key; trigger_error / user_error / syslog / file_put_contents / fwrite / fputs / wp_mail refused; wp_die and variable/expression calls (the injected header callable) refused with the password.
+- **Self-tests:** fixtures by path; `expectOwn` checks adminToolsProblemsFor alone (so the read-only `$var::` rule is tested apart from the general one); negatives for LOAD DATA, LOCK TABLES, forward_static_call, a real static writer (EVC_Staff_Session::revoke_current). Each new rule was deleted one at a time in a scratch copy (52 mutants, rule code only): every one made selfTest() fail. Shipped files pass.
+- **Runtime change (only one):** class-evc-readiness.php — no ledger in information_schema still «Λείπει», detail now "missing or no privilege — check the migrations page" (+ ReadinessTest assertion). Host name removed from go-live.md and memory.md (public repo; still in git history, owner informed).
+- **CI on 764fc61, all first attempt, no re-runs, 45/45 check runs success:** foundation push 42804301051 18/18 (WP mutation 241/241, commerce mutation 205/205 killed), foundation PR 42804316575 18/18, frontend push 42804301092 4/4, frontend PR 42804316531 4/4. Package artifacts: 13757881034 (push), 13757248847 (PR).
+- **Staging package:** /home/claude/evangelou-staging-package/evangelou-club-764fc61.zip, SHA-256 657b4abafbe8ed0e1d2350d556222b883c8610f8e70a007b7b13a46963636688 (files=166, commit stamp 764fc61). Against the c4521e3 package only includes/admin/class-evc-readiness.php and the two build-info.json stamps differ. Not uploaded anywhere.
