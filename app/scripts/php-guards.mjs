@@ -618,7 +618,9 @@ const QR_SITES = [
 const QR_NAMES = [
   ["evc_sql_qr_token_store", [R5C.storeFile, R5C.servicesFile]],
   ["evc_sql_lookup_rate_limiter", [R5C.limiterFile, R5C.servicesFile]],
-  ["evc_club_qr_services", [R5C.servicesFile, R5C.lookupBackend, R5C.customerBackend]],
+  // STAGE-08 round 2: the read-only readiness checks reuse EVC_Club_Qr_Services::is_lookup_secret() (the lookup
+  // backend's own >= 32-byte rule); adminToolsProblemsFor() allows ONLY that static call there.
+  ["evc_club_qr_services", [R5C.servicesFile, R5C.lookupBackend, R5C.customerBackend, "includes/admin/class-evc-readiness.php"]],
   ["evc_wp_club_staff_authorizer", [R5C.servicesFile]],
   ["evc_no_member_phone_directory", [R5C.servicesFile]],
   ["evc_first_issue_only_qr_store", [R5C.servicesFile]],
@@ -1288,11 +1290,29 @@ export function selfTest() {
 //    readiness checks and page are constructed only inside EVC_Admin_Tools_Plugin::wire() (reached only via build() <-
 //    boot() after `if (!EVC_Admin_Tools_Feature::enabled()) { return; }`); their names appear only in the allowlisted
 //    files; no shipped file defines EVC_CLUB_ADMIN_TOOLS_ENABLED.
-// B. adminToolsProblemsFor(): the readiness files NEVER write (no option / meta / transient / user / post writer, no
-//    write on a database handle, no hook that could act); the till-account files never log or cache (no error_log,
-//    print_r, var_export, set_transient, setcookie), so a generated password cannot leak; and only the service file
-//    writes a password (wp_set_password).
+// B. adminToolsProblemsFor(), the READ-ONLY files (the readiness checks and page, and the till-account reader):
+//    - no call of a WordPress writer or hook (READ_ONLY_FORBIDDEN: options, user options, meta, transients, cache,
+//      users, posts, cron, hooks, rewrite rules, error_log) and no string naming one (so no callable string reaches
+//      it through call_user_func / a variable function);
+//    - no call_user_func*, forward_static_call*, no `$var::`;
+//    - no call of a till-account WRITER as a method or static method, whatever the receiver (READ_ONLY_METHODS:
+//      ->query / insert / update / delete / replace / execute / exec_raw / transactional / save, and create,
+//      set_password, set_disabled, revoke_all, record_login, process, handle_load, delete_all_activity,
+//      revoke_all_staff_sessions, destroy, destroy_all, destroy_others), nor a string naming one;
+//    - no string carrying an SQL write (INSERT INTO, UPDATE … SET, DELETE FROM, REPLACE INTO, ALTER / DROP / CREATE /
+//      TRUNCATE / RENAME TABLE …, GRANT, INTO OUTFILE), whatever method receives it (e.g. $wpdb->get_var("DELETE …"));
+//    - EVC_Staff_Account_Service may be named there ONLY as EVC_Staff_Account_Service::may_manage(…) (the page's access
+//      check); EVC_Admin_Tools_Plugin (whose parts() hold the service) not at all; EVC_Club_Qr_Services ONLY as
+//      EVC_Club_Qr_Services::is_lookup_secret(…).
+//    Not covered statically (documented): a writer name or an SQL statement assembled at run time from pieces.
+// C. The till-account files (service and page) never let a generated password out: no error_log / print_r /
+//    var_export / var_dump / set_transient / set_site_transient / setcookie / wp_cache_set / add_query_arg /
+//    wp_redirect / wp_safe_redirect at all, and no update_option / add_option / update_user_meta / add_user_meta /
+//    update_user_option / wp_cache_add / wp_cache_replace / header / do_action / apply_filters whose arguments carry
+//    the password (a variable whose name contains "pass", or a 'password' string such as $result['password']).
+// D. Only the service file writes a password (wp_set_password).
 const ADMIN_TOOLS_BOOTSTRAP = "includes/admin/class-evc-admin-tools-plugin.php";
+const STAFF_ACCOUNT_READER = "includes/admin/class-evc-staff-account-reader.php";
 export const ADMIN_TOOLS_RULES = Object.freeze({
   bootstrap: ADMIN_TOOLS_BOOTSTRAP,
   pluginClass: "EVC_Admin_Tools_Plugin",
@@ -1309,6 +1329,7 @@ export const ADMIN_TOOLS_RULES = Object.freeze({
   ],
   guardedFiles: [
     ADMIN_TOOLS_BOOTSTRAP,
+    STAFF_ACCOUNT_READER,
     "includes/admin/class-evc-staff-account-service.php",
     "includes/admin/class-evc-staff-account-page.php",
     "includes/admin/class-evc-readiness.php",
@@ -1316,29 +1337,69 @@ export const ADMIN_TOOLS_RULES = Object.freeze({
   ],
   memberLockFiles: null,
   forbiddenDefines: ["EVC_CLUB_ADMIN_TOOLS_ENABLED"],
-  readOnlyFiles: ["includes/admin/class-evc-readiness.php", "includes/admin/class-evc-readiness-page.php"],
+  readOnlyFiles: ["includes/admin/class-evc-readiness.php", "includes/admin/class-evc-readiness-page.php", STAFF_ACCOUNT_READER],
   secretFiles: ["includes/admin/class-evc-staff-account-service.php", "includes/admin/class-evc-staff-account-page.php"],
   passwordFile: "includes/admin/class-evc-staff-account-service.php",
 });
-const READ_ONLY_FORBIDDEN = ["update_option", "add_option", "delete_option", "update_site_option", "update_user_meta", "add_user_meta", "delete_user_meta",
-  "set_transient", "delete_transient", "wp_insert_user", "wp_update_user", "wp_delete_user", "wp_set_password", "wp_insert_post", "wp_update_post",
-  "wp_delete_post", "add_action", "add_filter", "do_action", "wp_schedule_event", "wp_schedule_single_event", "flush_rewrite_rules", "error_log"];
-const READ_ONLY_METHODS = ["query", "insert", "update", "delete", "replace", "execute", "exec_raw", "transactional", "save"];
-const SECRET_FORBIDDEN = ["error_log", "print_r", "var_export", "var_dump", "set_transient", "set_site_transient", "setcookie", "wp_cache_set", "update_option_password"];
+const READ_ONLY_FORBIDDEN = ["update_option", "add_option", "delete_option", "update_site_option", "add_site_option", "delete_site_option",
+  "update_user_option", "delete_user_option", "update_user_meta", "add_user_meta", "delete_user_meta", "update_post_meta", "add_post_meta",
+  "delete_post_meta", "update_term_meta", "add_term_meta", "delete_term_meta", "update_metadata", "add_metadata", "delete_metadata",
+  "set_transient", "delete_transient", "set_site_transient", "delete_site_transient", "wp_cache_set", "wp_cache_add", "wp_cache_replace",
+  "wp_cache_delete", "wp_cache_incr", "wp_cache_decr", "wp_cache_flush", "wp_insert_user", "wp_update_user", "wp_delete_user", "wp_create_user",
+  "wp_set_password", "wp_set_current_user", "wp_set_auth_cookie", "wp_insert_post", "wp_update_post", "wp_delete_post", "add_action", "add_filter",
+  "remove_action", "remove_filter", "do_action", "do_action_ref_array", "wp_schedule_event", "wp_schedule_single_event", "wp_clear_scheduled_hook",
+  "wp_unschedule_event", "flush_rewrite_rules", "error_log", "call_user_func", "call_user_func_array", "forward_static_call", "forward_static_call_array"];
+// Writers of a database handle, of the till account (EVC_Staff_Account_Service, EVC_Staff_Account_Page,
+// EVC_Staff_Session::delete_all_activity / revoke_all_staff_sessions, EVC_Staff_Auth::set_disabled) and of WordPress
+// session tokens: refused as ->method() and ::method() in the read-only files, whatever the receiver.
+const READ_ONLY_METHODS = ["query", "insert", "update", "delete", "replace", "execute", "exec_raw", "transactional", "save",
+  "create", "set_password", "set_disabled", "revoke_all", "record_login", "process", "handle_load", "delete_all_activity",
+  "revoke_all_staff_sessions", "destroy", "destroy_all", "destroy_others", "add_cap", "remove_cap", "set_role", "add_role", "remove_role"];
+const SQL_WRITE = /\b(insert\s+(ignore\s+)?into|update\s+[`\w.{}$]+\s+(\w+\s+)?set|delete\s+(\w+\s+)?from|replace\s+into|(alter|drop|create|truncate|rename)\s+(temporary\s+)?(table|database|schema|index|view|trigger|procedure|function|event|user)|grant\s|revoke\s+\w|into\s+(outfile|dumpfile)|load\s+data|lock\s+tables)/i;
+const SECRET_FORBIDDEN = ["error_log", "print_r", "var_export", "var_dump", "set_transient", "set_site_transient", "setcookie", "wp_cache_set",
+  "add_query_arg", "wp_redirect", "wp_safe_redirect"];
+const SECRET_WITH_PASSWORD = ["update_option", "add_option", "update_site_option", "update_user_meta", "add_user_meta", "update_user_option",
+  "wp_cache_add", "wp_cache_replace", "header", "do_action", "do_action_ref_array", "apply_filters", "apply_filters_ref_array"];
+/** The tokens of the argument list that starts at tokens[open] === "(" (to its matching ")"). */
+function argumentTokens(tokens, open) {
+  const out = [];
+  let depth = 0;
+  for (let j = open; j < tokens.length; j++) {
+    if (tokens[j].v === "(") depth++;
+    else if (tokens[j].v === ")") { depth--; if (depth === 0) break; }
+    if (j > open) out.push(tokens[j]);
+  }
+  return out;
+}
+const carriesPassword = (args) => args.some((a) => (a.t === "var" && a.v.toLowerCase().includes("pass")) || (a.t === "str" && a.v.toLowerCase().includes("password")));
 
 export function adminToolsProblemsFor(path, src, rules = ADMIN_TOOLS_RULES) {
   const problems = [];
   const tokens = tokenize(src);
+  const readOnly = rules.readOnlyFiles.includes(path);
   tokens.forEach((tk, k) => {
+    if (readOnly && tk.t === "str") {
+      const sv = bare(tk.v).toLowerCase();
+      if (READ_ONLY_FORBIDDEN.includes(sv) || READ_ONLY_METHODS.includes(sv)) problems.push(`${path}: a string names the writer '${tk.v}' in a read-only file`);
+      if (SQL_WRITE.test(tk.v)) problems.push(`${path}: an SQL write in a string in a read-only file`);
+    }
+    if (readOnly && tk.t === "var" && tokens[k + 1]?.v === "::") problems.push(`${path}: dynamic static call ${tk.v}:: in a read-only file`);
     if (tk.t !== "id") return;
     const v = bare(tk.v).toLowerCase();
     const call = tokens[k + 1]?.v === "(";
     const member = tokens[k - 1]?.v === "->" || tokens[k - 1]?.v === "::";
-    if (rules.readOnlyFiles.includes(path)) {
-      if (call && !member && READ_ONLY_FORBIDDEN.includes(v)) problems.push(`${path}: writes or hooks (${tk.v}) in a read-only readiness file`);
-      if (call && tokens[k - 1]?.v === "->" && READ_ONLY_METHODS.includes(v)) problems.push(`${path}: calls ->${tk.v}() in a read-only readiness file`);
+    if (readOnly) {
+      if (call && !member && READ_ONLY_FORBIDDEN.includes(v)) problems.push(`${path}: writes or hooks (${tk.v}) in a read-only file`);
+      if (call && member && READ_ONLY_METHODS.includes(v)) problems.push(`${path}: calls ${tokens[k - 1].v}${tk.v}() in a read-only file`);
+      const staticCall = (name) => tokens[k + 1]?.v === "::" && tokens[k + 2]?.t === "id" && tokens[k + 2].v.toLowerCase() === name && tokens[k + 3]?.v === "(";
+      if (v === "evc_staff_account_service" && !staticCall("may_manage")) problems.push(`${path}: names EVC_Staff_Account_Service other than ::may_manage() in a read-only file`);
+      if (v === "evc_admin_tools_plugin") problems.push(`${path}: names EVC_Admin_Tools_Plugin (its parts hold the service) in a read-only file`);
+      if (v === "evc_club_qr_services" && !staticCall("is_lookup_secret")) problems.push(`${path}: names EVC_Club_Qr_Services other than ::is_lookup_secret() in a read-only file`);
     }
-    if (rules.secretFiles.includes(path) && call && !member && SECRET_FORBIDDEN.includes(v)) problems.push(`${path}: ${tk.v}() could leak a generated password`);
+    if (rules.secretFiles.includes(path) && call && !member) {
+      if (SECRET_FORBIDDEN.includes(v)) problems.push(`${path}: ${tk.v}() could leak a generated password`);
+      if (SECRET_WITH_PASSWORD.includes(v) && carriesPassword(argumentTokens(tokens, k + 1))) problems.push(`${path}: ${tk.v}() with the password`);
+    }
     if (path !== rules.passwordFile && call && !member && v === "wp_set_password") problems.push(`${path}: sets a password outside the till-account service`);
   });
   return problems;
@@ -1355,7 +1416,7 @@ final class EVC_Admin_Tools_Plugin {
     public static function build() { return self::wire(); }
     private static function wire() {
         $s = new EVC_Staff_Account_Service();
-        $r = new EVC_Readiness($s);
+        $r = new EVC_Readiness();
         return array(new EVC_Staff_Account_Page($s), new EVC_Readiness_Page($r));
     }
 }`;
@@ -1364,7 +1425,7 @@ function adminToolsSelfTest() {
   const bad = [];
   const A = ADMIN_TOOLS_RULES;
   const expect = (label, path, src, want) => {
-    const got = problemsFor(path, src, A).length + adminToolsProblemsFor(path, src).length + onboardingProblemsFor(path, src).length > 0;
+    const got = problemsFor(path, src, A).length + adminToolsProblemsFor(path, src).length + onboardingProblemsFor(path, src).length + qrProblemsFor(path, src).length > 0;
     if (got !== want) bad.push(`admin tools ${label}: expected ${want ? "a problem" : "no problem"}`);
   };
   expect("good bootstrap", A.bootstrap, GOOD_ADMIN_TOOLS, false);
@@ -1383,5 +1444,54 @@ function adminToolsSelfTest() {
   expect("the service may create the account", A.passwordFile, "<?php\n$id = wp_insert_user(array());", false);
   expect("the service may not sign anyone in", A.passwordFile, "<?php\nwp_set_auth_cookie($id);", true);
   expect("a user created elsewhere still refused", "includes/admin/class-evc-readiness-page.php", "<?php\n$id = wp_insert_user(array());", true);
+  // Round 2: the read-only files cannot reach a till-account writer, an SQL write or a callable writer.
+  const R = A.readOnlyFiles[0];
+  const RP = A.readOnlyFiles[1];
+  const READER = A.readOnlyFiles[2];
+  for (const m of ["create", "set_password", "set_disabled", "revoke_all", "record_login", "process", "handle_load", "destroy_all"]) {
+    expect(`readiness calls ->${m}()`, R, `<?php\n$this->staff->${m}(1);`, true);
+  }
+  expect("readiness calls EVC_Staff_Session::delete_all_activity()", R, "<?php\nEVC_Staff_Session::delete_all_activity(1);", true);
+  expect("readiness calls EVC_Staff_Auth::set_disabled()", R, "<?php\nEVC_Staff_Auth::set_disabled(1, true);", true);
+  expect("readiness calls EVC_Staff_Session::revoke_all_staff_sessions()", R, "<?php\nEVC_Staff_Session::revoke_all_staff_sessions();", true);
+  expect("the reader destroys sessions", READER, "<?php\nWP_Session_Tokens::get_instance(1)->destroy_all();", true);
+  expect("the reader may read sessions", READER, "<?php\n$s = WP_Session_Tokens::get_instance(1)->get_all(); $m = get_user_meta(1, 'k', true);", false);
+  expect("readiness takes the service", R, "<?php\nfunction f(EVC_Staff_Account_Service $s) { return $s; }", true);
+  expect("readiness reaches the service through the plugin", R, "<?php\n$s = EVC_Admin_Tools_Plugin::parts()['service'];", true);
+  expect("readiness page may check access", RP, "<?php\nif (!EVC_Staff_Account_Service::may_manage(wp_get_current_user())) { return; }", false);
+  expect("readiness page calls a static writer of the service", RP, "<?php\nEVC_Staff_Account_Service::audit_entries(1);", true);
+  for (const sql of ["UPDATE wp_options SET option_value = 1", "delete from wp_users where ID = 1", "INSERT INTO evc_x VALUES (1)", "REPLACE INTO t VALUES (1)", "ALTER TABLE t ADD c INT", "DROP TABLE evc_x", "CREATE TABLE t (id INT)", "TRUNCATE TABLE t", "SELECT 1 INTO OUTFILE '/tmp/x'", "GRANT ALL ON *.* TO x"]) {
+    expect(`readiness SQL write via get_var: ${sql}`, R, `<?php\n$v = $wpdb->get_var("${sql}");`, true);
+  }
+  expect("readiness SQL write via a Club DB read", R, "<?php\n$db->fetch_one('DELETE FROM evc_members');", true);
+  expect("readiness SELECT stays allowed", R, "<?php\n$db->fetch_one('SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_NAME = ?', array('t')); $u = 'create new FluentCRM contacts on WP user registration';", false);
+  expect("readiness call_user_func", R, "<?php\ncall_user_func('get_option', 'x');", true);
+  expect("readiness call_user_func_array", R, "<?php\ncall_user_func_array(array($s, 'accounts'), array());", true);
+  expect("readiness callable string of a writer", R, "<?php\n$f = 'update_option'; $f('x', 1);", true);
+  expect("readiness callable array of a till writer", R, "<?php\n$f = array($s, 'set_password'); $f(1);", true);
+  expect("readiness update_user_option", R, "<?php\nupdate_user_option(1, 'x', 1);", true);
+  expect("readiness dynamic static call", R, "<?php\n$c::accounts();", true);
+  expect("readiness names the QR services other than is_lookup_secret", R, "<?php\n$s = EVC_Club_Qr_Services::store($db);", true);
+  expect("readiness checks the lookup key", R, "<?php\n$ok = EVC_Club_Qr_Services::is_lookup_secret($v);", false);
+  expect("the QR services named in the readiness page", RP, "<?php\n$ok = EVC_Club_Qr_Services::is_lookup_secret($v);", true);
+  // Round 2: the password-leak list.
+  for (const [label, path, src] of [
+    ["update_option", A.passwordFile, "<?php\nupdate_option('x', $password);"],
+    ["add_option", A.passwordFile, "<?php\nadd_option('x', array('p' => $password));"],
+    ["update_user_meta", A.passwordFile, "<?php\nupdate_user_meta($id, 'x', $password);"],
+    ["update_user_option", A.passwordFile, "<?php\nupdate_user_option($id, 'x', $password);"],
+    ["wp_cache_add", A.secretFiles[1], "<?php\nwp_cache_add('p', $result['password']);"],
+    ["wp_cache_replace", A.secretFiles[1], "<?php\nwp_cache_replace('p', $result['password']);"],
+    ["header", A.secretFiles[1], "<?php\nheader('X-P: ' . $result['password']);"],
+    ["do_action", A.passwordFile, "<?php\ndo_action('evc_password', $password);"],
+    ["apply_filters", A.passwordFile, "<?php\n$x = apply_filters('evc_x', $password);"],
+    ["add_query_arg", A.secretFiles[1], "<?php\n$u = add_query_arg('p', 'x', $url);"],
+    ["wp_redirect", A.secretFiles[1], "<?php\nwp_redirect($url);"],
+    ["wp_safe_redirect", A.secretFiles[1], "<?php\nwp_safe_redirect($url);"],
+  ]) {
+    expect(`password leak via ${label}`, path, src, true);
+  }
+  expect("the audit option without the password", A.passwordFile, "<?php\nupdate_option(self::AUDIT_OPTION, array_slice($all, -100), false);", false);
+  expect("the no-store header without the password", A.secretFiles[1], "<?php\nheader($line, true);", false);
   return bad;
 }

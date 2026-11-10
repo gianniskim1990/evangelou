@@ -37,8 +37,10 @@ final class StaffAccountAdminTest extends EVC_WP_Test_Case {
         WP_Session_Tokens::get_instance($user_id)->create(time() + 3600);
     }
 
+    /** A POST with the nonce of ITS OWN action and account (as the page's form carries), unless one is given. */
     private function post(array $fields, ?string $nonce = null): array {
-        return $this->parts()['page']->process($fields + array('_wpnonce' => $nonce ?? wp_create_nonce(EVC_Staff_Account_Page::NONCE_ACTION)));
+        $own = EVC_Staff_Account_Page::nonce_action((string) ($fields['evc_staff_action'] ?? ''), (int) ($fields['evc_staff_user'] ?? 0));
+        return $this->parts()['page']->process($fields + array('_wpnonce' => $nonce ?? wp_create_nonce($own)));
     }
 
     public function test_the_flag_wires_the_menu_and_the_login_hook(): void {
@@ -150,7 +152,7 @@ final class StaffAccountAdminTest extends EVC_WP_Test_Case {
         }
         $this->assertFalse(EVC_Staff_Auth::is_disabled($id));
         $this->assertSame(array($id), $this->staff_ids());
-        $this->assertSame(array('forbidden'), array_values(array_unique(array_column(EVC_Staff_Account_Service::audit_entries(20), 'outcome'))), 'every refusal is audited');
+        $this->assertSame(array('forbidden'), array_values(array_unique(array_column(EVC_Staff_Account_Service::audit_entries(20), 'outcome'))), 'every refusal by the service is audited');
         wp_set_current_user(0);
         $this->expectException(WPDieException::class);
         $this->parts()['page']->render();
@@ -159,12 +161,136 @@ final class StaffAccountAdminTest extends EVC_WP_Test_Case {
     public function test_a_missing_or_wrong_nonce_changes_nothing(): void {
         $id = $this->service()->create('till')['user_id'];
         $before = count(EVC_Staff_Account_Service::audit_entries(100));
-        foreach (array('', 'deadbeef00', wp_create_nonce('another_action')) as $nonce) {
+        foreach (array('', 'deadbeef00', wp_create_nonce('another_action'), wp_create_nonce(EVC_Staff_Account_Page::NONCE_ACTION)) as $nonce) {
             $this->assertSame('bad_nonce', $this->post(array('evc_staff_action' => 'disable', 'evc_staff_user' => (string) $id), $nonce)['code']);
         }
         $this->assertSame('bad_nonce', $this->parts()['page']->process(array('evc_staff_action' => 'revoke'))['code'], 'no nonce field at all');
         $this->assertFalse(EVC_Staff_Auth::is_disabled($id));
-        $this->assertSame($before, count(EVC_Staff_Account_Service::audit_entries(100)), 'the action never ran');
+        $this->assertSame($before, count(EVC_Staff_Account_Service::audit_entries(100)), 'the action never ran (and a bad nonce is not audited)');
+    }
+
+    public function test_a_nonce_is_bound_to_its_action_and_its_account(): void {
+        $id = $this->service()->create('till')['user_id'];
+        $other = (int) self::factory()->user->create(array('role' => EVC_Staff_Role::ROLE));
+        $before = count(EVC_Staff_Account_Service::audit_entries(100));
+        // The nonce of the «disable» form cannot be replayed as another action ...
+        $disable = wp_create_nonce(EVC_Staff_Account_Page::nonce_action('disable', $id));
+        foreach (array('password', 'enable', 'revoke', 'create') as $action) {
+            $this->assertSame('bad_nonce', $this->post(array('evc_staff_action' => $action, 'evc_staff_user' => (string) $id), $disable)['code'], $action);
+        }
+        // ... nor against another account, nor by the old unbound nonce.
+        $this->assertSame('bad_nonce', $this->post(array('evc_staff_action' => 'disable', 'evc_staff_user' => (string) $other), $disable)['code']);
+        $this->assertSame('bad_nonce', $this->post(array('evc_staff_action' => 'disable', 'evc_staff_user' => (string) $id), wp_create_nonce(EVC_Staff_Account_Page::NONCE_ACTION))['code']);
+        $this->assertSame($before, count(EVC_Staff_Account_Service::audit_entries(100)));
+        $this->assertFalse(EVC_Staff_Auth::is_disabled($id));
+        $this->assertFalse(EVC_Staff_Auth::is_disabled($other));
+        // The nonce printed in the page's own «Νέος κωδικός» form works for that action and that account only.
+        $html = $this->parts()['page']->html(null);
+        $this->assertSame(1, preg_match('/name="_wpnonce" value="([^"]+)"[^<]*<input[^>]*><input type="hidden" name="evc_staff_action" value="password"><input type="hidden" name="evc_staff_user" value="' . $id . '">/', $html, $m), 'the password form of the first account');
+        $form_nonce = $m[1];
+        $this->assertSame('bad_nonce', $this->post(array('evc_staff_action' => 'disable', 'evc_staff_user' => (string) $id), $form_nonce)['code']);
+        $this->assertSame('bad_nonce', $this->post(array('evc_staff_action' => 'password', 'evc_staff_user' => (string) $other), $form_nonce)['code']);
+        $this->assertSame('ok', $this->post(array('evc_staff_action' => 'password', 'evc_staff_user' => (string) $id), $form_nonce)['code']);
+    }
+
+    public function test_the_answer_with_a_password_is_sent_no_store(): void {
+        $sent = array();
+        EVC_Admin_Tools_Plugin::boot(array('now' => function () {
+            return $this->clock;
+        }, 'header' => function (string $line) use (&$sent): void {
+            $sent[] = $line;
+        }));
+        $id = $this->service()->create('till')['user_id'];
+        $server = $_SERVER;
+        $post = $_POST;
+        try {
+            $_SERVER['REQUEST_METHOD'] = 'POST';
+            $_POST = array('evc_staff_action' => 'disable', 'evc_staff_user' => (string) $id, '_wpnonce' => wp_create_nonce(EVC_Staff_Account_Page::nonce_action('disable', $id)));
+            $this->parts()['page']->handle_load();
+            $this->assertSame(array(), $sent, 'no password in this answer');
+            $_POST = array('evc_staff_action' => 'password', 'evc_staff_user' => (string) $id, '_wpnonce' => wp_create_nonce(EVC_Staff_Account_Page::nonce_action('password', $id)));
+            $this->parts()['page']->handle_load();
+        } finally {
+            $_SERVER = $server;
+            $_POST = $post;
+        }
+        $this->assertSame(array(EVC_Staff_Account_Page::NO_STORE_HEADER), $sent);
+        $this->assertStringContainsString('no-store', EVC_Staff_Account_Page::NO_STORE_HEADER);
+        ob_start();
+        $this->parts()['page']->render();
+        $html = (string) ob_get_clean();
+        $this->assertStringContainsString('Νέος κωδικός (εμφανίζεται ΜΟΝΟ τώρα', $html, 'the password answer is rendered once');
+    }
+
+    public function test_an_account_with_more_than_the_staff_role_gets_no_password_and_is_not_enabled(): void {
+        $created = $this->service()->create('till');
+        $id = $created['user_id'];
+        get_userdata($id)->add_cap('edit_posts');
+        $this->assertFalse(EVC_Staff_Role::is_restricted_staff_account(get_userdata($id)));
+        $this->session($id);
+        $r = $this->post(array('evc_staff_action' => 'password', 'evc_staff_user' => (string) $id));
+        $this->assertSame(array('code' => 'not_restricted', 'action' => 'password'), $r, 'no password handed out');
+        $this->assertTrue(wp_check_password($created['password'], get_userdata($id)->user_pass, $id), 'the password is unchanged');
+        $this->assertCount(1, WP_Session_Tokens::get_instance($id)->get_all(), 'nothing else ran');
+        // Disabling it is allowed; enabling it again is not.
+        $this->assertSame('ok', $this->post(array('evc_staff_action' => 'disable', 'evc_staff_user' => (string) $id))['code']);
+        $this->assertSame('not_restricted', $this->post(array('evc_staff_action' => 'enable', 'evc_staff_user' => (string) $id))['code']);
+        $this->assertTrue(EVC_Staff_Auth::is_disabled($id));
+        $this->assertSame(array('not_restricted', 'ok', 'not_restricted'), array_column(EVC_Staff_Account_Service::audit_entries(3), 'outcome'));
+        // The page offers neither action for it.
+        $html = $this->parts()['page']->html(null);
+        $this->assertStringNotContainsString('value="password"', $html);
+        $this->assertStringNotContainsString('value="enable"', $html);
+    }
+
+    public function test_a_weakened_password_generator_fails_closed_after_ten_attempts(): void {
+        $calls = 0;
+        $weak = function () use (&$calls) {
+            $calls++;
+            return 'aaaaaaaaaaaaaaaaaaaaaaaa';
+        };
+        add_filter('random_password', $weak);
+        try {
+            $r = $this->service()->create('till');
+        } catch (Exception $e) {
+            // A create that went on without a password ends in a WordPress notice: report it as an assertion below.
+            $r = array('code' => 'went on without a password: ' . get_class($e));
+        } finally {
+            remove_filter('random_password', $weak);
+        }
+        $this->assertSame(array('code' => 'failed'), $r);
+        $this->assertSame(EVC_Staff_Account_Service::PASSWORD_ATTEMPTS, $calls, 'bounded: no endless loop');
+        $this->assertSame(10, EVC_Staff_Account_Service::PASSWORD_ATTEMPTS);
+        $this->assertSame(array(), $this->staff_ids(), 'no account without a strong password');
+        $created = $this->service()->create('till');
+        $id = $created['user_id'];
+        $this->session($id);
+        $calls = 0;
+        add_filter('random_password', $weak);
+        try {
+            $r = $this->post(array('evc_staff_action' => 'password', 'evc_staff_user' => (string) $id));
+        } finally {
+            remove_filter('random_password', $weak);
+        }
+        $this->assertSame(array('code' => 'failed', 'action' => 'password'), $r);
+        $this->assertSame(10, $calls);
+        $this->assertTrue(wp_check_password($created['password'], get_userdata($id)->user_pass, $id), 'the old password still works');
+        $this->assertCount(1, WP_Session_Tokens::get_instance($id)->get_all(), 'the tablet stays signed in');
+        // A filter that weakens only the first tries: the retry still yields a strong password.
+        $calls = 0;
+        $flaky = function ($password) use (&$calls) {
+            $calls++;
+            return $calls <= 3 ? 'short' : $password;
+        };
+        add_filter('random_password', $flaky);
+        try {
+            $r = $this->service()->set_password($id);
+        } finally {
+            remove_filter('random_password', $flaky);
+        }
+        $this->assertSame('ok', $r['code']);
+        $this->assertSame(4, $calls);
+        $this->assertTrue(EVC_Staff_Account_Service::strong($r['password']));
     }
 
     public function test_more_than_one_shared_account_is_a_warning_and_nothing_is_deleted(): void {

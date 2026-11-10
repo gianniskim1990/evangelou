@@ -8,22 +8,27 @@ defined('ABSPATH') || exit;
  *  - create   the shared account when there is none: role evc_club_staff ONLY (nothing else is granted), no e-mail,
  *             a generated password shown once;
  *  - password a new generated password (shown once; never stored or logged by this plugin); all its sessions end;
- *  - disable / enable (EVC_Staff_Auth::set_disabled: disabling also ends every session);
+ *             refused (NOT_RESTRICTED) for an account that holds more than the staff role;
+ *  - disable / enable (EVC_Staff_Auth::set_disabled: disabling also ends every session); enable is refused
+ *             (NOT_RESTRICTED) for an account that holds more than the staff role, disable is always allowed;
  *  - sign out everywhere (EVC_Staff_Session::revoke_all_staff_sessions);
  *  - status: last sign-in time, disabled or not, open sessions. No IP address, no personal data.
  *
  * Every action re-checks the caller (an administrator with manage_options AND evc_manage_club, never a staff
- * account, single-site WordPress) and is audited WITHOUT secrets: time, action, outcome, the acting administrator's
+ * account, single-site WordPress) and every action that reaches this service is audited WITHOUT secrets (a request
+ * with a bad nonce is refused by the page before it reaches the service, and is not audited): time, action, outcome, the acting administrator's
  * user ID and the target account's user ID, in a bounded WordPress option (newest 100). More than one account with
  * the staff role is reported as a warning; nothing is ever deleted automatically.
  */
 final class EVC_Staff_Account_Service {
     const AUDIT_OPTION = 'evc_club_staff_admin_audit';
     const AUDIT_MAX = 100;
-    const LAST_LOGIN_META = 'evc_staff_last_login';
+    const LAST_LOGIN_META = EVC_Staff_Account_Reader::LAST_LOGIN_META;
     const DEFAULT_LOGIN = 'club-tameio';
     const DISPLAY_NAME = 'Evangelou Club — ταμείο';
     const PASSWORD_LENGTH = 24;
+    /** A generated password that is not strong (e.g. a `random_password` filter weakened it) is retried at most this often. */
+    const PASSWORD_ATTEMPTS = 10;
     const ACTIONS = array('create', 'password', 'disable', 'enable', 'revoke');
 
     const OK = 'ok';
@@ -54,28 +59,11 @@ final class EVC_Staff_Account_Service {
     }
 
     /**
-     * Every account that carries the staff role (normally exactly one, D18).
+     * Every account that carries the staff role (normally exactly one, D18); the read-only reader's view.
      * @return array<int,array{id:int,login:string,disabled:bool,restricted:bool,last_login:?int,sessions:int}>
      */
     public function accounts(): array {
-        $out = array();
-        foreach (get_users(array('role' => EVC_Staff_Role::ROLE, 'orderby' => 'ID', 'order' => 'ASC')) as $user) {
-            $id = (int) $user->ID;
-            $sessions = WP_Session_Tokens::get_instance($id)->get_all();
-            $last = (int) get_user_meta($id, self::LAST_LOGIN_META, true);
-            foreach ($sessions as $session) {
-                $last = max($last, isset($session['login']) ? (int) $session['login'] : 0);
-            }
-            $out[] = array(
-                'id' => $id,
-                'login' => (string) $user->user_login,
-                'disabled' => EVC_Staff_Auth::is_disabled($id),
-                'restricted' => EVC_Staff_Role::is_restricted_staff_account($user),
-                'last_login' => $last > 0 ? $last : null,
-                'sessions' => count($sessions),
-            );
-        }
-        return $out;
+        return EVC_Staff_Account_Reader::accounts();
     }
 
     /** @return array{code:string,user_id?:int,password?:string} */
@@ -97,6 +85,9 @@ final class EVC_Staff_Account_Service {
             return $this->done('create', 0, self::ROLE_MISSING);
         }
         $password = self::generate_password();
+        if ($password === null) {
+            return $this->done('create', 0, self::FAILED);
+        }
         $user_id = wp_insert_user(array(
             'user_login' => $login,
             'user_pass' => $password,
@@ -126,7 +117,14 @@ final class EVC_Staff_Account_Service {
         if (!$this->is_staff($user_id)) {
             return $this->done('password', $user_id, self::NOT_STAFF);
         }
+        if (!EVC_Staff_Role::is_restricted_staff_account(get_userdata($user_id))) {
+            // More than the staff role: it cannot sign in at the till anyway; never hand out its password.
+            return $this->done('password', $user_id, self::NOT_RESTRICTED);
+        }
         $password = self::generate_password();
+        if ($password === null) {
+            return $this->done('password', $user_id, self::FAILED);
+        }
         wp_set_password($password, $user_id);
         WP_Session_Tokens::get_instance($user_id)->destroy_all();
         EVC_Staff_Session::delete_all_activity($user_id);
@@ -142,6 +140,10 @@ final class EVC_Staff_Account_Service {
         }
         if (!$this->is_staff($user_id)) {
             return $this->done($action, $user_id, self::NOT_STAFF);
+        }
+        if (!$disabled && !EVC_Staff_Role::is_restricted_staff_account(get_userdata($user_id))) {
+            // Never re-enable an account that holds more than the staff role; disabling it stays allowed.
+            return $this->done($action, $user_id, self::NOT_RESTRICTED);
         }
         $result = EVC_Staff_Auth::set_disabled($user_id, $disabled);
         return $this->done($action, $user_id, $result === true ? self::OK : self::FAILED);
@@ -173,12 +175,18 @@ final class EVC_Staff_Account_Service {
         return array_slice(array_reverse(is_array($all) ? array_values($all) : array()), 0, max(0, $limit));
     }
 
-    /** A strong generated password: PASSWORD_LENGTH characters with lower and upper case letters and digits. */
-    public static function generate_password(): string {
-        do {
+    /**
+     * A strong generated password: PASSWORD_LENGTH characters with lower and upper case letters and digits. At most
+     * PASSWORD_ATTEMPTS tries (a `random_password` filter may weaken every one); then null and the action FAILS.
+     */
+    public static function generate_password(): ?string {
+        for ($attempt = 0; $attempt < self::PASSWORD_ATTEMPTS; $attempt++) {
             $password = wp_generate_password(self::PASSWORD_LENGTH, false, false);
-        } while (!self::strong($password));
-        return $password;
+            if (is_string($password) && self::strong($password)) {
+                return $password;
+            }
+        }
+        return null;
     }
 
     public static function strong(string $password): bool {

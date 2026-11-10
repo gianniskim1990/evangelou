@@ -2,6 +2,7 @@
 
 ## CURRENT STATE (keep this section current; update it at every task transition)
 
+- **As of 2026-11-10 (newest first):** STAGE-08 round 2 on `feat/evc-pilot-readiness` (Draft PR #42, base `feat/evc-store-onboarding`); see «STAGE-08 round 2», «TECHNICIAN ANSWERS 2026-11-10» and «OWNER DECISION D19» at the end of this file. Still nothing merged, deployed or enabled. The bullets below are the older state and are kept as history.
 - **As of 2026-11-03.** Stack tip `feat/evc-member-qr` (STAGE-05C, Draft PR, base `feat/evc-member-sync` = Draft PR #37 STAGE-05B, base `feat/evc-staff-redemption` = Draft PR #36 STAGE-05A, base `feat/evc-club-migrations` = Draft PR #35). Before it: `feat/evc-club-migrations` (STAGE-04A, code SHA `b0357be`, CI run 40475996174 18/18), `feat/evc-wc-completion` (Draft PR #34), `feat/evc-bacs-issuance` (Draft PR #33), … PR #31. None merged.
 - `main` @ `9024989` has DIVERGED from the stack (memory-only commits on main; no `wordpress/` folder on main). Any future merge needs a deliberate `memory.md` reconciliation.
 - Nothing of the Club is merged, deployed or active. Flags `EVC_CLUB_STAFF_ENABLED` / `EVC_CLUB_CUSTOMER_ENABLED` / `EVC_CLUB_WC_COMPLETION_ENABLED` / `EVC_CLUB_MIGRATIONS_ENABLED` / `EVC_CLUB_REDEMPTION_SOURCE` OFF; production redeem = 503. Owner approved (2026-10-27) applying migrations 001+002 on the STAGING Club DB only (performed by owner/technician; no result reported here yet).
@@ -1599,3 +1600,39 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
     - a Greek section.
   - store-onboarding.md: the same-/48 known risk and the once-per-request cleanup.
 - **CI on 3d0cea9 (STAGE-08), all first attempt, no re-runs:** foundation push 42258147068 18/18 (commerce mutation 205/205 killed), foundation PR 42258183972 18/18, frontend push 42258147155 4/4, frontend PR 42258183888 4/4.
+
+### STAGE-08 round 2 — independent review of 3d0cea9: ACCEPT WITH NITS, all items fixed (2026-11-10)
+- New builder session (the previous one was lost); restarted from this log. Development only: no merge, deploy, enabling, real or staging DB, SFTP / MySQL connection, FluentCRM or migration run.
+- **1 (MEDIUM) readiness green while the payment path is off:**
+  - new rows in «Κατάστημα»: `payment_provenance` (OK only for the exact `'club_db_v1'`; pure `EVC_Readiness::provenance_status()`, the same `===` rule as `EVC_Customer_Qr_Backend::provenance_recorded()`; no shared parser outside the QR allowlist existed) and `lookup_key` (`EVC_Club_Qr_Services::is_lookup_secret()`, >= 32 bytes; value and length never shown);
+  - TEST seam `constants` (boot seams → build → EVC_Readiness);
+  - go-live.md steps 3 and 5 name these rows.
+- **2 (LOW–MED) packager bypasses:**
+  - new static read-only `EVC_Staff_Account_Reader::accounts()` (includes/admin/class-evc-staff-account-reader.php); the service delegates to it; `EVC_Readiness` no longer receives the service (constructor = db_config, connect, server, constants);
+  - read-only files = readiness, readiness page, reader. Banned there: WordPress writers / hooks (incl. update_user_option, wp_cache_* writes, call_user_func*, forward_static_call*) as calls AND as strings; writer methods via `->`/`::` (create, set_password, set_disabled, revoke_all, record_login, process, handle_load, delete_all_activity, revoke_all_staff_sessions, destroy*, caps/roles, plus the DB writers); `$var::`; SQL-write strings (SQL_WRITE regex); `EVC_Staff_Account_Service` only as `::may_manage(`; `EVC_Admin_Tools_Plugin` never; `EVC_Club_Qr_Services` only as `::is_lookup_secret(` (QR_NAMES allowlist widened to the readiness file only);
+  - password-leak list: add_query_arg / wp_redirect / wp_safe_redirect banned outright in the till-account files; update_option, add_option, update_site_option, update_user_meta, add_user_meta, update_user_option, wp_cache_add / replace, header, do_action(_ref_array), apply_filters(_ref_array) banned when an argument carries the password (a `$…pass…` variable or a 'password' string); the fake `update_option_password` entry removed;
+  - a negative self-test for each rule (selfTest now also runs qrProblemsFor for the admin-tools cases); each new rule was checked by disabling it (the self-test then fails);
+  - docs/admin-tools.md lists exactly what is enforced and what is not (run-time assembled names).
+- **3:** `set_password` refuses, and `set_disabled(false)` (enable) refuses, an account that is not `is_restricted_staff_account` → `not_restricted`; disable stays allowed; the page shows neither button for it; the Greek message is generic now.
+- **4:** nonce action `evc_club_staff_account|<action>|<user ID>` (`EVC_Staff_Account_Page::nonce_action()`); the action and user are parsed before the nonce check; the password answer sends `Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private` through a TEST-seamed header callable (`header` seam).
+- **5:** `generate_password()` returns ?string after at most `PASSWORD_ATTEMPTS` = 10 tries; create / password return `failed` with nothing changed.
+- **6:** schema row: no ledger table (information_schema check) = «Λείπει»; a table that cannot be read, or a check that throws = new status `unreadable` «Δεν διαβάζεται», pointing at the migrations page. go-live T1 no longer says a green DB row closes error 1044.
+- **7:** docs/admin-tools.md: only requests that reach the service are audited (a bad nonce is not); showing the password is not audited separately (accepted); audit spam by an admin without evc_manage_club (informational, newest 100 kept); nonce re-use within its lifetime (accepted).
+- **Mutants AT18–AT30** (mode admin_tools): provenance any value / undefined, short lookup key, unreadable ledger, password / enable for an over-privileged account, unbound nonce / nonce not bound to the account, no-store header dropped, weak password accepted, create / password ignoring a failed generator, one attempt only. All killed locally by their named assertion tests (targeted run, wp-admin-tools 27/27 green). AT28's test catches the WordPress notice of a password-less wp_insert_user so the kill is an assertion failure.
+- **Existing mutants re-pointed:** AT7 (the nonce check now reads `self::nonce_action($action, $user)`) and AT8 (a null check now sits between generate_password() and wp_set_password()). Runner subset AT1–AT30: total=29 killed=29 (sources restored).
+- **Not run locally:** the commerce suites (downloads.wordpress.org is blocked by the sandbox proxy, so the pinned WooCommerce zip cannot be fetched): ReadinessCommerceTest's new assertions and ATC1–ATC2 are CI-only.
+- **Local environment note:** the old scratch MariaDB datadir had an unknown root password; a fresh one was initialised in the scratchpad (`mdb2`, root / test-only password from env.sh), test databases only.
+
+### TECHNICIAN ANSWERS 2026-11-10 (relayed by the coordinator; NO secrets recorded)
+- **SFTP host:** `linuxzone146.grserver.gr` (`evangelouprofiterole.gr:22` times out).
+- **No phpMyAdmin** for the Club DB; the technician uses **MySQL Workbench** to `linuxzone146.grserver.gr`.
+- **The Club DB is the STAGING Club database** (11:32 Athens update).
+- **Club DB user** (name deliberately not recorded in the repo): the technician states it "has full access" to its Club database. **T1 (error 1044): reported fixed, verify on the migrations status page.**
+- **Club DB password:** it had been the same as the plugin password previously shared in chat (exposed). The owner reports (11:32 Athens) the technician **rotated** it → **T3 closed for the Club DB**; the WordPress DB password rotation is still to be confirmed (go-live.md T3).
+- **MySQL server timezone = Europe/Athens.** This does NOT close **T2**, which is the WordPress setting (Settings → General → Timezone, still a fixed UTC+3 until changed). go-live.md makes the distinction explicit.
+- None of this was verified from the development side (no server access by the builder).
+
+### OWNER DECISION D19 — 2026-11-10 11:38 Athens: migration 003 on STAGING approved
+- The owner answered «ναι»: apply migration 003 on the **STAGING** Club DB only (technician: `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` on staging, backup first). **Production** still needs its own approval for 001, 002 and 003.
+- **Staging install:** the plugin is already installed on the staging WordPress (which uses the staging Club DB), but it is an earlier build; the technician will replace it with the new package (go-live.md T8).
+- Docs updated: go-live.md (T1, T2, T3, T7, new T8, technician answers, step 2, Greek section), club-db-migrations.md, member-qr.md (D9 row and the 003 note).

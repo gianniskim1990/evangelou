@@ -31,6 +31,8 @@ final class ReadinessCommerceTest extends EVC_WP_Test_Case {
         $this->assertStringContainsString('#' . EVC_TEST_CLUB_PRODUCT, $rows['commerce_config']['detail']);
         $this->assertSame('ok', $rows['commerce_environment']['status'], $rows['commerce_environment']['detail']);
         $this->assertSame('ok', $rows['commerce_site']['status'], $rows['commerce_site']['detail']);
+        $this->assertSame('ok', $rows['payment_provenance']['status'], 'EVC_CLUB_PAYMENT_PROVENANCE = club_db_v1 on this site');
+        $this->assertSame('ok', $rows['lookup_key']['status'], 'EVC_CLUB_LOOKUP_KEY is a valid test key on this site');
         $this->assertSame('ok', $rows['bacs']['status']);
         $this->assertSame('ok', $rows['timezone']['status']);
         $this->assertSame('ok', $rows['flag_customer']['status']);
@@ -60,5 +62,19 @@ final class ReadinessCommerceTest extends EVC_WP_Test_Case {
         $this->assertSame('wrong', $rows['timezone']['status']);
         $this->assertSame('wrong', $rows['commerce_site']['status']);
         $this->assertStringContainsString('site_timezone_not_athens', $rows['commerce_site']['detail']);
+    }
+
+    public function test_the_shop_reads_ok_but_the_payment_path_off_is_not_green(): void {
+        // Round 2 (review MEDIUM): everything else on this site is configured; a wrong provenance or a short lookup key
+        // must still show «wrong», never an all-green page.
+        EVC_Admin_Tools_Plugin::boot(array('constants' => array('EVC_CLUB_PAYMENT_PROVENANCE' => 'club_db', 'EVC_CLUB_LOOKUP_KEY' => 'too-short')));
+        $rows = self::rows();
+        $this->assertSame('ok', $rows['commerce_config']['status']);
+        $this->assertSame('ok', $rows['commerce_environment']['status'], $rows['commerce_environment']['detail']);
+        $this->assertSame('wrong', $rows['payment_provenance']['status']);
+        $this->assertSame('wrong', $rows['lookup_key']['status']);
+        $html = EVC_Admin_Tools_Plugin::parts()['readiness_page']->html();
+        $this->assertStringContainsString('data-check="payment_provenance" data-status="wrong"', $html);
+        $this->assertStringNotContainsString('too-short', $html);
     }
 }

@@ -1496,14 +1496,12 @@ $mutants = array(
         '        if ($this->accounts() !== array()) {', '        if (false) {',
         array('StaffAccountAdminTest::test_the_shared_account_is_created_once_with_the_staff_role_only')),
     array('AT7-nonce-not-checked', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
-        '        if (wp_verify_nonce($nonce, self::NONCE_ACTION) === false) {', '        if (false) {',
+        '        if (wp_verify_nonce($nonce, self::nonce_action($action, $user)) === false) {', '        if (false) {',
         array('StaffAccountAdminTest::test_a_missing_or_wrong_nonce_changes_nothing')),
     array('AT8-new-password-keeps-sessions', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
-        '        $password = self::generate_password();
-        wp_set_password($password, $user_id);
+        '        wp_set_password($password, $user_id);
         WP_Session_Tokens::get_instance($user_id)->destroy_all();
-', '        $password = self::generate_password();
-        wp_set_password($password, $user_id);
+', '        wp_set_password($password, $user_id);
 ',
         array('StaffAccountAdminTest::test_a_new_password_is_strong_shown_once_and_signs_the_tablet_out')),
     array('AT9-password-for-any-account', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
@@ -1541,6 +1539,60 @@ $mutants = array(
             update_user_meta((int) $user->ID, self::LAST_LOGIN_META', '        if (true) {
             update_user_meta((int) $user->ID, self::LAST_LOGIN_META',
         array('StaffAccountAdminTest::test_the_last_sign_in_time_is_recorded_without_any_address')),
+    // STAGE-08 round 2 (AT18-AT30, mode admin_tools): readiness provenance / lookup key / unreadable ledger, the
+    // not-restricted refusals, the bound nonce, the no-store header and the bounded password generator.
+    array('AT18-provenance-any-value-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        return $value === self::PROVENANCE_VALUE ? self::OK : self::WRONG;', '        return self::OK;',
+        array('ReadinessTest::test_the_payment_provenance_reads_ok_only_for_the_exact_value')),
+    array('AT19-provenance-undefined-not-missing', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        if (!$defined) {
+            return self::MISSING;
+        }
+        return $value === self::PROVENANCE_VALUE', '        return $value === self::PROVENANCE_VALUE',
+        array('ReadinessTest::test_the_payment_provenance_reads_ok_only_for_the_exact_value')),
+    array('AT20-short-lookup-key-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        return EVC_Club_Qr_Services::is_lookup_secret($value) ? self::OK : self::WRONG;', '        return is_string($value) && $value !== \'\' ? self::OK : self::WRONG;',
+        array('ReadinessTest::test_the_lookup_key_reads_ok_only_when_valid_and_is_never_shown')),
+    array('AT21-unreadable-ledger-reads-as-nothing-applied', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '            $unreadable = get_class($e);
+', '',
+        array('ReadinessTest::test_an_unreadable_migrations_ledger_is_not_read_as_nothing_applied')),
+    array('AT22-password-for-an-over-privileged-account', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if (!EVC_Staff_Role::is_restricted_staff_account(get_userdata($user_id))) {
+            // More than the staff role', '        if (false) {
+            // More than the staff role',
+        array('StaffAccountAdminTest::test_an_account_with_more_than_the_staff_role_gets_no_password_and_is_not_enabled')),
+    array('AT23-enable-an-over-privileged-account', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if (!$disabled && !EVC_Staff_Role::is_restricted_staff_account(', '        if (false && !EVC_Staff_Role::is_restricted_staff_account(',
+        array('StaffAccountAdminTest::test_an_account_with_more_than_the_staff_role_gets_no_password_and_is_not_enabled')),
+    array('AT24-nonce-not-bound', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
+        '        return self::NONCE_ACTION . \'|\' . $action . \'|\' . $user_id;', '        return self::NONCE_ACTION;',
+        array('StaffAccountAdminTest::test_a_nonce_is_bound_to_its_action_and_its_account', 'StaffAccountAdminTest::test_a_missing_or_wrong_nonce_changes_nothing')),
+    array('AT25-nonce-not-bound-to-the-account', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
+        '        return self::NONCE_ACTION . \'|\' . $action . \'|\' . $user_id;', '        return self::NONCE_ACTION . \'|\' . $action;',
+        array('StaffAccountAdminTest::test_a_nonce_is_bound_to_its_action_and_its_account')),
+    array('AT26-password-answer-without-no-store', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
+        '            ($this->header)(self::NO_STORE_HEADER);
+', '',
+        array('StaffAccountAdminTest::test_the_answer_with_a_password_is_sent_no_store')),
+    array('AT27-weak-generated-password-accepted', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '            if (is_string($password) && self::strong($password)) {', '            if (is_string($password)) {',
+        array('StaffAccountAdminTest::test_a_weakened_password_generator_fails_closed_after_ten_attempts')),
+    array('AT28-create-ignores-a-failed-generator', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if ($password === null) {
+            return $this->done(\'create\', 0, self::FAILED);
+        }
+', '',
+        array('StaffAccountAdminTest::test_a_weakened_password_generator_fails_closed_after_ten_attempts')),
+    array('AT29-new-password-ignores-a-failed-generator', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if ($password === null) {
+            return $this->done(\'password\', $user_id, self::FAILED);
+        }
+', '',
+        array('StaffAccountAdminTest::test_a_weakened_password_generator_fails_closed_after_ten_attempts')),
+    array('AT30-one-generator-attempt-only', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '    const PASSWORD_ATTEMPTS = 10;', '    const PASSWORD_ATTEMPTS = 1;',
+        array('StaffAccountAdminTest::test_a_weakened_password_generator_fails_closed_after_ten_attempts')),
     array('ATC1-shop-conflicts-ignored', 'commerce_admin_tools', 'includes/admin/class-evc-readiness.php',
         '$conflicts === array() ? self::OK : self::WRONG', 'self::OK',
         array('ReadinessCommerceTest::test_a_wrong_price_a_shared_cart_or_no_bank_transfer_read_wrong')),

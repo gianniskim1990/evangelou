@@ -12,7 +12,7 @@ defined('ABSPATH') || exit;
  * read-only).
  *
  * It NEVER changes anything: only reads (options, constants, plain SELECTs on the Club database, FluentCRM read
- * calls). It never prints a secret: no password, key, host, user, database name, IP address or header value; only
+ * calls). It holds no till-account service: the shared account is read through EVC_Staff_Account_Reader (read-only). It never prints a secret: no password, key, host, user, database name, IP address or header value; only
  * statuses, version numbers, IDs of products / levels / tags and problem codes.
  */
 final class EVC_Readiness {
@@ -21,13 +21,24 @@ final class EVC_Readiness {
     const WRONG = 'wrong';
     const MANUAL = 'manual';
     const OFF = 'off';
+    const UNREADABLE = 'unreadable';
     const STATUS_LABELS = array(
         self::OK => 'Εντάξει',
         self::MISSING => 'Λείπει',
         self::WRONG => 'Λάθος',
         self::MANUAL => 'Έλεγχος με το χέρι',
         self::OFF => 'Ανενεργό (προεπιλογή)',
+        self::UNREADABLE => 'Δεν διαβάζεται',
     );
+
+    /** The payment-provenance switch: only this exact string records payments in the Club database (same rule as
+     *  EVC_Customer_Qr_Backend::provenance_recorded(), the WooCommerce completion and the redemption backends). */
+    const PROVENANCE_CONSTANT = 'EVC_CLUB_PAYMENT_PROVENANCE';
+    const PROVENANCE_VALUE = 'club_db_v1';
+    /** The lookup-proof secret of the member QR / staff scan (EVC_Club_Qr_Services::is_lookup_secret: >= 32 bytes). */
+    const LOOKUP_KEY_CONSTANT = 'EVC_CLUB_LOOKUP_KEY';
+    /** The ledger table of EVC_Migrator. */
+    const LEDGER_TABLE = 'evc_schema_migrations';
 
     /** The tested matrix (CI): PHP 7.4 / 8.2 / 8.4; MySQL 8.0 / 8.4, MariaDB 10.11. */
     const SUPPORTED_PHP = array('7.4', '8.2', '8.4');
@@ -54,19 +65,20 @@ final class EVC_Readiness {
     private $db_config;
     /** @var callable(EVC_Db_Config): EVC_Club_Db */
     private $connect;
-    /** @var EVC_Staff_Account_Service */
-    private $staff;
     /** @var array<string,mixed> */
     private $server;
+    /** @var array<string,mixed>|null */
+    private $constants;
 
     /**
      * @param callable(): ?EVC_Db_Config|null $db_config TEST seam (default: the EVC_CLUB_DB_* constants)
      * @param callable(EVC_Db_Config): EVC_Club_Db|null $connect TEST seam (default: EVC_Club_Db::connect)
      * @param array<string,mixed>|null $server TEST seam (default: $_SERVER)
+     * @param array<string,mixed>|null $constants TEST seam: values standing in for the provenance / lookup-key constants
      */
-    public function __construct(EVC_Staff_Account_Service $staff, ?callable $db_config = null, ?callable $connect = null, ?array $server = null) {
+    public function __construct(?callable $db_config = null, ?callable $connect = null, ?array $server = null, ?array $constants = null) {
         EVC_Admin_Tools_Feature::assert_constructible(__CLASS__);
-        $this->staff = $staff;
+        $this->constants = $constants;
         $this->db_config = $db_config ?? array('EVC_Db_Config', 'from_constants');
         $this->connect = $connect ?? array('EVC_Club_Db', 'connect');
         $this->server = $server ?? $_SERVER;
@@ -109,14 +121,20 @@ final class EVC_Readiness {
         }
         $rows = array(self::row('club_db', 'Βάση δεδομένων του Club', self::OK, 'Η σύνδεση πέτυχε.'));
         $target = EVC_Club_Migrations_Feature::target_version();
+        $unreadable = null;
         try {
-            // The ledger table of EVC_Migrator (evc_schema_migrations): the highest applied version.
-            $applied = (int) ($db->fetch_one('SELECT COALESCE(MAX(version), 0) AS v FROM evc_schema_migrations')['v'] ?? 0);
+            // The ledger table of EVC_Migrator: absent = nothing applied; present = the highest applied version.
+            $present = (int) ($db->fetch_one('SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?', array(self::LEDGER_TABLE))['n'] ?? 0) > 0;
+            $applied = $present ? (int) ($db->fetch_one('SELECT COALESCE(MAX(version), 0) AS v FROM ' . self::LEDGER_TABLE)['v'] ?? 0) : 0;
         } catch (Throwable $e) {
+            // Never read as "no migration applied": the ledger exists or cannot be checked, and it could not be read.
             $applied = 0;
+            $unreadable = get_class($e);
         }
         if ($target === null) {
             $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', self::WRONG, 'Το EVC_CLUB_MIGRATIONS_TARGET δεν είναι θετικός ακέραιος.');
+        } elseif ($unreadable !== null) {
+            $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', self::UNREADABLE, sprintf('Ο πίνακας μεταβάσεων δεν διαβάστηκε (%s). Δείτε τους ελέγχους στη σελίδα Εργαλεία → «Evangelou Club — Βάση δεδομένων» (στόχος %d).', $unreadable, $target));
         } elseif ($applied === 0) {
             $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', self::MISSING, sprintf('Δεν έχει εφαρμοστεί καμία μετάβαση (στόχος %d).', $target));
         } else {
@@ -179,6 +197,8 @@ final class EVC_Readiness {
                 $rows[] = self::row('commerce_site', 'Επίπεδο PMPro και ρυθμίσεις ιστότοπου', $site === null ? self::OK : self::WRONG, $site === null ? 'Όλα όπως πρέπει.' : 'Κωδικός: ' . $site);
             }
         }
+        $rows[] = $this->provenance_row();
+        $rows[] = $this->lookup_key_row();
         if (!function_exists('WC')) {
             $rows[] = self::row('bacs', 'Τραπεζική μεταφορά (BACS)', self::MISSING, 'Το WooCommerce δεν είναι ενεργό.');
         } else {
@@ -193,6 +213,54 @@ final class EVC_Readiness {
             $rows[] = self::row('terms_url', 'Σελίδα όρων του Club (EVC_CLUB_TERMS_URL, D13)', $url !== '' ? self::OK : self::WRONG, $url !== '' ? 'Ορίστηκε, στον ίδιο ιστότοπο.' : 'Δεν είναι διεύθυνση αυτού του ιστότοπου.');
         }
         return $rows;
+    }
+
+    /** @return array{0:bool,1:mixed} defined?, value (the TEST seam stands in for the real constant) */
+    private function constant_value(string $name): array {
+        if ($this->constants !== null && array_key_exists($name, $this->constants)) {
+            return array(true, $this->constants[$name]);
+        }
+        return defined($name) ? array(true, constant($name)) : array(false, null);
+    }
+
+    /** Pure: the status of EVC_CLUB_PAYMENT_PROVENANCE. OK only for the exact string 'club_db_v1'. */
+    public static function provenance_status(bool $defined, $value): string {
+        if (!$defined) {
+            return self::MISSING;
+        }
+        return $value === self::PROVENANCE_VALUE ? self::OK : self::WRONG;
+    }
+
+    /** Pure: the status of EVC_CLUB_LOOKUP_KEY, by the lookup backend's own rule (a string of at least 32 bytes). */
+    public static function lookup_key_status(bool $defined, $value): string {
+        if (!$defined) {
+            return self::MISSING;
+        }
+        return EVC_Club_Qr_Services::is_lookup_secret($value) ? self::OK : self::WRONG;
+    }
+
+    /** The value is never shown, only whether it is the exact enabling value. */
+    private function provenance_row(): array {
+        list($defined, $value) = $this->constant_value(self::PROVENANCE_CONSTANT);
+        $status = self::provenance_status($defined, $value);
+        $details = array(
+            self::OK => 'Ορίστηκε ακριβώς: οι πληρωμές καταγράφονται στη βάση του Club.',
+            self::MISSING => 'Δεν έχει οριστεί: η επιβεβαίωση πληρωμής, η σελίδα μέλους με QR και η εξαργύρωση μένουν κλειστές.',
+            self::WRONG => 'Ορίστηκε, αλλά όχι με την ακριβή τιμή που το ενεργοποιεί: η επιβεβαίωση πληρωμής, η σελίδα μέλους με QR και η εξαργύρωση μένουν κλειστές.',
+        );
+        return self::row('payment_provenance', 'Καταγραφή πληρωμών στη βάση του Club (EVC_CLUB_PAYMENT_PROVENANCE)', $status, $details[$status]);
+    }
+
+    /** The key is never shown, nor its length: only present-and-valid or not. */
+    private function lookup_key_row(): array {
+        list($defined, $value) = $this->constant_value(self::LOOKUP_KEY_CONSTANT);
+        $status = self::lookup_key_status($defined, $value);
+        $details = array(
+            self::OK => 'Ορίστηκε και είναι έγκυρο (τουλάχιστον 32 bytes).',
+            self::MISSING => 'Δεν έχει οριστεί: το σκανάρισμα του QR στο ταμείο μένει κλειστό.',
+            self::WRONG => 'Ορίστηκε, αλλά δεν είναι έγκυρο (χρειάζεται κείμενο τουλάχιστον 32 bytes): το σκανάρισμα του QR μένει κλειστό.',
+        );
+        return self::row('lookup_key', 'Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)', $status, $details[$status]);
     }
 
     // ---- CRM ----------------------------------------------------------------------------------------------
@@ -274,7 +342,7 @@ final class EVC_Readiness {
     // ---- the shared till account (D18) --------------------------------------------------------------------------
 
     private function staff(): array {
-        $accounts = $this->staff->accounts();
+        $accounts = EVC_Staff_Account_Reader::accounts();
         $label = 'Κοινός λογαριασμός ταμείου (D18)';
         if ($accounts === array()) {
             return array(self::row('staff_account', $label, self::MISSING, 'Δεν υπάρχει· δημιουργήστε τον από «Λογαριασμός ταμείου».'));

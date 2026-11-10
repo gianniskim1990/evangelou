@@ -20,13 +20,31 @@ approval: first on **staging**, and on **production** only after the owner appro
 
 | # | Blocker | What closes it |
 |---|---|---|
-| T1 | **MySQL error 1044** (access denied to the Club database) seen on staging | Give the Club DB user full rights on the Club database only (not on the WordPress database). The readiness page shows «Βάση δεδομένων του Club: Εντάξει». |
-| T2 | **Timezone**: the site is set to a fixed UTC+3, not `Europe/Athens` | Settings → General → Timezone = «Athens» (Europe/Athens), after checking the impact on existing orders. Readiness: «Ζώνη ώρας: Εντάξει». |
-| T3 | **The exposed database password** | Rotate the WordPress and Club database passwords, update wp-config.php, confirm the site and the readiness page. |
+| T1 | **MySQL error 1044** (access denied to the Club database) seen on staging | **Reported fixed, to verify (2026-11-10):** the technician states the Club DB user has full access to the Club database. Verify on the **migrations status page** (Tools → «Evangelou Club — Βάση δεδομένων», with `EVC_CLUB_MIGRATIONS_ENABLED`): every separation and schema check passes, and the approved apply on staging succeeds. A green readiness row «Βάση δεδομένων του Club» proves only that a connection opens and SELECTs run; it does **not** prove the CREATE rights whose absence gave 1044, so it does not close T1. |
+| T2 | **WordPress timezone setting**: Settings → General → Timezone is a fixed UTC+3, not `Europe/Athens` | **Open.** Settings → General → Timezone = «Athens» (Europe/Athens), after checking the impact on existing orders. Readiness: «Ζώνη ώρας του ιστότοπου: Εντάξει». This is the **WordPress** setting (`timezone_string`), which the Club's day boundary and the shop checks read. It is **separate from the MySQL server's timezone**: the technician reported (2026-11-10) that the MySQL server runs in Europe/Athens, which does **not** close T2. |
+| T3 | **The exposed database passwords** | **Club DB: closed (2026-11-10)** — the owner reports that the technician rotated the exposed Club DB password. **WordPress DB: still to be confirmed** — the technician confirms that the WordPress database password was rotated too (or was never the exposed one), wp-config.php updated, the site and the readiness page work. |
 | T4 | **Terms URL** (D13) | `define('EVC_CLUB_TERMS_URL', 'https://…/…')` with the existing Club terms page. |
 | T5 | **FluentCRM tag IDs** | The six `EVC_CLUB_FLUENTCRM_TAG_*` constants with the real IDs and names ([fluentcrm-tags.md](fluentcrm-tags.md)). |
 | T6 | **Checkout type**: Block Checkout or classic | Record which one the live site uses (step 6 below). Both are guarded; staging must use the same one. |
-| T7 | **Migration 003** | Needs its **own** owner approval. Without it the target stays 2 and the member QR / scan stay unavailable. |
+| T7 | **Migration 003** | **Staging: approved (owner decision D19, 2026-11-10)** — `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` on staging only, after a backup. **Production:** 001, 002 and 003 each still need the owner's own approval. Without 003 the target stays 2 and the member QR / scan stay unavailable. |
+| T8 | **The staging plugin build** | The plugin is already installed on the staging WordPress (using the staging Club DB), but it is an **earlier build**. The technician replaces it with the package built from the reviewed, CI-green commit before any step below. |
+
+### Technician answers received 2026-11-10 (no secrets recorded here)
+
+- **SFTP host:** `linuxzone146.grserver.gr` (port 22 on `evangelouprofiterole.gr` times out).
+- **Club database access:** there is no phpMyAdmin for the Club DB; use **MySQL Workbench** to `linuxzone146.grserver.gr`.
+- **The Club DB is the STAGING Club database** (confirmed 2026-11-10). The staging WordPress, with an earlier build of
+  the plugin installed, uses it (T8).
+- **Club DB user:** the technician states it "has full access" to its Club database (T1: reported fixed, verify on the
+  migrations status page). The user name is not recorded in the repository.
+- **Club DB password:** it had been the same as the plugin password previously shared in chat (exposed); the owner
+  reports the technician has **rotated** it (T3 closed for the Club DB). The WordPress DB password rotation is still to
+  be confirmed (T3).
+- **Timezone:** the **MySQL server** runs in `Europe/Athens`. The **WordPress setting** (Settings → General) is still a
+  fixed UTC+3 until the technician changes it: T2 stays open.
+- **Migration 003:** approved for staging only (D19).
+- **The developer has no server access:** no SFTP or MySQL connection is made from the development side; every step is
+  done by the technician.
 
 ## 2. Enable order, and what to check after each step
 
@@ -37,10 +55,10 @@ read «Εντάξει» (or the «manual» items are confirmed).
 |---|---|---|
 | 0 | Backups of both databases. | Restore tested. |
 | 1 | `define('EVC_CLUB_ADMIN_TOOLS_ENABLED', true);` | The «Evangelou Club» menu appears for administrators only. Readiness shows the current state. |
-| 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);` | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green; apply 001 + 002 (approved for staging on 2026-10-27; production needs its own approval). 003 only with its own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: database and schema «Εντάξει». |
-| 3 | `EVC_CLUB_MEMBERSHIP_SOURCE`, `EVC_CLUB_PMPRO_LEVEL_ID`, `EVC_CLUB_WC_PRODUCT_ID`, `EVC_CLUB_EVIDENCE_KEY`, `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` | Readiness «Κατάστημα»: all «Εντάξει» (pinned versions, product 20.00 €, sold individually, one-month level, Athens clock, BACS on). |
+| 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);`; on **staging** also `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` (D19) | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green (this also verifies T1); apply 001 + 002 (approved for staging on 2026-10-27) and, on staging, 003 (D19, 2026-11-10). **Production:** 001, 002 and 003 each need the owner's own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: «Βάση δεδομένων του Club» and «Έκδοση σχήματος» «Εντάξει» (a «Δεν διαβάζεται» schema row means the migrations table could not be read: go back to the migrations page checks). |
+| 3 | `EVC_CLUB_MEMBERSHIP_SOURCE`, `EVC_CLUB_PMPRO_LEVEL_ID`, `EVC_CLUB_WC_PRODUCT_ID`, `EVC_CLUB_EVIDENCE_KEY`, `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` | Readiness «Κατάστημα»: all «Εντάξει» (pinned versions, product 20.00 €, sold individually, one-month level, Athens clock, BACS on), **including «Καταγραφή πληρωμών στη βάση του Club (EVC_CLUB_PAYMENT_PROVENANCE)»**: «Εντάξει» only for the exact `'club_db_v1'`; «Λάθος» or «Λείπει» means payment confirmation, the member QR and redemption stay closed. |
 | 4 | `define('EVC_CLUB_WC_COMPLETION_ENABLED', true);` | One test order by bank transfer, marked «Ολοκληρωμένη» by the shop: the member reads active ([commerce-membership-source.md](commerce-membership-source.md)). |
-| 5 | `define('EVC_CLUB_CUSTOMER_ENABLED', true);` (and `EVC_CLUB_LOOKUP_KEY` for the QR) | `/club-member/` shows the test member as active; the QR appears only after 003. |
+| 5 | `define('EVC_CLUB_CUSTOMER_ENABLED', true);` and `EVC_CLUB_LOOKUP_KEY` (a random secret of at least 32 bytes, for the QR scan) | Readiness «Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)»: «Εντάξει» (the value is never shown). `/club-member/` shows the test member as active; the QR appears only after 003. |
 | 6 | `define('EVC_CLUB_STAFF_ENABLED', true);` `define('EVC_CLUB_REDEMPTION_SOURCE', 'club_db_v1');` | Create the shared till account (Evangelou Club → Λογαριασμός ταμείου, D18); sign the tablet in at `/club-admin/`; redeem one coffee for the test member; a second one the same day is refused. |
 | 7 | `EVC_CLUB_TERMS_URL`; `define('EVC_CLUB_ONBOARDING_ENABLED', true);` | Record the checkout type: edit the WooCommerce checkout page; a «Checkout» block = Block Checkout, `[woocommerce_checkout]` or «Classic Checkout» = classic. Then the staging checks of [store-onboarding.md](store-onboarding.md) (REMOTE_ADDR, FluentCRM settings, page cache, BACS-only checkout). |
 | 8 | The six tag constants; `define('EVC_CLUB_FLUENTCRM_SYNC_ENABLED', true);` | Readiness «Ετικέτες FluentCRM: Εντάξει» (verified); Tools → «Evangelou Club — FluentCRM» shows counts only. |
@@ -108,13 +126,22 @@ A search of the shipped plugin (`includes/`, `evangelou-club.php`) and the app s
 κάνει ο τεχνικός, πρώτα στο **staging**, και στο κανονικό site **μόνο με την έγκρισή σας**.
 
 **Πριν ξεκινήσουμε, ο τεχνικός πρέπει να κλείσει:**
-1. το σφάλμα MySQL 1044 (δικαιώματα του χρήστη της βάσης του Club)·
-2. τη ζώνη ώρας του site σε «Αθήνα» (σήμερα είναι σταθερό UTC+3)·
-3. την αλλαγή του κωδικού της βάσης που είχε εκτεθεί·
+1. το σφάλμα MySQL 1044: ο τεχνικός λέει ότι διορθώθηκε (πλήρης πρόσβαση στη βάση του Club)· το επιβεβαιώνουμε στη
+   σελίδα των μεταβάσεων (Εργαλεία → «Evangelou Club — Βάση δεδομένων»)·
+2. τη ζώνη ώρας **του WordPress** σε «Αθήνα» (Ρυθμίσεις → Γενικά· σήμερα σταθερό UTC+3). Ο διακομιστής MySQL είναι
+   ήδη σε ώρα Αθήνας, αλλά αυτό είναι άλλη ρύθμιση και δεν αρκεί·
+3. κωδικοί που είχαν εκτεθεί: της βάσης του Club **άλλαξε** (2026-11-10)· μένει να επιβεβαιωθεί και ο κωδικός της
+   βάσης του WordPress·
 4. τη διεύθυνση της σελίδας όρων του Club (D13)·
 5. τους αριθμούς (ID) των ετικετών του FluentCRM·
 6. ποιο checkout χρησιμοποιεί το site (Block ή κλασικό)·
-7. η μετάβαση 003 θέλει ξεχωριστή δική σας έγκριση.
+7. η μετάβαση 003: εγκρίθηκε **μόνο για το staging** (D19)· για το κανονικό site θέλει ξεχωριστή έγκρισή σας (όπως και
+   οι 001, 002)·
+8. το plugin στο staging είναι παλιότερη έκδοση: ο τεχνικός το αντικαθιστά με το νέο πακέτο.
+
+**Απαντήσεις τεχνικού (2026-11-10):** SFTP στο `linuxzone146.grserver.gr`· η βάση του Club είναι η βάση του
+**staging**, χωρίς phpMyAdmin (MySQL Workbench στο `linuxzone146.grserver.gr`)· ο διακομιστής MySQL είναι σε ώρα
+Αθήνας.
 
 **Η σειρά ενεργοποίησης** (μία αλλαγή τη φορά, και μετά από κάθε μία ανοίγουμε **Evangelou Club → Ετοιμότητα**):
 σελίδες διαχείρισης → βάση του Club → ρυθμίσεις καταστήματος → επιβεβαίωση πληρωμής από το WooCommerce → σελίδα

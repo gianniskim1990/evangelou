@@ -5,9 +5,11 @@ defined('ABSPATH') || exit;
  * Constructed ONLY by EVC_Admin_Tools_Plugin::wire() behind EVC_CLUB_ADMIN_TOOLS_ENABLED.
  *
  * Actions are POSTs handled on the page's load-* hook (before any output): the WordPress nonce, then the capability
- * (EVC_Staff_Account_Service::may_manage), then the action. A generated password is shown ONCE in the answer to that
- * POST and is never stored (no redirect, no transient), with no-cache headers. Every value printed is escaped; no IP
- * address or personal data is shown.
+ * (EVC_Staff_Account_Service::may_manage), then the action. The nonce is bound to the action AND the target account
+ * (nonce_action()), so a captured form of one action cannot be replayed as another, or against another account. A
+ * generated password is shown ONCE in the answer to that POST and is never stored (no redirect, no transient), with
+ * nocache_headers() and an explicit `Cache-Control: no-store`. Every value printed is escaped; no IP address or
+ * personal data is shown. A refused nonce never reaches the service, so it is not audited.
  */
 final class EVC_Staff_Account_Page {
     const MENU_SLUG = 'evc-club';
@@ -30,20 +32,33 @@ final class EVC_Staff_Account_Page {
         'login_taken' => 'Το όνομα χρήστη χρησιμοποιείται ήδη.',
         'role_missing' => 'Ο ρόλος του ταμείου δεν υπάρχει. Απενεργοποιήστε και ενεργοποιήστε ξανά το plugin.',
         'not_staff' => 'Αυτός ο χρήστης δεν είναι λογαριασμός ταμείου.',
-        'not_restricted' => 'Ο λογαριασμός δημιουργήθηκε αλλά έχει περισσότερα δικαιώματα από τον ρόλο του ταμείου, οπότε έμεινε απενεργοποιημένος. Ενημερώστε τον προγραμματιστή.',
+        'not_restricted' => 'Ο λογαριασμός έχει περισσότερα δικαιώματα από τον ρόλο του ταμείου, οπότε μένει απενεργοποιημένος: δεν παίρνει κωδικό και δεν ενεργοποιείται. Ενημερώστε τον προγραμματιστή.',
         'failed' => 'Η ενέργεια δεν ολοκληρώθηκε. Δεν άλλαξε τίποτα.',
         'bad_nonce' => 'Η σελίδα έληξε. Ανοίξτε την ξανά και δοκιμάστε πάλι.',
     );
+    /** Sent with the answer that carries a generated password (on top of nocache_headers()). */
+    const NO_STORE_HEADER = 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private';
     const ACTION_LABELS = array('create' => 'Δημιουργία', 'password' => 'Νέος κωδικός', 'disable' => 'Απενεργοποίηση', 'enable' => 'Ενεργοποίηση', 'revoke' => 'Αποσύνδεση παντού');
 
     /** @var EVC_Staff_Account_Service */
     private $service;
     /** @var array<string,mixed>|null the answer to this request's POST */
     private $result;
+    /** @var callable(string): void */
+    private $header;
 
-    public function __construct(EVC_Staff_Account_Service $service) {
+    /** @param callable(string): void|null $header TEST seam (default: PHP header(), replacing) */
+    public function __construct(EVC_Staff_Account_Service $service, ?callable $header = null) {
         EVC_Admin_Tools_Feature::assert_constructible(__CLASS__);
         $this->service = $service;
+        $this->header = $header ?? function (string $line): void {
+            header($line, true);
+        };
+    }
+
+    /** The nonce action of one form: bound to the action and the target account (0 for create / revoke). */
+    public static function nonce_action(string $action, int $user_id): string {
+        return self::NONCE_ACTION . '|' . $action . '|' . $user_id;
     }
 
     /** admin_menu: the top-level «Evangelou Club» menu, opening on this screen. */
@@ -65,21 +80,25 @@ final class EVC_Staff_Account_Page {
         if ($result['code'] === self::BAD_NONCE || $result['code'] === EVC_Staff_Account_Service::FORBIDDEN) {
             wp_die(esc_html(self::MESSAGES[$result['code']]), '', array('response' => 403));
         }
+        if (isset($result['password'])) {
+            // The answer carries a password: never stored by a browser or a proxy.
+            ($this->header)(self::NO_STORE_HEADER);
+        }
         $this->result = $result;
     }
 
     /**
-     * The nonce, then the capability, then the action.
+     * The nonce (bound to this action and this account), then the capability, then the action.
      * @param array<string,mixed> $post
      * @return array<string,mixed>
      */
     public function process(array $post): array {
-        $nonce = isset($post['_wpnonce']) && is_string($post['_wpnonce']) ? $post['_wpnonce'] : '';
-        if (wp_verify_nonce($nonce, self::NONCE_ACTION) === false) {
-            return array('code' => self::BAD_NONCE, 'action' => '');
-        }
         $action = isset($post[self::FIELD_ACTION]) && is_string($post[self::FIELD_ACTION]) ? $post[self::FIELD_ACTION] : '';
         $user = isset($post[self::FIELD_USER]) && is_scalar($post[self::FIELD_USER]) ? (int) $post[self::FIELD_USER] : 0;
+        $nonce = isset($post['_wpnonce']) && is_string($post['_wpnonce']) ? $post['_wpnonce'] : '';
+        if (wp_verify_nonce($nonce, self::nonce_action($action, $user)) === false) {
+            return array('code' => self::BAD_NONCE, 'action' => '');
+        }
         switch ($action) {
             case 'create':
                 $result = $this->service->create(isset($post[self::FIELD_LOGIN]) && is_string($post[self::FIELD_LOGIN]) ? $post[self::FIELD_LOGIN] : '');
@@ -133,8 +152,10 @@ final class EVC_Staff_Account_Page {
                 if (!$a['restricted']) {
                     $state .= ' — ΠΡΟΣΟΧΗ: έχει δικαιώματα πέρα από τον ρόλο του ταμείου (δεν μπορεί να συνδεθεί στο ταμείο)';
                 }
-                $actions = $this->form('password', $a['id'], 'Νέος κωδικός')
-                    . ($a['disabled'] ? $this->form('enable', $a['id'], 'Ενεργοποίηση') : $this->form('disable', $a['id'], 'Απενεργοποίηση'));
+                // An account with more than the staff role gets neither a password nor enable (the service refuses both).
+                $actions = !$a['restricted']
+                    ? ($a['disabled'] ? '' : $this->form('disable', $a['id'], 'Απενεργοποίηση'))
+                    : $this->form('password', $a['id'], 'Νέος κωδικός') . ($a['disabled'] ? $this->form('enable', $a['id'], 'Ενεργοποίηση') : $this->form('disable', $a['id'], 'Απενεργοποίηση'));
                 $out .= '<tr><td>' . esc_html((string) $a['id']) . '</td><td>' . esc_html($a['login']) . '</td><td>' . esc_html($state) . '</td><td>'
                     . esc_html($a['last_login'] === null ? '—' : wp_date('d/m/Y H:i', $a['last_login'])) . '</td><td>' . esc_html((string) $a['sessions']) . '</td><td>' . $actions . '</td></tr>';
             }
@@ -150,7 +171,7 @@ final class EVC_Staff_Account_Page {
 
     private function form(string $action, int $user_id, string $label, string $extra = ''): string {
         $confirm = in_array($action, array('password', 'disable', 'revoke'), true) ? ' onclick="return confirm(' . esc_attr(wp_json_encode('Σίγουρα; Το tablet του ταμείου θα αποσυνδεθεί.')) . ');"' : '';
-        return '<form method="post" style="display:inline-block;margin:0 .5em .5em 0">' . wp_nonce_field(self::NONCE_ACTION, '_wpnonce', true, false)
+        return '<form method="post" style="display:inline-block;margin:0 .5em .5em 0">' . wp_nonce_field(self::nonce_action($action, $user_id), '_wpnonce', true, false)
             . '<input type="hidden" name="' . self::FIELD_ACTION . '" value="' . esc_attr($action) . '">'
             . '<input type="hidden" name="' . self::FIELD_USER . '" value="' . esc_attr((string) $user_id) . '">'
             . $extra . '<button type="submit" class="button"' . $confirm . '>' . esc_html($label) . '</button></form>';

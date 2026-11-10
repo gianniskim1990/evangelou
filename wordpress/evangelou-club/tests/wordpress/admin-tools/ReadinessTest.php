@@ -81,6 +81,82 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         $this->assertContains($rows['club_db_server']['status'], array('ok', 'manual'));
     }
 
+    public function test_an_unreadable_migrations_ledger_is_not_read_as_nothing_applied(): void {
+        $club = $this->migrated_club(false);
+        // A ledger table that exists but cannot be read as one (no version column): never «no migration applied».
+        $club->connect()->exec_raw('CREATE TABLE evc_schema_migrations (id INT PRIMARY KEY)');
+        $rows = self::by_key($this->readiness(array('db_config' => function () use ($club) {
+            return $club->config();
+        })));
+        $this->assertSame('ok', $rows['club_db']['status']);
+        $this->assertSame('unreadable', $rows['club_db_schema']['status']);
+        $this->assertStringContainsString('Βάση δεδομένων', $rows['club_db_schema']['detail'], 'points at the migrations page checks');
+        $this->assertStringNotContainsString('καμία μετάβαση', $rows['club_db_schema']['detail']);
+        $this->assertSame('Δεν διαβάζεται', EVC_Readiness::STATUS_LABELS['unreadable']);
+        $html = EVC_Admin_Tools_Plugin::parts()['readiness_page']->html();
+        $this->assertStringContainsString('data-check="club_db_schema" data-status="unreadable"', $html);
+        $this->assertStringContainsString('Δεν διαβάζεται: 1', $html);
+    }
+
+    public function test_the_payment_provenance_reads_ok_only_for_the_exact_value(): void {
+        $none = function () {
+            return null;
+        };
+        $rows = self::by_key($this->readiness(array('db_config' => $none)));
+        $this->assertSame('missing', $rows['payment_provenance']['status'], 'not defined in this suite');
+        $this->assertSame('shop', $rows['payment_provenance']['section']);
+        foreach (array(array('club_db_v1', 'ok'), array('club_db_v2', 'wrong'), array(' club_db_v1', 'wrong'), array('CLUB_DB_V1', 'wrong'), array(true, 'wrong'), array(1, 'wrong'), array('', 'wrong'), array(null, 'wrong')) as $case) {
+            $rows = self::by_key($this->readiness(array('db_config' => $none, 'constants' => array('EVC_CLUB_PAYMENT_PROVENANCE' => $case[0]))));
+            $this->assertSame($case[1], $rows['payment_provenance']['status'], var_export($case[0], true));
+            $this->assertSame($case[1], EVC_Readiness::provenance_status(true, $case[0]));
+            if (is_string($case[0]) && $case[0] !== '' && $case[1] !== 'ok') {
+                $this->assertStringNotContainsString($case[0], $rows['payment_provenance']['detail'], 'the value is never shown');
+            }
+        }
+        $this->assertSame('missing', EVC_Readiness::provenance_status(false, 'club_db_v1'));
+        // The same exact rule as the routes it gates.
+        $this->assertSame(EVC_Customer_Qr_Backend::PROVENANCE, EVC_Readiness::PROVENANCE_VALUE);
+    }
+
+    public function test_the_lookup_key_reads_ok_only_when_valid_and_is_never_shown(): void {
+        $none = function () {
+            return null;
+        };
+        $rows = self::by_key($this->readiness(array('db_config' => $none)));
+        $this->assertSame('missing', $rows['lookup_key']['status'], 'not defined in this suite');
+        $valid = 'evc-test-readiness-lookup-key-0123456789';
+        $short = 'evc-short-key-0123456789abcdef1';
+        $this->assertSame(32, strlen($short) + 1);
+        foreach (array(array($valid, 'ok'), array(str_repeat('k', 32), 'ok'), array($short, 'wrong'), array('', 'wrong'), array(12345678901234567890, 'wrong'), array(array(), 'wrong'), array(null, 'wrong')) as $case) {
+            $rows = self::by_key($this->readiness(array('db_config' => $none, 'constants' => array('EVC_CLUB_LOOKUP_KEY' => $case[0]))));
+            $this->assertSame($case[1], $rows['lookup_key']['status'], is_string($case[0]) ? 'length ' . strlen($case[0]) : gettype($case[0]));
+            $this->assertSame($case[1], EVC_Readiness::lookup_key_status(true, $case[0]));
+            $this->assertSame(EVC_Club_Qr_Services::is_lookup_secret($case[0]), $case[1] === 'ok', 'the lookup backend\'s own rule');
+            if (is_string($case[0]) && $case[0] !== '') {
+                $html = EVC_Admin_Tools_Plugin::parts()['readiness_page']->html();
+                $this->assertStringNotContainsString($case[0], $html, 'the key is never shown');
+                if (strlen($case[0]) !== EVC_Lookup_Key_Ring::MIN_SECRET_BYTES) {
+                    $this->assertStringNotContainsString(strlen($case[0]) . ' bytes', $html, 'nor its length (only the 32-byte minimum)');
+                }
+            }
+        }
+        $this->assertSame('missing', EVC_Readiness::lookup_key_status(false, $valid));
+    }
+
+    public function test_the_readiness_checks_hold_no_till_account_service(): void {
+        $readiness = $this->readiness(array('db_config' => function () {
+            return null;
+        }));
+        foreach ((new ReflectionObject($readiness))->getProperties() as $property) {
+            $property->setAccessible(true);
+            $this->assertNotInstanceOf(EVC_Staff_Account_Service::class, $property->getValue($readiness), $property->getName());
+        }
+        foreach ((new ReflectionMethod(EVC_Readiness::class, '__construct'))->getParameters() as $parameter) {
+            $type = $parameter->getType();
+            $this->assertNotSame(EVC_Staff_Account_Service::class, $type instanceof ReflectionNamedType ? $type->getName() : '', $parameter->getName());
+        }
+    }
+
     public function test_the_flags_report_on_off_or_wrong_with_each_feature_s_own_parser(): void {
         $rows = self::by_key($this->readiness(array('db_config' => function () {
             return null;
@@ -189,7 +265,7 @@ final class ReadinessTest extends EVC_WP_Test_Case {
                 $this->assertStringNotContainsString($secret, $html);
             }
         }
-        foreach (array('club_db', 'club_db_schema', 'flag_admin_tools', 'commerce_config', 'bacs', 'terms_url', 'crm_tags', 'remote_addr', 'page_cache', 'timezone', 'php_version', 'wp_db_server', 'staff_account') as $key) {
+        foreach (array('club_db', 'club_db_schema', 'flag_admin_tools', 'commerce_config', 'payment_provenance', 'lookup_key', 'bacs', 'terms_url', 'crm_tags', 'remote_addr', 'page_cache', 'timezone', 'php_version', 'wp_db_server', 'staff_account') as $key) {
             $this->assertStringContainsString('data-check="' . $key . '"', $html, $key);
         }
         wp_set_current_user((int) self::factory()->user->create(array('role' => 'editor')));
