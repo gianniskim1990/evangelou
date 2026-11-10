@@ -1623,6 +1623,10 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **Not run locally:** the commerce suites (downloads.wordpress.org is blocked by the sandbox proxy, so the pinned WooCommerce zip cannot be fetched): ReadinessCommerceTest's new assertions and ATC1–ATC2 are CI-only.
 - **Local environment note:** the old scratch MariaDB datadir had an unknown root password; a fresh one was initialised in the scratchpad (`mdb2`, root / test-only password from env.sh), test databases only.
 
+- **Local full WP mutation run on c4521e3's tree** (MariaDB 10.11, PHP 8.3, separate copy): total=241 killed=241. An earlier local run reported OB23 (onboarding, untouched here) SURVIVED once; the rerun killed it, so it looks like a local timing flake: watch it, it was not changed.
+- **CI on c4521e3 (STAGE-08 round 2), all first attempt, no re-runs, 45/45 check runs success:** foundation push 42793942178 18/18 (WP mutation 241/241, commerce mutation 205/205 killed), foundation PR 42793949368 18/18, frontend push 42793942175 4/4, frontend PR 42793949341 4/4.
+- **Staging package:** built locally from c4521e3 with `npm run package:club-plugin` + `zip -qr` (as CI does): /home/claude/evangelou-staging-package/evangelou-club-c4521e3.zip, SHA-256 d9f74f33f0291f81922a06aac2730e9728ac15fbb0e563692154c2535a0786f6 (files=166, commit stamp c4521e3). Not uploaded anywhere. CI artifacts of the same SHA: `evangelou-club-plugin-package` id 13751973422 (push run) and 13752044045 (PR run); their zips differ byte-wise from the local one (zip timestamps); the content comparison could not be done (artifact download host blocked by the sandbox proxy).
+
 ### TECHNICIAN ANSWERS 2026-11-10 (relayed by the coordinator; NO secrets recorded)
 - **SFTP host:** `linuxzone146.grserver.gr` (`evangelouprofiterole.gr:22` times out).
 - **No phpMyAdmin** for the Club DB; the technician uses **MySQL Workbench** to `linuxzone146.grserver.gr`.
