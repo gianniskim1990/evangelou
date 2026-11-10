@@ -67,6 +67,8 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         })));
         $this->assertSame('ok', $rows['club_db']['status']);
         $this->assertSame('missing', $rows['club_db_schema']['status'], 'an empty database');
+        $this->assertStringContainsString('δεν έχει δικαίωμα', $rows['club_db_schema']['detail'], 'no ledger in information_schema: missing or no privilege');
+        $this->assertStringContainsString('Βάση δεδομένων', $rows['club_db_schema']['detail'], 'points at the migrations page');
         (new EVC_Migrator($club->connect(), EVC_Test_Database::migrations_dir()))->migrate(1);
         $rows = self::by_key($this->readiness(array('db_config' => function () use ($club) {
             return $club->config();

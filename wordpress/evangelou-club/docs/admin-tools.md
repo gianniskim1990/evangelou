@@ -38,13 +38,17 @@ What is audited: every request that reaches the service (each action and each ca
 - **Audit:** the newest 100 entries in the option `evc_club_staff_admin_audit` (autoload off): time, action, outcome,
   the administrator's user ID and the account's user ID. Never a password or a login name. The page shows the last 20.
 - **No leak (packager, `adminToolsProblemsFor`):** in the two till-account files (service and page) it refuses every
-  call of `error_log`, `print_r`, `var_export`, `var_dump`, `set_transient`, `set_site_transient`, `setcookie`,
+  call of `error_log`, `print_r`, `var_export`, `var_dump`, `trigger_error`, `user_error`, `syslog`,
+  `file_put_contents`, `fwrite`, `fputs`, `wp_mail`, `set_transient`, `set_site_transient`, `setcookie`,
   `wp_cache_set`, `add_query_arg`, `wp_redirect` and `wp_safe_redirect`, and every call of `update_option`,
   `add_option`, `update_site_option`, `update_user_meta`, `add_user_meta`, `update_user_option`, `wp_cache_add`,
-  `wp_cache_replace`, `header`, `do_action`, `do_action_ref_array`, `apply_filters` and `apply_filters_ref_array` whose
-  arguments carry the password (a variable whose name contains `pass`, or a `'password'` string such as
-  `$result['password']`). `wp_set_password` is refused in every file but the service. A value copied into a variable
-  with another name before such a call is not caught statically; the tests check that no option holds the password.
+  `wp_cache_replace`, `header`, `wp_die`, `do_action`, `do_action_ref_array`, `apply_filters` and
+  `apply_filters_ref_array`, and every call of a variable or an expression (`$f(…)`, the injected header callable
+  `($this->header)(…)`), whose arguments carry the password: a variable whose name contains `pass`, a `'password'`
+  string such as `$result['password']`, or the result array itself (`$result`, `$this->result`) unless it is indexed
+  by another string key (`$result['code']` is allowed). `wp_set_password` is refused in every file but the service.
+  Not caught statically: a value copied into a variable with another name before such a call, or a call through a
+  name assembled at run time; the tests check that no option holds the password.
 - **Accepted / informational:**
   - showing the generated password (once, in the answer to the POST) is not audited separately; the `password` action
     that produced it is;
@@ -61,7 +65,7 @@ host, user, database name, IP address or header value).
 
 | Section | Checks (reusing the existing code) |
 |---|---|
-| Club database | the `EVC_CLUB_DB_*` constants; a connection (`EVC_Club_Db::connect`); the applied schema version against `EVC_Club_Migrations_Feature::target_version()` (no `evc_schema_migrations` table = «Λείπει», nothing applied; a table that exists but cannot be read, or a check that throws = «Δεν διαβάζεται», never "nothing applied": use the migrations page checks); the server version. A green connection row does not prove the CREATE rights a migration needs (MySQL error 1044): the migrations status page does. |
+| Club database | the `EVC_CLUB_DB_*` constants; a connection (`EVC_Club_Db::connect`); the applied schema version against `EVC_Club_Migrations_Feature::target_version()` (no `evc_schema_migrations` table listed by `information_schema` = «Λείπει», with the detail "the ledger is missing or the database user may not see it: check the migrations page", because `information_schema` lists only the tables the user has a privilege on; a table that exists but cannot be read, or a check that throws = «Δεν διαβάζεται», never "nothing applied": use the migrations page checks); the server version. A green connection row does not prove the CREATE rights a migration needs (MySQL error 1044): the migrations status page does. |
 | Flags | customer, staff, redemption source, onboarding (also needs the customer flag), FluentCRM sync, WooCommerce completion, migrations, admin pages: each with its own feature parser |
 | Shop | the commerce constants; `EVC_Wp_Commerce_Pmpro_Reader::environment_conflicts()` (pinned versions, product, price 20.00, sold individually, one-month level); `EVC_Bacs_Payment_Issuer::site_problem()` (Athens clock, level group); `EVC_CLUB_PAYMENT_PROVENANCE` («Εντάξει» only for the exact `'club_db_v1'`, the rule of `EVC_Customer_Qr_Backend::provenance_recorded()` and the redemption / completion backends; the value is never shown); `EVC_CLUB_LOOKUP_KEY` (present and valid by `EVC_Club_Qr_Services::is_lookup_secret()`, at least 32 bytes; never shown, nor its length); BACS enabled (D15); the terms URL (D13) |
 | FluentCRM | the tag IDs (verified read-only through `EVC_Fluentcrm_Plugin::problem()` when the sync is on); three manual checks: no contacts on user registration, no «New User Sign Up» automations, the WooCommerce integration off |
@@ -74,22 +78,44 @@ Statuses: «Εντάξει», «Λείπει», «Λάθος», «Έλεγχος
 `EVC_Staff_Account_Reader` (the service uses the same reader). What the packager enforces in the three read-only files
 (the readiness checks, the readiness page and the reader):
 - no call of a WordPress writer or hook (options, site and user options, user / post / term meta, transients, object
-  cache writes, users, passwords, auth cookies, posts, cron, add/remove/do action and filter, rewrite rules,
-  `error_log`), no `call_user_func*` / `forward_static_call*`, no `$var::`, and no string equal to one of those names
-  or to a writer method (so no callable string or array reaches one);
+  cache writes, users, passwords, auth cookies and sign-out (`wp_set_auth_cookie`, `wp_clear_auth_cookie`,
+  `wp_logout`, `wp_destroy_*_session(s)`), posts (also `wp_trash_post` / `wp_untrash_post`), cron, add/remove/do
+  action and filter, rewrite rules, `error_log`), no `call_user_func*` / `forward_static_call*`, no `$var::`, no
+  variable method name (`$o->$m()`, `$o->{$m}()`, `X::$m()`), and no string equal to one of those names or to a
+  writer method (so no callable string or array reaches one);
 - no `->` or `::` call of a writer method, whatever the receiver: `query`, `insert`, `update`, `delete`, `replace`,
-  `execute`, `exec_raw`, `transactional`, `save`, `create`, `set_password`, `set_disabled`, `revoke_all`,
-  `record_login`, `process`, `handle_load`, `delete_all_activity`, `revoke_all_staff_sessions`, `destroy`,
-  `destroy_all`, `destroy_others`, `add_cap`, `remove_cap`, `set_role`, `add_role`, `remove_role` (this covers
-  `EVC_Staff_Session::delete_all_activity` and `EVC_Staff_Auth::set_disabled`);
-- no string carrying an SQL write (`INSERT INTO`, `UPDATE … SET`, `DELETE FROM`, `REPLACE INTO`, `ALTER / DROP /
-  CREATE / TRUNCATE / RENAME TABLE|DATABASE|…`, `GRANT`, `INTO OUTFILE`, `LOAD DATA`, `LOCK TABLES`), whichever method
-  receives it (so `$wpdb->get_var("DELETE …")` is refused);
+  `execute`, `exec_raw`, `transactional`, `save`, `migrate`, `apply`, `create`, `set_password`, `set_disabled`,
+  `revoke_all`, `revoke_current`, `record_login`, `process`, `handle_load`, `prune_activity`, `on_logout`,
+  `handle_admin_revoke`, `delete_all_activity`, `revoke_all_staff_sessions`, `destroy`, `destroy_all`,
+  `destroy_others`, `destroy_all_for_all_users`, `register`, `unregister`, `add_cap`, `remove_cap`, `set_role`,
+  `add_role`, `remove_role`;
+- an **allowlist** of `EVC_*` static calls: `EVC_X::m(…)`, the string callable `'EVC_X::m'` and the pair
+  `array('EVC_X', 'm')` are allowed only for the read-only helpers these files use (`READ_ONLY_STATIC_ALLOW` in
+  `app/scripts/php-guards.mjs`: the feature flags' `is_enabled_value` / `enabled` / `tag_config` /
+  `target_version` / `assert_constructible`, `EVC_Db_Config::from_constants`, `EVC_Club_Db::connect`,
+  `EVC_Commerce_Source_Config::from_constants`, the PMPro / BACS / onboarding-shell / FluentCRM probes,
+  `EVC_Club_Qr_Services::is_lookup_secret`, `EVC_Staff_Account_Reader::accounts`,
+  `EVC_Staff_Account_Service::may_manage`, `EVC_Staff_Auth::is_disabled`,
+  `EVC_Staff_Role::is_restricted_staff_account`). Anything else is refused (e.g. any `EVC_Staff_Session` or
+  `EVC_Staff_Role::register` call), as are a pair without a literal method name, `EVC_X::class`, `new EVC_X` and
+  `static::m()` / `parent::m()`. Class constants (`EVC_X::CONSTANT`) and `self::m()` stay allowed. The allowlist
+  says which helpers may be called; that each of them is itself read-only is checked by review and by the tests, not
+  by this guard;
+- no string carrying an SQL write: `INSERT` in any form (also without `INTO`, with `LOW_PRIORITY` / `IGNORE`),
+  `REPLACE [INTO] t`, `UPDATE … SET` (also `UPDATE {$wpdb->options} SET` and multi-table `UPDATE t1, t2 SET`),
+  `DELETE … FROM`, `ALTER / DROP / CREATE / TRUNCATE / RENAME TABLE|DATABASE|VIEW|…` (also `CREATE DEFINER=…`),
+  `GRANT`, `REVOKE`, `INTO OUTFILE|DUMPFILE`, `LOAD DATA|XML`, `LOCK TABLES`, `SET GLOBAL|PERSIST|PASSWORD`,
+  `CALL proc(`, whichever method receives it (so `$wpdb->get_var("DELETE …")` is refused). The patterns are broad on
+  purpose (a plain-text string with the word "insert" is refused too); the shipped read-only files pass;
 - `EVC_Staff_Account_Service` only as `EVC_Staff_Account_Service::may_manage(…)` (the page's access check);
   `EVC_Admin_Tools_Plugin` not at all; `EVC_Club_Qr_Services` only as `EVC_Club_Qr_Services::is_lookup_secret(…)`
   (and only in the readiness checks file).
 
-Not covered statically: a writer name or an SQL statement assembled at run time from pieces. The test
+Every rule has a negative self-test that the packager runs on every build; for each rule added in round 3 the
+self-test was checked to fail when the rule is deleted.
+
+Not covered statically: a writer name, a class or method name or an SQL statement assembled at run time from pieces,
+and a callable handed in through the constructor seams (the tests' doubles). The test
 `ReadinessTest::test_the_page_changes_nothing_and_shows_no_secret` watches every query of a full render.
 
 ## Operator note (Greek): ο κοινός λογαριασμός του ταμείου
@@ -130,7 +156,7 @@ Not covered statically: a writer name or an SQL statement assembled at run time 
   exactly 10 tries (no account, old password and sessions kept) while one that weakens the first 3 still succeeds, the
   duplicate-account warning, an account given extra capabilities at creation stays disabled, the last sign-in time,
   the audit (no secrets, newest 100).
-- `wp-admin-tools` `ReadinessTest`: each status of the Club database (missing, unreachable, empty, behind, at target,
+- `wp-admin-tools` `ReadinessTest`: each status of the Club database (missing, unreachable, empty (detail: missing or no privilege, see the migrations page), behind, at target,
   and an unreadable migrations table = «Δεν διαβάζεται»), the flags, the shop / terms / CRM without configuration,
   `EVC_CLUB_PAYMENT_PROVENANCE` (only the exact `'club_db_v1'` is OK; value never shown), `EVC_CLUB_LOOKUP_KEY`
   (OK only by the lookup backend's own rule; value and length never shown), proxy header NAMES only, page-cache

@@ -31,8 +31,10 @@ approval: first on **staging**, and on **production** only after the owner appro
 
 ### Technician answers received 2026-11-10 (no secrets recorded here)
 
-- **SFTP host:** `linuxzone146.grserver.gr` (port 22 on `evangelouprofiterole.gr` times out).
-- **Club database access:** there is no phpMyAdmin for the Club DB; use **MySQL Workbench** to `linuxzone146.grserver.gr`.
+- **SFTP host:** the hosting provider's server, given by the technician privately (not recorded in this public
+  repository); port 22 on `evangelouprofiterole.gr` times out.
+- **Club database access:** there is no phpMyAdmin for the Club DB; use **MySQL Workbench** to the same
+  hosting-provider server.
 - **The Club DB is the STAGING Club database** (confirmed 2026-11-10). The staging WordPress, with an earlier build of
   the plugin installed, uses it (T8).
 - **Club DB user:** the technician states it "has full access" to its Club database (T1: reported fixed, verify on the
@@ -139,8 +141,8 @@ A search of the shipped plugin (`includes/`, `evangelou-club.php`) and the app s
    οι 001, 002)·
 8. το plugin στο staging είναι παλιότερη έκδοση: ο τεχνικός το αντικαθιστά με το νέο πακέτο.
 
-**Απαντήσεις τεχνικού (2026-11-10):** SFTP στο `linuxzone146.grserver.gr`· η βάση του Club είναι η βάση του
-**staging**, χωρίς phpMyAdmin (MySQL Workbench στο `linuxzone146.grserver.gr`)· ο διακομιστής MySQL είναι σε ώρα
+**Απαντήσεις τεχνικού (2026-11-10):** SFTP στον διακομιστή του παρόχου φιλοξενίας (τον δίνει ιδιωτικά ο τεχνικός)· η βάση του Club είναι η βάση του
+**staging**, χωρίς phpMyAdmin (MySQL Workbench στον ίδιο διακομιστή)· ο διακομιστής MySQL είναι σε ώρα
 Αθήνας.
 
 **Η σειρά ενεργοποίησης** (μία αλλαγή τη φορά, και μετά από κάθε μία ανοίγουμε **Evangelou Club → Ετοιμότητα**):

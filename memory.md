@@ -1628,8 +1628,8 @@ Branch `feat/evc-member-ui`, stacked on `feat/evc-member-qr`, Draft PR. Nothing 
 - **Staging package:** built locally from c4521e3 with `npm run package:club-plugin` + `zip -qr` (as CI does): /home/claude/evangelou-staging-package/evangelou-club-c4521e3.zip, SHA-256 d9f74f33f0291f81922a06aac2730e9728ac15fbb0e563692154c2535a0786f6 (files=166, commit stamp c4521e3). Not uploaded anywhere. CI artifacts of the same SHA: `evangelou-club-plugin-package` id 13751973422 (push run) and 13752044045 (PR run); their zips differ byte-wise from the local one (zip timestamps); the content comparison could not be done (artifact download host blocked by the sandbox proxy).
 
 ### TECHNICIAN ANSWERS 2026-11-10 (relayed by the coordinator; NO secrets recorded)
-- **SFTP host:** `linuxzone146.grserver.gr` (`evangelouprofiterole.gr:22` times out).
-- **No phpMyAdmin** for the Club DB; the technician uses **MySQL Workbench** to `linuxzone146.grserver.gr`.
+- **SFTP host:** the hosting provider's server, given by the technician privately (`evangelouprofiterole.gr:22` times out). The host name was removed from memory.md and docs/go-live.md in STAGE-08 round 3 because the repository is public; git history still contains it (owner informed).
+- **No phpMyAdmin** for the Club DB; the technician uses **MySQL Workbench** to that same hosting-provider server.
 - **The Club DB is the STAGING Club database** (11:32 Athens update).
 - **Club DB user** (name deliberately not recorded in the repo): the technician states it "has full access" to its Club database. **T1 (error 1044): reported fixed, verify on the migrations status page.**
 - **Club DB password:** it had been the same as the plugin password previously shared in chat (exposed). The owner reports (11:32 Athens) the technician **rotated** it → **T3 closed for the Club DB**; the WordPress DB password rotation is still to be confirmed (go-live.md T3).

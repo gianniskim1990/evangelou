@@ -122,6 +122,7 @@ final class EVC_Readiness {
         $rows = array(self::row('club_db', 'Βάση δεδομένων του Club', self::OK, 'Η σύνδεση πέτυχε.'));
         $target = EVC_Club_Migrations_Feature::target_version();
         $unreadable = null;
+        $present = false;
         try {
             // The ledger table of EVC_Migrator: absent = nothing applied; present = the highest applied version.
             $present = (int) ($db->fetch_one('SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?', array(self::LEDGER_TABLE))['n'] ?? 0) > 0;
@@ -136,7 +137,10 @@ final class EVC_Readiness {
         } elseif ($unreadable !== null) {
             $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', self::UNREADABLE, sprintf('Ο πίνακας μεταβάσεων δεν διαβάστηκε (%s). Δείτε τους ελέγχους στη σελίδα Εργαλεία → «Evangelou Club — Βάση δεδομένων» (στόχος %d).', $unreadable, $target));
         } elseif ($applied === 0) {
-            $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', self::MISSING, sprintf('Δεν έχει εφαρμοστεί καμία μετάβαση (στόχος %d).', $target));
+            // information_schema lists only the tables this user may see: no ledger = missing OR no privilege on it.
+            $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', self::MISSING, $present
+                ? sprintf('Δεν έχει εφαρμοστεί καμία μετάβαση (στόχος %d).', $target)
+                : sprintf('Ο πίνακας μεταβάσεων λείπει ή ο χρήστης της βάσης δεν έχει δικαίωμα να τον δει· ελέγξτε τη σελίδα Εργαλεία → «Evangelou Club — Βάση δεδομένων» (στόχος %d).', $target));
         } else {
             $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', $applied >= $target ? self::OK : self::WRONG, sprintf('Εφαρμοσμένη έκδοση %d, στόχος %d. Η μετάβαση 003 θέλει δική της έγκριση.', $applied, $target));
         }
