@@ -77,7 +77,8 @@ final class CustomerShellTest extends EVC_WP_Test_Case {
         $this->assertSame(200, $r['status']);
         $this->assertStringContainsString(self::ASSET_URL . '/assets/customer-Ab12Cd34.js', $r['body']);
         $config = $this->config_of($r['body']);
-        $this->assertSame(array('restBase', 'nonce', 'loginUrl', 'logoutUrl', 'appVersion'), array_keys($config));
+        $this->assertSame(array('restBase', 'homePath', 'nonce', 'loginUrl', 'logoutUrl', 'appVersion'), array_keys($config));
+        $this->assertSame(wp_parse_url(home_url('/'), PHP_URL_PATH), $config['homePath'], 'round 5: the home path for a plain REST base');
         $this->assertSame(1, wp_verify_nonce($config['nonce'], 'wp_rest'));
         $this->assertStringContainsString('evangelou-club-customer/v1', $config['restBase']);
         $this->assertStringContainsString('action=logout', $config['logoutUrl']);

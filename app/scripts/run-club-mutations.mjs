@@ -2229,19 +2229,19 @@ const mutants = [
   {
     id: "PP1-plain-any-rest-route",
     file: "lib/restRoute.ts",
-    search: "if (routes.length !== 1 || routes[0] !== namespace) return null;",
-    replace: "if (routes.length !== 1) return null;",
+    search: "if (aliases !== 1 || routes.length !== 1 || routes[0] !== namespace) return null;",
+    replace: "if (aliases !== 1 || routes.length !== 1) return null;",
   },
   {
     id: "PP2-plain-two-rest-routes",
     file: "lib/restRoute.ts",
-    search: "if (routes.length !== 1 || routes[0] !== namespace) return null;",
+    search: "if (aliases !== 1 || routes.length !== 1 || routes[0] !== namespace) return null;",
     replace: "if (routes[0] !== namespace) return null;",
   },
   {
     id: "PP3-plain-any-path",
     file: "lib/restRoute.ts",
-    search: "    if (!/\\/(?:index\\.php)?$/.test(url.pathname)) return null;\n",
+    search: "    if (home === null || (url.pathname !== home && url.pathname !== `${home}index.php`)) return null;\n",
     replace: "",
   },
   {
@@ -2253,8 +2253,8 @@ const mutants = [
   {
     id: "PP5-fragment-accepted",
     file: "lib/restRoute.ts",
-    search: "if (url.hash !== \"\" || url.username",
-    replace: "if (url.username",
+    search: "  if (value.includes(\"#\") || hasDotSegment(value)) return null;",
+    replace: "  if (hasDotSegment(value)) return null;",
   },
   {
     id: "PP6-plain-route-appended-to-path",
@@ -2265,8 +2265,8 @@ const mutants = [
   {
     id: "PP7-plain-other-params-dropped",
     file: "lib/restRoute.ts",
-    search: "    url.searchParams.set(\"rest_route\", `${current.replace(/\\/+$/, \"\")}${route}`);",
-    replace: "    url.search = \"\";\n    url.searchParams.set(\"rest_route\", `${current.replace(/\\/+$/, \"\")}${route}`);",
+    search: "    url.searchParams.set(REST_ROUTE, `${current.replace(/\\/+$/, \"\")}${route}`);",
+    replace: "    url.search = \"\";\n    url.searchParams.set(REST_ROUTE, `${current.replace(/\\/+$/, \"\")}${route}`);",
   },
   {
     id: "PP8-staff-session-concatenated",
@@ -2289,8 +2289,8 @@ const mutants = [
   {
     id: "PP11-staff-old-pretty-only-check",
     file: "staff/config.ts",
-    search: "  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE);",
-    replace: "  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE);\n  if (restBase && new URL(restBase).searchParams.has(\"rest_route\")) return { ok: false, reason: \"rest_base\" };",
+    search: "  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE, d.homePath);",
+    replace: "  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE, d.homePath);\n  if (restBase && new URL(restBase).searchParams.has(\"rest_route\")) return { ok: false, reason: \"rest_base\" };",
   },
   {
     id: "PP12-logo-site-root-path",
@@ -2309,6 +2309,67 @@ const mutants = [
     file: "preview/CustomerPreview.tsx",
     search: 'className="t-small self-center py-3',
     replace: 'className="rounded-full bg-[var(--brass)] w-full py-3',
+  },
+  // STAGE-08 round 5: PHP aliases of rest_route, the home path, empty fragments, dot-segments, relative bases.
+  {
+    id: "PP15-php-alias-not-counted",
+    file: "lib/restRoute.ts",
+    search: "    if (phpParamNames(key).includes(REST_ROUTE)) count += 1;",
+    replace: "    if (key === REST_ROUTE) count += 1;",
+  },
+  {
+    id: "PP16-unmatched-bracket-not-aliased",
+    file: "lib/restRoute.ts",
+    search: "  return [`${head}_${tail}`, `${head}_${tail.replace(/[ .[]/g, \"_\")}`];",
+    replace: "  return [name];",
+  },
+  {
+    id: "PP17-pretty-base-alias-accepted",
+    file: "lib/restRoute.ts",
+    search: "  if (aliases !== 0) return null;\n",
+    replace: "",
+  },
+  {
+    id: "PP18-plain-old-any-folder-rule",
+    file: "lib/restRoute.ts",
+    search: "    if (home === null || (url.pathname !== home && url.pathname !== `${home}index.php`)) return null;",
+    replace: "    if (!/\\/(?:index\\.php)?$/.test(url.pathname)) return null;",
+  },
+  {
+    id: "PP19-plain-without-home-path-defaults-to-root",
+    file: "lib/restRoute.ts",
+    search: "    const home = validHomePath(homePath, origin);",
+    replace: "    const home = validHomePath(homePath, origin) ?? \"/\";",
+  },
+  {
+    id: "PP20-raw-dot-segments-normalised-away",
+    file: "lib/restRoute.ts",
+    search: "  if (value.includes(\"#\") || hasDotSegment(value)) return null;",
+    replace: "  if (value.includes(\"#\")) return null;",
+  },
+  {
+    id: "PP21-relative-base-text-join",
+    file: "lib/restRoute.ts",
+    search: "    url = new URL(base, RELATIVE_ORIGIN);\n    relative = true;",
+    replace: "    return `${base.replace(/\\/+$/, \"\")}${route}`;",
+  },
+  {
+    id: "PP22-staff-home-path-not-passed",
+    file: "staff/config.ts",
+    search: "sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE, d.homePath);\n  if (!restBase)",
+    replace: "sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE, \"/\");\n  if (!restBase)",
+  },
+  {
+    id: "PP23-join-home-path-not-passed",
+    file: "customer/joinConfig.ts",
+    search: "  const restBase = restBaseOk(d.restBase, origin, d.homePath);",
+    replace: "  const restBase = restBaseOk(d.restBase, origin, \"/\");",
+  },
+  {
+    id: "PP24-customer-home-path-not-passed",
+    file: "customer/config.ts",
+    search: "sameOriginRestBase(d.restBase, origin, CUSTOMER_NAMESPACE, d.homePath);",
+    replace: "sameOriginRestBase(d.restBase, origin, CUSTOMER_NAMESPACE, \"/\");",
   },
 ];
 

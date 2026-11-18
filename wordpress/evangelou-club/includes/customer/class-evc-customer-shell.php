@@ -113,6 +113,7 @@ final class EVC_Customer_Shell {
         }
         $config = array(
             'restBase' => untrailingslashit(rest_url(EVC_Customer_Rest_Security::NAMESPACE_V1)),
+            'homePath' => EVC_Rest_Security::home_path(),
             'nonce' => wp_create_nonce('wp_rest'),
             'loginUrl' => wp_login_url(self::shell_url()),
             'logoutUrl' => wp_logout_url(self::shell_url()),

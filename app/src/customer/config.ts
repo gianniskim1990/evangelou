@@ -56,7 +56,7 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
   if (typeof data !== "object" || data === null || Array.isArray(data)) return { ok: false, reason: "not_object" };
   const d = data as Record<string, unknown>;
   // STAGE-08 round 4: the same shared rule as the staff app (one rest_route, exactly the namespace, at the site root).
-  const restBase = sameOriginRestBase(d.restBase, origin, CUSTOMER_NAMESPACE);
+  const restBase = sameOriginRestBase(d.restBase, origin, CUSTOMER_NAMESPACE, d.homePath);
   if (!restBase) return { ok: false, reason: "rest_base" };
   if (typeof d.nonce !== "string" || !NONCE_RE.test(d.nonce)) return { ok: false, reason: "nonce" };
   const loginUrl = sameOriginUrl(d.loginUrl, origin);

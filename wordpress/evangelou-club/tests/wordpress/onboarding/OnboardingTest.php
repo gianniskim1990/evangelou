@@ -116,6 +116,7 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         }
         $this->assertStringContainsString(rawurlencode(EVC_Onboarding_Shell::join_url()), $config['loginUrl'], 'sign-in returns to the join page');
         $this->assertSame(EVC_Customer_Shell::shell_url(), $config['memberUrl']);
+        $this->assertSame(EVC_Rest_Security::home_path(), $config['homePath'], 'round 5: the home path for a plain REST base');
     }
 
     public function test_redirect_parameters_are_never_used(): void {

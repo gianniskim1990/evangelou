@@ -70,7 +70,7 @@ export function parseStaffConfig(raw: string | null | undefined, origin: string)
   const d = data as Record<string, unknown>;
 
   // STAGE-08 round 4: plain permalinks (staging, 2026-11-18) give …/index.php?rest_route=/evangelou-club/v1.
-  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE);
+  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE, d.homePath);
   if (!restBase) return { ok: false, reason: "rest_base" };
   if (!isValidNonce(d.nonce)) return { ok: false, reason: "nonce" };
   const loginUrl = sameOriginUrl(d.loginUrl, origin);

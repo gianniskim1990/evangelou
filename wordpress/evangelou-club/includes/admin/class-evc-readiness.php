@@ -118,7 +118,7 @@ final class EVC_Readiness {
             $db = ($this->connect)($config);
         } catch (Throwable $e) {
             $code = $e instanceof EVC_Db_Exception ? $e->driver_code() : null;
-            return array(self::row('club_db', 'Βάση δεδομένων του Club', self::WRONG, 'Η σύνδεση απέτυχε (' . get_class($e) . ($code !== null ? ', κωδικός ' . $code : '') . '). ' . self::db_connect_hint($code)));
+            return array(self::row('club_db', 'Βάση δεδομένων του Club', self::WRONG, 'Η σύνδεση απέτυχε (' . get_class($e) . ($code !== null ? ', σφάλμα MySQL ' . $code : '') . '). ' . self::db_connect_hint($code)));
         }
         $rows = array(self::row('club_db', 'Βάση δεδομένων του Club', self::OK, 'Η σύνδεση πέτυχε.'));
         $target = EVC_Club_Migrations_Feature::target_version();

@@ -67,14 +67,14 @@ export function bootMode(raw: string | null | undefined): BootMode | null {
   return data.mode === "join" || data.mode === "poster" ? data.mode : null;
 }
 
-function restBaseOk(value: unknown, origin: string): string | null {
-  return sameOriginRestBase(value, origin, CUSTOMER_NAMESPACE);
+function restBaseOk(value: unknown, origin: string, homePath: unknown): string | null {
+  return sameOriginRestBase(value, origin, CUSTOMER_NAMESPACE, homePath);
 }
 
 export function parseJoinConfig(raw: string | null | undefined, origin: string): Parsed<JoinConfig> {
   const d = readJson(raw);
   if (!d || d.mode !== "join") return { ok: false, reason: "not_join" };
-  const restBase = restBaseOk(d.restBase, origin);
+  const restBase = restBaseOk(d.restBase, origin, d.homePath);
   if (!restBase) return { ok: false, reason: "rest_base" };
   if (typeof d.nonce !== "string" || !NONCE_RE.test(d.nonce)) return { ok: false, reason: "nonce" };
   if (typeof d.step !== "string" || !(JOIN_STEPS_ALLOWED as readonly string[]).includes(d.step)) return { ok: false, reason: "step" };

@@ -265,7 +265,9 @@ final class ReadinessTest extends EVC_WP_Test_Case {
             })));
             $detail = $rows['club_db']['detail'];
             $this->assertSame('wrong', $rows['club_db']['status']);
-            $this->assertStringContainsString('κωδικός ' . $code, $detail, (string) $code);
+            // Round 5: «σφάλμα MySQL <n>», never «κωδικός <n>» (κωδικός also means password).
+            $this->assertStringContainsString('σφάλμα MySQL ' . $code, $detail, (string) $code);
+            $this->assertStringNotContainsString('κωδικός ' . $code, $detail, (string) $code);
             foreach ($names as $name) {
                 $this->assertStringContainsString($name, $detail, $code . ': ' . $name);
             }

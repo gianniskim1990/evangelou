@@ -33,10 +33,11 @@ const VALID = {
   appVersion: "t",
   features: {},
 };
-const parse = (restBase: unknown) => parseStaffConfig(JSON.stringify({ ...VALID, restBase }), ORIGIN);
+// STAGE-08 round 5: the shell sends the site's home path (wp_parse_url(home_url('/'), PHP_URL_PATH)).
+const parse = (restBase: unknown, homePath: unknown = "/sub/") => parseStaffConfig(JSON.stringify({ ...VALID, restBase, homePath }), ORIGIN);
 
-function config(restBase: string): StaffConfig {
-  const r = parse(restBase);
+function config(restBase: string, homePath = "/sub/"): StaffConfig {
+  const r = parse(restBase, homePath);
   assert.ok(r.ok, `accepted: ${restBase}`);
   return r.config;
 }
@@ -47,8 +48,8 @@ describe("STAGE-08 round 4: staff REST base in both permalink forms", () => {
   it("accepts pretty and plain permalinks (site root, sub-folder, index.php)", () => {
     assert.equal(config(PRETTY).restBase, PRETTY);
     assert.equal(config(`${PRETTY}/`).restBase, PRETTY, "trailing slash dropped");
-    for (const base of [PLAIN_INDEX, PLAIN_ROOT, PLAIN_SUBDIR]) {
-      assert.equal(routeOf(config(base).restBase), STAFF_NAMESPACE, base);
+    for (const [base, home] of [[PLAIN_INDEX, "/sub/"], [PLAIN_ROOT, "/"], [PLAIN_SUBDIR, "/sub/"]]) {
+      assert.equal(routeOf(config(base, home).restBase), STAFF_NAMESPACE, base);
     }
     assert.ok(config(`${ORIGIN}/sub/index.php?rest_route=%2Fevangelou-club%2Fv1`), "an encoded rest_route reads the same");
   });
@@ -76,8 +77,73 @@ describe("STAGE-08 round 4: staff REST base in both permalink forms", () => {
       ["not a string", 42],
       ["empty", ""],
     ];
-    for (const [label, base] of bad) assert.equal(parse(base).ok, false, label);
+    for (const [label, base] of bad) assert.equal(parse(base, "/").ok, false, label);
     assert.equal(sameOriginRestBase(`${ORIGIN}/?rest_route=/evangelou-club/v1`, ORIGIN, "/evangelou-club-customer/v1"), null);
+  });
+
+  it("round 5: refuses any parameter PHP reads as rest_route (plain and pretty bases)", () => {
+    const plain = `${ORIGIN}/?rest_route=/evangelou-club/v1`;
+    const aliases: [string, string][] = [
+      ["rest.route after rest_route (PHP: later key wins)", `${plain}&rest.route=/wp/v2/users`],
+      ["rest.route before rest_route", `${ORIGIN}/?rest.route=/wp/v2/users&rest_route=/evangelou-club/v1`],
+      ["rest%20route", `${plain}&rest%20route=/wp/v2/users`],
+      ["rest+route", `${plain}&rest+route=/wp/v2/users`],
+      ["rest[route (unmatched [)", `${plain}&rest[route=/wp/v2/users`],
+      ["rest%5Broute (encoded unmatched [)", `${plain}&rest%5Broute=/wp/v2/users`],
+      ["leading space", `${plain}&%20rest_route=/wp/v2/users`],
+      ["array form rest_route[]", `${plain}&rest_route[]=/wp/v2/users`],
+      ["array form rest.route[x]", `${plain}&rest.route[x]=/wp/v2/users`],
+      ["only an alias, no rest_route", `${ORIGIN}/?rest.route=/evangelou-club/v1`],
+      ["pretty base with ?rest.route=", `${PRETTY}?rest.route=/wp/v2/users`],
+      ["pretty base with ?rest%20route=", `${PRETTY}?rest%20route=/wp/v2/users`],
+      ["pretty base with ?rest[route=", `${PRETTY}?rest[route=/wp/v2/users`],
+    ];
+    for (const [label, base] of aliases) assert.equal(sameOriginRestBase(base, ORIGIN, STAFF_NAMESPACE, "/"), null, label);
+    // Names PHP does NOT turn into rest_route stay allowed.
+    assert.ok(sameOriginRestBase(`${plain}&rest-route=x&lang=el`, ORIGIN, STAFF_NAMESPACE, "/"));
+    assert.ok(sameOriginRestBase(`${PRETTY}?lang=el`, ORIGIN, STAFF_NAMESPACE));
+  });
+
+  it("round 5: a plain base sits exactly at the shell's home path (or its index.php)", () => {
+    const at = (base: string, home: unknown) => sameOriginRestBase(base, ORIGIN, STAFF_NAMESPACE, home);
+    assert.ok(at(`${ORIGIN}/index.php?rest_route=/evangelou-club/v1`, "/"));
+    assert.ok(at(`${ORIGIN}/?rest_route=/evangelou-club/v1`, "/"));
+    assert.ok(at(PLAIN_INDEX, "/sub/"));
+    const refused: [string, string, unknown][] = [
+      ["wp-admin/index.php", `${ORIGIN}/wp-admin/index.php?rest_route=/evangelou-club/v1`, "/"],
+      ["any page folder", `${ORIGIN}/any/page/?rest_route=/evangelou-club/v1`, "/"],
+      ["a sub-folder of the home path", `${ORIGIN}/sub/x/?rest_route=/evangelou-club/v1`, "/sub/"],
+      ["the parent of the home path", `${ORIGIN}/?rest_route=/evangelou-club/v1`, "/sub/"],
+      ["another folder's index.php", PLAIN_INDEX, "/"],
+      ["no home path", PLAIN_INDEX, undefined],
+      ["home path not a string", PLAIN_INDEX, 1],
+      ["home path without a leading slash", PLAIN_INDEX, "sub/"],
+      ["home path without a trailing slash", `${ORIGIN}/sub?rest_route=/evangelou-club/v1`, "/sub"],
+      ["protocol-relative home path", `${ORIGIN}//evil/?rest_route=/evangelou-club/v1`, "//evil/"],
+      ["home path with a dot-segment", `${ORIGIN}/?rest_route=/evangelou-club/v1`, "/sub/../"],
+      ["home path with a query", PLAIN_INDEX, "/sub/?x/"],
+    ];
+    for (const [label, base, home] of refused) assert.equal(at(base, home), null, label);
+    const withoutHome = (restBase: string) => parseStaffConfig(JSON.stringify({ ...VALID, restBase }), ORIGIN);
+    assert.equal(withoutHome(PLAIN_INDEX).ok, false, "the staff config without homePath refuses a plain base");
+    assert.equal(parse(PLAIN_INDEX, null).ok, false, "homePath null");
+    assert.ok(withoutHome(PRETTY).ok, "a pretty base needs no homePath");
+  });
+
+  it("round 5: refuses an empty fragment and raw dot-segments", () => {
+    const at = (base: string) => sameOriginRestBase(base, ORIGIN, STAFF_NAMESPACE, "/sub/");
+    for (const base of [`${PLAIN_INDEX}#`, `${PLAIN_SUBDIR}#`, `${PRETTY}#`, `${PRETTY}/#`]) assert.equal(at(base), null, base);
+    const dots = [
+      `${ORIGIN}/sub/wp-json/x/../evangelou-club/v1`,
+      `${ORIGIN}/sub/wp-json/x/%2e%2e/evangelou-club/v1`,
+      `${ORIGIN}/sub/wp-json/x/%2E%2E/evangelou-club/v1`,
+      `${ORIGIN}/sub/wp-json/x/.%2e/evangelou-club/v1`,
+      `${ORIGIN}/sub/./wp-json/evangelou-club/v1`,
+      `${ORIGIN}/sub/wp-json/%2e/evangelou-club/v1`,
+      `${ORIGIN}/sub/x/../index.php?rest_route=/evangelou-club/v1`,
+    ];
+    for (const base of dots) assert.equal(at(base), null, base);
+    assert.ok(at(PRETTY), "no dot-segment, accepted");
   });
 
   it("builds request URLs in the base's own form, keeping other query parameters", () => {
@@ -90,6 +156,10 @@ describe("STAGE-08 round 4: staff REST base in both permalink forms", () => {
     assert.equal(url.searchParams.get("lang"), "el", "other parameters kept");
     assert.equal([...url.searchParams.keys()].length, 2);
     assert.equal(restRouteUrl("/wp-json/evangelou-club/v1/", "/coffee-options"), "/wp-json/evangelou-club/v1/coffee-options", "relative demo base unchanged");
+    // Round 5: a relative base is built by the same code (and encoded the same way) as an absolute one.
+    const relativePlain = restRouteUrl("/index.php?rest_route=/evangelou-club/v1&lang=el", "/session");
+    assert.equal(relativePlain, "/index.php?rest_route=%2Fevangelou-club%2Fv1%2Fsession&lang=el");
+    assert.equal(`${ORIGIN}${relativePlain}`, restRouteUrl(`${ORIGIN}/index.php?rest_route=/evangelou-club/v1&lang=el`, "/session"));
   });
 
   it("the session client calls rest_route=/evangelou-club/v1/session(/end) on a plain base", async () => {

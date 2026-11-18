@@ -64,6 +64,9 @@ approval: first on **staging**, and on **production** only after the owner appro
   redirect went to the pretty `/club-admin/` (404); the till app showed «Η εφαρμογή δεν είναι διαθέσιμη» because it
   refused the plain REST address (`…/?rest_route=/evangelou-club/v1`). The member page worked as `?evc_club_member=1`.
   Switching to «Post name» fixed all of it. Round 4 makes the plain form work as well, and readiness flags «Plain».
+  Round 5 tightens the plain form: the pages send the site's home path (`homePath`), and the apps accept a plain REST
+  base only exactly at that path or its `index.php`, with one `rest_route` and no other parameter that PHP would read
+  as `rest_route` (`rest.route`, `rest route`, `rest[route`); no fragment and no dot-segment in either form.
 - **The member card logo did not load** (a broken image showing «Ευαγγέλου»): the customer pages asked for the logo
   at the site root (`/logo-evaggelou-color.png`, a file of the separate Vercel demo). Fixed in round 4: the logo is
   now bundled with the customer app (`customer-app/assets/`), as the till app's already was.
@@ -71,7 +74,8 @@ approval: first on **staging**, and on **production** only after the owner appro
   only** (T10).
 - **`EVC_CLUB_DB_NAME`** in the staging wp-config.php had **one underscore instead of two**; readiness only said
   «Η σύνδεση απέτυχε (EVC_Db_Exception)… π.χ. 1044». Round 4: the row now shows the MySQL error number and which
-  constants to compare letter by letter (never their values).
+  constants to compare letter by letter (never their values); round 5 words it «σφάλμα MySQL 1044», not «κωδικός»
+  (which also means password).
 - **Done on staging:** migrations 001 + 002 + 003 (T1 closed), WordPress timezone Europe/Athens (T2 closed), and
   **steps 1–6 of the enable order passed**: a test order completed by the shop was recorded in the Club database, the
   member page showed the real QR, the till scanned it and redeemed one coffee, and a second coffee the same day was

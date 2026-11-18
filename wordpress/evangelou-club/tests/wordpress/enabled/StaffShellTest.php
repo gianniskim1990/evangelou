@@ -272,6 +272,9 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         $this->assertSame($plain, $config['shellUrl']);
         $this->assertStringContainsString(rawurlencode($plain), $config['loginUrl']);
         $this->assertStringContainsString('rest_route=', $config['restBase'], 'plain REST base for the app');
+        // Round 5: the app accepts a plain base only exactly at homePath or its index.php.
+        $this->assertSame(EVC_Rest_Security::home_path(), $config['homePath']);
+        $this->assertContains((string) wp_parse_url($config['restBase'], PHP_URL_PATH), array($config['homePath'], $config['homePath'] . 'index.php'), 'the plain base sits at the home path');
         unset($token);
 
         $this->set_permalink_structure('/%postname%/');

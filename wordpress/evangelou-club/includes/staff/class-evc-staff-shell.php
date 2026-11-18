@@ -122,6 +122,7 @@ final class EVC_Staff_Shell {
         $token = wp_get_session_token();
         $config = array(
             'restBase' => untrailingslashit(rest_url(EVC_Rest_Security::NAMESPACE_V1)),
+            'homePath' => EVC_Rest_Security::home_path(),
             'nonce' => wp_create_nonce('wp_rest'),
             'loginUrl' => wp_login_url(self::shell_url(), true),
             'shellUrl' => self::shell_url(),

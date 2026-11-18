@@ -126,6 +126,16 @@ final class EVC_Rest_Security {
     }
 
     /** @return array<string,string> */
+    /**
+     * STAGE-08 round 5: the site's home path ("/" or "/sub/"), sent to the apps as homePath. With plain permalinks
+     * the apps accept a REST base only exactly at this path or its index.php (rest_url() uses home_url('index.php')).
+     */
+    public static function home_path(): string {
+        $path = wp_parse_url(home_url('/'), PHP_URL_PATH);
+        $path = is_string($path) && $path !== '' ? $path : '/';
+        return substr($path, -1) === '/' ? $path : $path . '/';
+    }
+
     public static function security_headers(): array {
         return array(
             'Cache-Control' => 'no-store, private, max-age=0',

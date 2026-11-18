@@ -13,7 +13,7 @@ const ORIGIN = "https://evangelouprofiterole.gr";
 const PRETTY = `${ORIGIN}/prometheus/wp-json/evangelou-club-customer/v1`;
 const PLAIN = `${ORIGIN}/prometheus/?rest_route=/evangelou-club-customer/v1`;
 const cfg = (over: Record<string, unknown> = {}) =>
-  JSON.stringify({ restBase: PRETTY, nonce: "0123456789", loginUrl: `${ORIGIN}/prometheus/wp-login.php?redirect_to=x`, logoutUrl: `${ORIGIN}/prometheus/wp-login.php?action=logout&_wpnonce=abc`, appVersion: "0.1.0-dev", ...over });
+  JSON.stringify({ restBase: PRETTY, homePath: "/prometheus/", nonce: "0123456789", loginUrl: `${ORIGIN}/prometheus/wp-login.php?redirect_to=x`, logoutUrl: `${ORIGIN}/prometheus/wp-login.php?action=logout&_wpnonce=abc`, appVersion: "0.1.0-dev", ...over });
 
 const okBody = (membership: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
   result: "ok",
@@ -48,6 +48,9 @@ describe("STAGE-01 customer bootstrap config", () => {
       ["other origin", { restBase: `https://evil.example/wp-json/evangelou-club-customer/v1` }],
       ["staff namespace", { restBase: `${ORIGIN}/wp-json/evangelou-club/v1` }],
       ["plain other route", { restBase: `${ORIGIN}/?rest_route=/wp/v2` }],
+      ["plain without homePath (round 5)", { restBase: PLAIN, homePath: undefined }],
+      ["plain at another path (round 5)", { restBase: `${ORIGIN}/prometheus/shop/?rest_route=/evangelou-club-customer/v1` }],
+      ["pretty with a PHP rest_route alias (round 5)", { restBase: `${PRETTY}?rest.route=/wp/v2/users` }],
       ["nonce", { nonce: "<script>" }],
       ["login elsewhere", { loginUrl: "https://evil.example/login" }],
       ["logout missing", { logoutUrl: "" }],
