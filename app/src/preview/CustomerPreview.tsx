@@ -179,9 +179,13 @@ export function Offer({ go, onPay, secondary, steps, live }: { go: (s: CustomerS
           ))}
         </ul>
         <p className="t-small mt-5 max-w-[52ch] text-[var(--milk)]/60">{ONBOARDING_COPY.offer.terms}</p>
-        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
-          <Btn tone="brass" disabled={!onPay} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"} onClick={onPay} className="px-8">Πληρωμή {CLUB_RULES.monthlyPriceEur} €</Btn>
-          <button type="button" onClick={secondary ? secondary.onClick : () => go("dashboard")} className="t-label -my-1 py-3 text-[var(--milk)]/75 underline decoration-[var(--brass-soft)] underline-offset-[6px] hover:text-[var(--milk)]">{secondary ? secondary.label : "Δείτε τον λογαριασμό μέλους"}</button>
+        {/* STAGE-08 round 4 (owner's staging run on a phone): the payment is THE action of this step, a full-width
+            filled button with a clear edge and a shadow; the account link below it is small and quiet. */}
+        <div className="mt-8 flex flex-col items-stretch gap-y-3 sm:max-w-[420px]">
+          <Btn tone="brass" disabled={!onPay} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"} onClick={onPay} className="w-full min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)]" data-evc-action="pay">
+            Πληρωμή {CLUB_RULES.monthlyPriceEur} €
+          </Btn>
+          <button type="button" data-evc-action="secondary" onClick={secondary ? secondary.onClick : () => go("dashboard")} className="t-small self-center py-3 text-[var(--milk)]/60 underline decoration-[var(--brass-soft)] underline-offset-4 hover:text-[var(--milk)]">{secondary ? secondary.label : "Δείτε τον λογαριασμό μέλους"}</button>
         </div>
       </div>
       {live ? (

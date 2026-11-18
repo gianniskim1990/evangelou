@@ -117,7 +117,8 @@ final class EVC_Readiness {
         try {
             $db = ($this->connect)($config);
         } catch (Throwable $e) {
-            return array(self::row('club_db', 'Βάση δεδομένων του Club', self::WRONG, 'Η σύνδεση απέτυχε (' . get_class($e) . '). Ελέγξτε τα στοιχεία σύνδεσης και τα δικαιώματα του χρήστη (π.χ. σφάλμα MySQL 1044).'));
+            $code = $e instanceof EVC_Db_Exception ? $e->driver_code() : null;
+            return array(self::row('club_db', 'Βάση δεδομένων του Club', self::WRONG, 'Η σύνδεση απέτυχε (' . get_class($e) . ($code !== null ? ', κωδικός ' . $code : '') . '). ' . self::db_connect_hint($code)));
         }
         $rows = array(self::row('club_db', 'Βάση δεδομένων του Club', self::OK, 'Η σύνδεση πέτυχε.'));
         $target = EVC_Club_Migrations_Feature::target_version();
@@ -151,6 +152,31 @@ final class EVC_Readiness {
         }
         $rows[] = self::db_version_row('club_db_server', 'Διακομιστής βάσης του Club', $version);
         return $rows;
+    }
+
+    /**
+     * Pure: what to check after a failed Club-database connection, by the numeric driver code only (the driver's
+     * message, which names the user and the server, is never kept: EVC_Db_Exception). STAGE-08 round 4: on staging
+     * the database name in wp-config.php had one underscore instead of two and the old hint did not say where to look.
+     * No value is ever shown, only which constant to compare letter by letter.
+     */
+    public static function db_connect_hint(?int $code): string {
+        $values = ' Οι τιμές δεν εμφανίζονται εδώ: συγκρίνετέ τες γράμμα προς γράμμα (και κάθε «_») με τα στοιχεία του παρόχου.';
+        switch ($code) {
+            case 1044:
+                return 'Ο χρήστης δεν έχει πρόσβαση σε αυτή τη βάση: ελέγξτε στο wp-config.php ότι το EVC_CLUB_DB_NAME είναι ακριβώς το όνομα της βάσης και ότι ο χρήστης (EVC_CLUB_DB_USER) έχει δικαιώματα σε αυτήν.' . $values;
+            case 1045:
+                return 'Ο χρήστης ή ο κωδικός δεν έγινε δεκτός: ελέγξτε στο wp-config.php τα EVC_CLUB_DB_USER και EVC_CLUB_DB_PASSWORD.' . $values;
+            case 1049:
+                return 'Η βάση δεν υπάρχει: ελέγξτε στο wp-config.php το EVC_CLUB_DB_NAME.' . $values;
+            case 2002:
+            case 2003:
+            case 2005:
+            case 2006:
+                return 'Ο διακομιστής της βάσης δεν απαντά: ελέγξτε στο wp-config.php τα EVC_CLUB_DB_HOST και EVC_CLUB_DB_PORT.' . $values;
+            default:
+                return 'Ελέγξτε στο wp-config.php τα EVC_CLUB_DB_NAME, EVC_CLUB_DB_USER, EVC_CLUB_DB_PASSWORD και EVC_CLUB_DB_HOST, και ότι ο χρήστης έχει δικαιώματα σε αυτή τη βάση (π.χ. σφάλμα MySQL 1044).' . $values;
+        }
     }
 
     // ---- the Club flags (each class's own parser) -------------------------------------------------------------
@@ -289,7 +315,12 @@ final class EVC_Readiness {
         }
         $rows[] = self::row('crm_registration', 'Στο FluentCRM: νέες επαφές από εγγραφή χρήστη', self::MANUAL, 'Στο FluentCRM → Settings → General: το «create new FluentCRM contacts on WP user registration» πρέπει να μείνει ΑΠΟΕΠΙΛΕΓΜΕΝΟ (D12).');
         $rows[] = self::row('crm_funnels', 'Στο FluentCRM: αυτοματισμοί «New User Sign Up»', self::MANUAL, 'Στο FluentCRM → Automations: κανένας ενεργός αυτοματισμός με έναυσμα «New User Sign Up», ή εξαιρείται ο ρόλος customer.');
-        $rows[] = self::row('crm_woocommerce', 'Στο FluentCRM: σύνδεση με WooCommerce', self::MANUAL, 'Στο FluentCRM → Settings → Integrations → WooCommerce: ανενεργή, ή εξαιρούνται αυτοί οι πελάτες.');
+        // D20 (2026-11-18): the WooCommerce integration stays, with Default Contact Status «Transactional»; consent comes
+        // only from FluentCRM's own checkout checkbox, unchecked by default. FluentCRM keeps both settings in its own
+        // storage, which this page does not read (only FluentCRM's API may be called, and only by the gateway), so
+        // they stay manual checks.
+        $rows[] = self::row('crm_woocommerce', 'Στο FluentCRM: σύνδεση με WooCommerce (D20)', self::MANUAL, 'Στο FluentCRM → Settings → Integrations → WooCommerce: το «Default Contact Status» πρέπει να είναι «Transactional» (όχι «Subscribed»), ώστε κανένας αγοραστής, ούτε όσοι γράφονται στο Club, να μη γίνεται συνδρομητής newsletter χωρίς να το ζητήσει (D20).');
+        $rows[] = self::row('crm_checkout_checkbox', 'Στο FluentCRM: κουτάκι newsletter στο checkout (D20)', self::MANUAL, 'Στο FluentCRM → Settings → General: ενεργό το «Add a subscription checkbox to the WooCommerce checkout page», με το αυτόματο τσεκάρισμα ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΟ (το κουτάκι ξεκινά άδειο). Το FluentCRM δείχνει το κουτάκι μόνο στο κλασικό checkout (shortcode)· ελέγξτε το στη σελίδα ολοκλήρωσης αγοράς. Χρειάζεται τη συγκατάθεση του καταστήματος πριν από την παραγωγή.');
         return $rows;
     }
 
@@ -319,12 +350,31 @@ final class EVC_Readiness {
         $rows[] = self::row('page_cache', 'Cache σελίδων', $found === array() ? self::OK : self::MANUAL, $found === array()
             ? 'Δεν βρέθηκε plugin cache σελίδων.'
             : 'Βρέθηκαν: ' . implode(', ', $found) . '. Βεβαιωθείτε ότι δεν αποθηκεύει τα /club/join/ και /club-member/.');
+        $rows[] = self::permalinks_row((string) get_option('permalink_structure', ''));
         $zone = (string) get_option('timezone_string', '');
         $rows[] = self::row('timezone', 'Ζώνη ώρας του ιστότοπου', $zone === EVC_Membership_Calendar::ZONE ? self::OK : self::WRONG, $zone === EVC_Membership_Calendar::ZONE ? EVC_Membership_Calendar::ZONE : 'Είναι «' . ($zone === '' ? 'UTC±' : $zone) . '», πρέπει να είναι ' . EVC_Membership_Calendar::ZONE . ' (Ρυθμίσεις → Γενικά).');
         $php = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
         $rows[] = self::row('php_version', 'Έκδοση PHP', in_array($php, self::SUPPORTED_PHP, true) ? self::OK : (version_compare($php, '7.4', '<') ? self::WRONG : self::MANUAL), 'PHP ' . $php . ' (δοκιμασμένες: ' . implode(', ', self::SUPPORTED_PHP) . ').');
         $rows[] = self::db_version_row('wp_db_server', 'Διακομιστής βάσης του WordPress', method_exists($wpdb, 'db_server_info') ? (string) $wpdb->db_server_info() : '');
         return $rows;
+    }
+
+    /**
+     * Pure: Settings → Permalinks. STAGE-08 round 4: staging ran with «Plain»; /club-admin/ and /club-member/ were then an
+     * Apache 404 that never reached WordPress. The plugin now also works with plain URLs (?evc_club_admin=1, …), but
+     * the printed poster QR, the bookmarks on the till tablet and the tested go-live path all use the pretty ones, so
+     * «Plain» reads WRONG; an /index.php/… structure is a manual check.
+     */
+    public static function permalinks_row(string $structure): array {
+        $label = 'Μόνιμοι σύνδεσμοι (Permalinks)';
+        $fix = 'Ρυθμίσεις → Μόνιμοι σύνδεσμοι → Όνομα άρθρου.';
+        if ($structure === '') {
+            return self::row('permalinks', $label, self::WRONG, 'Είναι «Απλοί»: οι σελίδες /club-admin/, /club-member/ και /club/join/ δεν φτάνουν στο WordPress και οι συνδέσεις οδηγούν σε σφάλμα 404. ' . $fix);
+        }
+        if (strpos($structure, 'index.php') !== false) {
+            return self::row('permalinks', $label, self::MANUAL, 'Περιέχουν index.php: ανοίξτε τις σελίδες /club-member/ και /club-admin/ για να βεβαιωθείτε ότι φορτώνουν, αλλιώς ' . $fix);
+        }
+        return self::row('permalinks', $label, self::OK, 'Όμορφοι σύνδεσμοι: οι σελίδες /club-admin/, /club-member/ και /club/join/ φτάνουν στο WordPress.');
     }
 
     /** "8.0.36" / "5.5.5-10.11.6-MariaDB" -> "mysql 8.0" / "mariadb 10.11", compared with the tested matrix. */

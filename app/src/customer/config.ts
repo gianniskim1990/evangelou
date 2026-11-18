@@ -6,8 +6,10 @@
  * Fail closed: anything malformed or pointing at another origin is rejected
  * and the app shows a configuration error instead of running. The REST base
  * may use pretty permalinks (…/wp-json/evangelou-club-customer/v1) or plain
- * permalinks (…/?rest_route=/evangelou-club-customer/v1, the current staging).
+ * permalinks (…/index.php?rest_route=/evangelou-club-customer/v1, or …/?rest_route=…).
  */
+
+import { restRouteUrl, sameOriginRestBase } from "../lib/restRoute";
 
 export const CONFIG_ELEMENT_ID = "evc-customer-config";
 export const CUSTOMER_NAMESPACE = "/evangelou-club-customer/v1";
@@ -38,20 +40,9 @@ function sameOriginUrl(value: unknown, origin: string): URL | null {
   }
 }
 
-function isCustomerRestBase(url: URL): boolean {
-  if (url.searchParams.has("rest_route")) return url.searchParams.get("rest_route")!.replace(/\/+$/, "") === CUSTOMER_NAMESPACE;
-  return url.pathname.replace(/\/+$/, "").endsWith(CUSTOMER_NAMESPACE);
-}
-
-/** URL of a route under the REST base, for pretty and plain permalinks alike. */
+/** URL of a route under the REST base, for pretty and plain permalinks alike (src/lib/restRoute.ts). */
 export function endpointUrl(restBase: string, route: string): string {
-  const url = new URL(restBase);
-  if (url.searchParams.has("rest_route")) {
-    url.searchParams.set("rest_route", `${url.searchParams.get("rest_route")!.replace(/\/+$/, "")}${route}`);
-    return url.href;
-  }
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}${route}`;
-  return url.href;
+  return restRouteUrl(restBase, route);
 }
 
 export function parseCustomerConfig(raw: string | null | undefined, origin: string): CustomerConfigResult {
@@ -64,8 +55,9 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
   }
   if (typeof data !== "object" || data === null || Array.isArray(data)) return { ok: false, reason: "not_object" };
   const d = data as Record<string, unknown>;
-  const restBase = sameOriginUrl(d.restBase, origin);
-  if (!restBase || !isCustomerRestBase(restBase)) return { ok: false, reason: "rest_base" };
+  // STAGE-08 round 4: the same shared rule as the staff app (one rest_route, exactly the namespace, at the site root).
+  const restBase = sameOriginRestBase(d.restBase, origin, CUSTOMER_NAMESPACE);
+  if (!restBase) return { ok: false, reason: "rest_base" };
   if (typeof d.nonce !== "string" || !NONCE_RE.test(d.nonce)) return { ok: false, reason: "nonce" };
   const loginUrl = sameOriginUrl(d.loginUrl, origin);
   if (!loginUrl) return { ok: false, reason: "login_url" };
@@ -74,7 +66,7 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
   return {
     ok: true,
     config: {
-      restBase: restBase.href,
+      restBase,
       nonce: d.nonce,
       loginUrl: loginUrl.href,
       logoutUrl: logoutUrl.href,

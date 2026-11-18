@@ -12,7 +12,8 @@ onboarding screens (register → consents → offer) connected to the real site:
 
 1. **Account.** Name, Greek mobile, e-mail (required) and password, by the existing CUSTOMER-01 rules. A customer
    who already has an account signs in instead, on the normal WordPress login, which returns to the join page.
-2. **Terms.** Only the Club terms, required. **No marketing or newsletter choice is shown** (owner decision D12).
+2. **Terms.** Only the Club terms, required. **No marketing or newsletter choice is shown here** (owner decision D12);
+   since D20 (2026-11-18) the newsletter choice is FluentCRM's own checkbox on the WooCommerce checkout, unticked.
 3. **Offer.** "Πληρωμή 20 €" opens the shop's existing WooCommerce checkout with the existing Club product in the
    cart, straight away: there is **no e-mail confirmation step** (owner decision D14). The payment is by bank
    transfer only (owner decision D15) and stays pending until the shop confirms it through the existing STAGE-03D
@@ -27,7 +28,8 @@ order is **never** sent to pay again. They go to the member area instead.
 
 | | Decision (2026-11-06) | Where it is built |
 |---|---|---|
-| D12 | No newsletter or marketing choice; the onboarding never touches FluentCRM. | below |
+| D12 | No newsletter or marketing choice in the join flow; the onboarding never touches FluentCRM. **The "no newsletter checkbox" part is superseded for the shop checkout by D20 (2026-11-18)**; the code rule stands. | below |
+| D20 | (2026-11-18) Newsletter consent only through FluentCRM's own «Add a subscription checkbox to the WooCommerce checkout page», **unticked** by default, for everyone (the Club join checkout included); the FluentCRM WooCommerce integration's Default Contact Status = «Transactional». Pending the shop owner's consent via the technician before production. | below |
 | D13 | The Club terms page already exists. The technician sets `EVC_CLUB_TERMS_URL` to it; no URL ships in code. Without it, the terms step shows the terms sentence and the privacy link only (the current fallback). | Configuration |
 | D14 | No e-mail confirmation step: from the account straight to the terms and payment. | Security: what remains possible |
 | D15 | Bank transfer (`bacs`) is the ONLY payment method for the Club subscription. If it is not available, no method is offered and a Greek message says so (fail closed). Other products are unchanged. | WooCommerce cart and checkout |
@@ -46,6 +48,35 @@ This rests on one FluentCRM setting that must stay as audited: **FluentCRM → S
 FluentCRM contacts on WP user registration" must remain unchecked** (it was unchecked in the audit). If someone
 checks it, FluentCRM itself would create a contact for every new account. This plugin never calls FluentCRM; the
 packager guard enforces that.
+
+### D20 (2026-11-18, supersedes D12's "no newsletter checkbox" for the shop checkout)
+
+The owner's staging run found FluentCRM's **WooCommerce integration** auto-sync **on**, with **Default Contact Status
+«Subscribed»**: every shop buyer, including every Club joiner, became a newsletter subscriber without being asked.
+**Decided by the owner (2026-11-18):**
+
+- FluentCRM → Settings → Integrations → WooCommerce: **Default Contact Status = «Transactional»** (buyers stay
+  contacts for orders, not newsletter subscribers);
+- FluentCRM → Settings → General: **«Add a subscription checkbox to the WooCommerce checkout page»** on, with
+  auto-check **off** (the box starts unticked), for every checkout, the Club join checkout included;
+- **pending the shop owner's consent via the technician** before it is set on production.
+
+What does **not** change: the Club code still never calls FluentCRM from the onboarding (D11 / D12 code rules; the
+packager guard enforces it). The newsletter box is FluentCRM's own field on WooCommerce's checkout; the Club's checkout
+guard (`EVC_Onboarding_Checkout_Guard`) never strips, renames or blocks a checkout field, classic or Store API: it only
+adds the Club's refusals (mixed cart, second order, guest without an account) and narrows the gateways to bank transfer.
+Tests: `OnboardingTest::test_the_checkout_guard_leaves_every_checkout_field_alone` (no guard callback on any
+field / posted-data / Store API body hook; the Store API request is returned unchanged) and, on the real shop,
+`OnboardingCommerceTest::test_a_newsletter_checkbox_field_passes_the_club_checkout_untouched` (CI only).
+
+**Known limitation:** FluentCRM shows the checkbox on the **classic** checkout only; its support acknowledged the
+Block Checkout incompatibility in the WordPress.org forum (2025-09, no fixed version known). On a Block Checkout no
+consent is collected at checkout; with «Transactional» nobody is subscribed by default. Record the checkout type (go-live
+T6) and check the box on staging.
+
+> **Απόφαση ιδιοκτήτη (D20):** Η συγκατάθεση για newsletter δίνεται μόνο με το κουτάκι του FluentCRM στο checkout,
+> άδειο εξ ορισμού, για όλους (και για την εγγραφή στο Club). Στη σύνδεση FluentCRM–WooCommerce το «Default Contact
+> Status» γίνεται «Transactional». Περιμένει τη συγκατάθεση του καταστήματος πριν από την παραγωγή.
 
 ## Configuration (wp-config.php)
 
@@ -325,13 +356,18 @@ are untouched.
    phone on mobile data and from the shop Wi-Fi, and check that each shows its own public address. If not, the
    server (not this plugin) must restore the client address from the trusted proxy only (nginx `real_ip`, Apache
    `mod_remoteip`, Cloudflare's documented module). This plugin never reads `X-Forwarded-For` itself.
-3. **FluentCRM must not see new accounts (D12).** All three must hold:
+3. **FluentCRM must not subscribe new accounts or buyers by itself (D12, D20).** All of these must hold:
    - FluentCRM → Settings → General → "create new FluentCRM contacts on WP user registration" stays **unchecked**;
    - no FluentCRM automation funnel with a **"New User Sign Up"** (user registration) trigger is active, or every
      such funnel excludes the `customer` role;
-   - the FluentCRM **WooCommerce integration** (customer / order sync into contacts) is **off**, or excludes these
-     customers (otherwise the Club checkout itself creates a contact).
-4. On **staging**: the customer flag and the onboarding flag; pretty permalinks or the `?evc_club_join=` links; the
+   - the FluentCRM **WooCommerce integration** (customer / order sync into contacts) has **Default Contact Status =
+     «Transactional»** (D20; it was «Subscribed» on the site), so a buyer becomes a contact for the order only;
+   - FluentCRM's **«Add a subscription checkbox to the WooCommerce checkout page»** is on and **not** auto-checked
+     (D20; classic checkout only, see D20 above).
+4. On **staging**: the customer flag and the onboarding flag; **Settings → Permalinks = «Post name»** (staging had
+   «Plain» on 2026-11-18 and `/club/join/`, `/club-member/`, `/club-admin/` were a 404; readiness flags it); the
+   «Disable Emails» plugin, so no test mail reaches a real person; with WP Staging (free), «Disable admin authorization»
+   only for the duration of the customer test; the
    poster on a test tablet; one test account through the whole flow with a test bank transfer that the shop
    confirms; a cart with the Club product shows only bank transfer; a cart with coffee shows the usual methods.
 5. **Which checkout does the live site use?** Open WooCommerce → Settings → Advanced → Page setup → Checkout page,

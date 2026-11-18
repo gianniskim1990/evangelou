@@ -177,7 +177,7 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         $this->assertSame('missing', $rows['bacs']['status'], 'no WooCommerce in this suite');
         $this->assertSame('missing', $rows['terms_url']['status'], 'D13: the technician sets it');
         $this->assertSame('off', $rows['crm_tags']['status']);
-        foreach (array('crm_registration', 'crm_funnels', 'crm_woocommerce') as $key) {
+        foreach (array('crm_registration', 'crm_funnels', 'crm_woocommerce', 'crm_checkout_checkbox') as $key) {
             $this->assertSame('manual', $rows[$key]['status'], $key);
             $this->assertNotSame('', $rows[$key]['detail'], 'with instructions');
         }
@@ -232,6 +232,67 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         $this->assertSame('manual', self::by_key($readiness)['staff_account']['status']);
     }
 
+    /** STAGE-08 round 4: staging had «Plain» permalinks; /club-admin/ and /club-member/ were an Apache 404. */
+    public function test_plain_permalinks_read_wrong_with_the_greek_fix(): void {
+        $seams = array('db_config' => function () {
+            return null;
+        });
+        update_option('permalink_structure', '');
+        $rows = self::by_key($this->readiness($seams));
+        $this->assertSame('server', $rows['permalinks']['section']);
+        $this->assertSame('wrong', $rows['permalinks']['status']);
+        $this->assertStringContainsString('Ρυθμίσεις → Μόνιμοι σύνδεσμοι → Όνομα άρθρου', $rows['permalinks']['detail']);
+        update_option('permalink_structure', '/index.php/%postname%/');
+        $this->assertSame('manual', self::by_key($this->readiness($seams))['permalinks']['status']);
+        update_option('permalink_structure', '/%postname%/');
+        $this->assertSame('ok', self::by_key($this->readiness($seams))['permalinks']['status']);
+        $this->assertSame('ok', EVC_Readiness::permalinks_row('/%year%/%monthnum%/%postname%/')['status']);
+    }
+
+    /** STAGE-08 round 4: a failed connection names the constants to check by the driver code, never a value. */
+    public function test_a_failed_connection_names_what_to_check_without_values(): void {
+        $hints = array(
+            1044 => array('EVC_CLUB_DB_NAME', 'EVC_CLUB_DB_USER'),
+            1045 => array('EVC_CLUB_DB_USER', 'EVC_CLUB_DB_PASSWORD'),
+            1049 => array('EVC_CLUB_DB_NAME'),
+            2002 => array('EVC_CLUB_DB_HOST'),
+        );
+        foreach ($hints as $code => $names) {
+            $rows = self::by_key($this->readiness(array('db_config' => function () {
+                return new EVC_Db_Config('db-secret-host.invalid', 3306, 'evc__secret_name', 'secret_user_xyz', 'secret-password-xyz');
+            }, 'connect' => function () use ($code) {
+                throw new EVC_Db_Exception('Club database is unavailable.', null, $code);
+            })));
+            $detail = $rows['club_db']['detail'];
+            $this->assertSame('wrong', $rows['club_db']['status']);
+            $this->assertStringContainsString('κωδικός ' . $code, $detail, (string) $code);
+            foreach ($names as $name) {
+                $this->assertStringContainsString($name, $detail, $code . ': ' . $name);
+            }
+            $this->assertStringContainsString('Οι τιμές δεν εμφανίζονται', $detail);
+            foreach (array('db-secret-host', 'evc__secret_name', 'secret_user_xyz', 'secret-password-xyz', '3306') as $secret) {
+                $this->assertStringNotContainsString($secret, $detail, $code . ': no value');
+            }
+        }
+        $this->assertStringNotContainsString('EVC_CLUB_DB_PASSWORD', EVC_Readiness::db_connect_hint(1049), 'a specific hint, not the generic one');
+        $this->assertStringContainsString('EVC_CLUB_DB_PASSWORD', EVC_Readiness::db_connect_hint(null), 'unknown code: every constant');
+        $this->assertStringContainsString('EVC_CLUB_DB_PASSWORD', EVC_Readiness::db_connect_hint(9999));
+    }
+
+    /** D20 (2026-11-18): the FluentCRM WooCommerce default status and the checkout checkbox stay manual checks. */
+    public function test_the_d20_fluentcrm_checks_are_manual_with_the_settings_named(): void {
+        $rows = self::by_key($this->readiness(array('db_config' => function () {
+            return null;
+        })));
+        $this->assertSame('manual', $rows['crm_woocommerce']['status']);
+        $this->assertStringContainsString('Transactional', $rows['crm_woocommerce']['detail']);
+        $this->assertStringContainsString('D20', $rows['crm_woocommerce']['detail']);
+        $this->assertSame('manual', $rows['crm_checkout_checkbox']['status']);
+        $this->assertStringContainsString('Add a subscription checkbox to the WooCommerce checkout page', $rows['crm_checkout_checkbox']['detail']);
+        $this->assertStringContainsString('ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΟ', $rows['crm_checkout_checkbox']['detail'], 'unchecked by default');
+        $this->assertSame('crm', $rows['crm_checkout_checkbox']['section']);
+    }
+
     public function test_the_page_changes_nothing_and_shows_no_secret(): void {
         global $wpdb;
         $club = $this->migrated_club();
@@ -267,7 +328,7 @@ final class ReadinessTest extends EVC_WP_Test_Case {
                 $this->assertStringNotContainsString($secret, $html);
             }
         }
-        foreach (array('club_db', 'club_db_schema', 'flag_admin_tools', 'commerce_config', 'payment_provenance', 'lookup_key', 'bacs', 'terms_url', 'crm_tags', 'remote_addr', 'page_cache', 'timezone', 'php_version', 'wp_db_server', 'staff_account') as $key) {
+        foreach (array('club_db', 'club_db_schema', 'flag_admin_tools', 'commerce_config', 'payment_provenance', 'lookup_key', 'bacs', 'terms_url', 'crm_tags', 'crm_woocommerce', 'crm_checkout_checkbox', 'remote_addr', 'page_cache', 'permalinks', 'timezone', 'php_version', 'wp_db_server', 'staff_account') as $key) {
             $this->assertStringContainsString('data-check="' . $key . '"', $html, $key);
         }
         wp_set_current_user((int) self::factory()->user->create(array('role' => 'editor')));

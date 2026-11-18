@@ -536,4 +536,44 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         $this->assertSame(503, $r->get_status());
         $this->assertSame(array('result' => 'unavailable'), $r->get_data(), 'no Club product configured: never a checkout');
     }
+
+    /**
+     * STAGE-08 round 4, D20 (2026-11-18): consent to the newsletter comes from FluentCRM's own «subscription checkbox»
+     * on the WooCommerce checkout. The Club's checkout guard must never strip, rename or block a checkout field (classic
+     * or Store API): it only adds the Club's refusals and narrows the gateways. Nothing of it is hooked where fields,
+     * posted data or the Store API request body are shaped.
+     */
+    public function test_the_checkout_guard_leaves_every_checkout_field_alone(): void {
+        $guard = $this->parts()['guard'];
+        $field_hooks = array(
+            'woocommerce_checkout_fields', 'woocommerce_billing_fields', 'woocommerce_shipping_fields', 'woocommerce_form_field',
+            'woocommerce_form_field_checkbox', 'woocommerce_form_field_args', 'woocommerce_checkout_posted_data',
+            'woocommerce_checkout_process', 'woocommerce_checkout_update_order_meta', 'woocommerce_checkout_order_processed',
+            'woocommerce_checkout_create_order', 'woocommerce_review_order_before_submit', 'woocommerce_checkout_after_terms_and_conditions',
+            'woocommerce_store_api_checkout_update_customer_from_request', 'woocommerce_store_api_checkout_order_processed',
+            'woocommerce_blocks_loaded', 'woocommerce_init', 'rest_pre_dispatch', 'rest_request_before_callbacks',
+        );
+        foreach ($field_hooks as $hook) {
+            global $wp_filter;
+            foreach (isset($wp_filter[$hook]) ? $wp_filter[$hook]->callbacks : array() as $callbacks) {
+                foreach ($callbacks as $cb) {
+                    $owner = is_array($cb['function']) ? $cb['function'][0] : null;
+                    if ($hook === 'rest_request_before_callbacks' && $owner === $guard) {
+                        $this->assertSame('start_of_request', $cb['function'][1], 'only remembers the order being paid');
+                        continue;
+                    }
+                    $this->assertNotSame($guard, $owner, $hook . ': the guard is not hooked here');
+                }
+            }
+        }
+        // The one Store API hook it reads a request on returns it untouched (it only reads route, method and id).
+        $request = new WP_REST_Request('POST', '/wc/store/v1/checkout');
+        $request->set_param('extensions', array('fluentcrm' => array('subscribe' => true)));
+        $this->assertSame('kept', $guard->start_of_request('kept', null, $request));
+        $this->assertSame(array('fluentcrm' => array('subscribe' => true)), $request->get_param('extensions'), 'the request body is never changed');
+        $source = (string) file_get_contents(EVC_CLUB_PATH . 'includes/onboarding/class-evc-onboarding-checkout-guard.php');
+        foreach (array('checkout_fields', 'posted_data', 'set_param', 'remove_param', 'unset($_POST', '$_POST[', 'extensions') as $needle) {
+            $this->assertStringNotContainsString($needle, $source, 'the guard never touches ' . $needle);
+        }
+    }
 }

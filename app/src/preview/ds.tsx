@@ -1,6 +1,10 @@
 import type { ReactNode, Ref } from "react";
 import type { CustomerMembershipState } from "./customerView";
 import { cx, sampleQrModules } from "./screens";
+// Imported (hashed by Vite, relative to the bundle) so the logo also loads where the app is not served from the site
+// root: the WordPress customer pages load it from the plugin's customer-app/assets/ (STAGE-08 round 4; a root path
+// "/logo-…png" was a 404 there, the broken image with alt «Ευαγγέλου» seen on staging).
+import logoUrl from "./assets/logo-evaggelou-color.png";
 
 /*
  * Design preview: primitives of the approved "contemporary coffee club"
@@ -9,7 +13,7 @@ import { cx, sampleQrModules } from "./screens";
  */
 
 export function Logo({ className }: { className?: string }) {
-  return <img src="/logo-evaggelou-color.png" alt="Ευαγγέλου" className={cx("object-contain", className)} />;
+  return <img src={logoUrl} alt="Ευαγγέλου" className={cx("object-contain", className)} />;
 }
 
 /**
@@ -37,9 +41,10 @@ const BTN: Record<BtnTone, string> = {
   "ghost-dark": "border border-[var(--brass-soft)] text-[var(--milk)] hover:border-[var(--brass)]",
 };
 
-export function Btn({ children, tone = "roast", onClick, className, disabled, title, type = "button" }: { children: ReactNode; tone?: BtnTone; onClick?: () => void; className?: string; disabled?: boolean; title?: string; type?: "button" | "submit" }) {
+export function Btn({ children, tone = "roast", onClick, className, disabled, title, type = "button", ...data }: { children: ReactNode; tone?: BtnTone; onClick?: () => void; className?: string; disabled?: boolean; title?: string; type?: "button" | "submit"; "data-evc-action"?: string }) {
   return (
     <button
+      {...data}
       type={type}
       onClick={onClick}
       disabled={disabled}

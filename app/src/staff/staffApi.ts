@@ -1,4 +1,5 @@
 import { isValidNonce, type StaffConfig } from "./config";
+import { restRouteUrl } from "../lib/restRoute";
 
 /**
  * Transport for the REAL staff app. Same origin only, WordPress cookie
@@ -150,7 +151,7 @@ export function createStaffApi(
     let res: Response;
     let text: string;
     try {
-      res = await raceAbort(staffFetch(`${config.restBase}${path}`, { method, signal: controller.signal }), controller.signal);
+      res = await raceAbort(staffFetch(restRouteUrl(config.restBase, path), { method, signal: controller.signal }), controller.signal);
       text = await raceAbort(res.text(), controller.signal);
     } catch (err) {
       if (err instanceof StaffApiError) throw err;

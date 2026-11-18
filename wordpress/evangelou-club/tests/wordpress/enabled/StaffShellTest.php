@@ -84,7 +84,7 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         $r = $this->shell();
         $this->assertSame(302, $r['status']);
         $this->assertStringContainsString('wp-login.php', $r['location']);
-        $this->assertStringContainsString(rawurlencode(home_url('/club-admin/')), $r['location']);
+        $this->assertStringContainsString(rawurlencode(EVC_Staff_Shell::shell_url()), $r['location']);
         $this->assertSame('', $r['body']);
         $this->assertNoBootstrap($r);
     }
@@ -112,7 +112,7 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         $this->assertSame(untrailingslashit(rest_url('evangelou-club/v1')), $config['restBase']);
         $this->assertNotFalse(wp_verify_nonce($config['nonce'], 'wp_rest'), 'valid wp_rest nonce for this session');
         $this->assertStringContainsString('reauth=1', $config['loginUrl']);
-        $this->assertSame(home_url('/club-admin/'), $config['shellUrl']);
+        $this->assertSame(EVC_Staff_Shell::shell_url(), $config['shellUrl']);
         $this->assertSame(300, $config['idleLockSeconds']);
         $this->assertSame(EVC_Staff_Session::session_ref($token), $config['sessionRef']);
         $this->assertSame(array('qrLookup' => false, 'phoneLookup' => false, 'coffeeRedemption' => false, 'history' => false), $config['features']);
@@ -251,6 +251,32 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         $this->assertContains(EVC_Staff_Shell::QUERY_VAR, apply_filters('query_vars', array()));
         $this->go_to(home_url('/club-admin/'));
         $this->assertSame('1', (string) get_query_var(EVC_Staff_Shell::QUERY_VAR));
+    }
+
+    /** STAGE-08 round 4: staging ran with plain permalinks; /club-admin/ never reached WordPress there (Apache 404). */
+    public function test_the_shell_url_follows_the_permalink_setting(): void {
+        $this->set_permalink_structure('');
+        $plain = EVC_Staff_Shell::shell_url();
+        $this->assertSame(add_query_arg(EVC_Staff_Shell::QUERY_VAR, '1', home_url('/')), $plain);
+        $this->assertStringNotContainsString('club-admin', $plain, 'plain permalinks: no pretty path');
+        $this->go_to($plain);
+        $this->assertSame('1', (string) get_query_var(EVC_Staff_Shell::QUERY_VAR), 'the plain URL reaches the shell');
+        $r = $this->shell();
+        $this->assertStringContainsString(rawurlencode($plain), $r['location'], 'login returns to the plain URL');
+        $staff = get_userdata($this->create_staff_user());
+        $this->assertSame($plain, EVC_Staff_Admin_Guard::redirect_target($staff, false), 'wp-admin sends the till to the plain URL');
+        $this->assertSame($plain, apply_filters('login_redirect', admin_url(), '', $staff), 'so does the login redirect');
+        $token = $this->login_as($staff->ID);
+        $config = self::config_of($this->shell());
+        $this->assertIsArray($config);
+        $this->assertSame($plain, $config['shellUrl']);
+        $this->assertStringContainsString(rawurlencode($plain), $config['loginUrl']);
+        $this->assertStringContainsString('rest_route=', $config['restBase'], 'plain REST base for the app');
+        unset($token);
+
+        $this->set_permalink_structure('/%postname%/');
+        $this->assertSame(home_url('/club-admin/'), EVC_Staff_Shell::shell_url());
+        $this->assertSame(home_url('/club-admin/'), apply_filters('login_redirect', admin_url(), '', $staff));
     }
 
     public function test_rewrite_rules_are_flushed_only_when_the_state_changes(): void {

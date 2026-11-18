@@ -2225,6 +2225,91 @@ const mutants = [
     search: "name=\"evc_extra\" type=\"text\"",
     replace: "name=\"website\" type=\"text\"",
   },
+  // STAGE-08 round 4: plain permalinks (…/index.php?rest_route=…) for the staff and customer apps, and the logo.
+  {
+    id: "PP1-plain-any-rest-route",
+    file: "lib/restRoute.ts",
+    search: "if (routes.length !== 1 || routes[0] !== namespace) return null;",
+    replace: "if (routes.length !== 1) return null;",
+  },
+  {
+    id: "PP2-plain-two-rest-routes",
+    file: "lib/restRoute.ts",
+    search: "if (routes.length !== 1 || routes[0] !== namespace) return null;",
+    replace: "if (routes[0] !== namespace) return null;",
+  },
+  {
+    id: "PP3-plain-any-path",
+    file: "lib/restRoute.ts",
+    search: "    if (!/\\/(?:index\\.php)?$/.test(url.pathname)) return null;\n",
+    replace: "",
+  },
+  {
+    id: "PP4-cross-origin-base",
+    file: "lib/restRoute.ts",
+    search: "if (url.origin !== origin || (url.protocol",
+    replace: "if ((url.protocol",
+  },
+  {
+    id: "PP5-fragment-accepted",
+    file: "lib/restRoute.ts",
+    search: "if (url.hash !== \"\" || url.username",
+    replace: "if (url.username",
+  },
+  {
+    id: "PP6-plain-route-appended-to-path",
+    file: "lib/restRoute.ts",
+    search: "  if (current !== null) {",
+    replace: "  if (current === \"never\") {",
+  },
+  {
+    id: "PP7-plain-other-params-dropped",
+    file: "lib/restRoute.ts",
+    search: "    url.searchParams.set(\"rest_route\", `${current.replace(/\\/+$/, \"\")}${route}`);",
+    replace: "    url.search = \"\";\n    url.searchParams.set(\"rest_route\", `${current.replace(/\\/+$/, \"\")}${route}`);",
+  },
+  {
+    id: "PP8-staff-session-concatenated",
+    file: "staff/staffApi.ts",
+    search: "staffFetch(restRouteUrl(config.restBase, path),",
+    replace: "staffFetch(`${config.restBase}${path}`,",
+  },
+  {
+    id: "PP9-staff-lookup-concatenated",
+    file: "staff/member/memberApi.ts",
+    search: "  const lookupUrl = restRouteUrl(base, \"/members/lookup\");",
+    replace: "  const lookupUrl = `${base}/members/lookup`;",
+  },
+  {
+    id: "PP10-redeem-concatenated",
+    file: "restClubService.ts",
+    search: "res = await doFetch(restRouteUrl(baseUrl, path), {",
+    replace: "res = await doFetch(`${baseUrl}${path}`, {",
+  },
+  {
+    id: "PP11-staff-old-pretty-only-check",
+    file: "staff/config.ts",
+    search: "  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE);",
+    replace: "  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE);\n  if (restBase && new URL(restBase).searchParams.has(\"rest_route\")) return { ok: false, reason: \"rest_base\" };",
+  },
+  {
+    id: "PP12-logo-site-root-path",
+    file: "preview/ds.tsx",
+    search: "<img src={logoUrl}",
+    replace: "<img src=\"/logo-evaggelou-color.png\"",
+  },
+  {
+    id: "PP13-offer-pay-not-full-width",
+    file: "preview/CustomerPreview.tsx",
+    search: 'className="w-full min-h-14 px-8',
+    replace: 'className="min-h-14 px-8',
+  },
+  {
+    id: "PP14-offer-account-link-as-a-button",
+    file: "preview/CustomerPreview.tsx",
+    search: 'className="t-small self-center py-3',
+    replace: 'className="rounded-full bg-[var(--brass)] w-full py-3',
+  },
 ];
 
 // ---- Driver ---------------------------------------------------------------

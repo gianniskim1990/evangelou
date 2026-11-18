@@ -155,3 +155,27 @@ describe("STAGE-01 customer app: signed out, not a customer, unavailable, errors
     assert.deepEqual(storageWrites, []);
   });
 });
+
+describe("STAGE-08 round 4: the customer card logo is a bundled asset (staging showed a broken image)", () => {
+  it("the logo is not a site-root path, which the WordPress pages cannot serve", async () => {
+    await mount([{ kind: "ok", me: me("active", "2026-11-15T10:00:00+00:00") }]);
+    const logos = [...app().querySelectorAll('img[alt="Ευαγγέλου"]')] as HTMLImageElement[];
+    assert.ok(logos.length >= 1, "the card shows the logo");
+    for (const img of logos) {
+      const src = img.getAttribute("src") ?? "";
+      assert.notEqual(src, "/logo-evaggelou-color.png", "not the Vercel public/ path");
+      assert.doesNotMatch(src, /^\//, "never a site-root path");
+      assert.match(src, /logo-evaggelou-color[^/]*\.png$/, "the bundled (hashed) asset");
+    }
+  });
+
+  it("no image in the real customer app graph is loaded from a site-root path", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const appDir = process.env.EVC_APP_DIR ?? process.cwd();
+    for (const file of ["src/preview/ds.tsx", "src/customer/CustomerApp.tsx", "src/customer/JoinApp.tsx", "src/customer/PosterApp.tsx", "src/customer/MemberQrPanel.tsx"]) {
+      const source = readFileSync(join(appDir, file), "utf8");
+      assert.doesNotMatch(source, /src=["'`]\//, `${file}: no src="/…"`);
+    }
+  });
+});

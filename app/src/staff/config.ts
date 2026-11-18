@@ -8,7 +8,11 @@
  * and the app shows a configuration error instead of running.
  */
 
+import { sameOriginRestBase } from "../lib/restRoute";
+
 export const CONFIG_ELEMENT_ID = "evc-staff-config";
+/** The staff REST namespace (pretty: …/wp-json/evangelou-club/v1; plain: …/index.php?rest_route=/evangelou-club/v1). */
+export const STAFF_NAMESPACE = "/evangelou-club/v1";
 /** Owner-approved tablet idle lock. The client never waits LONGER than this. */
 export const MAX_IDLE_LOCK_SECONDS = 300;
 const NONCE_RE = /^[0-9a-f]{10}$/;
@@ -22,7 +26,8 @@ export interface StaffFeatures {
 }
 
 export interface StaffConfig {
-  /** Absolute same-origin URL of the evangelou-club/v1 REST namespace (no trailing slash). */
+  /** Absolute same-origin URL of the evangelou-club/v1 REST namespace, pretty or plain permalinks (no trailing
+   *  slash); build request URLs with restRouteUrl() (src/lib/restRoute.ts), never by string concatenation. */
   restBase: string;
   /** WordPress wp_rest nonce (in memory only; never persisted). */
   nonce: string;
@@ -64,8 +69,9 @@ export function parseStaffConfig(raw: string | null | undefined, origin: string)
   if (typeof data !== "object" || data === null || Array.isArray(data)) return { ok: false, reason: "not_object" };
   const d = data as Record<string, unknown>;
 
-  const restBase = sameOriginUrl(d.restBase, origin);
-  if (!restBase || !/\/evangelou-club\/v1\/?$/.test(new URL(restBase).pathname)) return { ok: false, reason: "rest_base" };
+  // STAGE-08 round 4: plain permalinks (staging, 2026-11-18) give …/index.php?rest_route=/evangelou-club/v1.
+  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE);
+  if (!restBase) return { ok: false, reason: "rest_base" };
   if (!isValidNonce(d.nonce)) return { ok: false, reason: "nonce" };
   const loginUrl = sameOriginUrl(d.loginUrl, origin);
   if (!loginUrl) return { ok: false, reason: "login_url" };
@@ -81,7 +87,7 @@ export function parseStaffConfig(raw: string | null | undefined, origin: string)
   return {
     ok: true,
     config: {
-      restBase: restBase.replace(/\/+$/, ""),
+      restBase,
       nonce: d.nonce,
       loginUrl,
       shellUrl,

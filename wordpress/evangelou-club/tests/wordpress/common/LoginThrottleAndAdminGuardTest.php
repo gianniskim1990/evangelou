@@ -66,7 +66,7 @@ final class LoginThrottleAndAdminGuardTest extends EVC_WP_Test_Case {
     public function test_admin_guard_targets_only_the_staff_role(): void {
         $staff = get_userdata($this->create_staff_user());
         $admin = get_userdata($this->create_user_with_role('administrator'));
-        $this->assertSame(home_url('/club-admin/'), EVC_Staff_Admin_Guard::redirect_target($staff, false));
+        $this->assertSame(EVC_Staff_Shell::shell_url(), EVC_Staff_Admin_Guard::redirect_target($staff, false));
         $this->assertNull(EVC_Staff_Admin_Guard::redirect_target($staff, true), 'admin-ajax.php is never redirected');
         $this->assertNull(EVC_Staff_Admin_Guard::redirect_target($admin, false));
         $this->assertNull(EVC_Staff_Admin_Guard::redirect_target(new WP_User(0), false));
@@ -76,7 +76,7 @@ final class LoginThrottleAndAdminGuardTest extends EVC_WP_Test_Case {
         wp_set_current_user($admin->ID);
         $this->assertTrue(apply_filters('show_admin_bar', true), 'administrators keep their admin bar');
 
-        $this->assertSame(home_url('/club-admin/'), apply_filters('login_redirect', admin_url(), '', $staff));
+        $this->assertSame(EVC_Staff_Shell::shell_url(), apply_filters('login_redirect', admin_url(), '', $staff));
         $this->assertSame(admin_url(), apply_filters('login_redirect', admin_url(), '', $admin));
         $this->assertSame(1, has_action('admin_init', array('EVC_Staff_Admin_Guard', 'maybe_redirect')));
     }

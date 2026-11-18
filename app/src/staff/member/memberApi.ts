@@ -1,6 +1,7 @@
 import { createRestClubService } from "../../club/restClubService";
 import type { ClubService } from "../../club/clubService";
 import { StaffApiError, type StaffApi } from "../staffApi";
+import { restRouteUrl } from "../../lib/restRoute";
 
 /*
  * STAGE-05D: the counter's two member requests, over the staff transport
@@ -125,6 +126,7 @@ export interface MemberApi {
 
 export function createMemberApi(api: StaffApi, restBase: string, timeoutMs = LOOKUP_TIMEOUT_MS): MemberApi {
   const base = restBase.replace(/\/+$/, "");
+  const lookupUrl = restRouteUrl(base, "/members/lookup");
   return {
     async lookupQr(token, signal) {
       // Nothing that is not exactly a Club token leaves the tablet: a bad scan (wrong layout leftovers,
@@ -140,7 +142,7 @@ export function createMemberApi(api: StaffApi, restBase: string, timeoutMs = LOO
       let body: unknown = null;
       let retryAfter: string | null;
       try {
-        const res = await api.staffFetch(`${base}/members/lookup`, {
+        const res = await api.staffFetch(lookupUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ method: "qr", qr_token: scanned }),

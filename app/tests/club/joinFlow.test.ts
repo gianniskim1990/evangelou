@@ -296,3 +296,22 @@ describe("STAGE-07 tablet poster", () => {
     assert.equal(dom.network.fetch.length, 0, "no network");
   });
 });
+
+describe("STAGE-08 round 4: the offer's payment is the obvious main action (owner's staging run on a phone)", () => {
+  it("«Πληρωμή 20 €» is a full-width filled button; the account link is a quiet secondary link after it", async () => {
+    await mount("offer", fakeApi({}));
+    const pay = app().querySelector('[data-evc-action="pay"]') as HTMLButtonElement;
+    const secondary = app().querySelector('[data-evc-action="secondary"]') as HTMLButtonElement;
+    assert.ok(pay && secondary);
+    assert.equal(pay.tagName, "BUTTON");
+    assert.equal(pay.textContent?.trim(), "Πληρωμή 20 €");
+    assert.equal(pay.disabled, false);
+    const payClass = pay.className.split(/\s+/);
+    for (const c of ["w-full", "bg-[var(--brass)]", "rounded-full", "min-h-14"]) assert.ok(payClass.includes(c), `pay button: ${c}`);
+    const secondaryClass = secondary.className.split(/\s+/);
+    assert.ok(secondaryClass.includes("t-small") && secondaryClass.includes("underline"), "the account action reads as a small link");
+    for (const c of ["w-full", "rounded-full"]) assert.ok(!secondaryClass.some((x) => x === c || x.startsWith("bg-")), `not a filled button: ${c}`);
+    assert.ok(pay.compareDocumentPosition(secondary) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, "payment first, account link after");
+    assert.equal(app().querySelectorAll('[data-evc-action="pay"]').length, 1, "one main action");
+  });
+});

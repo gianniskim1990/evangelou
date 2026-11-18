@@ -118,7 +118,7 @@ final class StrictStaffPolicyTest extends EVC_WP_Test_Case {
             $u->add_cap('manage_options');
         });
         $this->assertSame(43200, apply_filters('auth_cookie_expiration', 14 * DAY_IN_SECONDS, $user->ID, true));
-        $this->assertSame(home_url('/club-admin/'), EVC_Staff_Admin_Guard::redirect_target($user, false));
+        $this->assertSame(EVC_Staff_Shell::shell_url(), EVC_Staff_Admin_Guard::redirect_target($user, false));
         $token = $this->login_as($user->ID);
         $session = WP_Session_Tokens::get_instance($user->ID)->get($token);
         $this->assertSame(EVC_Staff_Session::POLICY_VERSION, $session[EVC_Staff_Session::POLICY_FLAG]);

@@ -1,4 +1,5 @@
 import { CUSTOMER_NAMESPACE } from "./config";
+import { sameOriginRestBase } from "../lib/restRoute";
 
 /*
  * STAGE-07 bootstrap configuration of the join page and the tablet poster, delivered by the WordPress pages
@@ -67,11 +68,7 @@ export function bootMode(raw: string | null | undefined): BootMode | null {
 }
 
 function restBaseOk(value: unknown, origin: string): string | null {
-  const href = sameOrigin(value, origin);
-  if (!href) return null;
-  const url = new URL(href);
-  const route = url.searchParams.has("rest_route") ? url.searchParams.get("rest_route")!.replace(/\/+$/, "") === CUSTOMER_NAMESPACE : url.pathname.replace(/\/+$/, "").endsWith(CUSTOMER_NAMESPACE);
-  return route ? href : null;
+  return sameOriginRestBase(value, origin, CUSTOMER_NAMESPACE);
 }
 
 export function parseJoinConfig(raw: string | null | undefined, origin: string): Parsed<JoinConfig> {

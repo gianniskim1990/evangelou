@@ -83,7 +83,14 @@ final class EVC_Staff_Shell {
         exit;
     }
 
+    /**
+     * Pretty permalinks: /club-admin/; plain permalinks: /?evc_club_admin=1 (STAGE-08 round 4: staging ran with
+     * «Plain», where /club-admin/ never reaches WordPress, so the login and logout redirects ended in a 404).
+     */
     public static function shell_url(): string {
+        if ((string) get_option('permalink_structure') === '') {
+            return add_query_arg(self::QUERY_VAR, '1', home_url('/'));
+        }
         return home_url('/' . self::SLUG . '/');
     }
 
