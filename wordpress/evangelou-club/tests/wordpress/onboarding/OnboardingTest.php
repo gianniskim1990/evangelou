@@ -269,8 +269,20 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         wp_set_current_user(0);
         $_SERVER['REMOTE_ADDR'] = $other;
         $clock += EVC_Onboarding_Registration::WINDOW_SECONDS;
+        global $wpdb;
+        $failure_rows = $wpdb->get_results($wpdb->prepare("SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like(EVC_Onboarding_Registration::COUNTER_PREFIX . 'f_') . '%'), ARRAY_A);
+        $this->assertNotEmpty($failure_rows);
         $this->assertSame(array('result' => 'ok'), $this->post('/join/account', $form)->get_data(), 'after the window');
         wp_set_current_user(0);
+        // STAGE-08 round 8: the expired failure row must still be there for the next failure, so that this test checks
+        // the window-end rule of the counter itself. The shipped cleanup removes expired rows at random (1 in 50
+        // counter writes) and could remove it during the request above (mutant OB23 then survived in CI run
+        // 44523385067): put it back when it did.
+        foreach ($failure_rows as $row) {
+            if ($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name = %s", $row['option_name'])) === '0') {
+                $wpdb->insert($wpdb->options, array('option_name' => $row['option_name'], 'option_value' => $row['option_value'], 'autoload' => 'no'));
+            }
+        }
         $this->post('/join/account', self::form(array('phone' => '')));
         $this->assertSame(1, $this->parts()['registration']->failures($other), 'a failure after the window starts a new window');
         $clock += 60;

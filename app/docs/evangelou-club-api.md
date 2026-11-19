@@ -558,6 +558,9 @@ caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
   `{"state":"member","today":"YYYY-MM-DD","taken_today":bool,"this_month":int}` (Athens day and month, by the
   ledger's `business_date`), or `not_member` / `member_disabled`; `503 {"result":"unavailable"}`; `404` = off.
 - The customer app (`coffeesApi.ts`, `memberCoffees.ts`) shows them on the card; any failure keeps «—».
+  It asks when the member area opens and on visibility / focus / online / opening the card: at most every 30 s
+  after an answer (also after `not_member` / `member_disabled`), 5 s after a failure, and 3 times per rolling
+  minute; after `404`, `401` or `403` it does not ask again in that page.
 
 ## 16. Demo-only shortcuts (deliberate)
 
