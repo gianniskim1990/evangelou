@@ -2709,8 +2709,8 @@ const mutants = [
   {
     id: "D23-14-failure-keeps-the-stale-figures",
     file: "customer/memberCoffees.ts",
-    search: "    this.failed = true;\n    this.set(null);",
-    replace: "    this.failed = true;",
+    search: "    this.set(null);\n  }\n}\n",
+    replace: "  }\n}\n",
   },
   {
     id: "D23-15-no-hard-cap",
@@ -2721,8 +2721,20 @@ const mutants = [
   {
     id: "D23-16-no-route-asked-again",
     file: "customer/memberCoffees.ts",
-    search: "    if (result.kind === \"off\") this.off = true;\n",
+    search: "    if (result.kind === \"off\" || result.kind === \"signed_out\" || result.kind === \"forbidden\") this.off = true;\n",
     replace: "",
+  },
+  {
+    id: "D23-25-signed-out-asked-again",
+    file: "customer/memberCoffees.ts",
+    search: " || result.kind === \"signed_out\" || result.kind === \"forbidden\") this.off = true;",
+    replace: ") this.off = true;",
+  },
+  {
+    id: "D23-26-not-a-member-read-as-a-failure",
+    file: "customer/memberCoffees.ts",
+    search: "    this.failed = result.kind !== \"not_member\" && result.kind !== \"member_disabled\";",
+    replace: "    this.failed = true;",
   },
   {
     id: "D23-17-two-requests-at-once",

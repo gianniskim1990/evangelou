@@ -13,8 +13,10 @@ import { QR_RETRY_DELAYS_MS, QR_WAKE_MIN_INTERVAL_MS } from "./memberQr";
  * Never hammering the endpoint: the same wake throttling as the QR flow
  * (QR_WAKE_MIN_INTERVAL_MS after an answer, QR_RETRY_DELAYS_MS[0] after a
  * failure) and its own hard cap of COFFEES_MAX_REQUESTS_PER_MINUTE in any
- * rolling minute. A route that does not exist (404, "off") is never asked
- * again in this page.
+ * rolling minute. A route that does not exist (404, "off"), a signed-out
+ * session and a refused account are never asked again in this page (the
+ * GET /me flow explains those); "not a member" and "member disabled" are
+ * answers, not failures, so they wait the normal 30 s before the next ask.
  */
 
 /** Hard cap: GET /me/coffees requests in any rolling minute. */
@@ -119,8 +121,8 @@ export class MemberCoffeesFlow {
       this.set(result.coffees);
       return;
     }
-    if (result.kind === "off") this.off = true;
-    this.failed = true;
+    if (result.kind === "off" || result.kind === "signed_out" || result.kind === "forbidden") this.off = true;
+    this.failed = result.kind !== "not_member" && result.kind !== "member_disabled";
     this.set(null);
   }
 }

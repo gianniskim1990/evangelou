@@ -372,7 +372,8 @@ anything else → 400):
 - Client: `app/src/customer/coffeesApi.ts` (strict parse: exact keys, a real date, `0 ≤ this_month ≤ 31`,
   taken today ⇒ at least 1), `memberCoffees.ts` (asks on open; wake on visibilitychange / focus / online and
   when the card is opened, at most every 30 s after an answer and 5 s after a failure, the QR flow's
-  constants; hard cap 3 per rolling minute; 404 = off for the page; any failure → unknown), `liveView.ts`
+  constants; hard cap 3 per rolling minute; 404, 401 and 403 = never asked again in the page; `not_member` /
+  `member_disabled` are answers (30 s throttle, no 5 s re-ask); anything else → unknown), `liveView.ts`
   (figures used only when their `today` is the card's Athens day, else «—»; `historyData: "unavailable"`).
 - Tests: `CustomerQrTest::test_d23_*` (month and Athens-midnight boundaries, another member's rows, other
   benefit type, every row counts, read only, not a member / disabled / signed out / staff, no secret needed,

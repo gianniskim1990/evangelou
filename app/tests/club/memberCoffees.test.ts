@@ -276,6 +276,38 @@ describe("D23: the refresh flow (throttled, fail soft)", () => {
     assert.equal(busy.getState()?.thisMonth, 3);
   });
 
+  it("signed out or refused: never asked again; not a member / disabled: answers, asked again only after 30 s", async () => {
+    for (const final of [{ kind: "signed_out" }, { kind: "forbidden" }] as CoffeesResult[]) {
+      let now = 0;
+      const f = fakeApi([final, OK3]);
+      const flow = new MemberCoffeesFlow(f.api, { now: () => now });
+      flow.open("eleni@example.org");
+      await tick();
+      now = 600_000;
+      flow.wake();
+      await tick();
+      assert.equal(f.calls(), 1, final.kind);
+      assert.equal(flow.getState(), null, final.kind);
+    }
+    for (const answer of [{ kind: "not_member" }, { kind: "member_disabled" }] as CoffeesResult[]) {
+      let now = 0;
+      const f = fakeApi([answer, OK3]);
+      const flow = new MemberCoffeesFlow(f.api, { now: () => now });
+      flow.open("eleni@example.org");
+      await tick();
+      assert.equal(flow.getState(), null, answer.kind);
+      now = 29_999;
+      flow.wake();
+      await tick();
+      assert.equal(f.calls(), 1, `${answer.kind}: not a failure, no 5 s re-ask`);
+      now = 30_000;
+      flow.wake();
+      await tick();
+      assert.equal(f.calls(), 2, answer.kind);
+      assert.equal(flow.getState()?.thisMonth, 3, answer.kind);
+    }
+  });
+
   it("another account never sees the previous figures; pause stops wakes until the next open", async () => {
     let now = 0;
     const f = fakeApi([OK3]);
