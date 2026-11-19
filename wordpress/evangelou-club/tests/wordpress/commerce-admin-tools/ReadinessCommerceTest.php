@@ -33,12 +33,13 @@ final class ReadinessCommerceTest extends EVC_WP_Test_Case {
         $this->assertSame('ok', $rows['commerce_site']['status'], $rows['commerce_site']['detail']);
         $this->assertSame('ok', $rows['payment_provenance']['status'], 'EVC_CLUB_PAYMENT_PROVENANCE = club_db_v1 on this site');
         $this->assertSame('ok', $rows['lookup_key']['status'], 'EVC_CLUB_LOOKUP_KEY is a valid test key on this site');
+        $this->assertSame('ok', $rows['qr_secret']['status'], 'EVC_CLUB_QR_SECRET is a valid test secret on this site (D22)');
         $this->assertSame('ok', $rows['bacs']['status']);
         $this->assertSame('ok', $rows['timezone']['status']);
         $this->assertSame('ok', $rows['flag_customer']['status']);
         $this->assertSame('ok', $rows['flag_onboarding']['status']);
         $html = EVC_Admin_Tools_Plugin::parts()['readiness_page']->html();
-        foreach (array(EVC_CLUB_EVIDENCE_KEY, EVC_CLUB_LOOKUP_KEY, EVC_CLUB_DB_NAME) as $secret) {
+        foreach (array(EVC_CLUB_EVIDENCE_KEY, EVC_CLUB_LOOKUP_KEY, EVC_CLUB_QR_SECRET, EVC_CLUB_DB_NAME) as $secret) {
             $this->assertStringNotContainsString($secret, $html);
         }
         if (EVC_CLUB_DB_PASSWORD !== '') {

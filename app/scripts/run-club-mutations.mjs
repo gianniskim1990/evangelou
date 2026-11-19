@@ -1792,8 +1792,8 @@ const mutants = [
   {
     id: "Q7-every-post-replaces",
     file: "customer/qrApi.ts",
-    search: "JSON.stringify(replace ? { replace: true } : {})",
-    replace: "JSON.stringify({ replace: true })",
+    search: "const reply = await call(\"POST\", \"{}\");",
+    replace: "const reply = await call(\"POST\", JSON.stringify({ replace: true }));",
   },
   {
     id: "Q8-old-kept-qr-shown",
@@ -2053,7 +2053,7 @@ const mutants = [
   {
     id: "Q35-other-tab-change-not-re-read",
     file: "customer/memberQr.ts",
-    search: "      if (this.state.phase === \"shown\") void this.open();\n",
+    search: "      if (this.state.phase === \"shown\" || this.state.phase === \"unchecked\") void this.open();\n",
     replace: "",
   },
   {
@@ -2326,8 +2326,8 @@ const mutants = [
   {
     id: "PP19-plain-without-home-path-defaults-to-root",
     file: "lib/restRoute.ts",
-    search: "    const home = validHomePath(homePath, origin);",
-    replace: "    const home = validHomePath(homePath, origin) ?? \"/\";",
+    search: "    const home = validHomePath(homePath, origin);\n    if (home === null || (url.pathname",
+    replace: "    const home = validHomePath(homePath, origin) ?? \"/\";\n    if (home === null || (url.pathname",
   },
   {
     id: "PP20-raw-dot-segments-normalised-away",
@@ -2363,14 +2363,14 @@ const mutants = [
   {
     id: "QR21-1-not-kept-shows-no-qr",
     file: "customer/memberQr.ts",
-    search: "      return this.issue(mine, account, true, concurrentRetries);",
-    replace: "      return this.settle(mine, { phase: \"error\" });",
+    search: "    return this.issue(mine, account, concurrentRetries);\n  }\n\n  private async issue",
+    replace: "    return this.settle(mine, { phase: \"error\" });\n  }\n\n  private async issue",
   },
   {
-    id: "QR21-2-auto-issue-without-replace",
+    id: "QR22-1-flow-asks-for-a-replace",
     file: "customer/memberQr.ts",
-    search: "      return this.issue(mine, account, true, concurrentRetries);",
-    replace: "      return this.issue(mine, account, false, concurrentRetries);",
+    search: "    const issued = await this.api.issue();",
+    replace: "    const issued = await (this.api.issue as (replace: boolean) => Promise<QrIssue>)(true);",
   },
   {
     id: "QR21-3-no-retry-after-an-error",
@@ -2405,13 +2405,13 @@ const mutants = [
   {
     id: "QR21-8-wake-not-throttled",
     file: "customer/memberQr.ts",
-    search: "    if (since >= QR_WAKE_MIN_INTERVAL_MS) void this.open(this.account, true);",
+    search: "    if (since >= wait) void this.open(this.account, true);",
     replace: "    void this.open(this.account, true);",
   },
   {
     id: "QR21-9-wake-hides-the-qr",
     file: "customer/memberQr.ts",
-    search: "    if (!(quiet && this.state.phase === \"shown\")) this.set({ phase: \"loading\" });",
+    search: "    if (!(quiet && this.showing())) this.set({ phase: \"loading\" });",
     replace: "    this.set({ phase: \"loading\" });",
   },
   {
@@ -2435,8 +2435,8 @@ const mutants = [
   {
     id: "QR21-13-button-next-to-the-qr",
     file: "customer/MemberQrPanel.tsx",
-    search: "            <QrSvg text={state.token} size={196} />",
-    replace: "            <QrSvg text={state.token} size={196} />\n            <button type=\"button\" onClick={() => flow.retry()}>Νέο QR</button>",
+    search: "            <QrSvg text={state.token} size={196} />\n          </div>\n          <p className=\"t-small mt-3 text-[var(--ink-2)]\">Ο κωδικός σας μένει",
+    replace: "            <QrSvg text={state.token} size={196} />\n            <button type=\"button\" onClick={() => flow.retry()}>Νέο QR</button>\n          </div>\n          <p className=\"t-small mt-3 text-[var(--ink-2)]\">Ο κωδικός σας μένει",
   },
   {
     id: "QR21-14-loading-hidden-during-the-post",
@@ -2466,8 +2466,8 @@ const mutants = [
   {
     id: "PP26-pretty-base-outside-home-path",
     file: "lib/restRoute.ts",
-    search: "  if (home !== null && !path.startsWith(home)) return null;\n",
-    replace: "",
+    search: "    if (home === null || !path.startsWith(home)) return null;\n  }\n  url.pathname",
+    replace: "    if (home === null) return null;\n  }\n  url.pathname",
   },
   {
     id: "PP27-relative-base-not-root-relative",
@@ -2480,6 +2480,152 @@ const mutants = [
     file: "lib/restRoute.ts",
     search: "  if (STRIPPED_BY_URL_PARSER.test(base)) throw new TypeError(\"REST base with a tab or line break\");\n",
     replace: "",
+  },
+  // STAGE-08 round 7: owner decision D22 (one stable QR, never a replace from the client), MAJOR-1 (a shown QR
+  // survives a failed check; the phone's copy while offline), LOW-3 (pause off the card), LOW-4, survived mutants.
+  {
+    id: "QR22-2-card-says-the-code-changes",
+    file: "customer/MemberQrPanel.tsx",
+    search: "Ο κωδικός σας μένει ίδιος σε όλες τις συσκευές σας και δεν αλλάζει όταν ανοίγετε την κάρτα.",
+    replace: "Ο κωδικός ανανεώνεται αυτόματα· μόλις ανανεωθεί, ο παλιός και κάθε στιγμιότυπο οθόνης του δεν ισχύουν πια στο ταμείο.",
+  },
+  {
+    id: "QR22-3-no-screenshot-line",
+    file: "customer/MemberQrPanel.tsx",
+    search: "          <p className=\"t-small mt-1 text-[var(--ink-2)]\">Στιγμιότυπο οθόνης ισχύει κανονικά στο ταμείο, από όποια συσκευή κι αν το δείξετε.</p>\n",
+    replace: "",
+  },
+  {
+    id: "R7-1-quiet-error-drops-the-qr",
+    file: "customer/memberQr.ts",
+    search: "    if (first && this.showing()) {",
+    replace: "    if (false) {",
+  },
+  {
+    id: "R7-2-quiet-retry-not-silent",
+    file: "customer/memberQr.ts",
+    search: "      this.unsure = true;\n      return this.schedule(mine, true);",
+    replace: "      this.unsure = true;\n      return this.schedule(mine, false);",
+  },
+  {
+    id: "R7-3-no-retry-after-a-quiet-failure",
+    file: "customer/memberQr.ts",
+    search: "      this.unsure = true;\n      return this.schedule(mine, true);",
+    replace: "      this.unsure = true;\n      return;",
+  },
+  {
+    id: "R7-4-offline-open-shows-nothing",
+    file: "customer/memberQr.ts",
+    search: "    const kept = first && this.keeper.peek ? await this.keeper.peek(account) : null;",
+    replace: "    const kept: string | null = null;",
+  },
+  {
+    id: "R7-5-peek-any-account",
+    file: "customer/qrStore.ts",
+    search: "          if (r !== null && r.a === a) found.push(r.t);",
+    replace: "          if (r !== null) found.push(r.t);",
+  },
+  {
+    id: "R7-6-stale-qr-kept-after-409",
+    file: "customer/memberQr.ts",
+    search: "    if (first && this.showing()) {",
+    replace: "    if (this.showing()) {",
+  },
+  {
+    id: "R7-7-wake-ignores-a-failed-check",
+    file: "customer/memberQr.ts",
+    search: "    const wait = this.unsure || phase === \"unchecked\" ? QR_RETRY_DELAYS_MS[0] : QR_WAKE_MIN_INTERVAL_MS;",
+    replace: "    const wait = QR_WAKE_MIN_INTERVAL_MS;",
+  },
+  {
+    id: "R7-8-pause-keeps-the-retry",
+    file: "customer/memberQr.ts",
+    search: "    this.paused = true;\n    this.cancelRetry();",
+    replace: "    this.paused = true;",
+  },
+  {
+    id: "R7-9-pause-lets-the-get-in-flight-post",
+    file: "customer/memberQr.ts",
+    search: "    this.generation++;\n    this.paused = true;",
+    replace: "    this.paused = true;",
+  },
+  {
+    id: "R7-10-wake-while-paused",
+    file: "customer/memberQr.ts",
+    search: "    if (this.account === null || this.paused) return;",
+    replace: "    if (this.account === null) return;",
+  },
+  {
+    id: "R7-11-retry-while-paused",
+    file: "customer/memberQr.ts",
+    search: "    if (this.paused) return;\n    const phase = this.state.phase;\n    if (phase === \"error\" || phase === \"unavailable\") void this.open();",
+    replace: "    const phase = this.state.phase;\n    if (phase === \"error\" || phase === \"unavailable\") void this.open();",
+  },
+  {
+    id: "R7-12-other-tab-change-while-paused",
+    file: "customer/memberQr.ts",
+    search: "      if (this.paused) return;\n      if (this.state.phase === \"shown\"",
+    replace: "      if (this.state.phase === \"shown\"",
+  },
+  {
+    id: "R7-13-app-never-pauses",
+    file: "customer/CustomerApp.tsx",
+    search: "    return () => qrFlow.pause();",
+    replace: "    return;",
+  },
+  {
+    id: "R7-14-panel-keeps-visibility-listener",
+    file: "customer/MemberQrPanel.tsx",
+    search: "      doc.removeEventListener(\"visibilitychange\", onVisible);\n",
+    replace: "",
+  },
+  {
+    id: "R7-15-panel-keeps-focus-listener",
+    file: "customer/MemberQrPanel.tsx",
+    search: "      globalThis.removeEventListener?.(\"focus\", onVisible);\n",
+    replace: "",
+  },
+  {
+    id: "R7-16-panel-keeps-online-listener",
+    file: "customer/MemberQrPanel.tsx",
+    search: "      globalThis.removeEventListener?.(\"online\", onVisible);\n",
+    replace: "",
+  },
+  {
+    id: "R7-17-no-online-listener",
+    file: "customer/MemberQrPanel.tsx",
+    search: "    globalThis.addEventListener?.(\"online\", onVisible);\n",
+    replace: "",
+  },
+  {
+    id: "R7-18-wake-while-loading",
+    file: "customer/memberQr.ts",
+    search: "    if (phase === \"loading\" || phase === \"off\") return;",
+    replace: "    if (phase === \"off\") return;",
+  },
+  {
+    id: "R7-19-two-re-reads-after-a-409",
+    file: "customer/memberQr.ts",
+    search: "      if (concurrentRetries >= 1) return this.settle(mine, { phase: \"error\" });",
+    replace: "      if (concurrentRetries >= 2) return this.settle(mine, { phase: \"error\" });",
+  },
+  {
+    id: "R7-20-error-wake-not-throttled",
+    file: "customer/memberQr.ts",
+    search: "      if (since >= QR_RETRY_DELAYS_MS[0]) void this.open();",
+    replace: "      void this.open();",
+  },
+  {
+    id: "R7-21-unchecked-shown-as-verified",
+    file: "customer/memberQr.ts",
+    search: "    this.set({ phase: \"unchecked\", token: kept });",
+    replace: "    this.set({ phase: \"shown\", token: kept, issuedAt: \"\", fresh: false });",
+  },
+  {
+    id: "PP29-invalid-home-path-ignored-for-a-pretty-base",
+    file: "lib/restRoute.ts",
+    search: "    if (home === null || !path.startsWith(home)) return null;\n  }\n  url.pathname",
+    replace: "    if (home !== null && !path.startsWith(home)) return null;\n  }\n  url.pathname",
   },
 ];
 

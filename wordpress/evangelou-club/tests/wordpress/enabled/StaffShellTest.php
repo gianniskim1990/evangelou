@@ -319,6 +319,26 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         } finally {
             remove_filter('pre_option_home', $spaced);
         }
+        // Round 7: the browser's URL.pathname keeps every «%» as it is: an encoded slash, lower-case hex and a
+        // bare «%» are never decoded or re-encoded (fixed values, checked against new URL(…).pathname).
+        foreach (array(
+            'http://example.org/a%2Fb' => '/a%2Fb/',
+            'http://example.org/a%2fb' => '/a%2fb/',
+            'http://example.org/%ce%ba%ce%b1' => '/%ce%ba%ce%b1/',
+            'http://example.org/100%' => '/100%/',
+            'http://example.org/50%off/%zz' => '/50%off/%zz/',
+            'http://example.org/x^|[]y/{a}`b' => '/x^|[]y/%7Ba%7D%60b/',
+        ) as $home => $expected) {
+            $filter = static function () use ($home) {
+                return $home;
+            };
+            add_filter('pre_option_home', $filter);
+            try {
+                $this->assertSame($expected, EVC_Rest_Security::home_path(), $home);
+            } finally {
+                remove_filter('pre_option_home', $filter);
+            }
+        }
         $this->assertSame('/', EVC_Rest_Security::home_path());
     }
 

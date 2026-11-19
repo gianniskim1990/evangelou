@@ -8,12 +8,14 @@ defined('ABSPATH') || exit;
  *                 200 {"result":"ok","qr":{"state":"not_member"}}     no Club member row (yet)
  *                 200 {"result":"ok","qr":{"state":"member_disabled"}}
  *                 NEVER a token (only its digest is stored).
- *   POST /me/qr   body {} or {"replace": true|false}  (anything else: 400 invalid_request)
- *                 200 {"result":"ok","qr":{"state":"active","token":"evc_…","issued_at":"…"}}  ONLY here
+ *   POST /me/qr   body {} (or {"replace": true|false} from older cached apps: accepted and IGNORED, owner
+ *                 decision D22; anything else: 400 invalid_request)
+ *                 200 {"result":"ok","qr":{"state":"active","token":"evc_…","issued_at":"…"}}  ONLY here:
+ *                     the member's stable token, the SAME on every device and every call (D22)
  *                 404 not_a_member · 403 member_disabled
- *                 409 qr_exists (an active QR exists and replace was not true; nothing changed)
- *                 409 concurrent_change (another device wrote first; nothing issued: read GET again)
- *                 503 {"result":"unavailable"} (incl. an unknown COMMIT outcome: retry with replace)
+ *                 409 concurrent_change (another device of the member wrote at the same moment: ask again)
+ *                 503 {"result":"unavailable"} (incl. a missing EVC_CLUB_QR_SECRET and an unknown COMMIT
+ *                     outcome: asking again is safe)
  * Both: customer accounts only (EVC_Customer_Auth: cookie session + own wp_rest nonce), the user is
  * ALWAYS get_current_user_id(); nothing identifying is read from the request. Responses are no-store
  * (EVC_Customer_Rest_Security). The token is never logged.
@@ -82,7 +84,8 @@ final class EVC_Rest_Me_Qr_Controller {
             return EVC_Rest_Security::error_response('invalid_request', 400);
         }
         try {
-            $result = $this->backend->issue(get_current_user_id(), ($body['replace'] ?? false) === true);
+            // D22: a customer never replaces the QR; `replace` was validated above and is ignored.
+            $result = $this->backend->issue(get_current_user_id());
         } catch (Throwable $e) {
             return self::unavailable();
         }
@@ -97,8 +100,6 @@ final class EVC_Rest_Me_Qr_Controller {
                 return EVC_Rest_Security::error_response('not_a_member', 404);
             case 'member_disabled':
                 return EVC_Rest_Security::error_response('member_disabled', 403);
-            case 'qr_exists':
-                return EVC_Rest_Security::error_response('qr_exists', 409);
             case 'concurrent_change':
                 return EVC_Rest_Security::error_response('concurrent_change', 409);
             default:

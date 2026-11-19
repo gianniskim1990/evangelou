@@ -74,7 +74,7 @@ final class EVC_Club_Qr_Services {
             new EVC_Sql_Lookup_Rate_Limiter($db, $clock),
             new EVC_Lookup_Key_Ring(array(self::LOOKUP_KEY_ID => $secret), self::LOOKUP_KEY_ID),
             new EVC_Lookup_Context_Policy(self::LOOKUP_CONTEXT_TTL_SECONDS),
-            // Owner decision D6 (2026-11-04): a QR has no age limit; it changes only on request.
+            // Owner decision D6 (2026-11-04): a QR has no age limit; since D22 (2026-11-19) it changes only by an administrator's revocation.
             EVC_Qr_Token_Policy::without_expiry(),
             $clock,
             self::LOOKUP_PURPOSE,

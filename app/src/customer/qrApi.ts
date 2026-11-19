@@ -10,13 +10,17 @@ import { REQUEST_TIMEOUT_MS, type NonceBox } from "./customerApi";
  *
  *   GET  /me/qr  200 active (+ issued_at) | none | not_member | member_disabled
  *                404 (no such route: the QR feature is not switched on) -> off
- *   POST /me/qr  200 issued: the ONLY reply that carries the plaintext token
- *                409 qr_exists | concurrent_change, 404 not_a_member,
- *                403 member_disabled, 503 unavailable
+ *   POST /me/qr  body {} ONLY (owner decision D22: this client never asks for
+ *                a replacement). 200 issued: the ONLY reply that carries the
+ *                plaintext token, the member's own stable token (the same on
+ *                every device); 409 concurrent_change (or qr_exists from an
+ *                older server), 404 not_a_member, 403 member_disabled,
+ *                503 unavailable
  *   both         401 signed_out, other 403 forbidden
  *
- * The token is never logged, never put in a URL and never written to browser
- * storage (qrMemory.ts keeps it in memory only).
+ * The token is never logged and never put in a URL; the only browser storage
+ * that holds it is qrStore.ts (owner decision 2026-11-04 «Ναι, να τον
+ * θυμάται»), through the QrKeeper interface of memberQr.ts.
  */
 
 export const QR_TOKEN_RE = /^evc_[0-9a-f]{48}$/;
@@ -46,8 +50,8 @@ export type QrIssue =
 
 export interface CustomerQrApi {
   status(): Promise<QrStatus>;
-  /** `replace: true` only after the member confirmed a new QR (D6). */
-  issue(replace: boolean): Promise<QrIssue>;
+  /** POST {}: the member's own stable QR (D22). There is no way to ask for a replacement from the customer app. */
+  issue(): Promise<QrIssue>;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -146,8 +150,8 @@ export function createCustomerQrApi(
       return { kind: "error" };
     },
 
-    async issue(replace) {
-      const reply = await call("POST", JSON.stringify(replace ? { replace: true } : {}));
+    async issue() {
+      const reply = await call("POST", "{}");
       if (reply === null) return { kind: "error" };
       const code = errorCode(reply.body);
       if (reply.status === 200) return parseQrIssued(reply.body) ?? { kind: "error" };

@@ -145,6 +145,31 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         $this->assertSame('missing', EVC_Readiness::lookup_key_status(false, $valid));
     }
 
+    /** D22: EVC_CLUB_QR_SECRET reads OK only by the customer QR backend's own rule, and is never shown. */
+    public function test_the_qr_secret_reads_ok_only_when_valid_distinct_from_the_lookup_key_and_is_never_shown(): void {
+        $none = function () {
+            return null;
+        };
+        $rows = self::by_key($this->readiness(array('db_config' => $none)));
+        $this->assertSame('missing', $rows['qr_secret']['status'], 'not defined in this suite');
+        $valid = 'evc-test-readiness-qr-secret-0123456789ab';
+        $lookup = 'evc-test-readiness-lookup-key-0123456789';
+        foreach (array(array($valid, null, 'ok'), array(str_repeat('q', 32), null, 'ok'), array($valid, $lookup, 'ok'), array($lookup, $lookup, 'wrong'), array(str_repeat('q', 31), null, 'wrong'), array('', null, 'wrong'), array(12345678901234567890123456789012, null, 'wrong'), array(null, null, 'wrong')) as $case) {
+            $constants = array('EVC_CLUB_QR_SECRET' => $case[0]);
+            if ($case[1] !== null) {
+                $constants['EVC_CLUB_LOOKUP_KEY'] = $case[1];
+            }
+            $rows = self::by_key($this->readiness(array('db_config' => $none, 'constants' => $constants)));
+            $this->assertSame($case[2], $rows['qr_secret']['status'], is_string($case[0]) ? 'length ' . strlen($case[0]) : gettype($case[0]));
+            $this->assertSame($case[2], EVC_Readiness::qr_secret_status(true, $case[0], $case[1]));
+            $this->assertSame(EVC_Qr_Token::is_derivation_secret($case[0], $case[1]), $case[2] === 'ok', 'the customer backend\'s own rule');
+            if (is_string($case[0]) && $case[0] !== '') {
+                $this->assertStringNotContainsString($case[0], EVC_Admin_Tools_Plugin::parts()['readiness_page']->html(), 'the secret is never shown');
+            }
+        }
+        $this->assertSame('missing', EVC_Readiness::qr_secret_status(false, $valid));
+    }
+
     public function test_the_readiness_checks_hold_no_till_account_service(): void {
         $readiness = $this->readiness(array('db_config' => function () {
             return null;
@@ -330,7 +355,7 @@ final class ReadinessTest extends EVC_WP_Test_Case {
                 $this->assertStringNotContainsString($secret, $html);
             }
         }
-        foreach (array('club_db', 'club_db_schema', 'flag_admin_tools', 'commerce_config', 'payment_provenance', 'lookup_key', 'bacs', 'terms_url', 'crm_tags', 'crm_woocommerce', 'crm_checkout_checkbox', 'remote_addr', 'page_cache', 'permalinks', 'timezone', 'php_version', 'wp_db_server', 'staff_account') as $key) {
+        foreach (array('club_db', 'club_db_schema', 'flag_admin_tools', 'commerce_config', 'payment_provenance', 'lookup_key', 'qr_secret', 'bacs', 'terms_url', 'crm_tags', 'crm_woocommerce', 'crm_checkout_checkbox', 'remote_addr', 'page_cache', 'permalinks', 'timezone', 'php_version', 'wp_db_server', 'staff_account') as $key) {
             $this->assertStringContainsString('data-check="' . $key . '"', $html, $key);
         }
         wp_set_current_user((int) self::factory()->user->create(array('role' => 'editor')));

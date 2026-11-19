@@ -37,6 +37,8 @@ final class EVC_Readiness {
     const PROVENANCE_VALUE = 'club_db_v1';
     /** The lookup-proof secret of the member QR / staff scan (EVC_Club_Qr_Services::is_lookup_secret: >= 32 bytes). */
     const LOOKUP_KEY_CONSTANT = 'EVC_CLUB_LOOKUP_KEY';
+    /** D22: the member-QR derivation secret (EVC_Qr_Token::is_derivation_secret: >= 32 bytes, not the lookup key). */
+    const QR_SECRET_CONSTANT = 'EVC_CLUB_QR_SECRET';
     /** The ledger table of EVC_Migrator. */
     const LEDGER_TABLE = 'evc_schema_migrations';
 
@@ -229,6 +231,7 @@ final class EVC_Readiness {
         }
         $rows[] = $this->provenance_row();
         $rows[] = $this->lookup_key_row();
+        $rows[] = $this->qr_secret_row();
         if (!function_exists('WC')) {
             $rows[] = self::row('bacs', 'Τραπεζική μεταφορά (BACS)', self::MISSING, 'Το WooCommerce δεν είναι ενεργό.');
         } else {
@@ -269,6 +272,14 @@ final class EVC_Readiness {
         return EVC_Club_Qr_Services::is_lookup_secret($value) ? self::OK : self::WRONG;
     }
 
+    /** Pure: the status of EVC_CLUB_QR_SECRET, by the customer QR backend's own rule (D22). */
+    public static function qr_secret_status(bool $defined, $value, $lookup_key = null): string {
+        if (!$defined) {
+            return self::MISSING;
+        }
+        return EVC_Qr_Token::is_derivation_secret($value, $lookup_key) ? self::OK : self::WRONG;
+    }
+
     /** The value is never shown, only whether it is the exact enabling value. */
     private function provenance_row(): array {
         list($defined, $value) = $this->constant_value(self::PROVENANCE_CONSTANT);
@@ -291,6 +302,19 @@ final class EVC_Readiness {
             self::WRONG => 'Ορίστηκε, αλλά δεν είναι έγκυρο (χρειάζεται κείμενο τουλάχιστον 32 bytes): το σκανάρισμα του QR μένει κλειστό.',
         );
         return self::row('lookup_key', 'Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)', $status, $details[$status]);
+    }
+
+    /** D22: the secret is never shown, nor its length: only present-and-valid or not. */
+    private function qr_secret_row(): array {
+        list($defined, $value) = $this->constant_value(self::QR_SECRET_CONSTANT);
+        list($lookup_defined, $lookup) = $this->constant_value(self::LOOKUP_KEY_CONSTANT);
+        $status = self::qr_secret_status($defined, $value, $lookup_defined ? $lookup : null);
+        $details = array(
+            self::OK => 'Ορίστηκε και είναι έγκυρο (τουλάχιστον 32 bytes, διαφορετικό από το κλειδί σκαναρίσματος).',
+            self::MISSING => 'Δεν έχει οριστεί: η κάρτα μέλους δεν δείχνει κωδικό QR.',
+            self::WRONG => 'Ορίστηκε, αλλά δεν είναι έγκυρο (χρειάζεται κείμενο τουλάχιστον 32 bytes, διαφορετικό από το κλειδί σκαναρίσματος): η κάρτα μέλους δεν δείχνει κωδικό QR.',
+        );
+        return self::row('qr_secret', 'Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)', $status, $details[$status]);
     }
 
     // ---- CRM ----------------------------------------------------------------------------------------------

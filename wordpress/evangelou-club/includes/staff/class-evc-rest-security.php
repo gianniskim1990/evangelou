@@ -138,21 +138,21 @@ final class EVC_Rest_Security {
         $path = wp_parse_url(home_url('/'), PHP_URL_PATH);
         $path = is_string($path) && $path !== '' ? $path : '/';
         $path = substr($path, -1) === '/' ? $path : $path . '/';
-        $segments = array_map(
-            static function (string $segment): string {
-                return strtr(rawurlencode(rawurldecode($segment)), self::PATH_KEEP);
+        // Round 7: exactly what the browser's URL.pathname shows for this path. The WHATWG URL parser keeps every
+        // «%» as it is (a valid escape in its own case, e.g. %2F or %ce, and a bare «%» too) and percent-encodes,
+        // byte by byte in upper-case hex, only the path percent-encode set: C0 controls, space, «"», «#», «<», «>»,
+        // «?», «`», «{», «}», DEL and every non-ASCII byte. Nothing is decoded first, so nothing changes meaning.
+        return (string) preg_replace_callback(
+            self::PATH_ENCODE,
+            static function (array $m): string {
+                return sprintf('%%%02X', ord($m[0]));
             },
-            explode('/', $path)
+            $path
         );
-        return implode('/', $segments);
     }
 
-    /** Characters rawurlencode() escapes but the WHATWG URL parser keeps as they are in a path. */
-    private const PATH_KEEP = array(
-        '%21' => '!', '%24' => '$', '%26' => '&', '%27' => "'", '%28' => '(', '%29' => ')', '%2A' => '*',
-        '%2B' => '+', '%2C' => ',', '%3B' => ';', '%3D' => '=', '%3A' => ':', '%40' => '@', '%5B' => '[',
-        '%5D' => ']', '%5E' => '^', '%7C' => '|',
-    );
+    /** The bytes the WHATWG URL parser percent-encodes in a path (byte-wise; no /u flag). */
+    private const PATH_ENCODE = '/[\x00-\x20"#<>?`{}\x7F-\xFF]/';
 
     /** @return array<string,string> */
     public static function security_headers(): array {

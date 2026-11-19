@@ -85,13 +85,18 @@ approval: first on **staging**, and on **production** only after the owner appro
   «Transactional» (T11). It supersedes D12's "no newsletter checkbox" for the **shop checkout**; the Club code still
   never calls FluentCRM from the onboarding (D11 / D12 code rules stand). Pending the shop owner's consent.
 - **Owner decision D21** (2026-11-19, STAGE-08 round 6): the member card shows the QR **always** when the membership
-  is active, and the «Νέο QR» button is gone. A device without the current QR (another phone, a reload with nothing
-  kept, private browsing) asks for a new one by itself (`POST {"replace": true}`), which retires the old QR at once
-  everywhere, screenshots included; a visible-again tab re-checks (at most every 30 s); failures retry with backoff
-  (5 s, 15 s, 30 s, then 60 s) under a hard client cap of 8 requests / 3 new QRs per minute. **Server unchanged:** no
-  token expiry was added (D6 `without_expiry()` stands) and the customer QR route still has no server-side rate
-  limit; see K17 and [member-qr.md](member-qr.md). Staging check: open the card on a second phone, then rescan the
-  first phone's QR at the till: «δεν βρέθηκε μέλος».
+  is active, and the «Νέο QR» button is gone. Its automatic replacement (a device without the current QR asked for a
+  new one and retired the old) is **superseded by D22**.
+- **Owner decision D22** (2026-11-19, STAGE-08 round 7, «Όχι, να μην αλλάζει ποτέ»): the member's QR is the **same on
+  every device and browser**; opening the card anywhere never revokes it; a screenshot works from any device (D6 no
+  expiry and D7 stand). The server derives the token (HMAC-SHA256 with the new secret `EVC_CLUB_QR_SECRET`, the
+  member's public id and a generation = the member's QR row count) and hands it again to that signed-in member only;
+  the database still stores only digests, so the till lookup is unchanged. **No migration 004** (no schema change).
+  A new code only after an administrator's revocation (existing REST route, no new screen). Tokens issued on
+  staging before D22 are replaced **once** by the stable token at the member's next card open (old screenshots stop
+  then, once). Client: never sends `replace`; a failed re-check keeps the QR on screen (round 7); retries pause off
+  the card. See [member-qr.md](member-qr.md). Staging check: open the card on two phones: the **same** QR on both;
+  scan both at the till: the same member.
 - **On a phone, the offer's «Πληρωμή 20 €» did not look like a button** (the owner only noticed the account link).
   Round 4: a full-width filled button; the account link below it is small.
 
@@ -107,7 +112,7 @@ read «Εντάξει» (or the «manual» items are confirmed).
 | 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);`; on **staging** also `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` (D19) | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green (this also verifies T1); apply 001 + 002 (approved for staging on 2026-10-27) and, on staging, 003 (D19, 2026-11-10). **Production:** 001, 002 and 003 each need the owner's own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: «Βάση δεδομένων του Club» and «Έκδοση σχήματος» «Εντάξει» (a «Δεν διαβάζεται» schema row means the migrations table could not be read: go back to the migrations page checks). |
 | 3 | `EVC_CLUB_MEMBERSHIP_SOURCE`, `EVC_CLUB_PMPRO_LEVEL_ID`, `EVC_CLUB_WC_PRODUCT_ID`, `EVC_CLUB_EVIDENCE_KEY`, `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` | Readiness «Κατάστημα»: all «Εντάξει» (pinned versions, product 20.00 €, sold individually, one-month level, Athens clock, BACS on), **including «Καταγραφή πληρωμών στη βάση του Club (EVC_CLUB_PAYMENT_PROVENANCE)»**: «Εντάξει» only for the exact `'club_db_v1'`; «Λάθος» or «Λείπει» means payment confirmation, the member QR and redemption stay closed. |
 | 4 | `define('EVC_CLUB_WC_COMPLETION_ENABLED', true);` | One test order by bank transfer, marked «Ολοκληρωμένη» by the shop: the member reads active ([commerce-membership-source.md](commerce-membership-source.md)). |
-| 5 | `define('EVC_CLUB_CUSTOMER_ENABLED', true);` and `EVC_CLUB_LOOKUP_KEY` (a random secret of at least 32 bytes, for the QR scan) | Readiness «Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)»: «Εντάξει» (the value is never shown). `/club-member/` shows the test member as active; the QR appears only after 003. |
+| 5 | `define('EVC_CLUB_CUSTOMER_ENABLED', true);`, `EVC_CLUB_LOOKUP_KEY` (a random secret of at least 32 bytes, for the QR scan) and (D22) `EVC_CLUB_QR_SECRET` (another, **different** random secret of at least 32 bytes, for the member's QR; never change it without reason: every member's QR changes once when it does) | Readiness «Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)» and «Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)»: «Εντάξει» (values never shown). `/club-member/` shows the test member as active; the QR appears only after 003, and is the same on a second phone. |
 | 6 | `define('EVC_CLUB_STAFF_ENABLED', true);` `define('EVC_CLUB_REDEMPTION_SOURCE', 'club_db_v1');` | Create the shared till account (Evangelou Club → Λογαριασμός ταμείου, D18); sign the tablet in at `/club-admin/`; redeem one coffee for the test member; a second one the same day is refused. |
 | 7 | `EVC_CLUB_TERMS_URL`; `define('EVC_CLUB_ONBOARDING_ENABLED', true);` | Record the checkout type: edit the WooCommerce checkout page; a «Checkout» block = Block Checkout, `[woocommerce_checkout]` or «Classic Checkout» = classic. Then the staging checks of [store-onboarding.md](store-onboarding.md) (REMOTE_ADDR, FluentCRM settings of D20, page cache, BACS-only checkout). With D20 in place: the Club join checkout shows FluentCRM's newsletter box **unticked**; a test order with the box unticked leaves the contact «Transactional», ticked makes it subscribed (classic checkout only, T6). |
 | 8 | The six tag constants; `define('EVC_CLUB_FLUENTCRM_SYNC_ENABLED', true);` | Readiness «Ετικέτες FluentCRM: Εντάξει» (verified); Tools → «Evangelou Club — FluentCRM» shows counts only. |
@@ -164,7 +169,7 @@ Each with the owner decision that accepted it or the mitigation in place.
 | K13 | **A tablet that does not confirm sign-out** keeps its server session until the 30-minute inactivity limit. | Bounded by the session policy; «Αποσύνδεση από όλες τις συσκευές» ends it at once. |
 | K15 | **Plain permalinks** on a site: the pretty Club URLs are a 404. | Round 4: the plugin builds plain URLs then, and readiness reads «Λάθος» with the fix (T9). |
 | K16 | **FluentCRM's checkout checkbox is not shown on the Block Checkout** (D20). | Known FluentCRM limitation (acknowledged by its support, 2025-09). On a Block Checkout no consent is collected at the checkout; the D20 «Transactional» default keeps buyers out of the newsletter. Check on staging (T6). |
-| K17 | **D21: opening the card on a second device retires the first device's QR** (and any screenshot of it); two devices used in turn replace each other's QR. There is no token expiry, so a screenshot of the *current* QR keeps working until the next renewal. The customer `POST /me/qr` has no server-side rate limit; only the app's own cap (8 requests / 3 new QRs per minute per page) applies. | Owner decision D21 (2026-11-19); one coffee per Athens day and the staff's first-name check still limit the damage. A server-side limit or a token lifetime would be a new owner decision. |
+| K17 | **Resolved by D22 (2026-11-19).** Was: opening the card on a second device retired the first device's QR. Now the QR is the same on every device and only an administrator's revocation changes it. What remains: a screenshot of the QR keeps working on any device until that revocation (D6 no expiry, D7 accepted); `EVC_CLUB_QR_SECRET` is a new secret to keep (a leak lets someone compute members' codes if they also know the member ids; changing it gives every member a new code once); the customer `POST /me/qr` has no server-side rate limit (it now writes only on a first QR, after a revocation, or once for a pre-D22 token), only the app's cap of 8 requests / 3 POSTs per minute. | One coffee per Athens day and the staff's first-name check limit the damage; the secret lives only in wp-config.php (packager guard: no secret in a shipped file) and is never logged or shown. A token lifetime or a server-side limit would be a new owner decision. |
 | K14 | **A page cache** could serve the join page to the wrong visitor. | `DONOTCACHEPAGE` + no-cache headers; readiness lists page-cache plugins; exclude `/club/join/` and `/club-member/` by hand if the host cache ignores them. |
 
 ## 6. Shipped-code TODO / FIXME
@@ -235,11 +240,16 @@ FluentCRM με το WooCommerce, το «Default Contact Status» γίνεται 
 αγοραστής γίνεται συνδρομητής newsletter). Περιμένουμε τη συγκατάθεση του καταστήματος μέσω του τεχνικού πριν
 γίνει στο κανονικό site. Προσοχή: το FluentCRM δείχνει το κουτάκι μόνο στο κλασικό checkout, όχι στο Block Checkout.
 
-**Απόφαση D21 (19/11/2026):** στην κάρτα μέλους ο QR φαίνεται πάντα και το κουμπί «Νέο QR» καταργήθηκε. Αν το
-κινητό δεν έχει τον ισχύοντα κωδικό (άλλο κινητό, ανανέωση σελίδας), η εφαρμογή βγάζει μόνη της νέο, και ο παλιός,
-μαζί με κάθε στιγμιότυπό του, σταματά αμέσως να δουλεύει στο ταμείο. Ο κωδικός δεν λήγει με τον χρόνο (αυτό θα ήταν
-νέα απόφαση). Δοκιμή στο staging: ανοίξτε την κάρτα σε δεύτερο κινητό και σαρώστε τον κωδικό του πρώτου· πρέπει να
-βγει «δεν βρέθηκε μέλος».
+**Απόφαση D21 (19/11/2026):** στην κάρτα μέλους ο QR φαίνεται πάντα και το κουμπί «Νέο QR» καταργήθηκε.
+
+**Απόφαση D22 (19/11/2026):** «Όχι, να μην αλλάζει ποτέ». Ο QR του μέλους είναι **ο ίδιος σε κάθε συσκευή** και
+δεν αλλάζει όταν ανοίγει την κάρτα του αλλού. Στιγμιότυπο οθόνης ισχύει από οποιαδήποτε συσκευή. Νέος κωδικός
+βγαίνει μόνο αν ο διαχειριστής ακυρώσει τον παλιό (π.χ. χαμένο κινητό). Χρειάζεται **ένα νέο μυστικό** στο
+`wp-config.php`, το `EVC_CLUB_QR_SECRET` (τουλάχιστον 32 τυχαίοι χαρακτήρες, **διαφορετικό** από το
+`EVC_CLUB_LOOKUP_KEY`)· χωρίς αυτό η κάρτα δεν δείχνει QR. **Δεν** χρειάζεται νέα μετάβαση βάσης. Στο staging, οι
+QR που βγήκαν πριν από το D22 αλλάζουν **μία φορά** στο επόμενο άνοιγμα της κάρτας και μετά μένουν ίδιοι. Δοκιμή
+στο staging: ανοίξτε την κάρτα σε δύο κινητά· πρέπει να δείχνουν τον ίδιο QR, και η σάρωση και των δύο στο ταμείο
+βρίσκει το ίδιο μέλος.
 
 **Γνωστοί κίνδυνοι** που έχετε αποφασίσει ή έχουν μέτρα: δείτε τον πίνακα «Known risks» (K1–K17) παραπάνω· ο
 τεχνικός μπορεί να σας τους εξηγήσει έναν έναν.

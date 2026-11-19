@@ -12,8 +12,9 @@
  *   - a plain base sits exactly at the site's home path (`homePath`, e.g. "/" or "/sub/", sent by the WordPress
  *     shell as wp_parse_url(home_url('/'), PHP_URL_PATH)) or at its index.php, and carries exactly one parameter that
  *     PHP reads as rest_route, equal to the namespace. Without a valid homePath a plain base is refused;
- *   - a pretty base ends with the namespace and carries NO parameter that PHP reads as rest_route; with a valid
- *     homePath its path must also start with that home path (round 6).
+ *   - a pretty base ends with the namespace and carries NO parameter that PHP reads as rest_route; when a homePath
+ *     is sent its path must also start with that home path (round 6), and a homePath that is sent but not valid
+ *     refuses the base (round 7, fail closed). Only a config with no homePath at all (the Vercel demo) skips it.
  *
  * Round 6: a tab, CR or LF anywhere in the base is refused: the WHATWG URL parser strips them, so «/.\t./» would
  * slip past the dot-segment check and then be normalised away. A relative base must be root-relative (exactly one
@@ -106,8 +107,11 @@ export function sameOriginRestBase(value: unknown, origin: string, namespace: st
   const path = url.pathname.replace(/\/+$/, "");
   if (!path.endsWith(namespace)) return null;
   // Round 6: under the site's home path when the shell sent one (a subfolder install: /sub/wp-json/…).
-  const home = homePath === undefined ? null : validHomePath(homePath, origin);
-  if (home !== null && !path.startsWith(home)) return null;
+  // Round 7: a homePath that was sent but is not valid refuses the pretty base too (fail closed, like a plain base).
+  if (homePath !== undefined) {
+    const home = validHomePath(homePath, origin);
+    if (home === null || !path.startsWith(home)) return null;
+  }
   url.pathname = path;
   return url.href;
 }

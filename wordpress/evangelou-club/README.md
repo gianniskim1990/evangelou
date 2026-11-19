@@ -831,11 +831,16 @@ applied until the technician sets the target to 3 after the owner's go-ahead.
 Owner decisions 2026-11-04 (later): successful tablet re-logins stay unlimited, so each new login
 gives about 10 more failed scans («Όχι, μένει έτσι», an accepted risk, no code); QR revocation stays
 administrator-only and the tablet only scans («Όχι, μόνο ο διαχειριστής»).
+Owner decisions 2026-11-19: D21 the card always shows the QR (no «Νέο QR» button); **D22** («Όχι, να μην
+αλλάζει ποτέ») the QR is the SAME on every device and browser, opening the card never revokes it, and a
+screenshot works from any device; only an administrator's revocation gives a new code.
 
 - **Customer:** `GET|POST evangelou-club-customer/v1/me/qr`, only with `EVC_CLUB_CUSTOMER_ENABLED` AND
-  `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`. A member gets one QR; a second request without
-  `replace: true` is `409 qr_exists`. The plaintext is returned ONLY at issue (digests are stored); the app
-  keeps it.
+  `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` AND (D22) a valid `EVC_CLUB_QR_SECRET` (≥ 32 bytes, not equal
+  to `EVC_CLUB_LOOKUP_KEY`; fail closed, readiness row `qr_secret`). `POST {}` returns the member's stable
+  token: `EVC_Qr_Token::derive()` = HMAC-SHA256 over the member's public id and generation (the member's QR
+  row count), so it is the same on every call and device; `replace` from older apps is ignored. Only digests
+  are stored (no migration 004); a pre-D22 random token is replaced once. GET never returns a token.
 - **Staff:** `POST evangelou-club/v1/members/lookup` → `{member:{member_id, first_name}, status:
   active|used_today|inactive}`, one generic 404 for unknown / replaced / revoked / disabled. Only with
   everything the STAGE-05A redeem route needs, plus migration 003 and the new wp-config secret
@@ -848,12 +853,14 @@ administrator-only and the tablet only scans («Όχι, μόνο ο διαχει
     the v1 list (including «Άλλος καφές»). Shown ONLY while `GET /session` reports `features.qr_lookup:
     true`, which happens only when every lookup gate passes now (constants, key, connection, schema ≥ 3).
     No revoke on the tablet.
-  - **Member card** (`app/src/customer/`): the real QR (own encoder), `409 qr_exists`, and «Νέο QR» with
-    a Greek confirmation. Owner decision 2026-11-04 «Ναι, να τον θυμάται»: the phone remembers the QR.
+  - **Member card** (`app/src/customer/`): the real QR (own encoder), always shown (D21: the «Νέο QR»
+    button and its confirmation question are gone), the same on every device (D22: the app only ever sends
+    `POST {}`). Owner decision 2026-11-04 «Ναι, να τον θυμάται»: the phone remembers the QR.
     It lives in `qrStore.ts`, the only file allowed to use browser storage (`localStorage`; packager
     guard `storage-guard.mjs`), keyed by hashes of the account and issued_at. It is shown only for the
-    `issued_at` the server reports, and deleted on sign-out, signed_out, not_member, member_disabled,
-    route off and replace. The server never re-sends a token.
+    `issued_at` the server reports (or, round 7, as «unchecked» while the server cannot be reached), and
+    deleted on sign-out, signed_out, not_member, member_disabled and route off. A failed re-check never
+    takes a shown QR off the screen; retries pause while the member is off the card.
   - **Devices** (owner decision 2026-11-04 «Δεν ξέρω ακόμα, να δουλεύει σε όλες»): iPad, Android and a
     USB hand scanner. The camera uses `BarcodeDetector`, else jsQR loaded lazily as its own chunk on
     in-memory downscaled frames. A hand scanner on the Greek layout or with Caps Lock is corrected, and

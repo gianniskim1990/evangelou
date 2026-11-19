@@ -9,6 +9,10 @@ import { encodeQr } from "./qrEncode";
  * Owner decision D21 (2026-11-19): the QR is always shown (or «Φόρτωση…»
  * while one is fetched); no «Νέο QR» button. Only the error states offer a
  * small «Δοκιμάστε ξανά» link (memberQr.ts retries by itself, within limits).
+ * Owner decision D22 (2026-11-19): the code is the same on every device and
+ * never changes when the card is opened. Round 7: when the server cannot be
+ * reached the phone's own copy is shown as «unchecked», saying plainly that it
+ * was not checked now and will be checked again (`online` re-checks at once).
  */
 
 
@@ -49,7 +53,17 @@ function body(state: MemberQrState, flow: MemberQrFlow) {
           <div className="inline-block rounded-[10px] bg-white p-1">
             <QrSvg text={state.token} size={196} />
           </div>
-          <p className="t-small mt-3 text-[var(--ink-2)]">Ο κωδικός ανανεώνεται αυτόματα· μόλις ανανεωθεί, ο παλιός και κάθε στιγμιότυπο οθόνης του δεν ισχύουν πια στο ταμείο.</p>
+          <p className="t-small mt-3 text-[var(--ink-2)]">Ο κωδικός σας μένει ίδιος σε όλες τις συσκευές σας και δεν αλλάζει όταν ανοίγετε την κάρτα.</p>
+          <p className="t-small mt-1 text-[var(--ink-2)]">Στιγμιότυπο οθόνης ισχύει κανονικά στο ταμείο, από όποια συσκευή κι αν το δείξετε.</p>
+        </div>
+      );
+    case "unchecked":
+      return (
+        <div className="text-center">
+          <div className="inline-block rounded-[10px] bg-white p-1">
+            <QrSvg text={state.token} size={196} />
+          </div>
+          <p className="t-small mt-3 text-[var(--ink-2)]">Δεν μπορέσαμε να ελέγξουμε τον κωδικό αυτή τη στιγμή. Δείχνουμε αυτόν που είναι αποθηκευμένος σε αυτή τη συσκευή· θα τον ελέγξουμε ξανά μόλις γίνει δυνατό.</p>
         </div>
       );
     case "not_member":
@@ -82,6 +96,8 @@ function announce(state: MemberQrState): { status: string; alert: string } {
       return { status: "Φόρτωση του κωδικού σας.", alert: "" };
     case "shown":
       return { status: "Ο κωδικός QR σας εμφανίζεται.", alert: "" };
+    case "unchecked":
+      return { status: "Εμφανίζεται ο αποθηκευμένος κωδικός QR σας, χωρίς έλεγχο αυτή τη στιγμή.", alert: "" };
     case "unavailable":
     case "error":
     case "signed_out":
@@ -93,7 +109,8 @@ function announce(state: MemberQrState): { status: string; alert: string } {
 
 export function MemberQrPanel({ flow }: { flow: MemberQrFlow }) {
   const state = useSyncExternalStore(flow.subscribe, flow.getState);
-  // D21: a tab that becomes visible again asks the server whether its code is still the active one.
+  // D21: a tab that becomes visible again (or comes back online, round 7) asks the server whether its code is
+  // still the active one. The listeners go with the panel (CustomerApp also pauses the flow off the card).
   useEffect(() => {
     const doc = globalThis.document;
     if (!doc) return;
@@ -102,9 +119,11 @@ export function MemberQrPanel({ flow }: { flow: MemberQrFlow }) {
     };
     doc.addEventListener("visibilitychange", onVisible);
     globalThis.addEventListener?.("focus", onVisible);
+    globalThis.addEventListener?.("online", onVisible);
     return () => {
       doc.removeEventListener("visibilitychange", onVisible);
       globalThis.removeEventListener?.("focus", onVisible);
+      globalThis.removeEventListener?.("online", onVisible);
     };
   }, [flow]);
   const said = announce(state);

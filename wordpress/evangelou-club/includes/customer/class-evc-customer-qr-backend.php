@@ -10,30 +10,43 @@ defined('ABSPATH') || exit;
  *   3. the Club DB constants (EVC_Db_Config);  4. the Club DB connects;  5. schema MAX(version) >= 2.
  * Any failure → 'unavailable' (the route answers 503 {"result":"unavailable"}).
  *
+ * Every call ALSO needs (step 3b, before any connection) a valid EVC_CLUB_QR_SECRET: a string of at least
+ * 32 bytes that differs from EVC_CLUB_LOOKUP_KEY (EVC_Qr_Token::is_derivation_secret); without it the route
+ * answers 'unavailable' (fail closed, REASON_QR_SECRET).
+ *
  * Rules:
  *  - Only a WordPress user with an `evc_members` row (created by STAGE-05B after a recorded payment)
  *    has a QR. A QR is identity only: it never grants a coffee (the redeem route re-checks).
- *  - D6: no age limit; a QR changes ONLY on replace = true or when staff revoke it. Since owner decision
- *    D21 (2026-11-19) the customer app sends replace = true by itself when its device lacks the current
- *    QR (no «Νέο QR» button); this server code is unchanged.
- *    issue() without replace when a QR is already active answers 'qr_exists' and changes nothing.
- *  - Only the SHA-256 digest is stored, so the plaintext is returned ONLY by issue() (first QR or
- *    replacement). The customer app keeps it on the device (D6/D7: a screenshot works; one coffee per
- *    Athens day limits any loss). status() never returns a token, only the active QR's issue time,
- *    so the app can tell that its stored QR is still the current one.
- *  - The member is ALWAYS the caller's own (EVC_Qr_Issuance_Requester::member_self from the server
- *    session; the controller passes get_current_user_id()).
+ *  - Owner decision D22 (2026-11-19, supersedes the client side of D21): the member's QR is the SAME on
+ *    every device and browser and opening the card never changes it. issue() returns the member's stable
+ *    token (EVC_Qr_Token::derive over the member's public id and generation) every time it is asked:
+ *      active row == the stable token of the current generation  -> that token, nothing written;
+ *      no active row (first QR, or after an administrator's revocation) -> the token of the NEXT
+ *        generation is stored (a revocation therefore always gives a new code);
+ *      an active row that is not the stable token (a random token issued before D22, e.g. on staging, or
+ *        one derived under an earlier secret) -> replaced ONCE by the stable token of the next
+ *        generation; from then on the same token comes back on every device.
+ *    The customer can no longer replace the QR: `replace` is accepted for older cached apps and ignored.
+ *    Only an administrator's revocation (EVC_Club_Lookup_Backend::revoke_for_wp_user) starts a new code.
+ *  - D6 (no age limit) and D7 (a screenshot works) are unchanged. Only the SHA-256 digest is stored; the
+ *    plaintext is derived again for the signed-in member only, and returned ONLY by issue() (POST, no-store).
+ *    status() never returns a token, only the active QR's issue time.
+ *  - The member is ALWAYS the caller's own (the controller passes get_current_user_id(); the member row is
+ *    read by that WordPress user id), so one member can never receive another member's token.
  * Logs: a fixed reason / stage plus an exception class only; never a token, digest, id or name.
  * The constructor parameters are TEST seams; the shipped wiring passes none (packager).
  */
 final class EVC_Customer_Qr_Backend {
     const PROVENANCE = 'club_db_v1';
     const MIN_SCHEMA_VERSION = 2;
+    /** issue(): how often a lost race with another device of the same member is read again. */
+    const STABLE_TRIES = 2;
 
     const REASON_ENVIRONMENT = 'environment_unreadable';
     const REASON_CUSTOMER = 'customer_flag_off';
     const REASON_PROVENANCE = 'payment_provenance_not_recorded';
     const REASON_DB_CONFIG = 'club_db_not_configured';
+    const REASON_QR_SECRET = 'qr_secret_missing';
     const REASON_CONNECT = 'club_db_unavailable';
     const REASON_SCHEMA = 'club_db_schema_too_old';
     const REASON_FAILED = 'qr_failed';
@@ -48,6 +61,8 @@ final class EVC_Customer_Qr_Backend {
     private $log;
     /** @var string|null */
     private $last_reason = null;
+    /** @var string|null the derivation secret of the current request (set by open(); never logged) */
+    private $secret = null;
 
     public function __construct(?callable $environment = null, ?callable $connect = null, ?EVC_Clock_Source $clock = null, ?callable $log = null) {
         $this->environment = $environment ?? array(__CLASS__, 'constants');
@@ -65,12 +80,14 @@ final class EVC_Customer_Qr_Backend {
         return defined('EVC_CLUB_PAYMENT_PROVENANCE') && constant('EVC_CLUB_PAYMENT_PROVENANCE') === self::PROVENANCE;
     }
 
-    /** @return array{customer:mixed,provenance:mixed,db:?EVC_Db_Config} */
+    /** @return array{customer:mixed,provenance:mixed,db:?EVC_Db_Config,qr_secret:mixed,lookup_key:mixed} */
     public static function constants(): array {
         return array(
             'customer' => defined(EVC_Customer_Feature::CONSTANT) ? constant(EVC_Customer_Feature::CONSTANT) : null,
             'provenance' => defined('EVC_CLUB_PAYMENT_PROVENANCE') ? constant('EVC_CLUB_PAYMENT_PROVENANCE') : null,
             'db' => EVC_Db_Config::from_constants(),
+            'qr_secret' => defined(EVC_Qr_Token::SECRET_CONSTANT) ? constant(EVC_Qr_Token::SECRET_CONSTANT) : null,
+            'lookup_key' => defined(EVC_Club_Qr_Services::LOOKUP_KEY_CONSTANT) ? constant(EVC_Club_Qr_Services::LOOKUP_KEY_CONSTANT) : null,
         );
     }
 
@@ -109,15 +126,20 @@ final class EVC_Customer_Qr_Backend {
     }
 
     /**
+     * D22: the signed-in member's stable QR (see the class comment). There is no `replace`: a customer can
+     * never revoke or change the QR.
+     *
      * @return array{result:string,token?:string,issued_at_utc?:string}
-     *   result: issued (+ token, issued_at_utc) | unavailable | not_member | member_disabled | qr_exists
+     *   result: issued (+ token, issued_at_utc) | unavailable | not_member | member_disabled
      *           | concurrent_change | outcome_unknown
      */
-    public function issue(int $wp_user_id, bool $replace): array {
+    public function issue(int $wp_user_id): array {
         $db = $this->open();
         if ($db === null) {
             return array('result' => 'unavailable');
         }
+        $secret = (string) $this->secret;
+        $this->secret = null;
         try {
             $store = EVC_Club_Qr_Services::store($db);
             $member = $store->find_member_by_wp_user($wp_user_id);
@@ -127,28 +149,36 @@ final class EVC_Customer_Qr_Backend {
             if ($member['status'] !== 'enabled') {
                 return array('result' => 'member_disabled');
             }
-            if (!$replace && $store->active_token_hash($member['id']) !== null) {
-                return array('result' => 'qr_exists');
-            }
-            $log = $this->log;
-            $result = EVC_Club_Qr_Services::token_service($db, $this->clock, function (array $d) use ($log) {
-                $log('Evangelou Club: customer QR error (stage=' . self::safe($d['stage'] ?? null) . ', exception=' . self::safe($d['exception'] ?? null) . ').');
-            }, !$replace)->issue(EVC_Qr_Issuance_Requester::member_self($wp_user_id), $member['member_public_id']);
-            switch ($result->kind()) {
-                case EVC_Qr_Token_Result::ISSUED:
-                    return array('result' => 'issued', 'token' => (string) $result->token(), 'issued_at_utc' => (string) $result->issued_at_utc());
-                case EVC_Qr_Token_Result::CONCURRENT_CHANGE:
-                    // Another device of the same customer wrote first (without replace: a QR now exists).
-                    return array('result' => 'concurrent_change');
-                case EVC_Qr_Token_Result::OUTCOME_UNKNOWN:
+            // Two tries: another device of the same member may store the same stable token at the same moment.
+            for ($try = 0; $try < self::STABLE_TRIES; $try++) {
+                $active = $store->active_token_hash($member['id']);
+                $generation = $store->generation($member['id']);
+                if ($active !== null && $generation >= 1) {
+                    $token = EVC_Qr_Token::derive($secret, $member['member_public_id'], $generation);
+                    if (hash_equals($active, EVC_Qr_Token::digest($token))) {
+                        $row = $store->find_token_by_hash($active);
+                        if ($row !== null && $row['status'] === 'active' && $row['member_id'] === $member['id']) {
+                            return array('result' => 'issued', 'token' => $token, 'issued_at_utc' => $row['issued_at_utc']);
+                        }
+                    }
+                }
+                // None yet (first QR / after a revocation) or not the stable one (before D22): the next generation.
+                $token = EVC_Qr_Token::derive($secret, $member['member_public_id'], $generation + 1);
+                $now = EVC_Clock::to_utc($this->clock->now())->format('Y-m-d H:i:s.u');
+                try {
+                    $store->rotate($member['id'], $active, EVC_Qr_Token::digest($token), $now);
+                    return array('result' => 'issued', 'token' => $token, 'issued_at_utc' => $now);
+                } catch (EVC_Qr_Rotation_Conflict $e) {
+                    continue;
+                } catch (EVC_Db_Duplicate_Key_Exception $e) {
+                    continue;
+                } catch (EVC_Db_Commit_Unknown_Exception $e) {
+                    // Asking again is safe: the next call finds the stored stable token or stores it.
+                    $this->refuse(self::REASON_FAILED, $e);
                     return array('result' => 'outcome_unknown');
-                case EVC_Qr_Token_Result::MEMBER_DISABLED:
-                    return array('result' => 'member_disabled');
-                default:
-                    // forbidden / member_not_found / invalid_request cannot happen for the caller's own
-                    // row read just above; server_error and anything else: unavailable.
-                    return array('result' => 'unavailable');
+                }
             }
+            return array('result' => 'concurrent_change');
         } catch (Throwable $e) {
             $this->refuse(self::REASON_FAILED, $e);
             return array('result' => 'unavailable');
@@ -158,6 +188,7 @@ final class EVC_Customer_Qr_Backend {
     /** The gated, prepared Club DB connection for this request, or null (reason logged). */
     private function open(): ?EVC_Club_Db {
         $this->last_reason = null;
+        $this->secret = null;
         try {
             $env = ($this->environment)();
         } catch (Throwable $e) {
@@ -176,6 +207,10 @@ final class EVC_Customer_Qr_Backend {
         if (!$config instanceof EVC_Db_Config) {
             return $this->refuse(self::REASON_DB_CONFIG);
         }
+        // D22: no derivation secret, no QR (fail closed, before any connection).
+        if (!EVC_Qr_Token::is_derivation_secret($env['qr_secret'] ?? null, $env['lookup_key'] ?? null)) {
+            return $this->refuse(self::REASON_QR_SECRET);
+        }
         try {
             $db = ($this->connect)($config);
             if (!$db instanceof EVC_Club_Db) {
@@ -193,6 +228,7 @@ final class EVC_Customer_Qr_Backend {
         if ($row === null || $row['v'] === null || (int) $row['v'] < self::MIN_SCHEMA_VERSION) {
             return $this->refuse(self::REASON_SCHEMA);
         }
+        $this->secret = $env['qr_secret'];
         return $db;
     }
 

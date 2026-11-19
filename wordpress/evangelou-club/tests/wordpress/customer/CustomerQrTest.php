@@ -5,12 +5,17 @@
  * customer flag ON, EVC_CLUB_PAYMENT_PROVENANCE UNDEFINED (this process, the shipped default):
  *  - the shipped wiring registers no QR route at all;
  *  - through the backend's TEST seams (environment / connect / clock / log) on a disposable, migrated
- *    Club DB: every gate, own-account only, first QR, D6 "same until a new one is asked for",
- *    replacement, the plaintext only at issue, no token in logs.
+ *    Club DB: every gate, own-account only, owner decision D22 (the SAME token on every device, never
+ *    replaced by the customer; a new one only after an administrator's revocation; an older random
+ *    token replaced once), fail closed without EVC_CLUB_QR_SECRET, the plaintext only at POST, no token
+ *    or secret in logs.
  * The real wiring with the constant set is in tests/wordpress/commerce (CI only).
  */
 final class CustomerQrTest extends EVC_WP_Test_Case {
     const QR = '/evangelou-club-customer/v1/me/qr';
+    /** Test-only derivation secret (D22); a real site keeps its own in wp-config.php. */
+    const SECRET = 'evc-test-only-qr-secret-0123456789abcdef';
+    const LOOKUP = 'evc-test-only-lookup-key-0123456789abcdef';
 
     /** @var EVC_Test_Database[] */
     private $databases = array();
@@ -58,7 +63,7 @@ final class CustomerQrTest extends EVC_WP_Test_Case {
             $this->club = $this->club ?? $this->database();
             $db = $this->club->config();
         }
-        return array('customer' => true, 'provenance' => 'club_db_v1', 'db' => $db);
+        return array('customer' => true, 'provenance' => 'club_db_v1', 'db' => $db, 'qr_secret' => self::SECRET, 'lookup_key' => self::LOOKUP);
     }
 
     private function use_backend(?array $environment = null): EVC_Customer_Qr_Backend {
@@ -98,6 +103,19 @@ final class CustomerQrTest extends EVC_WP_Test_Case {
         return (int) $db->fetch_one('SELECT id FROM evc_members WHERE wp_user_id = ?', array($wp_user_id))['id'];
     }
 
+    private function public_id(int $member_id): string {
+        return (string) $this->db()->fetch_one('SELECT member_public_id FROM evc_members WHERE id = ?', array($member_id))['member_public_id'];
+    }
+
+    /** POST /me/qr as a fresh "device": a new login session and its own nonce. */
+    private function device_token(int $user): string {
+        wp_set_current_user(0);
+        $this->login_as($user);
+        $r = $this->rest('POST', self::QR, array(), $this->nonce());
+        $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+        return $r->get_data()['qr']['token'];
+    }
+
     private function rows(int $member_id): array {
         return $this->db()->fetch_all('SELECT token_hash, status FROM evc_qr_tokens WHERE member_id = ? ORDER BY id', array($member_id));
     }
@@ -110,7 +128,7 @@ final class CustomerQrTest extends EVC_WP_Test_Case {
         $this->assertSame(404, $this->rest('POST', self::QR, array(), $this->nonce())->get_status());
     }
 
-    public function test_the_first_qr_is_issued_once_kept_until_a_new_one_is_asked_for_and_never_read_back(): void {
+    public function test_d22_the_same_token_on_every_device_and_never_read_back_by_get(): void {
         $this->use_backend();
         $user = $this->customer();
         $member = $this->member($user);
@@ -124,45 +142,98 @@ final class CustomerQrTest extends EVC_WP_Test_Case {
         $qr = $first->get_data()['qr'];
         $this->assertSame(array('state', 'token', 'issued_at'), array_keys($qr));
         $this->assertTrue(EVC_Qr_Token::is_valid_format($qr['token']));
+        $this->assertSame(EVC_Qr_Token::derive(self::SECRET, $this->public_id($member), 1), $qr['token'], 'derived: generation 1');
         $this->assertSame('2026-11-04T12:00:00+02:00', $qr['issued_at'], 'Athens time with offset');
         $this->assertSame('no-store, private, max-age=0', $first->get_headers()['Cache-Control']);
         $this->assertSame(array(array('token_hash' => EVC_Qr_Token::digest($qr['token']), 'status' => 'active')), $this->rows($member), 'only the digest is stored');
 
         $status = $this->rest('GET', self::QR, null, $this->nonce());
-        $this->assertSame(array('result' => 'ok', 'qr' => array('state' => 'active', 'issued_at' => '2026-11-04T12:00:00+02:00')), $status->get_data(), 'never the token again');
+        $this->assertSame(array('result' => 'ok', 'qr' => array('state' => 'active', 'issued_at' => '2026-11-04T12:00:00+02:00')), $status->get_data(), 'never the token in a GET');
 
         $this->clock->set('2027-11-04T10:00:00Z'); // D6: no age limit
-        $again = $this->rest('POST', self::QR, array(), $this->nonce());
-        $this->assertEnvelope($again, 409, 'qr_exists');
-        $this->assertCount(1, $this->rows($member), 'nothing replaced without asking');
-        $this->assertSame('active', $this->rest('GET', self::QR, null, $this->nonce())->get_data()['qr']['state']);
-
-        $new = $this->rest('POST', self::QR, array('replace' => true), $this->nonce());
-        $this->assertSame(200, $new->get_status());
-        $token = $new->get_data()['qr']['token'];
-        $this->assertNotSame($qr['token'], $token);
-        $rows = $this->rows($member);
-        $this->assertSame(array('revoked', 'active'), array_column($rows, 'status'));
-        $this->assertSame(EVC_Qr_Token::digest($token), $rows[1]['token_hash']);
-
-        $false = $this->rest('POST', self::QR, array('replace' => false), $this->nonce());
-        $this->assertEnvelope($false, 409, 'qr_exists');
+        $phone = $this->device_token($user);
+        $laptop = $this->device_token($user);
+        $this->assertSame($qr['token'], $phone, 'a second device gets the SAME token');
+        $this->assertSame($qr['token'], $laptop, 'and a third');
+        // Older cached apps may still send replace: accepted, ignored (a customer never revokes).
+        foreach (array(array('replace' => true), array('replace' => false)) as $body) {
+            $r = $this->rest('POST', self::QR, $body, $this->nonce());
+            $this->assertSame(200, $r->get_status());
+            $this->assertSame($qr['token'], $r->get_data()['qr']['token'], wp_json_encode($body));
+            $this->assertSame('2026-11-04T12:00:00+02:00', $r->get_data()['qr']['issued_at'], 'the issue time of the stored row');
+        }
+        $this->assertSame(array(array('token_hash' => EVC_Qr_Token::digest($qr['token']), 'status' => 'active')), $this->rows($member), 'nothing was written again');
         $dump = implode("\n", $this->log);
         $this->assertStringNotContainsString($qr['token'], $dump);
-        $this->assertStringNotContainsString($token, $dump);
+        $this->assertStringNotContainsString(self::SECRET, $dump);
     }
 
-    public function test_after_a_revocation_the_next_request_gets_a_new_qr_without_replace(): void {
+    public function test_d22_only_an_administrators_revocation_gives_a_new_token_and_it_then_stays(): void {
         $this->use_backend();
         $user = $this->customer();
         $member = $this->member($user);
-        $this->login_as($user);
-        $first = $this->rest('POST', self::QR, array(), $this->nonce())->get_data()['qr']['token'];
+        $first = $this->device_token($user);
         (new EVC_Sql_Qr_Token_Store($this->db()))->revoke($member, EVC_Qr_Token::digest($first), '2026-11-04 10:30:00.000000');
         $this->assertSame('none', $this->rest('GET', self::QR, null, $this->nonce())->get_data()['qr']['state']);
-        $second = $this->rest('POST', self::QR, array(), $this->nonce());
-        $this->assertSame(200, $second->get_status());
-        $this->assertNotSame($first, $second->get_data()['qr']['token']);
+        $second = $this->device_token($user);
+        $this->assertNotSame($first, $second, 'a new code after the revocation');
+        $this->assertSame(EVC_Qr_Token::derive(self::SECRET, $this->public_id($member), 2), $second, 'generation 2');
+        $this->assertSame($second, $this->device_token($user), 'and then the same on every device again');
+        $this->assertSame(array('revoked', 'active'), array_column($this->rows($member), 'status'));
+    }
+
+    public function test_d22_an_older_random_token_is_replaced_by_the_stable_one_exactly_once(): void {
+        $this->use_backend();
+        $user = $this->customer();
+        $member = $this->member($user);
+        $legacy = EVC_Qr_Token::mint();
+        (new EVC_Sql_Qr_Token_Store($this->db()))->rotate($member, null, EVC_Qr_Token::digest($legacy), '2026-11-03 08:00:00.000000');
+        $stable = $this->device_token($user);
+        $this->assertNotSame($legacy, $stable);
+        $this->assertSame(EVC_Qr_Token::derive(self::SECRET, $this->public_id($member), 2), $stable);
+        $this->assertSame(array(array('token_hash' => EVC_Qr_Token::digest($legacy), 'status' => 'revoked'), array('token_hash' => EVC_Qr_Token::digest($stable), 'status' => 'active')), $this->rows($member));
+        $this->assertSame($stable, $this->device_token($user));
+        $this->assertSame($stable, $this->device_token($user));
+        $this->assertCount(2, $this->rows($member), 'replaced once, never again');
+    }
+
+    public function test_d22_a_member_never_receives_another_members_token(): void {
+        $this->use_backend();
+        $a = $this->customer();
+        $b = $this->customer();
+        $ma = $this->member($a);
+        $mb = $this->member($b);
+        $ta = $this->device_token($a);
+        $tb = $this->device_token($b);
+        $this->assertNotSame($ta, $tb);
+        $this->assertSame(EVC_Qr_Token::derive(self::SECRET, $this->public_id($ma), 1), $ta);
+        $this->assertSame(EVC_Qr_Token::derive(self::SECRET, $this->public_id($mb), 1), $tb);
+        $this->assertSame($tb, $this->device_token($b), 'B again: still B\'s own');
+        $this->assertSame(array(array('token_hash' => EVC_Qr_Token::digest($ta), 'status' => 'active')), $this->rows($ma), 'A untouched by B');
+    }
+
+    public function test_d22_without_a_valid_secret_the_route_fails_closed_before_any_connection(): void {
+        $user = $this->customer();
+        $member = $this->member($user);
+        $this->login_as($user);
+        $base = $this->environment();
+        foreach (array(array('qr_secret' => null), array('qr_secret' => ''), array('qr_secret' => str_repeat('k', 31)), array('qr_secret' => 12345678901234567890123456789012), array('qr_secret' => self::LOOKUP)) as $override) {
+            $this->connects = 0;
+            $backend = $this->use_backend(array_merge($base, $override));
+            foreach (array(array('GET', null), array('POST', array())) as $call) {
+                $r = $this->rest($call[0], self::QR, $call[1], $this->nonce());
+                $this->assertSame(503, $r->get_status(), wp_json_encode($override));
+                $this->assertSame(array('result' => 'unavailable'), $r->get_data());
+            }
+            $this->assertSame(EVC_Customer_Qr_Backend::REASON_QR_SECRET, $backend->last_reason());
+            $this->assertSame(0, $this->connects, 'no connection without the secret');
+        }
+        $this->assertSame(array(), $this->rows($member), 'nothing written');
+        $this->assertTrue(EVC_Qr_Token::is_derivation_secret(str_repeat('k', 32)));
+        $this->assertTrue(EVC_Qr_Token::is_derivation_secret(self::SECRET, self::LOOKUP));
+        $this->assertFalse(EVC_Qr_Token::is_derivation_secret(self::LOOKUP, self::LOOKUP), 'never the lookup key');
+        $dump = implode("\n", $this->log);
+        $this->assertStringNotContainsString(self::LOOKUP, $dump);
     }
 
     public function test_only_an_existing_enabled_member_and_only_their_own_qr(): void {
@@ -176,7 +247,7 @@ final class CustomerQrTest extends EVC_WP_Test_Case {
         $this->member($disabled, 'disabled');
         $this->login_as($disabled);
         $this->assertSame('member_disabled', $this->rest('GET', self::QR, null, $this->nonce())->get_data()['qr']['state']);
-        $this->assertEnvelope($this->rest('POST', self::QR, array('replace' => true), $this->nonce()), 403, 'member_disabled');
+        $this->assertEnvelope($this->rest('POST', self::QR, array(), $this->nonce()), 403, 'member_disabled');
 
         $owner = $this->customer();
         $member = $this->member($owner);

@@ -104,7 +104,7 @@ final class StaffQrCommerceTest extends EVC_WP_Test_Case {
         }, null, new EVC_Fixed_Clock($at->format('Y-m-d\TH:i:s\Z')), function (string $line) {
             $this->log[] = $line;
         });
-        $r = $backend->issue($wp_user_id, false);
+        $r = $backend->issue($wp_user_id);
         $this->assertSame('issued', $r['result'], (string) $backend->last_reason());
         return $r['token'];
     }

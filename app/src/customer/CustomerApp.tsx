@@ -101,8 +101,12 @@ export function CustomerApp({
   const account = result?.kind === "ok" ? result.me.email : null;
   const onCard = result?.kind === "ok" && (screen ?? (toLiveView(result.me, now()).state === "active" ? "card" : "dashboard")) === "card";
   // Each time the card is opened, the QR is resolved again from GET /me/qr (docs/member-qr.md rules).
+  // Round 7: leaving the card (or unmounting) pauses the flow: no retry timer keeps running and no POST is sent
+  // while the member is elsewhere; coming back opens it again.
   useEffect(() => {
-    if (onCard && account !== null) void qrFlow?.open(account);
+    if (!onCard || account === null || !qrFlow) return;
+    void qrFlow.open(account);
+    return () => qrFlow.pause();
   }, [onCard, account, qrFlow]);
   // The real panel replaces the sample only once the route is known to exist (never «Φόρτωση…» when it is off).
   const showQr = qrFlow !== undefined && qrState.phase !== "off" && (qrState.phase !== "loading" || qrFlow.seenRoute());

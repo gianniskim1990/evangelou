@@ -29,8 +29,11 @@ import type { QrKeeper } from "./memberQr";
  *   (private mode, blocked, full), nothing is persisted: the QR lives in
  *   memory only, as before. Every access is wrapped; a failure never shows a
  *   code and never throws into the app.
- * The server never re-sends a token: if this record is lost, the card asks
- * for a new one by itself (owner decision D21, memberQr.ts).
+ * If this record is lost, the card simply asks the server again: owner
+ * decision D22 (2026-11-19) makes the server hand the member the SAME token
+ * on every device (memberQr.ts).
+ * - Round 7, peek(): while the server cannot be reached, the card may show
+ *   the account's kept token as «unchecked» (read only, nothing deleted).
  */
 
 export const QR_STORE_PREFIX = "evc-club-qr:v1:";
@@ -166,6 +169,26 @@ export function createStorageQrKeeper(
           return null;
         }
         return r.t;
+      } catch {
+        return null;
+      }
+    },
+    /**
+     * Round 7 (offline open): the token kept for this account, whatever its issued_at, read only: nothing is
+     * deleted (the server could not be asked, so nothing is known to be stale). Exactly one record of the account,
+     * else nothing. A forget / sign-out that starts while the digest is computed voids the answer.
+     */
+    async peek(account) {
+      const mine = epoch;
+      try {
+        const a = await accountHash(account);
+        if (mine !== epoch) return null;
+        const found: string[] = [];
+        for (const k of ownKeys()) {
+          const r = parse(storage.getItem(k));
+          if (r !== null && r.a === a) found.push(r.t);
+        }
+        return found.length === 1 ? found[0] : null;
       } catch {
         return null;
       }

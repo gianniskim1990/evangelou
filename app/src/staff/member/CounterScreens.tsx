@@ -25,7 +25,7 @@ function noticeText(n: ScanNotice, now: number, blockedUntil: number | null): { 
     case "recorded":
       return { text: `Ο καφές καταχωρήθηκε: ${n.coffeeLabel}${n.firstName ? ` · ${n.firstName}` : ""}`, good: true };
     case "not_found":
-      return { text: "Δεν βρέθηκε μέλος με αυτόν τον κωδικό. Ο κωδικός του πελάτη μπορεί να έχει ανανεωθεί: ας ανοίξει ξανά την κάρτα του.", good: false };
+      return { text: "Δεν βρέθηκε μέλος με αυτόν τον κωδικό. Ο κωδικός του πελάτη μπορεί να έχει ανανεωθεί: ζητήστε του να ανοίξει ξανά την κάρτα του.", good: false };
     case "invalid_qr":
       return { text: "Αυτός δεν είναι κωδικός QR του Club. Σαρώστε ξανά τον κωδικό της κάρτας μέλους.", good: false };
     case "rate_limited":

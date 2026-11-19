@@ -597,6 +597,8 @@ export const QR_RULES = Object.freeze({
   customerController: "includes/customer/class-evc-rest-me-qr-controller.php",
   // STAGE-05D: GET /session asks EVC_Rest_Lookup_Controller::lookup_ready() for features.qr_lookup.
   sessionController: "includes/staff/class-evc-rest-session-controller.php",
+  // STAGE-08 round 7, owner decision D22: the stable member token is derived here (EVC_Qr_Token::derive).
+  tokenFile: "includes/class-evc-qr-token.php",
 });
 
 const R5C = QR_RULES;
@@ -743,6 +745,49 @@ export function qrProblemsFor(path, src) {
     const at = tokens.findIndex((tk, k) => tk.t === "id" && tk.v.toLowerCase() === "const" && tokens[k + 1]?.v === "PROVENANCE");
     if (at < 0 || tokens[at + 3]?.t !== "str" || tokens[at + 3].v !== "club_db_v1") problems.push(`${path}: const PROVENANCE must be 'club_db_v1'`);
   }
+  return problems.concat(qrSecretProblemsFor(path, tokens));
+}
+
+// STAGE-08 round 7, owner decision D22: the member-QR derivation secret and the derived token.
+//  1. No shipped file defines a Club secret (define('EVC_CLUB_QR_SECRET', ...) or a class constant of that name):
+//     the secrets live only in each site's wp-config.php.
+//  2. The token file may not call any output / logging / storage function at all.
+//  3. The customer backend may not pass the secret or a token to one: no logging-type call, and no dynamic call
+//     (the injected `($this->log)(...)` / `$log(...)` callables), whose arguments name a secret or a token.
+const CLUB_SECRET_CONSTANTS = ["evc_club_qr_secret", "evc_club_lookup_key", "evc_club_evidence_key"];
+const SECRET_SINKS = ["error_log", "print_r", "var_export", "var_dump", "debug_zval_dump", "printf", "vprintf", "trigger_error", "user_error", "syslog",
+  "file_put_contents", "fwrite", "fputs", "wp_mail", "header", "setcookie", "set_transient", "set_site_transient", "update_option", "add_option",
+  "update_site_option", "update_user_meta", "add_user_meta", "wp_cache_set", "wp_cache_add", "do_action", "apply_filters", "call_user_func",
+  "call_user_func_array", "json_encode", "wp_json_encode", "serialize", "echo", "print"];
+function carriesSecret(args) {
+  return args.some((a, i) => {
+    if (a.t === "var" && /secret|token/i.test(a.v)) return true;
+    if (a.t === "id" && /secret|token/i.test(a.v) && args[i - 1]?.v === "->") return true;
+    return a.t === "str" && /qr_secret|evc_club_qr_secret/i.test(a.v);
+  });
+}
+export function qrSecretProblemsFor(path, tokens) {
+  const problems = [];
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id" && tk.v.toLowerCase() === "define" && tokens[k + 1]?.v === "(" && tokens[k + 2]?.t === "str" && CLUB_SECRET_CONSTANTS.includes(tokens[k + 2].v.toLowerCase())) {
+      problems.push(`${path}: defines the Club secret ${tokens[k + 2].v} (secrets belong in wp-config.php only)`);
+    }
+    if (tk.t === "id" && tk.v.toLowerCase() === "const" && tokens[k + 1]?.t === "id" && CLUB_SECRET_CONSTANTS.includes(tokens[k + 1].v.toLowerCase())) {
+      problems.push(`${path}: declares a constant named like the Club secret ${tokens[k + 1].v}`);
+    }
+  });
+  if (path !== R5C.tokenFile && path !== R5C.customerBackend) return problems;
+  tokens.forEach((tk, k) => {
+    const member = ["->", "::"].includes(tokens[k - 1]?.v);
+    if (tk.t === "id" && !member && SECRET_SINKS.includes(bare(tk.v).toLowerCase())) {
+      const args = tokens[k + 1]?.v === "(" ? argumentTokens(tokens, k + 1) : tokens.slice(k + 1, tokens.findIndex((x, j) => j > k && x.v === ";"));
+      if (path === R5C.tokenFile) problems.push(`${path}: ${tk.v} in the QR token file (D22: the token and the secret are never output)`);
+      else if (carriesSecret(args)) problems.push(`${path}: ${tk.v}() with the QR secret or a token`);
+    }
+    if (tk.v === "(" && tk.t === "op" && (tokens[k - 1]?.v === ")" || tokens[k - 1]?.t === "var") && carriesSecret(argumentTokens(tokens, k))) {
+      problems.push(`${path}: a dynamic call with the QR secret or a token (logging callables never receive them)`);
+    }
+  });
   return problems;
 }
 
@@ -856,6 +901,19 @@ function qrSelfTest() {
   expect("another file asks lookup_ready()", "includes/staff/class-evc-staff-shell.php", "<?php\n$qr = EVC_Rest_Lookup_Controller::lookup_ready();", true);
   expect("session controller builds the lookup backend", Q.sessionController, "<?php\n$b = new EVC_Club_Lookup_Backend();", true);
   expect("customer provenance value changed", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("const PROVENANCE = 'club_db_v1';", "const PROVENANCE = 'CLUB_DB_V1';"), true);
+  // STAGE-08 round 7 (D22): no secret in a shipped file; the token / secret never reach a log or output.
+  expect("a secret defined in a shipped file", "includes/x.php", "<?php\ndefine('EVC_CLUB_QR_SECRET', 'abcdefabcdefabcdefabcdefabcdefabcdef');", true);
+  expect("a secret defined upper / lower case", "includes/x.php", "<?php\nDEFINE(\"evc_club_lookup_key\", 'x');", true);
+  expect("a class constant named like the secret", "includes/x.php", "<?php\nclass X { const EVC_CLUB_QR_SECRET = 'x'; }", true);
+  expect("reading the secret constant is fine", "includes/x.php", "<?php\n$s = defined('EVC_CLUB_QR_SECRET') ? constant('EVC_CLUB_QR_SECRET') : null;", false);
+  expect("logging in the token file", Q.tokenFile, "<?php\nerror_log('x');", true);
+  expect("printing in the token file", Q.tokenFile, "<?php\nprint_r($a);", true);
+  expect("a pure token file", Q.tokenFile, "<?php\nfinal class EVC_Qr_Token { public static function derive($s, $m, $g) { return 'evc_' . substr(hash_hmac('sha256', $m, $s), 0, 48); } }", false);
+  expect("the backend logs the token", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f($token) { error_log('t=' . $token); }\n    public function issue"), true);
+  expect("the backend logs the secret by property", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f() { error_log($this->secret); }\n    public function issue"), true);
+  expect("the backend passes the token to its log callable", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f($token) { ($this->log)('t=' . $token); }\n    public function issue"), true);
+  expect("the backend passes the secret to a variable callable", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f($log, $secret) { $log($secret); }\n    public function issue"), true);
+  expect("the backend logs a fixed line", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f() { ($this->log)('Evangelou Club: customer QR unavailable (x).'); }\n    public function issue"), false);
   return bad;
 }
 
@@ -1383,7 +1441,7 @@ export const READ_ONLY_STATIC_ALLOW = Object.freeze([
   "evc_db_config::from_constants", "evc_club_db::connect", "evc_commerce_source_config::from_constants",
   "evc_wp_commerce_pmpro_reader::commerce_plugins_loaded", "evc_wp_commerce_pmpro_reader::environment_conflicts",
   "evc_bacs_payment_issuer::site_problem", "evc_onboarding_shell::same_site_url", "evc_fluentcrm_plugin::problem",
-  "evc_club_qr_services::is_lookup_secret", "evc_staff_account_reader::accounts", "evc_staff_account_service::may_manage",
+  "evc_club_qr_services::is_lookup_secret", "evc_qr_token::is_derivation_secret", "evc_staff_account_reader::accounts", "evc_staff_account_service::may_manage",
   "evc_staff_auth::is_disabled", "evc_staff_role::is_restricted_staff_account",
 ]);
 const SQL_WRITE = new RegExp([

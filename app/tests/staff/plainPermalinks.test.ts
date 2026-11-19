@@ -183,12 +183,24 @@ describe("STAGE-08 round 4: staff REST base in both permalink forms", () => {
     }
     assert.equal(at(`${ORIGIN}/prometheus/wp-json/wp/v2`, "/prometheus/"), null, "the namespace suffix is still required");
     assert.ok(at(staging, undefined), "no homePath (an older shell): the suffix check alone, as before");
-    assert.ok(at(staging, "not-a-path"), "an invalid homePath is ignored for a pretty base (it is refused for a plain one)");
     assert.equal(at(`${ORIGIN}/prometheus/?rest_route=/evangelou-club/v1`, "not-a-path"), null);
     const nonAscii = `${ORIGIN}/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/wp-json/evangelou-club/v1`;
     assert.equal(at(`${ORIGIN}/καφές/wp-json/evangelou-club/v1`, "/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/"), nonAscii, "a non-ASCII home path in the encoded form PHP now sends");
     assert.equal(at(`${ORIGIN}/καφές/index.php?rest_route=/evangelou-club/v1`, "/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/") !== null, true);
     assert.equal(at(`${ORIGIN}/καφές/index.php?rest_route=/evangelou-club/v1`, "/καφές/"), null, "the raw form never matches URL.pathname");
+  });
+
+  it("round 7: a homePath that is sent but not valid refuses a pretty base too (fail closed, like a plain one)", () => {
+    const at = (base: string, home: unknown) => sameOriginRestBase(base, ORIGIN, STAFF_NAMESPACE, home);
+    const staging = `${ORIGIN}/prometheus/wp-json/evangelou-club/v1`;
+    for (const home of ["not-a-path", "", null, 1, "/prometheus", "//evil/", "/prometheus/../", "/pro\tmetheus/", "/prometheus/?x/", "/καφές/"]) {
+      assert.equal(at(staging, home), null, JSON.stringify(home));
+      assert.equal(at(`${ORIGIN}/wp-json/evangelou-club/v1`, home), null, `root base, ${JSON.stringify(home)}`);
+    }
+    assert.equal(at(staging, "/prometheus/"), staging, "a valid homePath still passes");
+    assert.equal(at(staging, undefined), staging, "only a config with NO homePath at all skips the check");
+    assert.equal(parse(PRETTY, "not-a-path").ok, false, "the staff config refuses it");
+    assert.equal(parse(PRETTY, null).ok, false, "homePath null is sent, so it must be valid");
   });
 
   it("round 6: a relative base must be root-relative (exactly one leading slash)", () => {
