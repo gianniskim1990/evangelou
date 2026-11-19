@@ -154,7 +154,7 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         $this->assertSame('missing', $rows['qr_secret']['status'], 'not defined in this suite');
         $valid = 'evc-test-readiness-qr-secret-0123456789ab';
         $lookup = 'evc-test-readiness-lookup-key-0123456789';
-        foreach (array(array($valid, null, 'ok'), array(str_repeat('q', 32), null, 'ok'), array($valid, $lookup, 'ok'), array($lookup, $lookup, 'wrong'), array(str_repeat('q', 31), null, 'wrong'), array('', null, 'wrong'), array(12345678901234567890123456789012, null, 'wrong'), array(null, null, 'wrong')) as $case) {
+        foreach (array(array($valid, null, 'ok'), array(str_repeat('q', 32), null, 'wrong'), array(str_repeat('ab', 32), null, 'wrong'), array("...τουλάχιστον 32 τυχαίοι χαρακτήρες, ΔΙΑΦΟΡΕΤΙΚΟ από το EVC_CLUB_LOOKUP_KEY...", null, 'wrong'), array(bin2hex(random_bytes(32)), null, 'ok'), array($valid, $lookup, 'ok'), array($lookup, $lookup, 'wrong'), array(str_repeat('q', 31), null, 'wrong'), array('0123456789abcdefghijklmnopqrstu', null, 'wrong'), array('', null, 'wrong'), array(12345678901234567890123456789012, null, 'wrong'), array(null, null, 'wrong')) as $case) {
             $constants = array('EVC_CLUB_QR_SECRET' => $case[0]);
             if ($case[1] !== null) {
                 $constants['EVC_CLUB_LOOKUP_KEY'] = $case[1];

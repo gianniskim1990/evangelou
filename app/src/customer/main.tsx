@@ -4,7 +4,9 @@ import "../index.css";
 import "../preview/preview.css";
 import { CONFIG_ELEMENT_ID, parseCustomerConfig } from "./config";
 import { CustomerApp } from "./CustomerApp";
+import { createCustomerCoffeesApi } from "./coffeesApi";
 import { createCustomerApi, createNonceBox } from "./customerApi";
+import { MemberCoffeesFlow } from "./memberCoffees";
 import { createQrKeeper, MemberQrFlow } from "./memberQr";
 import { createCustomerQrApi } from "./qrApi";
 import { createStorageQrKeeper } from "./qrStore";
@@ -55,9 +57,11 @@ if (root) {
       const nonce = createNonceBox(parsed.config.nonce);
       // Owner decision 2026-11-04: the phone remembers the QR (qrStore.ts); memory only if storage cannot work.
       const qrFlow = new MemberQrFlow(createCustomerQrApi(parsed.config, nonce), createQrKeeper(createStorageQrKeeper()));
+      // D23: the member card's real coffee figures (read only).
+      const coffeesFlow = new MemberCoffeesFlow(createCustomerCoffeesApi(parsed.config, nonce));
       createRoot(root).render(
         <StrictMode>
-          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} navigate={(url) => window.location.assign(url)} />
+          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} coffeesFlow={coffeesFlow} navigate={(url) => window.location.assign(url)} />
         </StrictMode>,
       );
     }

@@ -16,12 +16,19 @@ defined('ABSPATH') || exit;
  *                 409 concurrent_change (another device of the member wrote at the same moment: ask again)
  *                 503 {"result":"unavailable"} (incl. a missing EVC_CLUB_QR_SECRET and an unknown COMMIT
  *                     outcome: asking again is safe)
- * Both: customer accounts only (EVC_Customer_Auth: cookie session + own wp_rest nonce), the user is
+ *   GET  /me/coffees  owner decision D23 (2026-11-19): the member card's own free-coffee figures, read only
+ *                 200 {"result":"ok","coffees":{"state":"member","today":"YYYY-MM-DD","taken_today":true|false,
+ *                      "this_month":<int>}}   today = the Europe/Athens business day the figures belong to
+ *                 200 {"result":"ok","coffees":{"state":"not_member"}} / {"state":"member_disabled"}
+ *                 503 {"result":"unavailable"} (the card then shows «—»: fail soft). Needs no QR secret.
+ * All: customer accounts only (EVC_Customer_Auth: cookie session + own wp_rest nonce), the user is
  * ALWAYS get_current_user_id(); nothing identifying is read from the request. Responses are no-store
  * (EVC_Customer_Rest_Security). The token is never logged.
  */
 final class EVC_Rest_Me_Qr_Controller {
     const ROUTE = '/me/qr';
+    /** D23: the member's own coffee figures (same gates and the same backend as the QR). */
+    const COFFEES_ROUTE = '/me/coffees';
 
     /** @var EVC_Customer_Qr_Backend */
     private $backend;
@@ -45,6 +52,42 @@ final class EVC_Rest_Me_Qr_Controller {
                 'args' => array(),
             ),
         ), $override);
+        register_rest_route(EVC_Customer_Rest_Security::NAMESPACE_V1, self::COFFEES_ROUTE, array(
+            array(
+                'methods' => 'GET',
+                'callback' => array($this, 'coffees'),
+                'permission_callback' => array('EVC_Customer_Auth', 'authorize'),
+                'args' => array(),
+            ),
+        ), $override);
+    }
+
+    /** @return WP_REST_Response|WP_Error */
+    public function coffees(WP_REST_Request $request) {
+        $auth = EVC_Customer_Auth::authorize($request);
+        if ($auth instanceof WP_Error) {
+            return $auth;
+        }
+        try {
+            // Always the caller's own member row: nothing identifying is read from the request.
+            $coffees = $this->backend->coffees(get_current_user_id());
+        } catch (Throwable $e) {
+            return self::unavailable();
+        }
+        switch ($coffees['state']) {
+            case 'member':
+                return new WP_REST_Response(array('result' => 'ok', 'coffees' => array(
+                    'state' => 'member',
+                    'today' => $coffees['today'],
+                    'taken_today' => $coffees['taken_today'],
+                    'this_month' => $coffees['this_month'],
+                )), 200);
+            case 'not_member':
+            case 'member_disabled':
+                return new WP_REST_Response(array('result' => 'ok', 'coffees' => array('state' => $coffees['state'])), 200);
+            default:
+                return self::unavailable();
+        }
     }
 
     /** @return WP_REST_Response|WP_Error */

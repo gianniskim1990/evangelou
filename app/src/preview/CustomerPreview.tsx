@@ -237,14 +237,14 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
             ["Κατάσταση", <StateMark key="s" state={state} />],
             ["Περίοδος", membershipLine(view)],
             ["Ανανέωση", renewalLine(view, `Χειροκίνητη, ${CLUB_RULES.monthlyPriceEur} € για έναν ημερολογιακό μήνα`)],
-            ["Αυτόν τον μήνα", view.clubData === "unavailable" ? "Δεν είναι ακόμη διαθέσιμο" : `${view.visitsThisMonth} καφέδες`],
+            ["Αυτόν τον μήνα", view.clubData === "unavailable" ? "Δεν είναι ακόμη διαθέσιμο" : view.visitsThisMonth === 1 ? "1 καφές" : `${view.visitsThisMonth} καφέδες`],
           ]}
         />
         <div className="mt-10 flex items-baseline justify-between border-b border-[var(--rule-strong)] pb-3">
           <h2 className="t-title text-[var(--ink)]">Τελευταίοι καφέδες</h2>
           <button type="button" onClick={() => go("history")} className="t-label -my-3 py-3 text-[var(--bronze-deep)] underline-offset-4 hover:underline">Όλο το ιστορικό</button>
         </div>
-        {recent.length === 0 && <p className="t-body py-3.5 text-[var(--ink-2)]">{view.clubData === "unavailable" ? "Το ιστορικό καφέδων δεν είναι ακόμη διαθέσιμο." : "Δεν υπάρχουν ακόμη καφέδες."}</p>}
+        {recent.length === 0 && <p className="t-body py-3.5 text-[var(--ink-2)]">{view.clubData === "unavailable" || view.historyData === "unavailable" ? "Το ιστορικό καφέδων δεν είναι ακόμη διαθέσιμο." : "Δεν υπάρχουν ακόμη καφέδες."}</p>}
         <ul className="m-0 list-none p-0">
           {recent.map((r) => (
             <li key={r.date} className="t-body grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-[var(--rule)] py-3.5">
@@ -322,7 +322,7 @@ export function Today({ view, go }: MemberScreenProps) {
           <Btn onClick={() => go("card")} className="px-8">Άνοιγμα κάρτας</Btn>
         </div>
 
-        {!clubDataUnavailable && (<>
+        {!clubDataUnavailable && view.historyData !== "unavailable" && (<>
         <h2 className="t-title mt-14 border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Οι τελευταίες 7 ημέρες</h2>
         <ol className="m-0 mt-5 grid list-none grid-cols-7 gap-2 p-0">
           {week.map((d) => {
@@ -375,8 +375,8 @@ export function History({ view }: MemberScreenProps) {
       <PageTitle title="Οι καφέδες σας" lede={state === "active" ? "Κάθε καφές Club των τελευταίων τριών εβδομάδων." : "Το ιστορικό μένει διαθέσιμο ακόμη κι όταν η συνδρομή δεν είναι ενεργή."} />
       {items.length === 0 && (
         <div className="border-y border-[var(--rule)] py-12 text-center">
-          <p className="t-title text-[var(--ink)]">{view.clubData === "unavailable" ? "Το ιστορικό δεν είναι ακόμη διαθέσιμο" : "Δεν υπάρχουν ακόμη καφέδες"}</p>
-          <p className="t-body mt-2 text-[var(--ink-2)]">{view.clubData === "unavailable" ? "Οι καφέδες σας θα εμφανίζονται εδώ μόλις συνδεθεί το ταμείο." : "Ο πρώτος σας καφές θα εμφανιστεί εδώ μόλις τον πάρετε στο ταμείο."}</p>
+          <p className="t-title text-[var(--ink)]">{view.clubData === "unavailable" || view.historyData === "unavailable" ? "Το ιστορικό δεν είναι ακόμη διαθέσιμο" : "Δεν υπάρχουν ακόμη καφέδες"}</p>
+          <p className="t-body mt-2 text-[var(--ink-2)]">{view.clubData === "unavailable" || view.historyData === "unavailable" ? "Οι καφέδες σας θα εμφανίζονται εδώ μόλις συνδεθεί το ταμείο." : "Ο πρώτος σας καφές θα εμφανιστεί εδώ μόλις τον πάρετε στο ταμείο."}</p>
         </div>
       )}
       {[...months.entries()].map(([ym, rows]) => (

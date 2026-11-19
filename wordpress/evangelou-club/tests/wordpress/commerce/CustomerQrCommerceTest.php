@@ -49,7 +49,14 @@ final class CustomerQrCommerceTest extends EVC_WP_Test_Case {
         $rows = $this->club->fetch_all('SELECT token_hash, status FROM evc_qr_tokens WHERE member_id = ? ORDER BY id', array($member));
         $this->assertSame(array(array('token_hash' => EVC_Qr_Token::digest($token), 'status' => 'active')), $rows);
 
+        // D23 (round 8): the member card's coffee figures over the same shipped wiring (no coffee yet).
+        $this->assertArrayHasKey('/evangelou-club-customer/v1/me/coffees', rest_get_server()->get_routes());
+        $coffees = $this->rest('GET', '/evangelou-club-customer/v1/me/coffees', null, $this->nonce());
+        $this->assertSame(200, $coffees->get_status(), wp_json_encode($coffees->get_data()));
+        $this->assertSame(array('result' => 'ok', 'coffees' => array('state' => 'member', 'today' => EVC_Clock::business_date(), 'taken_today' => false, 'this_month' => 0)), $coffees->get_data());
+
         $this->login_as($this->customer());
         $this->assertSame('not_member', $this->rest('GET', self::QR, null, $this->nonce())->get_data()['qr']['state']);
+        $this->assertSame(array('result' => 'ok', 'coffees' => array('state' => 'not_member')), $this->rest('GET', '/evangelou-club-customer/v1/me/coffees', null, $this->nonce())->get_data());
     }
 }

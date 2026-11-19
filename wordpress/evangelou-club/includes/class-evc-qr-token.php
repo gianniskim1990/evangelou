@@ -38,14 +38,25 @@ final class EVC_Qr_Token {
     }
 
     /**
+     * Round 8 (NIT-1): a secret needs at least this many DIFFERENT bytes. 64 random hex digits practically
+     * always hold 14-16; a value of one repeated character (or a short repeated pattern) is refused.
+     */
+    const MIN_DISTINCT_BYTES = 8;
+
+    /**
      * A usable derivation secret: a string of at least 32 bytes that is NOT the lookup-proof secret (one
      * leaked key must not give both). Anything else fails closed (the customer QR route answers 503).
+     * Round 8 (NIT-1): an obviously non-random value fails closed too: the placeholder copied from the docs
+     * (it contains «...»), or a value with fewer than MIN_DISTINCT_BYTES different bytes (e.g. 32 × «k»).
      *
      * @param mixed $secret
      * @param mixed $lookup_secret the value of EVC_CLUB_LOOKUP_KEY, or null when it is not defined
      */
     public static function is_derivation_secret($secret, $lookup_secret = null): bool {
         if (!is_string($secret) || strlen($secret) < self::MIN_SECRET_BYTES) {
+            return false;
+        }
+        if (strpos($secret, '...') !== false || count(count_chars($secret, 1)) < self::MIN_DISTINCT_BYTES) {
             return false;
         }
         return !(is_string($lookup_secret) && hash_equals($lookup_secret, $secret));

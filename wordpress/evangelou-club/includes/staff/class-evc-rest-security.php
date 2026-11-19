@@ -137,6 +137,9 @@ final class EVC_Rest_Security {
     public static function home_path(): string {
         $path = wp_parse_url(home_url('/'), PHP_URL_PATH);
         $path = is_string($path) && $path !== '' ? $path : '/';
+        // Round 8 (NIT-3): in an http(s) URL the browser reads «\» in a path as «/» (WHATWG special schemes), so
+        // URL.pathname of the REST base shows «/a/b/» for a home of «/a\b»: the same here.
+        $path = str_replace('\\', '/', $path);
         $path = substr($path, -1) === '/' ? $path : $path . '/';
         // Round 7: exactly what the browser's URL.pathname shows for this path. The WHATWG URL parser keeps every
         // «%» as it is (a valid escape in its own case, e.g. %2F or %ce, and a bare «%» too) and percent-encodes,

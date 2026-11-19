@@ -841,6 +841,11 @@ screenshot works from any device; only an administrator's revocation gives a new
   token: `EVC_Qr_Token::derive()` = HMAC-SHA256 over the member's public id and generation (the member's QR
   row count), so it is the same on every call and device; `replace` from older apps is ignored. Only digests
   are stored (no migration 004); a pre-D22 random token is replaced once. GET never returns a token.
+- **Customer, D23 (2026-11-19):** `GET evangelou-club-customer/v1/me/coffees`, same gates as `/me/qr` (no QR
+  secret needed): the signed-in member's own free coffees, read only from `evc_redemptions` by Athens business
+  date: `{"state":"member","today":"YYYY-MM-DD","taken_today":bool,"this_month":int}` (or `not_member` /
+  `member_disabled`); 503 `unavailable` = the card shows «—». Never delete `evc_qr_tokens` rows (round 8: the
+  generation is the row count; see docs/member-qr.md).
 - **Staff:** `POST evangelou-club/v1/members/lookup` → `{member:{member_id, first_name}, status:
   active|used_today|inactive}`, one generic 404 for unknown / replaced / revoked / disabled. Only with
   everything the STAGE-05A redeem route needs, plus migration 003 and the new wp-config secret

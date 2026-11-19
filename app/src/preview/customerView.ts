@@ -46,6 +46,11 @@ export type CustomerView = {
    * is not connected. Nothing about today's coffee or past coffees is claimed.
    */
   clubData?: "unavailable";
+  /**
+   * D23 live app: today's coffee and this month's count are real (clubData absent), but the coffee history
+   * is not sent by the server, so the history lists and the 7-day strip are not claimed either.
+   */
+  historyData?: "unavailable";
 };
 
 /** Journey/live actions; without them the approved buttons stay disabled. */

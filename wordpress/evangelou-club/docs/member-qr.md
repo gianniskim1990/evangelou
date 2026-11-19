@@ -17,6 +17,7 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
 | **D9α** νέα σύνδεση tablet | «Όχι, μένει έτσι». Οι **επιτυχημένες** νέες συνδέσεις του tablet δεν έχουν όριο (το `EVC_Login_Throttle` μετρά μόνο λάθος κωδικούς). Κάθε νέα σύνδεση δίνει νέες ~10 προσπάθειες. **Αποδεκτός κίνδυνος**, χωρίς νέο κώδικα. |
 | **D10** ακύρωση QR | «Όχι, μόνο ο διαχειριστής». Το tablet μόνο σαρώνει. |
 | **D21** (2026-11-19) πάντα ορατός QR | Στην κάρτα μέλους ο QR φαίνεται **πάντα** όταν η συνδρομή είναι ενεργή· το κουμπί «Νέο QR» καταργείται. Το δεύτερο μισό της απόφασης (η εφαρμογή ζητούσε μόνη της νέο QR σε άλλη συσκευή και ακύρωνε τον παλιό) **αντικαταστάθηκε από το D22**. |
+| **D23** (2026-11-19) καφέδες στην κάρτα | Η κάρτα μέλους δείχνει **πραγματικά** στοιχεία από τη βάση του Club: πόσους δωρεάν καφέδες πήρε το μέλος **αυτόν τον ημερολογιακό μήνα** (ώρα Ελλάδας) και αν πήρε ήδη τον **σημερινό**. Αν η βάση δεν απαντά, η κάρτα δείχνει «—» όπως πριν. |
 | **D22** (2026-11-19) ίδιος QR παντού | «Όχι, να μην αλλάζει ποτέ». Ο QR του μέλους είναι **ο ίδιος σε κάθε συσκευή και κάθε πρόγραμμα περιήγησης**, και το άνοιγμα της κάρτας οπουδήποτε **δεν** τον ακυρώνει ποτέ. Στιγμιότυπο οθόνης από οποιαδήποτε συσκευή ισχύει. Νέος κωδικός βγαίνει **μόνο** όταν ο διαχειριστής ακυρώσει τον παλιό. Για να γίνεται αυτό, ο διακομιστής **παράγει** τον κωδικό από ένα νέο μυστικό (`EVC_CLUB_QR_SECRET`) και μπορεί να τον ξαναδώσει στο ίδιο μέλος. Χωρίς νέα μετάβαση βάσης. |
 
 ### Τι κάνει
@@ -38,6 +39,19 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
    δουλεύει πια ο QR του χαμένου κινητού, το ζητά από το κατάστημα: **μόνο ο διαχειριστής** του
    WordPress ακυρώνει τον QR ενός πελάτη (με τον αριθμό χρήστη WordPress), και τότε το μέλος παίρνει νέο
    κωδικό στο επόμενο άνοιγμα της κάρτας. Ο κοινός λογαριασμός του ταμείου **δεν** μπορεί.
+
+### Καφέδες στην κάρτα (D23)
+
+- Η κάρτα ρωτά τη βάση του Club (μόνο ανάγνωση) για **τα δικά της** στοιχεία του μέλους: αν δόθηκε ο
+  σημερινός καφές (ημέρα Αθήνας, ίδια με τον κανόνα «ένας καφές την ημέρα» του ταμείου) και πόσοι καφέδες
+  δόθηκαν αυτόν τον μήνα (μήνας Αθήνας). Ποτέ ονόματα υπαλλήλων, ποτέ στοιχεία άλλου μέλους.
+- Ο τίτλος της κάρτας γράφει «Ο σημερινός καφές σας περιμένει» ή «Τον απολαύσατε σήμερα» και η γραμμή
+  «Καφέδες αυτόν τον μήνα» τον αριθμό. Αν η βάση δεν απαντά, η κάρτα μένει όπως πριν: «—» και «Η συνδρομή
+  σας είναι ενεργή».
+- Τα στοιχεία ξαναζητούνται όταν η κάρτα ξαναφαίνεται στην οθόνη (το πολύ μία φορά ανά 30 δευτερόλεπτα,
+  και το πολύ 3 φορές το λεπτό). Το αναλυτικό ιστορικό καφέδων **δεν** εμφανίζεται ακόμη.
+- Δεν χρειάζεται νέα μετάβαση βάσης ούτε νέο μυστικό. Ο χρήστης της βάσης του Club χρειάζεται `SELECT`
+  στον πίνακα `evc_redemptions` (τον έχει ήδη, γιατί το ταμείο γράφει εκεί).
 
 ### Οι οθόνες (STAGE-05D)
 
@@ -101,6 +115,15 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
 
       define('EVC_CLUB_QR_SECRET', '...τουλάχιστον 32 τυχαίοι χαρακτήρες, ΔΙΑΦΟΡΕΤΙΚΟ από το EVC_CLUB_LOOKUP_KEY...');
 
+  Το παράδειγμα αυτό **δεν** γίνεται δεκτό, ούτε ένας ίδιος χαρακτήρας ξανά και ξανά: χρειάζεται τυχαίο
+  κείμενο. Φτιάξτε το έτσι (64 χαρακτήρες):
+
+      php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"
+
+  ή, σε Windows PowerShell 5:
+
+      $b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b|%{$_.ToString('x2')}) -join ''
+
   Η βάση του Club πρέπει να έχει τουλάχιστον τις μεταβάσεις 001 + 002 (**καμία νέα μετάβαση** για το D22).
   Χωρίς έγκυρο `EVC_CLUB_QR_SECRET` η κάρτα δεν δείχνει QR (η υπηρεσία απαντά «μη διαθέσιμη»,
   `qr_secret_missing`). Η σελίδα «Ετοιμότητα» δείχνει τη γραμμή «Μυστικό κλειδί του κωδικού QR μέλους».
@@ -122,6 +145,12 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
 |---|---|
 | `evc_members` | `SELECT` |
 | `evc_qr_tokens` | `SELECT`, `INSERT`, `UPDATE (status, revoked_at_utc)`. Ποτέ `DELETE`. |
+| `evc_redemptions` | `SELECT` (D23: οι καφέδες της κάρτας· το ταμείο έχει ήδη και `INSERT`) |
+
+**Ποτέ μη σβήνετε γραμμές του `evc_qr_tokens`**, ούτε απευθείας στη βάση. Ο κωδικός κάθε μέλους
+βγαίνει από το πόσες γραμμές έχει εκεί. Αν σβηστούν γραμμές, ένας παλιός ακυρωμένος κωδικός μπορεί να
+ξαναγίνει έγκυρος, ή το μέλος να μείνει χωρίς QR. Η εφαρμογή αντέχει έως 16 σβησμένες γραμμές ανά μέλος·
+πιο πέρα γράφει στο αρχείο σφαλμάτων `qr_generation_stuck` (δείτε παρακάτω).
 | `evc_lookup_failures` (003) | `SELECT`, `INSERT`, `UPDATE`, `DELETE` (μόνο για καθαρισμό γραμμών πάνω από μίας ημέρας) |
 
 ### Τι βλέπει ο τεχνικός στο αρχείο σφαλμάτων
@@ -136,6 +165,8 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
 | `lookup_key_missing` | Λείπει ή είναι μικρό το `EVC_CLUB_LOOKUP_KEY`. |
 | `qr_secret_missing` | Λείπει, είναι μικρό ή είναι ίδιο με το `EVC_CLUB_LOOKUP_KEY` το `EVC_CLUB_QR_SECRET` (D22). |
 | `club_db_schema_too_old` | Ταμείο: δεν εφαρμόστηκε το 003. Πελάτης: λείπουν 001 + 002. |
+| `qr_generation_stuck` | Σβήστηκαν γραμμές του `evc_qr_tokens` (πάνω από 16 για ένα μέλος) και το μέλος δεν μπορεί να πάρει QR. Μην προσθέσετε ούτε σβήσετε τίποτα με το χέρι: ενημερώστε τον προγραμματιστή. |
+| `coffees_failed` | Η κάρτα δεν διάβασε τους καφέδες του μέλους (D23)· δείχνει «—». Συνήθως σημαίνει ότι λείπει το `SELECT` στο `evc_redemptions`. |
 | `payment_provenance_not_recorded` | Λείπει ή είναι λάθος το `EVC_CLUB_PAYMENT_PROVENANCE`. |
 | άλλες (`staff_flag_off`, `redemption_source_off`, `commerce_source_not_configured`, `club_db_not_configured`, `club_db_unavailable`) | Όπως στο `docs/staff-redemption.md`. |
 
@@ -298,6 +329,54 @@ anything else → 400):
 - Tests: `CustomerQrTest` (same token on several "devices", `replace` ignored, revocation → new token,
   pre-D22 token replaced once, no other member's token, fail closed), `ReadinessTest`, commerce
   `CustomerQrCommerceTest` / `ReadinessCommerceTest` (CI). Mutants QC1–QC2, QD1–QD5, AT35.
+
+**STAGE-08 round 8 (review of round 7).**
+- **LOW-1:** `CustomerQrTest::test_round8_a_concurrent_first_issue_by_another_device_gives_this_device_the_same_token`
+  makes the race deterministic: the test connection (`EVC_Faulty_Pdo::$before_prepare`) runs
+  `tests/bin/qr-token-worker.php` (its own process and connection) just before this request's rotation locks
+  the row; the worker stores the same generation-1 token and commits; this request's compare-and-set loses
+  and its second try returns the same token (kills `STABLE_TRIES = 1`, mutant QC8).
+  `…_an_active_row_that_is_not_the_members_own_is_never_handed_out` moves the active row to another member
+  between the read and the row check (kills dropping the `member_id` check, QC9).
+- **LOW-2 (no stored generation exists, no migration):** the generation is the row count, so
+  **`evc_qr_tokens` rows must never be deleted**. If some are: `issue()` matches the active row against
+  `derive(g)` for `g = count … count + GENERATION_PROBE` (16), so the stable token does not change; and the
+  next generation skips every `g` whose digest is already stored as a **revoked** row, so a revoked code is
+  never issued while its row exists (`next_generation()`; an ACTIVE row of that digest is a concurrent
+  device's and is left to the compare-and-set). More than 16 used generations in a row = the stuck state:
+  503 and the log reason `qr_generation_stuck` (`REASON_GENERATION`), never an endless 409. A revoked code
+  whose row was deleted cannot be told apart and can come back: hence the rule. Readiness does not scan for
+  it (it would need the QR secret and one derivation per member); the log line is the detection.
+  Mutants QG1–QG3.
+- **NIT-1:** `EVC_Qr_Token::is_derivation_secret()` also refuses a value containing `...` (the docs
+  placeholder) or with fewer than `MIN_DISTINCT_BYTES` (8) different bytes (e.g. 32 × `k`); readiness row
+  `qr_secret` follows (same function). Mutants QD6–QD7.
+- **NIT-2:** `status()` clears `$this->secret` like `issue()` (and `coffees()` never sets it). Mutant QC10.
+
+### Member card coffee figures (`GET evangelou-club-customer/v1/me/coffees`, owner decision D23)
+
+- Registered by `EVC_Rest_Me_Qr_Controller::register_routes()` next to `/me/qr`, so it exists only with the
+  same gates (customer flag + `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`) and uses the same backend and
+  per-request connection (`EVC_Customer_Qr_Backend::coffees()`). It does **not** need `EVC_CLUB_QR_SECRET`.
+- `200 {"result":"ok","coffees":{"state":"member","today":"YYYY-MM-DD","taken_today":bool,"this_month":int}}`;
+  `200 {"result":"ok","coffees":{"state":"not_member"|"member_disabled"}}`; `503 {"result":"unavailable"}`
+  (any gate, connection, schema or read failure, log reason `coffees_failed` for a failed read). GET only;
+  customer accounts only; always `get_current_user_id()`; no-store like every route of the namespace.
+- One read-only SELECT (`EVC_Redemption_Store::member_coffee_counts`): the member's `free_coffee` rows by
+  `business_date`, the Europe/Athens day the redeem engine writes (`EVC_Clock::business_date` of the
+  redemption instant); `today` = the Athens day of the backend clock, the month = `Y-m-01 … Y-m-t` of it.
+  The ledger has no reversal or void (no status column; the runtime user has no DELETE), so every row counts,
+  as the engine's one-per-day key counts it. Other benefit types are not counted. No staff id, coffee code or
+  time leaves the server (no history list: the approved screens' history needs the coffee, so it stays
+  «not yet available»).
+- Client: `app/src/customer/coffeesApi.ts` (strict parse: exact keys, a real date, `0 ≤ this_month ≤ 31`,
+  taken today ⇒ at least 1), `memberCoffees.ts` (asks on open; wake on visibilitychange / focus / online and
+  when the card is opened, at most every 30 s after an answer and 5 s after a failure, the QR flow's
+  constants; hard cap 3 per rolling minute; 404 = off for the page; any failure → unknown), `liveView.ts`
+  (figures used only when their `today` is the card's Athens day, else «—»; `historyData: "unavailable"`).
+- Tests: `CustomerQrTest::test_d23_*` (month and Athens-midnight boundaries, another member's rows, other
+  benefit type, every row counts, read only, not a member / disabled / signed out / staff, no secret needed,
+  fail soft), `app/tests/club/memberCoffees.test.ts`. Mutants CF1–CF8 (WordPress) and D23-1… (frontend).
 
 **Rules.**
 - The member is always `get_current_user_id()`, and the member row is read by that WordPress user id, so

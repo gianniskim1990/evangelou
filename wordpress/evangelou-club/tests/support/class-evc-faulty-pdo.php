@@ -15,8 +15,18 @@ class EVC_Faulty_Pdo extends PDO {
     /** @var bool Commit for real, then report failure (lost response). */
     public $fail_commit_after = false;
 
+    /** @var string|null Regex: the FIRST prepare() of matching SQL runs $before_prepare first (STAGE-08 round 8). */
+    public $before_prepare_matching;
+    /** @var callable|null Another writer acting between two statements of this connection (runs once). */
+    public $before_prepare;
+
     #[\ReturnTypeWillChange]
     public function prepare($query, $options = array()) {
+        if ($this->before_prepare_matching !== null && $this->before_prepare !== null && preg_match($this->before_prepare_matching, $query)) {
+            $run = $this->before_prepare;
+            $this->before_prepare = null;
+            $run($query);
+        }
         if ($this->fail_prepare_matching !== null && preg_match($this->fail_prepare_matching, $query)) {
             throw self::fault('HY000', 2006, 'Injected fault: server has gone away');
         }

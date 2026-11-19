@@ -97,6 +97,15 @@ approval: first on **staging**, and on **production** only after the owner appro
   then, once). Client: never sends `replace`; a failed re-check keeps the QR on screen (round 7); retries pause off
   the card. See [member-qr.md](member-qr.md). Staging check: open the card on two phones: the **same** QR on both;
   scan both at the till: the same member.
+- **Owner decision D23** (2026-11-19, STAGE-08 round 8): the member card shows **real** Club DB figures: the free
+  coffees of this Athens calendar month («Καφέδες αυτόν τον μήνα») and whether today's coffee (Athens day) was
+  already taken (headline «Τον απολαύσατε σήμερα»). New read-only route `GET evangelou-club-customer/v1/me/coffees`
+  (same gates as `/me/qr`, no QR secret needed); the Club DB user needs `SELECT` on `evc_redemptions` (the till
+  already has it). Fail soft: if the Club DB does not answer, the card shows «—» as before. No migration. Staging
+  check: after a till redemption, reopen the card: «Τον απολαύσατε σήμερα» and the month count one higher.
+- **Never delete rows of `evc_qr_tokens`** (round 8): a member's QR comes from that member's row count; deleted
+  rows can bring a revoked code back or leave the member without a QR (log reason `qr_generation_stuck` beyond 16
+  deleted rows of one member). See [member-qr.md](member-qr.md).
 - **On a phone, the offer's «Πληρωμή 20 €» did not look like a button** (the owner only noticed the account link).
   Round 4: a full-width filled button; the account link below it is small.
 
@@ -112,7 +121,7 @@ read «Εντάξει» (or the «manual» items are confirmed).
 | 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);`; on **staging** also `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` (D19) | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green (this also verifies T1); apply 001 + 002 (approved for staging on 2026-10-27) and, on staging, 003 (D19, 2026-11-10). **Production:** 001, 002 and 003 each need the owner's own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: «Βάση δεδομένων του Club» and «Έκδοση σχήματος» «Εντάξει» (a «Δεν διαβάζεται» schema row means the migrations table could not be read: go back to the migrations page checks). |
 | 3 | `EVC_CLUB_MEMBERSHIP_SOURCE`, `EVC_CLUB_PMPRO_LEVEL_ID`, `EVC_CLUB_WC_PRODUCT_ID`, `EVC_CLUB_EVIDENCE_KEY`, `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` | Readiness «Κατάστημα»: all «Εντάξει» (pinned versions, product 20.00 €, sold individually, one-month level, Athens clock, BACS on), **including «Καταγραφή πληρωμών στη βάση του Club (EVC_CLUB_PAYMENT_PROVENANCE)»**: «Εντάξει» only for the exact `'club_db_v1'`; «Λάθος» or «Λείπει» means payment confirmation, the member QR and redemption stay closed. |
 | 4 | `define('EVC_CLUB_WC_COMPLETION_ENABLED', true);` | One test order by bank transfer, marked «Ολοκληρωμένη» by the shop: the member reads active ([commerce-membership-source.md](commerce-membership-source.md)). |
-| 5 | `define('EVC_CLUB_CUSTOMER_ENABLED', true);`, `EVC_CLUB_LOOKUP_KEY` (a random secret of at least 32 bytes, for the QR scan) and (D22) `EVC_CLUB_QR_SECRET` (another, **different** random secret of at least 32 bytes, for the member's QR; never change it without reason: every member's QR changes once when it does) | Readiness «Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)» and «Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)»: «Εντάξει» (values never shown). `/club-member/` shows the test member as active; the QR appears only after 003, and is the same on a second phone. |
+| 5 | `define('EVC_CLUB_CUSTOMER_ENABLED', true);`, `EVC_CLUB_LOOKUP_KEY` (a random secret of at least 32 bytes, for the QR scan) and (D22) `EVC_CLUB_QR_SECRET` (another, **different** random secret of at least 32 bytes, for the member's QR; never change it without reason: every member's QR changes once when it does; the docs placeholder and a repeated character are refused). Generate each one separately: `php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"` or, in Windows PowerShell 5, `$b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b\|%{$_.ToString('x2')}) -join ''` | Readiness «Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)» and «Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)»: «Εντάξει» (values never shown). `/club-member/` shows the test member as active; the QR appears only after 003, and is the same on a second phone. |
 | 6 | `define('EVC_CLUB_STAFF_ENABLED', true);` `define('EVC_CLUB_REDEMPTION_SOURCE', 'club_db_v1');` | Create the shared till account (Evangelou Club → Λογαριασμός ταμείου, D18); sign the tablet in at `/club-admin/`; redeem one coffee for the test member; a second one the same day is refused. |
 | 7 | `EVC_CLUB_TERMS_URL`; `define('EVC_CLUB_ONBOARDING_ENABLED', true);` | Record the checkout type: edit the WooCommerce checkout page; a «Checkout» block = Block Checkout, `[woocommerce_checkout]` or «Classic Checkout» = classic. Then the staging checks of [store-onboarding.md](store-onboarding.md) (REMOTE_ADDR, FluentCRM settings of D20, page cache, BACS-only checkout). With D20 in place: the Club join checkout shows FluentCRM's newsletter box **unticked**; a test order with the box unticked leaves the contact «Transactional», ticked makes it subscribed (classic checkout only, T6). |
 | 8 | The six tag constants; `define('EVC_CLUB_FLUENTCRM_SYNC_ENABLED', true);` | Readiness «Ετικέτες FluentCRM: Εντάξει» (verified); Tools → «Evangelou Club — FluentCRM» shows counts only. |
@@ -246,10 +255,26 @@ FluentCRM με το WooCommerce, το «Default Contact Status» γίνεται 
 δεν αλλάζει όταν ανοίγει την κάρτα του αλλού. Στιγμιότυπο οθόνης ισχύει από οποιαδήποτε συσκευή. Νέος κωδικός
 βγαίνει μόνο αν ο διαχειριστής ακυρώσει τον παλιό (π.χ. χαμένο κινητό). Χρειάζεται **ένα νέο μυστικό** στο
 `wp-config.php`, το `EVC_CLUB_QR_SECRET` (τουλάχιστον 32 τυχαίοι χαρακτήρες, **διαφορετικό** από το
-`EVC_CLUB_LOOKUP_KEY`)· χωρίς αυτό η κάρτα δεν δείχνει QR. **Δεν** χρειάζεται νέα μετάβαση βάσης. Στο staging, οι
+`EVC_CLUB_LOOKUP_KEY`)· χωρίς αυτό η κάρτα δεν δείχνει QR. Το παράδειγμα των οδηγιών και ένας ίδιος χαρακτήρας
+ξανά και ξανά **δεν** γίνονται δεκτά. Ο τεχνικός φτιάχνει το μυστικό με μία από τις δύο εντολές (64 χαρακτήρες):
+
+    php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"
+
+ή σε Windows PowerShell 5:
+
+    $b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b|%{$_.ToString('x2')}) -join ''
+
+**Δεν** χρειάζεται νέα μετάβαση βάσης. Στο staging, οι
 QR που βγήκαν πριν από το D22 αλλάζουν **μία φορά** στο επόμενο άνοιγμα της κάρτας και μετά μένουν ίδιοι. Δοκιμή
 στο staging: ανοίξτε την κάρτα σε δύο κινητά· πρέπει να δείχνουν τον ίδιο QR, και η σάρωση και των δύο στο ταμείο
-βρίσκει το ίδιο μέλος.
+βρίσκει το ίδιο μέλος. **Ποτέ μη σβήνετε γραμμές του πίνακα `evc_qr_tokens`** στη βάση του Club: ο κωδικός κάθε
+μέλους βγαίνει από αυτές, και αν σβηστούν, ένας παλιός ακυρωμένος κωδικός μπορεί να ξαναγίνει έγκυρος.
+
+**Απόφαση D23 (19/11/2026):** η κάρτα μέλους δείχνει πια **πραγματικά** στοιχεία: πόσους δωρεάν καφέδες πήρε το
+μέλος αυτόν τον μήνα και αν πήρε ήδη τον σημερινό («Τον απολαύσατε σήμερα»). Αν η βάση του Club δεν απαντά, η
+κάρτα δείχνει «—» όπως πριν. Δεν χρειάζεται νέα μετάβαση ούτε νέο μυστικό. Δοκιμή στο staging: δώστε έναν καφέ στο
+ταμείο και ξανανοίξτε την κάρτα· πρέπει να γράφει «Τον απολαύσατε σήμερα» και ο αριθμός του μήνα να έχει
+ανέβει κατά ένα.
 
 **Γνωστοί κίνδυνοι** που έχετε αποφασίσει ή έχουν μέτρα: δείτε τον πίνακα «Known risks» (K1–K17) παραπάνω· ο
 τεχνικός μπορεί να σας τους εξηγήσει έναν έναν.

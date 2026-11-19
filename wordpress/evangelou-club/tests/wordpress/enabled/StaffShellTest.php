@@ -328,6 +328,9 @@ final class StaffShellTest extends EVC_WP_Test_Case {
             'http://example.org/100%' => '/100%/',
             'http://example.org/50%off/%zz' => '/50%off/%zz/',
             'http://example.org/x^|[]y/{a}`b' => '/x^|[]y/%7Ba%7D%60b/',
+            // Round 8 (NIT-3): a backslash is a «/» for the browser (new URL('http://h/a\\b').pathname === '/a/b').
+            'http://example.org/a\\b' => '/a/b/',
+            'http://example.org/shop\\' => '/shop//', // home_url('/') = «…/shop\\/»: URL.pathname «/shop//», as the REST base
         ) as $home => $expected) {
             $filter = static function () use ($home) {
                 return $home;

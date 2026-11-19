@@ -6,7 +6,9 @@ import { Btn, Logo } from "../preview/ds";
 import type { CustomerScreen } from "../preview/screens";
 import type { CustomerConfig } from "./config";
 import type { CustomerApi, MeResult } from "./customerApi";
+import type { MemberCoffees } from "./coffeesApi";
 import { toLiveView } from "./liveView";
+import type { MemberCoffeesFlow } from "./memberCoffees";
 import type { MemberQrFlow, MemberQrState } from "./memberQr";
 import { MemberQrPanel } from "./MemberQrPanel";
 
@@ -18,6 +20,8 @@ import { MemberQrPanel } from "./MemberQrPanel";
  * (MemberQrPanel / memberQr.ts); otherwise the approved non-redeemable sample.
  * Signed out, not a customer, membership source unavailable and errors get
  * their own plain pages: nothing is ever shown as paid unless /me says so.
+ * D23: with a coffees flow (GET /me/coffees) today's coffee and this month's
+ * count are the member's real figures; without an answer they stay «—».
  */
 
 type MemberScreen = "card" | "dashboard" | "today" | "history" | "profile";
@@ -42,6 +46,7 @@ function StatusPage({ title, lede, children }: { title: string; lede: string; ch
 
 const NO_QR: MemberQrState = { phase: "off" };
 const noSubscribe = () => () => {};
+const noCoffees = (): MemberCoffees | null => null;
 
 export function CustomerApp({
   config,
@@ -49,6 +54,7 @@ export function CustomerApp({
   now = () => Date.now(),
   navigate,
   qrFlow,
+  coffeesFlow,
 }: {
   config: CustomerConfig;
   api: CustomerApi;
@@ -56,9 +62,12 @@ export function CustomerApp({
   navigate: Navigate;
   /** STAGE-05D: the member's real QR (absent = always the sample code). */
   qrFlow?: MemberQrFlow;
+  /** D23: the member's own coffee figures (absent = «—», as before). */
+  coffeesFlow?: MemberCoffeesFlow;
 }) {
   const [result, setResult] = useState<MeResult | null>(null);
   const qrState = useSyncExternalStore(qrFlow?.subscribe ?? noSubscribe, qrFlow?.getState ?? (() => NO_QR));
+  const coffees = useSyncExternalStore(coffeesFlow?.subscribe ?? noSubscribe, coffeesFlow?.getState ?? noCoffees);
   const [screen, setScreen] = useState<MemberScreen | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const navigated = useRef(false);
@@ -100,6 +109,28 @@ export function CustomerApp({
 
   const account = result?.kind === "ok" ? result.me.email : null;
   const onCard = result?.kind === "ok" && (screen ?? (toLiveView(result.me, now()).state === "active" ? "card" : "dashboard")) === "card";
+  // D23: the figures are asked when the member area opens, and again (throttled, memberCoffees.ts) whenever the
+  // page becomes visible, gets focus or comes back online, and when the card is opened from another screen.
+  useEffect(() => {
+    if (account === null || !coffeesFlow) return;
+    coffeesFlow.open(account);
+    const doc = globalThis.document;
+    const onVisible = () => {
+      if (!doc || doc.visibilityState !== "hidden") coffeesFlow.wake();
+    };
+    doc?.addEventListener("visibilitychange", onVisible);
+    globalThis.addEventListener?.("focus", onVisible);
+    globalThis.addEventListener?.("online", onVisible);
+    return () => {
+      doc?.removeEventListener("visibilitychange", onVisible);
+      globalThis.removeEventListener?.("focus", onVisible);
+      globalThis.removeEventListener?.("online", onVisible);
+      coffeesFlow.pause();
+    };
+  }, [account, coffeesFlow]);
+  useEffect(() => {
+    if (onCard) coffeesFlow?.wake();
+  }, [onCard, coffeesFlow]);
   // Each time the card is opened, the QR is resolved again from GET /me/qr (docs/member-qr.md rules).
   // Round 7: leaving the card (or unmounting) pauses the flow: no retry timer keeps running and no POST is sent
   // while the member is elsewhere; coming back opens it again.
@@ -140,7 +171,7 @@ export function CustomerApp({
       </StatusPage>
     );
   } else {
-    const view = toLiveView(result.me, now());
+    const view = toLiveView(result.me, now(), coffees);
     const current: MemberScreen = screen ?? (view.state === "active" ? "card" : "dashboard");
     const go = (s: CustomerScreen) => {
       navigated.current = true;

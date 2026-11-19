@@ -37,7 +37,7 @@ final class EVC_Readiness {
     const PROVENANCE_VALUE = 'club_db_v1';
     /** The lookup-proof secret of the member QR / staff scan (EVC_Club_Qr_Services::is_lookup_secret: >= 32 bytes). */
     const LOOKUP_KEY_CONSTANT = 'EVC_CLUB_LOOKUP_KEY';
-    /** D22: the member-QR derivation secret (EVC_Qr_Token::is_derivation_secret: >= 32 bytes, not the lookup key). */
+    /** D22: the member-QR derivation secret (EVC_Qr_Token::is_derivation_secret: >= 32 bytes, not the lookup key, not obviously non-random). */
     const QR_SECRET_CONSTANT = 'EVC_CLUB_QR_SECRET';
     /** The ledger table of EVC_Migrator. */
     const LEDGER_TABLE = 'evc_schema_migrations';
@@ -310,9 +310,9 @@ final class EVC_Readiness {
         list($lookup_defined, $lookup) = $this->constant_value(self::LOOKUP_KEY_CONSTANT);
         $status = self::qr_secret_status($defined, $value, $lookup_defined ? $lookup : null);
         $details = array(
-            self::OK => 'Ορίστηκε και είναι έγκυρο (τουλάχιστον 32 bytes, διαφορετικό από το κλειδί σκαναρίσματος).',
+            self::OK => 'Ορίστηκε και είναι έγκυρο (τουλάχιστον 32 χαρακτήρες, τυχαίο, διαφορετικό από το κλειδί σκαναρίσματος).',
             self::MISSING => 'Δεν έχει οριστεί: η κάρτα μέλους δεν δείχνει κωδικό QR.',
-            self::WRONG => 'Ορίστηκε, αλλά δεν είναι έγκυρο (χρειάζεται κείμενο τουλάχιστον 32 bytes, διαφορετικό από το κλειδί σκαναρίσματος): η κάρτα μέλους δεν δείχνει κωδικό QR.',
+            self::WRONG => 'Ορίστηκε, αλλά δεν είναι έγκυρο (χρειάζεται τυχαίο κείμενο τουλάχιστον 32 χαρακτήρων, όχι το παράδειγμα των οδηγιών ούτε τον ίδιο χαρακτήρα ξανά και ξανά, διαφορετικό από το κλειδί σκαναρίσματος): η κάρτα μέλους δεν δείχνει κωδικό QR.',
         );
         return self::row('qr_secret', 'Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)', $status, $details[$status]);
     }

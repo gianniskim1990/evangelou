@@ -33,6 +33,19 @@ defined('ABSPATH') || exit;
  *    status() never returns a token, only the active QR's issue time.
  *  - The member is ALWAYS the caller's own (the controller passes get_current_user_id(); the member row is
  *    read by that WordPress user id), so one member can never receive another member's token.
+ *  - Round 8 (LOW-2): the generation is the member's row count, so rows of `evc_qr_tokens` must NEVER be deleted
+ *    (docs/member-qr.md, docs/go-live.md). If some were, issue() still copes with up to GENERATION_PROBE missing
+ *    rows: the active row is matched against the next generations too, and a next generation whose digest is
+ *    already stored as REVOKED (its row was counted out) is skipped, so a revoked code is never issued again
+ *    while its row exists. Beyond that it answers 'unavailable' and logs REASON_GENERATION (the stuck state).
+ *
+ * Owner decision D23 (2026-11-19): coffees() gives the member card the signed-in member's OWN free-coffee
+ * figures from the redemption ledger (`evc_redemptions`, read only, through EVC_Redemption_Store on the same
+ * gated connection): whether today's coffee was taken (Europe/Athens business day, the redeem engine's
+ * EVC_Clock::business_date) and how many this Athens calendar month. It needs no QR secret. There is no
+ * reversal or void of a redemption in the ledger (no status column, the runtime user never deletes), so every
+ * free-coffee row counts, exactly as the engine's one-per-day rule counts it.
+ *
  * Logs: a fixed reason / stage plus an exception class only; never a token, digest, id or name.
  * The constructor parameters are TEST seams; the shipped wiring passes none (packager).
  */
@@ -41,6 +54,8 @@ final class EVC_Customer_Qr_Backend {
     const MIN_SCHEMA_VERSION = 2;
     /** issue(): how often a lost race with another device of the same member is read again. */
     const STABLE_TRIES = 2;
+    /** Round 8 (LOW-2): how many deleted QR rows of one member issue() still copes with (never delete them). */
+    const GENERATION_PROBE = 16;
 
     const REASON_ENVIRONMENT = 'environment_unreadable';
     const REASON_CUSTOMER = 'customer_flag_off';
@@ -50,6 +65,8 @@ final class EVC_Customer_Qr_Backend {
     const REASON_CONNECT = 'club_db_unavailable';
     const REASON_SCHEMA = 'club_db_schema_too_old';
     const REASON_FAILED = 'qr_failed';
+    const REASON_GENERATION = 'qr_generation_stuck';
+    const REASON_COFFEES = 'coffees_failed';
 
     /** @var callable(): array */
     private $environment;
@@ -101,6 +118,8 @@ final class EVC_Customer_Qr_Backend {
      */
     public function status(int $wp_user_id): array {
         $db = $this->open();
+        // Round 8 (NIT-2): status() never needs the secret; it is not kept a moment longer than issue() keeps it.
+        $this->secret = null;
         if ($db === null) {
             return array('state' => 'unavailable');
         }
@@ -154,16 +173,27 @@ final class EVC_Customer_Qr_Backend {
                 $active = $store->active_token_hash($member['id']);
                 $generation = $store->generation($member['id']);
                 if ($active !== null && $generation >= 1) {
-                    $token = EVC_Qr_Token::derive($secret, $member['member_public_id'], $generation);
-                    if (hash_equals($active, EVC_Qr_Token::digest($token))) {
+                    // Normally the active row IS generation = row count; round 8: a few generations above it too,
+                    // in case rows were deleted (never do that).
+                    for ($g = $generation; $g <= $generation + self::GENERATION_PROBE; $g++) {
+                        $token = EVC_Qr_Token::derive($secret, $member['member_public_id'], $g);
+                        if (!hash_equals($active, EVC_Qr_Token::digest($token))) {
+                            continue;
+                        }
                         $row = $store->find_token_by_hash($active);
                         if ($row !== null && $row['status'] === 'active' && $row['member_id'] === $member['id']) {
                             return array('result' => 'issued', 'token' => $token, 'issued_at_utc' => $row['issued_at_utc']);
                         }
+                        break;
                     }
                 }
                 // None yet (first QR / after a revocation) or not the stable one (before D22): the next generation.
-                $token = EVC_Qr_Token::derive($secret, $member['member_public_id'], $generation + 1);
+                $next = self::next_generation($store, $secret, $member['member_public_id'], $generation);
+                if ($next === null) {
+                    $this->refuse(self::REASON_GENERATION);
+                    return array('result' => 'unavailable');
+                }
+                $token = EVC_Qr_Token::derive($secret, $member['member_public_id'], $next);
                 $now = EVC_Clock::to_utc($this->clock->now())->format('Y-m-d H:i:s.u');
                 try {
                     $store->rotate($member['id'], $active, EVC_Qr_Token::digest($token), $now);
@@ -185,8 +215,54 @@ final class EVC_Customer_Qr_Backend {
         }
     }
 
-    /** The gated, prepared Club DB connection for this request, or null (reason logged). */
-    private function open(): ?EVC_Club_Db {
+    /**
+     * Round 8 (LOW-2): the first generation above $generation whose token was never stored as a REVOKED row. A
+     * stored ACTIVE row of that digest is a concurrent device's (the rotation then fails and the next try returns
+     * it). Null = more than GENERATION_PROBE used generations in a row: rows were deleted (the stuck state).
+     */
+    private static function next_generation($store, string $secret, string $member_public_id, int $generation): ?int {
+        for ($g = $generation + 1; $g <= $generation + 1 + self::GENERATION_PROBE; $g++) {
+            $row = $store->find_token_by_hash(EVC_Qr_Token::digest(EVC_Qr_Token::derive($secret, $member_public_id, $g)));
+            if ($row === null || $row['status'] === 'active') {
+                return $g;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Owner decision D23: the signed-in member's own free coffees (see the class comment). Read only.
+     *
+     * @return array{state:string,today?:string,taken_today?:bool,this_month?:int}
+     *   state: unavailable | not_member | member_disabled | member (+ today «Y-m-d» Athens, taken_today, this_month)
+     */
+    public function coffees(int $wp_user_id): array {
+        $db = $this->open(false);
+        if ($db === null) {
+            return array('state' => 'unavailable');
+        }
+        try {
+            $member = EVC_Club_Qr_Services::store($db)->find_member_by_wp_user($wp_user_id);
+            if ($member === null) {
+                return array('state' => 'not_member');
+            }
+            if ($member['status'] !== 'enabled') {
+                return array('state' => 'member_disabled');
+            }
+            $today = EVC_Clock::business_date($this->clock->now());
+            $counts = (new EVC_Redemption_Store($db))->member_coffee_counts($member['id'], EVC_Redemption_Service::BENEFIT_FREE_COFFEE, $today);
+            return array('state' => 'member', 'today' => $today, 'taken_today' => $counts['today'] > 0, 'this_month' => $counts['month']);
+        } catch (Throwable $e) {
+            $this->refuse(self::REASON_COFFEES, $e);
+            return array('state' => 'unavailable');
+        }
+    }
+
+    /**
+     * The gated, prepared Club DB connection for this request, or null (reason logged). $needs_secret: the QR
+     * routes need a valid EVC_CLUB_QR_SECRET (D22); the coffee figures (D23) do not.
+     */
+    private function open(bool $needs_secret = true): ?EVC_Club_Db {
         $this->last_reason = null;
         $this->secret = null;
         try {
@@ -208,7 +284,7 @@ final class EVC_Customer_Qr_Backend {
             return $this->refuse(self::REASON_DB_CONFIG);
         }
         // D22: no derivation secret, no QR (fail closed, before any connection).
-        if (!EVC_Qr_Token::is_derivation_secret($env['qr_secret'] ?? null, $env['lookup_key'] ?? null)) {
+        if ($needs_secret && !EVC_Qr_Token::is_derivation_secret($env['qr_secret'] ?? null, $env['lookup_key'] ?? null)) {
             return $this->refuse(self::REASON_QR_SECRET);
         }
         try {
@@ -228,7 +304,7 @@ final class EVC_Customer_Qr_Backend {
         if ($row === null || $row['v'] === null || (int) $row['v'] < self::MIN_SCHEMA_VERSION) {
             return $this->refuse(self::REASON_SCHEMA);
         }
-        $this->secret = $env['qr_secret'];
+        $this->secret = $needs_secret ? $env['qr_secret'] : null;
         return $db;
     }
 

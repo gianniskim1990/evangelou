@@ -55,6 +55,31 @@ final class EVC_Redemption_Store {
         );
     }
 
+    /**
+     * Owner decision D23 (2026-11-19): one member's own benefit rows on the Athens business day $today and in
+     * its Athens calendar month, by `business_date` (written by the redeem engine as EVC_Clock::business_date of
+     * the redemption instant), in one read-only SELECT. The ledger has no reversal or void, so every row counts.
+     *
+     * @return array{today:int,month:int}
+     */
+    public function member_coffee_counts(int $member_id, string $benefit_type, string $today): array {
+        $day = DateTimeImmutable::createFromFormat('!Y-m-d', $today, new DateTimeZone('UTC'));
+        if ($member_id < 1 || $day === false || $day->format('Y-m-d') !== $today) {
+            throw new InvalidArgumentException('Invalid coffee count request.');
+        }
+        $row = $this->db->fetch_one(
+            'SELECT COUNT(*) AS month_n, COUNT(CASE WHEN business_date = ? THEN 1 END) AS today_n'
+            . ' FROM evc_redemptions WHERE member_id = ? AND benefit_type = ? AND business_date >= ? AND business_date <= ?',
+            array($today, $member_id, $benefit_type, $day->format('Y-m-01'), $day->format('Y-m-t'))
+        );
+        $month = filter_var($row['month_n'] ?? null, FILTER_VALIDATE_INT);
+        $taken = filter_var($row['today_n'] ?? null, FILTER_VALIDATE_INT);
+        if ($month === false || $taken === false || $month < 0 || $taken < 0 || $taken > $month) {
+            throw new UnexpectedValueException('Stored coffee count is malformed.');
+        }
+        return array('today' => $taken, 'month' => $month);
+    }
+
     /** Inserts one ledger row through $db (the caller's transaction). */
     public function insert_redemption(EVC_Club_Db $db, array $row): int {
         return $db->insert(
