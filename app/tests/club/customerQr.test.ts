@@ -247,6 +247,13 @@ async function flush() {
   for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
 }
 
+/** Round 7: waits (real time, bounded) for work that runs SHA-256 on Node's thread pool, which a loaded CI runner
+ *  may not finish within flush()'s fixed number of turns. */
+async function eventually(check: () => boolean, what: string) {
+  for (let i = 0; i < 400 && !check(); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(check(), `in time: ${what}`);
+}
+
 describe("STAGE-05D round 2: the phone's QR record (qrStore.ts)", () => {
   it("kept per account + issued_at, never in the clear; read only for the exact issued_at", async () => {
     const { storage, store } = persisted();
@@ -780,6 +787,7 @@ describe("STAGE-08 round 7: weak Wi-Fi, leaving the card, D22 never-replace (sur
     assert.equal(storage.ours().length, 1, "nothing deleted while the server cannot be asked");
     assert.deepEqual(clock.pending(), [5_000]);
     await clock.advance(5_000);
+    await eventually(() => flow.getState().phase === "shown", "the silent check");
     assert.deepEqual(calls, ["GET", "GET"]);
     assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: false }, "verified once the server answers");
     assert.deepEqual(phases.slice(phases.indexOf("unchecked")), ["unchecked", "shown"], "no «Φόρτωση…» between the unchecked and the checked QR");
@@ -799,6 +807,7 @@ describe("STAGE-08 round 7: weak Wi-Fi, leaving the card, D22 never-replace (sur
     await f2.open(ME);
     assert.equal(f2.getState().phase, "unchecked");
     await clock.advance(5_000);
+    await eventually(() => f2.getState().phase === "member_disabled" && ctx.storage.ours().length === 0, "the check");
     assert.deepEqual(f2.getState(), { phase: "member_disabled" }, "the check decides: the kept QR goes");
     assert.equal(ctx.storage.ours().length, 0);
   });
@@ -1136,7 +1145,9 @@ describe("STAGE-08 round 7: the card's listeners and timers stop when the member
 
   it("LOW-3: leaving the card pauses the retries (no request, no POST off the card); coming back asks again", async () => {
     const clock = fakeClock();
-    const { calls } = await mountWith([{ kind: "error" }, { kind: "active", issuedAt: ISSUED }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }], persisted(), clock);
+    // In-memory keeper (no WebCrypto on the thread pool): the timing is the fake clock's alone.
+    const { calls } = await mountWith([{ kind: "error" }, { kind: "active", issuedAt: ISSUED }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }], { ...persisted(), keeper: createQrKeeper() }, clock);
+    await eventually(() => clock.pending().length === 1, "the first answer");
     assert.deepEqual(calls, ["GET"]);
     assert.deepEqual(clock.pending(), [5_000], "a retry is pending on the card");
     await dom.click(button("Αρχική"));
@@ -1147,16 +1158,21 @@ describe("STAGE-08 round 7: the card's listeners and timers stop when the member
     assert.deepEqual(calls, ["GET"], "nothing sent while the member is elsewhere");
     await dom.click(button("Κάρτα"));
     await settle();
+    await eventually(() => calls.length >= 3, "back on the card");
+    await settle();
     assert.deepEqual(calls, ["GET", "GET", "POST {}"], "back on the card: asked again (POST {}, never a replace)");
     assert.ok(app().querySelector('[data-evc-qr="member"]'));
   });
 
   it("round 7: a QR on screen survives a failed visible-again check in the real app", async () => {
     const clock = fakeClock();
-    await mountWith([{ kind: "none" }, { kind: "error" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }], persisted(), clock);
+    const { flow } = await mountWith([{ kind: "none" }, { kind: "error" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }], { ...persisted(), keeper: createQrKeeper() }, clock);
+    await eventually(() => flow.getState().phase === "shown", "the first QR");
+    await settle();
     assert.ok(app().querySelector('[data-evc-qr="member"]'));
     await act(async () => clock.advance(30_000));
     await act(async () => void dom.document.dispatchEvent(new dom.window.Event("visibilitychange")));
+    await eventually(() => clock.pending().length === 1, "the failed check and its silent retry");
     await settle();
     assert.ok(app().querySelector('[data-evc-qr="member"]'), "still the QR");
     assert.doesNotMatch(text(), /Δεν φορτώθηκε|Φόρτωση του κωδικού/);
