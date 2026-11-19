@@ -12,15 +12,21 @@
  *   - a plain base sits exactly at the site's home path (`homePath`, e.g. "/" or "/sub/", sent by the WordPress
  *     shell as wp_parse_url(home_url('/'), PHP_URL_PATH)) or at its index.php, and carries exactly one parameter that
  *     PHP reads as rest_route, equal to the namespace. Without a valid homePath a plain base is refused;
- *   - a pretty base ends with the namespace and carries NO parameter that PHP reads as rest_route.
+ *   - a pretty base ends with the namespace and carries NO parameter that PHP reads as rest_route; with a valid
+ *     homePath its path must also start with that home path (round 6).
+ *
+ * Round 6: a tab, CR or LF anywhere in the base is refused: the WHATWG URL parser strips them, so «/.\t./» would
+ * slip past the dot-segment check and then be normalised away. A relative base must be root-relative (exactly one
+ * leading «/»): restRouteUrl() refuses anything else instead of resolving it.
  *
  * Round 5: PHP turns «.», « » and an unmatched «[» in a parameter NAME into «_» (and the part before a matched «[»
  * names an array), so `?rest_route=/evangelou-club/v1&rest.route=/wp/v2/users` reaches WordPress as
  * rest_route=/wp/v2/users (the later key wins). phpParamName() below applies those rules, and every such alias counts.
  *
  * Routes appended here are made of URL-safe segments (fixed words, encodeURIComponent'ed IDs of [0-9a-z_]); in the
- * plain form URLSearchParams encodes the whole rest_route value, and keeps every other query parameter. A relative
- * base (the Vercel demo's "/wp-json/…") goes through the same code, so both forms are encoded the same way.
+ * plain form URLSearchParams encodes the whole rest_route value, and keeps every other query parameter. A
+ * root-relative base (the Vercel demo's "/wp-json/…") goes through the same code, so both forms are encoded the same
+ * way.
  */
 
 const REST_ROUTE = "rest_route";
@@ -57,9 +63,13 @@ function hasDotSegment(raw: string): boolean {
   return /(?:^|[/\\])(?:\.|%2e){1,2}(?=[/\\]|$)/i.test(path);
 }
 
+/** Tab, CR, LF: removed by the WHATWG URL parser wherever they appear, so never allowed in a value it will parse. */
+const STRIPPED_BY_URL_PARSER = /[\t\r\n]/;
+
 /** "/" or "/sub/": an absolute path that ends with "/", in the URL parser's own (encoded) form. */
 function validHomePath(homePath: unknown, origin: string): string | null {
   if (typeof homePath !== "string" || !homePath.startsWith("/") || homePath.startsWith("//") || !homePath.endsWith("/")) return null;
+  if (STRIPPED_BY_URL_PARSER.test(homePath)) return null;
   if (/[?#\\]/.test(homePath) || hasDotSegment(homePath)) return null;
   try {
     const parsed = new URL(homePath, origin);
@@ -73,6 +83,7 @@ function validHomePath(homePath: unknown, origin: string): string | null {
  *  path from the shell's config (required for a plain base). */
 export function sameOriginRestBase(value: unknown, origin: string, namespace: string, homePath?: unknown): string | null {
   if (typeof value !== "string" || value === "") return null;
+  if (STRIPPED_BY_URL_PARSER.test(value)) return null;
   if (value.includes("#") || hasDotSegment(value)) return null;
   let url: URL;
   try {
@@ -94,6 +105,9 @@ export function sameOriginRestBase(value: unknown, origin: string, namespace: st
   if (aliases !== 0) return null;
   const path = url.pathname.replace(/\/+$/, "");
   if (!path.endsWith(namespace)) return null;
+  // Round 6: under the site's home path when the shell sent one (a subfolder install: /sub/wp-json/…).
+  const home = homePath === undefined ? null : validHomePath(homePath, origin);
+  if (home !== null && !path.startsWith(home)) return null;
   url.pathname = path;
   return url.href;
 }
@@ -101,14 +115,17 @@ export function sameOriginRestBase(value: unknown, origin: string, namespace: st
 /** A placeholder origin for relative bases (the Vercel demo's "/wp-json/…"); it never leaves this function. */
 const RELATIVE_ORIGIN = "http://relative.invalid";
 
-/** The URL of `route` (e.g. "/session") under a REST base of either form. A relative base keeps its relative form
- *  and is built by the same code as an absolute one. */
+/** The URL of `route` (e.g. "/session") under a REST base of either form. A relative base must be root-relative
+ *  (exactly one leading "/"; never "//host", "\\host" or "wp-json/…"), keeps its relative form and is built by the
+ *  same code as an absolute one. Anything else throws (callers report it as a network error). */
 export function restRouteUrl(base: string, route: string): string {
   let url: URL;
   let relative = false;
+  if (STRIPPED_BY_URL_PARSER.test(base)) throw new TypeError("REST base with a tab or line break");
   try {
     url = new URL(base);
   } catch {
+    if (!/^\/(?![/\\])/.test(base)) throw new TypeError("REST base is neither absolute nor root-relative");
     url = new URL(base, RELATIVE_ORIGIN);
     relative = true;
   }

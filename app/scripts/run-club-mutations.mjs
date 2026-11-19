@@ -1784,18 +1784,6 @@ const mutants = [
     replace: "export const QR_TOKEN_RE = /^evc_/;",
   },
   {
-    id: "Q4-replaced-without-asking",
-    file: "customer/memberQr.ts",
-    search: "      return this.set({ phase: \"elsewhere\", reason: \"not_here\" });\n    }\n    // none:",
-    replace: "      const r = await this.api.issue(true);\n      return r.kind === \"issued\" ? this.show(mine, account, r) : this.set({ phase: \"error\" });\n    }\n    // none:",
-  },
-  {
-    id: "Q5-confirm-without-the-question",
-    file: "customer/memberQr.ts",
-    search: "    if (this.state.phase !== \"confirm_replace\") return;\n    const account = this.account;",
-    replace: "    const account = this.account;",
-  },
-  {
     id: "Q6-plaintext-kept-after-sign-out",
     file: "customer/CustomerApp.tsx",
     search: "      await qrFlow?.forget();\n",
@@ -1953,10 +1941,10 @@ const mutants = [
     replace: "    if (status.kind === \"off\") {",
   },
   {
-    id: "Q18-replace-keeps-the-old-record",
+    id: "Q18-new-qr-keeps-the-old-record",
     file: "customer/memberQr.ts",
-    search: "    this.set({ phase: \"replacing\" });\n    await this.keeper.forget(account);",
-    replace: "    this.set({ phase: \"replacing\" });",
+    search: "    // The old record goes first, so a dead code is never kept even if the new one does not arrive.\n    await this.keeper.forget(account);\n",
+    replace: "",
   },
   {
     id: "Q19-record-not-per-account",
@@ -2065,7 +2053,7 @@ const mutants = [
   {
     id: "Q35-other-tab-change-not-re-read",
     file: "customer/memberQr.ts",
-    search: "      if (p === \"shown\" || p === \"confirm_replace\") void this.open();\n",
+    search: "      if (this.state.phase === \"shown\") void this.open();\n",
     replace: "",
   },
   {
@@ -2370,6 +2358,128 @@ const mutants = [
     file: "customer/config.ts",
     search: "sameOriginRestBase(d.restBase, origin, CUSTOMER_NAMESPACE, d.homePath);",
     replace: "sameOriginRestBase(d.restBase, origin, CUSTOMER_NAMESPACE, \"/\");",
+  },
+  // STAGE-08 round 6, owner decision D21: the QR is always shown; automatic issuing with backoff and a hard cap.
+  {
+    id: "QR21-1-not-kept-shows-no-qr",
+    file: "customer/memberQr.ts",
+    search: "      return this.issue(mine, account, true, concurrentRetries);",
+    replace: "      return this.settle(mine, { phase: \"error\" });",
+  },
+  {
+    id: "QR21-2-auto-issue-without-replace",
+    file: "customer/memberQr.ts",
+    search: "      return this.issue(mine, account, true, concurrentRetries);",
+    replace: "      return this.issue(mine, account, false, concurrentRetries);",
+  },
+  {
+    id: "QR21-3-no-retry-after-an-error",
+    file: "customer/memberQr.ts",
+    search: "    if (next.phase !== \"error\" && next.phase !== \"unavailable\") return;",
+    replace: "    return;",
+  },
+  {
+    id: "QR21-4-no-backoff",
+    file: "customer/memberQr.ts",
+    search: "    const step = QR_RETRY_DELAYS_MS[Math.min(this.failures, QR_RETRY_DELAYS_MS.length - 1)];",
+    replace: "    const step = QR_RETRY_DELAYS_MS[0];",
+  },
+  {
+    id: "QR21-5-no-request-cap",
+    file: "customer/memberQr.ts",
+    search: "    if (this.sent.length >= QR_MAX_REQUESTS_PER_MINUTE) return false;\n",
+    replace: "",
+  },
+  {
+    id: "QR21-6-no-post-cap",
+    file: "customer/memberQr.ts",
+    search: "    if (issue && this.sent.filter((r) => r.issue).length >= QR_MAX_ISSUES_PER_MINUTE) return false;\n",
+    replace: "",
+  },
+  {
+    id: "QR21-7-spent-budget-not-waited-for",
+    file: "customer/memberQr.ts",
+    search: "    }, Math.max(step, this.budgetWait()));",
+    replace: "    }, step);",
+  },
+  {
+    id: "QR21-8-wake-not-throttled",
+    file: "customer/memberQr.ts",
+    search: "    if (since >= QR_WAKE_MIN_INTERVAL_MS) void this.open(this.account, true);",
+    replace: "    void this.open(this.account, true);",
+  },
+  {
+    id: "QR21-9-wake-hides-the-qr",
+    file: "customer/memberQr.ts",
+    search: "    if (!(quiet && this.state.phase === \"shown\")) this.set({ phase: \"loading\" });",
+    replace: "    this.set({ phase: \"loading\" });",
+  },
+  {
+    id: "QR21-10-no-visibility-listener",
+    file: "customer/MemberQrPanel.tsx",
+    search: "    doc.addEventListener(\"visibilitychange\", onVisible);\n",
+    replace: "",
+  },
+  {
+    id: "QR21-11-sign-out-keeps-the-retry",
+    file: "customer/memberQr.ts",
+    search: "    this.generation++;\n    this.cancelRetry();\n    this.account = null;",
+    replace: "    this.generation++;\n    this.account = null;",
+  },
+  {
+    id: "QR21-12-final-answers-retried",
+    file: "customer/memberQr.ts",
+    search: "    if (next.phase !== \"error\" && next.phase !== \"unavailable\") return;",
+    replace: "    if (next.phase === \"off\") return;",
+  },
+  {
+    id: "QR21-13-button-next-to-the-qr",
+    file: "customer/MemberQrPanel.tsx",
+    search: "            <QrSvg text={state.token} size={196} />",
+    replace: "            <QrSvg text={state.token} size={196} />\n            <button type=\"button\" onClick={() => flow.retry()}>Νέο QR</button>",
+  },
+  {
+    id: "QR21-14-loading-hidden-during-the-post",
+    file: "customer/memberQr.ts",
+    search: "      if (this.state.phase === \"loading\") this.set({ phase: \"loading\" });\n",
+    replace: "",
+  },
+  {
+    id: "QR21-15-retry-in-any-state",
+    file: "customer/memberQr.ts",
+    search: "    if (phase === \"error\" || phase === \"unavailable\") void this.open();\n  }\n\n  /** Takes one",
+    replace: "    void this.open();\n  }\n\n  /** Takes one",
+  },
+  {
+    id: "QR21-16-qr-exists-is-a-dead-end",
+    file: "customer/memberQr.ts",
+    search: "    if (issued.kind === \"qr_exists\" || issued.kind === \"concurrent_change\") {",
+    replace: "    if (issued.kind === \"concurrent_change\") {",
+  },
+  // STAGE-08 round 6: review nits on restRoute.ts.
+  {
+    id: "PP25-tab-cr-lf-accepted",
+    file: "lib/restRoute.ts",
+    search: "  if (STRIPPED_BY_URL_PARSER.test(value)) return null;\n",
+    replace: "",
+  },
+  {
+    id: "PP26-pretty-base-outside-home-path",
+    file: "lib/restRoute.ts",
+    search: "  if (home !== null && !path.startsWith(home)) return null;\n",
+    replace: "",
+  },
+  {
+    id: "PP27-relative-base-not-root-relative",
+    file: "lib/restRoute.ts",
+    search: "    if (!/^\\/(?![/\\\\])/.test(base)) throw new TypeError(\"REST base is neither absolute nor root-relative\");\n",
+    replace: "",
+  },
+  {
+    id: "PP28-url-builder-accepts-tab",
+    file: "lib/restRoute.ts",
+    search: "  if (STRIPPED_BY_URL_PARSER.test(base)) throw new TypeError(\"REST base with a tab or line break\");\n",
+    replace: "",
   },
 ];
 

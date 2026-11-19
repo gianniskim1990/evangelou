@@ -3,21 +3,35 @@ import type { CustomerQrApi, QrIssue, QrStatus } from "./qrApi";
 /*
  * STAGE-05D: what the member's card does with the Club QR (pure logic, no
  * DOM). It follows the decision rules of wordpress/evangelou-club/docs/
- * member-qr.md:
+ * member-qr.md, as changed by owner decision D21 (2026-11-19): the QR is
+ * ALWAYS shown when the membership is active, and there is no «Νέο QR»
+ * button any more.
  *
  *   server says                         the card
- *   active, same issued_at kept         shows the kept QR (this visit or, round 2,
- *                                        an earlier one: the phone remembers it)
+ *   active, same issued_at kept         shows the kept QR (this visit or an
+ *                                        earlier one: the phone remembers it)
  *   none                                POST {} -> shows and keeps the new QR
- *   active, nothing (or older) kept     "not on this device" + «Νέο QR»; the
- *                                        older record is deleted
+ *   active, nothing (or older) kept     D21: the older record is deleted, then
+ *                                        POST {"replace": true} at once (another
+ *                                        device, a lost record, a reload with
+ *                                        nothing kept) -> shows and keeps it
  *   not_member / member_disabled        explained; the account's record is deleted
  *   off (no route)                      the approved sample card; everything deleted
  *   signed_out                          everything deleted (the plaintext too)
+ *   unavailable / error                 short message, automatic retry with
+ *                                        backoff, a «Δοκιμάστε ξανά» link
  *
- * A new QR replaces the old one (D6: it changes only when the member asks),
- * so «Νέο QR» always asks for an explicit confirmation first; the old record
- * is deleted BEFORE the request. A screenshot of the shown QR works (D7).
+ * The server's rules are unchanged: a new QR retires the old one at once (on
+ * every device, screenshots included), and a QR has no age limit (D6 server
+ * side, EVC_Qr_Token_Policy::without_expiry()). So there is no expiry to renew
+ * before; the card renews when it has no valid code on this device, and when
+ * the tab becomes visible again it asks the server (at most every 30 s)
+ * whether the code it shows is still the active one.
+ *
+ * Never hammering the endpoint: every request of this flow goes through a
+ * rolling one-minute budget (QR_MAX_REQUESTS_PER_MINUTE in all, of which
+ * QR_MAX_ISSUES_PER_MINUTE POSTs); failures wait QR_RETRY_DELAYS_MS (5 s,
+ * 15 s, 30 s, then every 60 s), or longer when the budget is spent.
  *
  * Owner decision 2026-11-04 «Ναι, να τον θυμάται»: the phone remembers the QR
  * between visits. Where: qrStore.ts, the ONLY customer file allowed to touch
@@ -99,10 +113,6 @@ export function createQrKeeper(persistent: QrKeeper | null = null): QrKeeper & {
 export type MemberQrState =
   | { phase: "loading" }
   | { phase: "shown"; token: string; issuedAt: string; fresh: boolean }
-  /** Active on the server but not kept here (another device, a lost record). */
-  | { phase: "elsewhere"; reason: "not_here" | "created_elsewhere" }
-  | { phase: "confirm_replace"; back: "shown" | "elsewhere" }
-  | { phase: "replacing" }
   | { phase: "not_member" }
   | { phase: "member_disabled" }
   | { phase: "off" }
@@ -111,25 +121,59 @@ export type MemberQrState =
   | { phase: "unavailable" }
   | { phase: "error" };
 
+/** Timers and time for the flow (tests pass a fake one). */
+export interface QrFlowClock {
+  now(): number;
+  setTimer(fn: () => void, ms: number): unknown;
+  clearTimer(handle: unknown): void;
+}
+
+const systemClock: QrFlowClock = {
+  now: () => Date.now(),
+  setTimer(fn, ms) {
+    const t = setTimeout(fn, ms);
+    // Node only (tests): a pending retry never keeps the process alive. Browsers have no unref.
+    (t as unknown as { unref?: () => void }).unref?.();
+    return t;
+  },
+  clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+};
+
+/** Waits before the 1st, 2nd, 3rd and every later automatic retry after a failure. */
+export const QR_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000] as const;
+/** Hard cap: requests (GET + POST) this flow sends in any rolling minute. */
+export const QR_MAX_REQUESTS_PER_MINUTE = 8;
+/** Hard cap: POST /me/qr this flow sends in any rolling minute. */
+export const QR_MAX_ISSUES_PER_MINUTE = 3;
+/** A visible-again tab asks the server again at most this often (an error state: QR_RETRY_DELAYS_MS[0]). */
+export const QR_WAKE_MIN_INTERVAL_MS = 30_000;
+const WINDOW_MS = 60_000;
+
 export class MemberQrFlow {
   private state: MemberQrState = { phase: "loading" };
   private readonly listeners = new Set<() => void>();
   private generation = 0;
-  private previous: MemberQrState | null = null;
   private account: string | null = null;
   /** True once the server answered with anything but "no route" (the panel may then show «Φόρτωση…»). */
   private routeSeen = false;
+  /** Requests sent in the last minute (`issue`: a POST). */
+  private sent: { at: number; issue: boolean }[] = [];
+  /** Failures in a row (the backoff step); reset when a QR is shown. */
+  private failures = 0;
+  private retryTimer: unknown = null;
+  private lastOpen = Number.NEGATIVE_INFINITY;
 
   private readonly api: CustomerQrApi;
   private readonly keeper: QrKeeper;
+  private readonly clock: QrFlowClock;
 
-  constructor(api: CustomerQrApi, keeper: QrKeeper) {
+  constructor(api: CustomerQrApi, keeper: QrKeeper, clock: QrFlowClock = systemClock) {
     this.api = api;
     this.keeper = keeper;
+    this.clock = clock;
     // Round 4: another tab signed out or replaced the QR: never keep showing the old code here.
     keeper.onExternalChange?.(() => {
-      const p = this.state.phase;
-      if (p === "shown" || p === "confirm_replace") void this.open();
+      if (this.state.phase === "shown") void this.open();
     });
   }
 
@@ -150,13 +194,81 @@ export class MemberQrFlow {
     for (const l of this.listeners) l();
   }
 
-  /** Each open (and each retry) starts from GET /me/qr for the signed-in `account` (its e-mail). */
-  async open(account: string | null = this.account): Promise<void> {
+  /**
+   * Each open (and each retry) starts from GET /me/qr for the signed-in `account` (its e-mail). `quiet`: a shown
+   * QR stays on screen while the server is asked (the visible-again check), instead of «Φόρτωση…».
+   */
+  async open(account: string | null = this.account, quiet = false): Promise<void> {
     if (account === null) return;
     const mine = ++this.generation;
     this.account = account;
-    this.set({ phase: "loading" });
+    this.cancelRetry();
+    this.lastOpen = this.clock.now();
+    if (!(quiet && this.state.phase === "shown")) this.set({ phase: "loading" });
     await this.resolve(mine, account, 0);
+  }
+
+  /** The tab became visible again (visibilitychange / focus): ask the server again, within the limits. */
+  wake(): void {
+    if (this.account === null) return;
+    const phase = this.state.phase;
+    if (phase === "loading" || phase === "off") return;
+    const since = this.clock.now() - this.lastOpen;
+    if (phase === "error" || phase === "unavailable") {
+      if (since >= QR_RETRY_DELAYS_MS[0]) void this.open();
+      return;
+    }
+    if (since >= QR_WAKE_MIN_INTERVAL_MS) void this.open(this.account, true);
+  }
+
+  /** «Δοκιμάστε ξανά» (error states only): now, but still within the one-minute budget. */
+  retry(): void {
+    const phase = this.state.phase;
+    if (phase === "error" || phase === "unavailable") void this.open();
+  }
+
+  /** Takes one request from the rolling one-minute budget; false = spent (nothing may be sent). */
+  private take(issue: boolean): boolean {
+    const now = this.clock.now();
+    this.sent = this.sent.filter((r) => now - r.at < WINDOW_MS);
+    if (this.sent.length >= QR_MAX_REQUESTS_PER_MINUTE) return false;
+    if (issue && this.sent.filter((r) => r.issue).length >= QR_MAX_ISSUES_PER_MINUTE) return false;
+    this.sent.push({ at: now, issue });
+    return true;
+  }
+
+  /** How long until both a GET and a POST fit in the budget again. */
+  private budgetWait(): number {
+    const now = this.clock.now();
+    const live = this.sent.filter((r) => now - r.at < WINDOW_MS);
+    const issues = live.filter((r) => r.issue);
+    let wait = 0;
+    if (live.length >= QR_MAX_REQUESTS_PER_MINUTE - 1) wait = Math.max(wait, live[live.length - (QR_MAX_REQUESTS_PER_MINUTE - 1)].at + WINDOW_MS - now);
+    if (issues.length >= QR_MAX_ISSUES_PER_MINUTE) wait = Math.max(wait, issues[issues.length - QR_MAX_ISSUES_PER_MINUTE].at + WINDOW_MS - now);
+    return wait;
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer !== null) this.clock.clearTimer(this.retryTimer);
+    this.retryTimer = null;
+  }
+
+  /** Shows `next` for the current open only; a failure schedules the next automatic try. */
+  private settle(mine: number, next: MemberQrState): void {
+    if (mine !== this.generation) return;
+    this.set(next);
+    if (next.phase === "shown") {
+      this.failures = 0;
+      return;
+    }
+    if (next.phase !== "error" && next.phase !== "unavailable") return;
+    const step = QR_RETRY_DELAYS_MS[Math.min(this.failures, QR_RETRY_DELAYS_MS.length - 1)];
+    this.failures++;
+    this.cancelRetry();
+    this.retryTimer = this.clock.setTimer(() => {
+      this.retryTimer = null;
+      if (mine === this.generation) void this.open();
+    }, Math.max(step, this.budgetWait()));
   }
 
   /** Applies the delete rules of a plain answer; returns the state to show, or null. */
@@ -182,85 +294,62 @@ export class MemberQrFlow {
   }
 
   private async resolve(mine: number, account: string, concurrentRetries: number): Promise<void> {
+    if (!this.take(false)) return this.settle(mine, { phase: "error" });
     const status = await this.api.status();
     if (mine !== this.generation) return;
-    if (status.kind !== "off") this.routeSeen = true;
+    if (status.kind !== "off" && !this.routeSeen) {
+      this.routeSeen = true;
+      // The card may show «Φόρτωση…» from now on (D21: the automatic POST can take a moment).
+      if (this.state.phase === "loading") this.set({ phase: "loading" });
+    }
     const plain = await this.plain(status, account);
     if (mine !== this.generation) return;
-    if (plain) return this.set(plain);
+    if (plain) return this.settle(mine, plain);
     if (status.kind === "off") {
       await this.keeper.forgetAll();
       if (mine !== this.generation) return;
-      return this.set({ phase: "off" });
+      return this.settle(mine, { phase: "off" });
     }
     if (status.kind === "active") {
       // Shown ONLY for the exact issued_at the server reports now; read() deletes any other record.
       const token = await this.keeper.read(account, status.issuedAt);
       if (mine !== this.generation) return;
-      if (token !== null) return this.set({ phase: "shown", token, issuedAt: status.issuedAt, fresh: false });
-      return this.set({ phase: "elsewhere", reason: "not_here" });
+      if (token !== null) return this.settle(mine, { phase: "shown", token, issuedAt: status.issuedAt, fresh: false });
+      // D21: no valid code on this device -> a new one at once (the old one stops working everywhere).
+      return this.issue(mine, account, true, concurrentRetries);
     }
     // none: no active QR on the server, so nothing kept can be valid. POST {} never replaces one.
+    return this.issue(mine, account, false, concurrentRetries);
+  }
+
+  private async issue(mine: number, account: string, replace: boolean, concurrentRetries: number): Promise<void> {
+    if (!this.take(true)) return this.settle(mine, { phase: "error" });
+    // The old record goes first, so a dead code is never kept even if the new one does not arrive.
     await this.keeper.forget(account);
     if (mine !== this.generation) return;
-    const issued = await this.api.issue(false);
+    const issued = await this.api.issue(replace);
     if (mine !== this.generation) return;
     if (issued.kind === "issued") return this.show(mine, account, issued);
-    if (issued.kind === "qr_exists") return this.set({ phase: "elsewhere", reason: "created_elsewhere" });
-    if (issued.kind === "concurrent_change") {
-      if (concurrentRetries >= 1) return this.set({ phase: "error" });
+    // Another device or tab changed it at the same moment: read the server again once, then follow the rules.
+    if (issued.kind === "qr_exists" || issued.kind === "concurrent_change") {
+      if (concurrentRetries >= 1) return this.settle(mine, { phase: "error" });
       return this.resolve(mine, account, concurrentRetries + 1);
     }
     const shown = await this.plain(issued, account);
     if (mine !== this.generation) return;
-    return this.set(shown ?? { phase: "error" });
+    return this.settle(mine, shown ?? { phase: "error" });
   }
 
   private async show(mine: number, account: string, issued: { token: string; issuedAt: string }): Promise<void> {
     await this.keeper.write(account, issued.issuedAt, issued.token);
     if (mine !== this.generation) return;
-    this.set({ phase: "shown", token: issued.token, issuedAt: issued.issuedAt, fresh: true });
+    this.settle(mine, { phase: "shown", token: issued.token, issuedAt: issued.issuedAt, fresh: true });
   }
 
-  /** «Νέο QR»: never replaces anything by itself, it only asks for confirmation. */
-  askReplace(): void {
-    const s = this.state;
-    if (s.phase !== "shown" && s.phase !== "elsewhere") return;
-    this.previous = s;
-    this.set({ phase: "confirm_replace", back: s.phase });
-  }
-
-  cancelReplace(): void {
-    if (this.state.phase !== "confirm_replace") return;
-    const back = this.previous;
-    this.previous = null;
-    this.set(back ?? { phase: "elsewhere", reason: "not_here" });
-  }
-
-  /** The member confirmed: the old record goes first, then POST {"replace": true}. */
-  async confirmReplace(): Promise<void> {
-    if (this.state.phase !== "confirm_replace") return;
-    const account = this.account;
-    if (account === null) return;
-    const mine = ++this.generation;
-    this.previous = null;
-    this.set({ phase: "replacing" });
-    await this.keeper.forget(account);
-    if (mine !== this.generation) return;
-    const issued = await this.api.issue(true);
-    if (mine !== this.generation) return;
-    if (issued.kind === "issued") return this.show(mine, account, issued);
-    // Another device changed it at the same moment: read the server again and follow the rules.
-    if (issued.kind === "concurrent_change") return this.resolve(mine, account, 1);
-    const shown = await this.plain(issued, account);
-    if (mine !== this.generation) return;
-    return this.set(shown ?? { phase: "error" });
-  }
-
-  /** Sign-out: drop the plaintext everywhere (memory and the phone's record). */
+  /** Sign-out: drop the plaintext everywhere (memory and the phone's record); no retry stays scheduled. */
   async forget(): Promise<void> {
     this.generation++;
-    this.previous = null;
+    this.cancelRetry();
     this.account = null;
     this.set({ phase: "loading" });
     await this.keeper.forgetAll();

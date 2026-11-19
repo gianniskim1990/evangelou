@@ -4,7 +4,7 @@ import { createElement } from "react";
 import type { CustomerConfig } from "../../src/customer/config";
 import { CustomerApp } from "../../src/customer/CustomerApp";
 import { createCustomerApi, createNonceBox, type CustomerApi, type Me } from "../../src/customer/customerApi";
-import { MemberQrFlow, createQrKeeper, type QrKeeper } from "../../src/customer/memberQr";
+import { MemberQrFlow, QR_MAX_ISSUES_PER_MINUTE, QR_MAX_REQUESTS_PER_MINUTE, QR_RETRY_DELAYS_MS, createQrKeeper, type QrFlowClock, type QrKeeper } from "../../src/customer/memberQr";
 import { QR_STORE_PREFIX, createStorageQrKeeper } from "../../src/customer/qrStore";
 import { createCustomerQrApi, parseQrIssued, parseQrStatus, type CustomerQrApi, type QrIssue, type QrStatus } from "../../src/customer/qrApi";
 import { createDom, type DomHarness } from "../staff/support/dom";
@@ -13,8 +13,10 @@ import { createDom, type DomHarness } from "../staff/support/dom";
  * STAGE-05D: the member's own Club QR in the REAL customer app.
  * - qrApi: GET/POST evangelou-club-customer/v1/me/qr parsed strictly; the
  *   token only ever comes from a POST 200.
- * - MemberQrFlow: the decision rules of docs/member-qr.md; a replacement
- *   only after an explicit confirmation (D6); 409 qr_exists handled.
+ * - MemberQrFlow: the decision rules of docs/member-qr.md; owner decision
+ *   D21 (2026-11-19): no «Νέο QR», a new QR is issued automatically when
+ *   none is kept on this device, errors retry with backoff under a hard
+ *   per-minute cap.
  * - qrStore (round 2, owner «Ναι, να τον θυμάται»): the phone remembers the
  *   QR per account + issued_at, shows it only for the issued_at the server
  *   reports, and deletes it on every rule of the decision.
@@ -202,6 +204,42 @@ function persisted() {
   return { storage, store, keeper: createQrKeeper(store) };
 }
 
+/** A manual clock for MemberQrFlow: timers fire only inside advance(). */
+function fakeClock() {
+  let t = 1_000_000;
+  let id = 0;
+  const timers = new Map<number, { at: number; fn: () => void }>();
+  const clock: QrFlowClock & { pending(): number[]; advance(ms: number): Promise<void> } = {
+    now: () => t,
+    setTimer(fn, ms) {
+      timers.set(++id, { at: t + ms, fn });
+      return id;
+    },
+    clearTimer(h) {
+      timers.delete(h as number);
+    },
+    pending: () => [...timers.values()].map((x) => x.at - t),
+    async advance(ms) {
+      const end = t + ms;
+      for (;;) {
+        const due = [...timers.entries()].filter(([, x]) => x.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        t = due[1].at;
+        timers.delete(due[0]);
+        due[1].fn();
+        await flush();
+      }
+      t = end;
+      await flush();
+    },
+  };
+  return clock;
+}
+/** Lets the flow's promise chains (memory keeper only: no thread-pool hashing) run to the end. */
+async function flush() {
+  for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+}
+
 describe("STAGE-05D round 2: the phone's QR record (qrStore.ts)", () => {
   it("kept per account + issued_at, never in the clear; read only for the exact issued_at", async () => {
     const { storage, store } = persisted();
@@ -288,22 +326,26 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
     assert.deepEqual(calls, ["GET"]);
   });
 
-  it("active with a different issued_at (replaced elsewhere, revoked and re-issued): not shown, the record is deleted", async () => {
+  it("D21: active with a different issued_at (replaced elsewhere, revoked and re-issued): the old record goes, a new QR is issued at once", async () => {
     const { storage, keeper } = persisted();
     await keeper.write(ME, ISSUED, TOKEN);
-    const { api, calls } = scripted([{ kind: "active", issuedAt: ISSUED2 }], []);
-    const flow = new MemberQrFlow(api, createQrKeeper(createStorageQrKeeper(storage as unknown as Storage, subtle)));
+    const order: string[] = [];
+    const { api, calls } = scripted([{ kind: "active", issuedAt: ISSUED2 }], [{ kind: "unavailable" }]);
+    const watched: CustomerQrApi = { status: api.status, issue: (r) => (order.push(`POST with ${storage.ours().length} kept`), api.issue(r)) };
+    const flow = new MemberQrFlow(watched, createQrKeeper(createStorageQrKeeper(storage as unknown as Storage, subtle)), fakeClock());
     await flow.open(ME);
-    assert.deepEqual(flow.getState(), { phase: "elsewhere", reason: "not_here" });
-    assert.deepEqual(calls, ["GET"], "no POST without the member's request");
+    assert.deepEqual(calls, ["GET", "POST replace"], "no button, no question: a new code at once");
+    assert.deepEqual(order, ["POST with 0 kept"], "the dead code is deleted BEFORE the request");
+    assert.deepEqual(flow.getState(), { phase: "unavailable" });
     assert.equal(storage.ours().length, 0, "a dead code is never kept");
     // The same with the old QR still in this page's memory (shown earlier in this visit).
     const again = persisted();
     await again.keeper.write(ME, ISSUED, TOKEN);
-    const f2 = new MemberQrFlow(scripted([{ kind: "active", issuedAt: ISSUED2 }], []).api, again.keeper);
+    const f2 = new MemberQrFlow(scripted([{ kind: "active", issuedAt: ISSUED2 }], [{ kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]).api, again.keeper, fakeClock());
     await f2.open(ME);
-    assert.deepEqual(f2.getState(), { phase: "elsewhere", reason: "not_here" });
-    assert.equal(again.keeper.memory(), null, "the in-memory copy is dropped too");
+    assert.deepEqual(f2.getState(), { phase: "shown", token: TOKEN2, issuedAt: ISSUED2, fresh: true });
+    assert.deepEqual(again.keeper.memory(), { account: ME.toLowerCase(), issuedAt: ISSUED2, token: TOKEN2 }, "only the new code in memory");
+    assert.equal(again.storage.ours().length, 1, "and on the phone");
   });
 
   it("delete rules: signed_out, not_member, member_disabled, forbidden, route off and none", async () => {
@@ -312,7 +354,7 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
       await keeper.write(OTHER, ISSUED, TOKEN2);
       await keeper.write(ME, ISSUED, TOKEN);
       const { api } = scripted([{ kind }], kind === "none" ? [{ kind: "unavailable" }] : []);
-      const flow = new MemberQrFlow(api, keeper);
+      const flow = new MemberQrFlow(api, keeper, fakeClock());
       await flow.open(ME);
       assert.equal(storage.ours().length, othersKept, `${kind}: the account's record is deleted`);
       assert.equal(keeper.memory(), null, `${kind}: nor kept in memory`);
@@ -323,64 +365,48 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
     for (const kind of ["unavailable", "error"] as const) {
       const { storage, keeper } = persisted();
       await keeper.write(ME, ISSUED, TOKEN);
-      const flow = new MemberQrFlow(scripted([{ kind }], []).api, keeper);
+      const flow = new MemberQrFlow(scripted([{ kind }], []).api, keeper, fakeClock());
       await flow.open(ME);
       assert.deepEqual(flow.getState(), { phase: kind });
       assert.equal(storage.ours().length, 1);
     }
   });
 
-  it("«Νέο QR» asks first; cancel goes back; confirm deletes the old record BEFORE POST replace: true", async () => {
+  it("D21: the flow has no «Νέο QR» question any more", () => {
+    const flow = new MemberQrFlow(scripted([], []).api, createQrKeeper(), fakeClock()) as unknown as Record<string, unknown>;
+    for (const gone of ["askReplace", "cancelReplace", "confirmReplace"]) assert.equal(flow[gone], undefined, gone);
+  });
+
+  it("409 qr_exists after GET none (another device or tab was first): read the server again once and follow the rules", async () => {
+    const kept = scripted([{ kind: "none" }, { kind: "active", issuedAt: ISSUED }], [{ kind: "qr_exists" }]);
     const { storage, keeper } = persisted();
-    const { api, calls } = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }, { kind: "unavailable" }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
-    const flow = new MemberQrFlow(api, keeper);
+    const flow = new MemberQrFlow(kept.api, keeper, fakeClock());
+    // The other tab of this phone wrote its new QR while this tab's POST was refused.
+    const otherTab = createStorageQrKeeper(storage as unknown as Storage, subtle)!;
+    const issue = kept.api.issue;
+    kept.api.issue = async (r) => {
+      const out = await issue(r);
+      await otherTab.write(ME, ISSUED, TOKEN);
+      return out;
+    };
     await flow.open(ME);
-    flow.askReplace();
-    assert.deepEqual(flow.getState(), { phase: "confirm_replace", back: "shown" });
-    flow.cancelReplace();
-    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: true });
-    assert.deepEqual(calls, ["GET", "POST {}"], "cancel sends nothing");
-    flow.askReplace();
-    await flow.confirmReplace();
-    assert.deepEqual(flow.getState(), { phase: "unavailable" });
-    assert.equal(storage.ours().length, 0, "the old code is gone even though the new one did not arrive");
-    await flow.open(ME);
-    flow.askReplace();
-    assert.equal(flow.getState().phase, "error", "open() with a GET error: nothing to replace from");
+    assert.deepEqual(kept.calls, ["GET", "POST {}", "GET"], "the other tab's code is used, nothing replaced");
+    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: false });
+    const elsewhere = scripted([{ kind: "none" }, { kind: "active", issuedAt: ISSUED }], [{ kind: "qr_exists" }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
+    const f2 = new MemberQrFlow(elsewhere.api, createQrKeeper(), fakeClock());
+    await f2.open(ME);
+    assert.deepEqual(elsewhere.calls, ["GET", "POST {}", "GET", "POST replace"], "another device: replaced at once (D21)");
+    assert.deepEqual(f2.getState(), { phase: "shown", token: TOKEN2, issuedAt: ISSUED2, fresh: true });
   });
 
-  it("confirm replace: the new QR is shown and kept", async () => {
-    const { storage, keeper } = persisted();
-    const { api, calls } = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
-    const flow = new MemberQrFlow(api, keeper);
-    await flow.open(ME);
-    flow.askReplace();
-    await flow.confirmReplace();
-    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN2, issuedAt: ISSUED2, fresh: true });
-    assert.deepEqual(calls, ["GET", "POST {}", "POST replace"]);
-    assert.equal(await createStorageQrKeeper(storage as unknown as Storage, subtle)!.read(ME, ISSUED2), TOKEN2);
-    await flow.confirmReplace();
-    assert.equal(calls.length, 3, "confirm without a question does nothing");
-  });
-
-  it("409 qr_exists after GET none (another device was first): explained, nothing replaced", async () => {
-    const { api, calls } = scripted([{ kind: "none" }], [{ kind: "qr_exists" }]);
-    const flow = new MemberQrFlow(api, createQrKeeper());
-    await flow.open(ME);
-    assert.deepEqual(flow.getState(), { phase: "elsewhere", reason: "created_elsewhere" });
-    flow.askReplace();
-    assert.deepEqual(flow.getState(), { phase: "confirm_replace", back: "elsewhere" });
-    assert.deepEqual(calls, ["GET", "POST {}"]);
-  });
-
-  it("409 concurrent_change: read the server again once; twice in a row is an error", async () => {
-    const once = scripted([{ kind: "none" }, { kind: "active", issuedAt: ISSUED }], [{ kind: "concurrent_change" }]);
-    const f1 = new MemberQrFlow(once.api, createQrKeeper());
+  it("409 concurrent_change: read the server again once; twice in a row is an error (then the backoff)", async () => {
+    const once = scripted([{ kind: "none" }, { kind: "active", issuedAt: ISSUED }], [{ kind: "concurrent_change" }, { kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
+    const f1 = new MemberQrFlow(once.api, createQrKeeper(), fakeClock());
     await f1.open(ME);
-    assert.deepEqual(f1.getState(), { phase: "elsewhere", reason: "not_here" });
-    assert.deepEqual(once.calls, ["GET", "POST {}", "GET"]);
+    assert.deepEqual(once.calls, ["GET", "POST {}", "GET", "POST replace"]);
+    assert.equal(f1.getState().phase, "shown");
     const twice = scripted([{ kind: "none" }, { kind: "none" }], [{ kind: "concurrent_change" }, { kind: "concurrent_change" }]);
-    const f2 = new MemberQrFlow(twice.api, createQrKeeper());
+    const f2 = new MemberQrFlow(twice.api, createQrKeeper(), fakeClock());
     await f2.open(ME);
     assert.deepEqual(f2.getState(), { phase: "error" });
   });
@@ -510,6 +536,163 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
   });
 });
 
+describe("STAGE-08 round 6, owner decision D21: the QR is always shown (automatic, rate-capped issuing)", () => {
+  it("auto-issue on load with nothing kept on this device: another device's QR is replaced at once, a first QR is created", async () => {
+    const elsewhere = scripted([{ kind: "active", issuedAt: ISSUED }], [{ kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
+    const f1 = new MemberQrFlow(elsewhere.api, createQrKeeper(), fakeClock());
+    await f1.open(ME);
+    assert.deepEqual(elsewhere.calls, ["GET", "POST replace"]);
+    assert.deepEqual(f1.getState(), { phase: "shown", token: TOKEN2, issuedAt: ISSUED2, fresh: true });
+    const first = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
+    const f2 = new MemberQrFlow(first.api, createQrKeeper(), fakeClock());
+    await f2.open(ME);
+    assert.deepEqual(first.calls, ["GET", "POST {}"], "POST {} never replaces anything");
+    assert.equal(f2.getState().phase, "shown");
+  });
+
+  it("a kept QR that is still the active one is shown without any POST, and no timer renews it (the server sets no expiry)", async () => {
+    const keeper = createQrKeeper();
+    await keeper.write(ME, ISSUED, TOKEN);
+    const clock = fakeClock();
+    const { api, calls } = scripted([{ kind: "active", issuedAt: ISSUED }], []);
+    const flow = new MemberQrFlow(api, keeper, clock);
+    await flow.open(ME);
+    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: false });
+    await clock.advance(30 * 60_000);
+    assert.deepEqual(calls, ["GET"], "nothing is sent while the page just stays open");
+    assert.deepEqual(clock.pending(), []);
+  });
+
+  it("visible again: asks the server (at most every 30 s), keeps the QR on screen meanwhile, and renews it if it was replaced elsewhere", async () => {
+    const clock = fakeClock();
+    const { api, calls } = scripted(
+      [{ kind: "none" }, { kind: "active", issuedAt: ISSUED }, { kind: "active", issuedAt: ISSUED2 }],
+      [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }],
+    );
+    const flow = new MemberQrFlow(api, createQrKeeper(), clock);
+    await flow.open(ME);
+    const phases: string[] = [];
+    flow.subscribe(() => phases.push(flow.getState().phase));
+    await clock.advance(10_000);
+    flow.wake();
+    await flush();
+    assert.deepEqual(calls, ["GET", "POST {}"], "10 s later: too soon, nothing sent");
+    await clock.advance(20_000);
+    flow.wake();
+    await flush();
+    assert.deepEqual(calls, ["GET", "POST {}", "GET"], "30 s later: the server is asked");
+    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: false });
+    assert.ok(!phases.includes("loading"), "the QR stayed on screen (no «Φόρτωση…» flash)");
+    await clock.advance(30_000);
+    flow.wake();
+    await flush();
+    assert.deepEqual(calls, ["GET", "POST {}", "GET", "GET", "POST replace"], "replaced on another device: a new code here at once");
+    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN2, issuedAt: ISSUED2, fresh: true });
+  });
+
+  it("errors retry by themselves with backoff (5 s, 15 s, 30 s, then every 60 s), and the next success resets it", async () => {
+    const clock = fakeClock();
+    const statuses: QrStatus[] = [{ kind: "error" }, { kind: "unavailable" }, { kind: "error" }, { kind: "error" }, { kind: "error" }, { kind: "none" }, { kind: "error" }];
+    const { api, calls } = scripted(statuses, [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
+    const flow = new MemberQrFlow(api, createQrKeeper(), clock);
+    await flow.open(ME);
+    assert.deepEqual(flow.getState(), { phase: "error" });
+    assert.deepEqual(clock.pending(), [QR_RETRY_DELAYS_MS[0]]);
+    assert.deepEqual([...QR_RETRY_DELAYS_MS], [5_000, 15_000, 30_000, 60_000]);
+    await clock.advance(4_999);
+    assert.equal(calls.length, 1, "not before 5 s");
+    await clock.advance(1);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(flow.getState(), { phase: "unavailable" });
+    assert.deepEqual(clock.pending(), [15_000]);
+    await clock.advance(15_000);
+    assert.deepEqual(clock.pending(), [30_000]);
+    await clock.advance(30_000);
+    assert.deepEqual(clock.pending(), [60_000]);
+    await clock.advance(60_000);
+    assert.deepEqual(clock.pending(), [60_000], "then every 60 s");
+    await clock.advance(60_000);
+    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: true });
+    assert.deepEqual(clock.pending(), [], "nothing scheduled once the QR is shown");
+    await clock.advance(30_000);
+    flow.wake();
+    await flush();
+    assert.deepEqual(flow.getState(), { phase: "error" });
+    assert.deepEqual(clock.pending(), [5_000], "the backoff starts again after a success");
+  });
+
+  it("request cap: however often «Δοκιμάστε ξανά» or a wake-up fires, at most 8 requests and 3 POSTs in any minute", async () => {
+    const clock = fakeClock();
+    const calls: { at: number; what: string }[] = [];
+    const api: CustomerQrApi = {
+      async status() {
+        calls.push({ at: clock.now(), what: "GET" });
+        return { kind: "active", issuedAt: ISSUED };
+      },
+      async issue() {
+        calls.push({ at: clock.now(), what: "POST" });
+        return { kind: "unavailable" };
+      },
+    };
+    const flow = new MemberQrFlow(api, createQrKeeper(), clock);
+    await flow.open(ME);
+    for (let i = 0; i < 40; i++) {
+      flow.retry();
+      flow.wake();
+      await flush();
+      await clock.advance(1_000);
+    }
+    await clock.advance(10 * 60_000);
+    assert.equal(QR_MAX_REQUESTS_PER_MINUTE, 8);
+    assert.equal(QR_MAX_ISSUES_PER_MINUTE, 3);
+    for (const c of calls) {
+      const inMinute = calls.filter((x) => x.at > c.at - 60_000 && x.at <= c.at);
+      assert.ok(inMinute.length <= QR_MAX_REQUESTS_PER_MINUTE, `at most 8 requests in the minute up to ${c.at}`);
+      assert.ok(inMinute.filter((x) => x.what === "POST").length <= QR_MAX_ISSUES_PER_MINUTE, `at most 3 POSTs in the minute up to ${c.at}`);
+    }
+    assert.ok(calls.filter((c) => c.what === "POST").length >= 3, "it does keep trying");
+    assert.ok(["error", "unavailable"].includes(flow.getState().phase), "still an error state (with its retry link)");
+    assert.equal(clock.pending().length, 1, "and exactly one retry is scheduled");
+  });
+
+  it("a spent budget waits for the window instead of the short backoff step", async () => {
+    const clock = fakeClock();
+    const api: CustomerQrApi = { status: async () => ({ kind: "active", issuedAt: ISSUED }), issue: async () => ({ kind: "unavailable" }) };
+    const flow = new MemberQrFlow(api, createQrKeeper(), clock);
+    await flow.open(ME);
+    flow.retry();
+    await flush();
+    flow.retry();
+    await flush();
+    // 3 POSTs spent at t0: the next try may not come before the first of them leaves the minute.
+    assert.ok(clock.pending()[0] >= 60_000 - 1, `waits for the window (${clock.pending()[0]} ms)`);
+  });
+
+  it("no retry for a final answer, retry() only in an error state, and sign-out cancels a scheduled retry", async () => {
+    for (const kind of ["not_member", "member_disabled", "forbidden", "signed_out", "off"] as const) {
+      const clock = fakeClock();
+      const flow = new MemberQrFlow(scripted([{ kind }], []).api, createQrKeeper(), clock);
+      await flow.open(ME);
+      assert.deepEqual(clock.pending(), [], `${kind}: nothing scheduled`);
+    }
+    const clock = fakeClock();
+    const shown = scripted([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }]);
+    const f1 = new MemberQrFlow(shown.api, createQrKeeper(), clock);
+    await f1.open(ME);
+    f1.retry();
+    await flush();
+    assert.deepEqual(shown.calls, ["GET", "POST {}"], "retry() does nothing while a QR is shown");
+    const failing = scripted([{ kind: "error" }], []);
+    const f2 = new MemberQrFlow(failing.api, createQrKeeper(), clock);
+    await f2.open(ME);
+    assert.equal(clock.pending().length, 1);
+    await f2.forget();
+    assert.deepEqual(clock.pending(), [], "sign-out leaves no retry behind");
+    await clock.advance(10 * 60_000);
+    assert.deepEqual(failing.calls, ["GET"]);
+  });
+});
+
 let dom: DomHarness;
 let act: (fn: () => Promise<void>) => Promise<void>;
 
@@ -536,7 +719,7 @@ async function settle(rounds = 4) {
 }
 const ACTIVE: Me = { displayName: "Ελένη Μαρκοπούλου", email: ME, state: "active", paidUntilUtc: "2026-11-15T10:00:00+00:00" };
 
-async function mountWith(statuses: (QrStatus | (() => Promise<QrStatus>))[], issues: QrIssue[], ctx = persisted()) {
+async function mountWith(statuses: (QrStatus | (() => Promise<QrStatus>))[], issues: QrIssue[], ctx = persisted(), clock: QrFlowClock = fakeClock()) {
   const calls: string[] = [];
   const api: CustomerQrApi = {
     async status() {
@@ -549,7 +732,7 @@ async function mountWith(statuses: (QrStatus | (() => Promise<QrStatus>))[], iss
       return issues.shift() ?? { kind: "error" };
     },
   };
-  const flow = new MemberQrFlow(api, ctx.keeper);
+  const flow = new MemberQrFlow(api, ctx.keeper, clock);
   const me: CustomerApi = { me: async () => ({ kind: "ok", me: ACTIVE }) };
   const visited: string[] = [];
   await dom.render(createElement(CustomerApp, { config: CONFIG, api: me, now: () => Date.parse("2026-11-04T10:00:00Z"), navigate: (u: string) => visited.push(u), qrFlow: flow }));
@@ -568,31 +751,27 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     assert.match(svg!.parentElement!.className, /bg-white/, "the white padded frame");
     assert.ok((app().querySelector('[data-evc-preview="sample-qr"]')) === (null), "no sample code next to the real one");
     assert.doesNotMatch(dom.document.body.innerHTML, /evc_[0-9a-f]{48}/, "the plaintext is drawn, never written out");
-    assert.match(text(), /Μένει ίδιος μέχρι να ζητήσετε νέο/);
-    assert.match(text(), /στιγμιότυπο οθόνης/);
+    assert.match(text(), /Ο κωδικός ανανεώνεται αυτόματα· μόλις ανανεωθεί, ο παλιός και κάθε στιγμιότυπο οθόνης του δεν ισχύουν πια στο ταμείο\./);
+    assert.doesNotMatch(text(), /Νέο QR|Μένει ίδιος|κρατήσετε στιγμιότυπο/);
     assert.match(text(), /Δείξτε τον κωδικό στο ταμείο/);
     assert.ok(app().querySelector('[aria-label="Κάρτα μέλους Evangelou Club"]'));
     assert.equal(storage.ours().length, 1, "the phone remembers it");
     assert.ok(app().querySelector('[role="status"]') && app().querySelector('[role="alert"]'), "two fixed live regions");
   });
 
-  it("«Νέο QR» shows a clear Greek confirmation (focus moves to it, not inside a live region); «Άκυρο» keeps the code; «Ναι, νέο QR» replaces it", async () => {
-    const { calls } = await mountWith([{ kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }, { kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
-    await dom.click(button("Νέο QR"));
-    const dialog = app().querySelector('[role="alertdialog"]') as HTMLElement;
-    assert.ok(dialog);
-    assert.ok((dialog.closest("[aria-live]")) === (null), "the dialog is not inside a live region");
-    assert.match(dialog.textContent ?? "", /Θέλετε νέο κωδικό QR;/);
-    assert.match(dialog.textContent ?? "", /θα σταματήσει να ισχύει αμέσως, σε όλες τις συσκευές/);
-    assert.equal(dom.document.activeElement?.id, "evc-qr-confirm-title", "focus on the question");
-    await dom.click(button("Άκυρο"));
+  it("D21: no «Νέο QR» button and no question in the normal state; a visible-again tab asks the server", async () => {
+    const clock = fakeClock();
+    const { calls } = await mountWith([{ kind: "none" }, { kind: "active", issuedAt: ISSUED }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }], persisted(), clock);
     assert.ok(app().querySelector('[data-evc-qr="member"]'));
-    assert.deepEqual(calls, ["GET", "POST {}"]);
-    await dom.click(button("Νέο QR"));
-    await dom.click(button("Ναι, νέο QR"));
+    const panel = app().querySelector("[data-evc-qr-state]") as HTMLElement;
+    assert.equal(panel.querySelectorAll("button").length, 0, "no button at all next to the QR");
+    assert.ok(![...dom.document.querySelectorAll("button")].some((b) => /Νέο QR|νέο κωδικό/.test(b.textContent ?? "")), "no «Νέο QR» anywhere");
+    assert.equal(app().querySelector('[role="alertdialog"]'), null);
+    await clock.advance(30_000);
+    await act(async () => void dom.document.dispatchEvent(new dom.window.Event("visibilitychange")));
     await settle();
-    assert.deepEqual(calls, ["GET", "POST {}", "POST replace"]);
-    assert.equal(app().querySelector("[data-evc-qr-state]")?.getAttribute("data-evc-qr-state"), "shown");
+    assert.deepEqual(calls, ["GET", "POST {}", "GET"], "visibilitychange: the server is asked again");
+    assert.ok(app().querySelector('[data-evc-qr="member"]'), "the same QR, still shown");
   });
 
   it("the next visit shows the remembered QR without asking the server for a new one", async () => {
@@ -604,13 +783,33 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     assert.ok(app().querySelector('[data-evc-qr="member"]'));
   });
 
-  it("active on another device: explained, the screenshot still works, «Νέο QR» on request only", async () => {
-    const { calls } = await mountWith([{ kind: "active", issuedAt: ISSUED }], []);
-    assert.match(text(), /Ο κωδικός σας δεν φαίνεται σε αυτή τη συσκευή/);
-    assert.match(text(), /Αν έχετε στιγμιότυπο οθόνης, ισχύει κανονικά/);
-    assert.ok((app().querySelector('[data-evc-qr="member"]')) === (null), "app().querySelector('[data-evc-qr=\"member\"]') === null");
-    assert.deepEqual(calls, ["GET"]);
-    button("Νέο QR");
+  it("D21: active on another device: a new QR is shown here at once; the old «not on this device» state is gone", async () => {
+    const { calls, storage } = await mountWith([{ kind: "active", issuedAt: ISSUED }], [{ kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }]);
+    assert.deepEqual(calls, ["GET", "POST replace"]);
+    assert.ok(app().querySelector('[data-evc-qr="member"]'));
+    assert.doesNotMatch(text(), /δεν φαίνεται σε αυτή τη συσκευή|δημιουργήθηκε σε άλλη συσκευή|Νέο QR/);
+    assert.equal(storage.ours().length, 1);
+  });
+
+  it("D21: while the new QR is fetched the panel shows a neutral «Φόρτωση…», never a button", async () => {
+    let answer: (i: QrIssue) => void = () => {};
+    const ctx = persisted();
+    const calls: string[] = [];
+    const api: CustomerQrApi = {
+      status: async () => (calls.push("GET"), { kind: "active", issuedAt: ISSUED }),
+      issue: (r) => (calls.push(r ? "POST replace" : "POST {}"), new Promise<QrIssue>((res) => (answer = res))),
+    };
+    const flow = new MemberQrFlow(api, ctx.keeper, fakeClock());
+    const me: CustomerApi = { me: async () => ({ kind: "ok", me: ACTIVE }) };
+    await dom.render(createElement(CustomerApp, { config: CONFIG, api: me, now: () => Date.parse("2026-11-04T10:00:00Z"), navigate: () => {}, qrFlow: flow }));
+    await settle();
+    assert.deepEqual(calls, ["GET", "POST replace"]);
+    assert.equal(app().querySelector("[data-evc-qr-state]")?.getAttribute("data-evc-qr-state"), "loading");
+    assert.match(text(), /Φόρτωση του κωδικού σας/);
+    assert.equal(app().querySelectorAll("[data-evc-qr-state] button").length, 0);
+    await act(async () => answer({ kind: "issued", token: TOKEN, issuedAt: ISSUED }));
+    await settle();
+    assert.ok(app().querySelector('[data-evc-qr="member"]'));
   });
 
   it("not a member yet / disabled: explained in Greek, no code", async () => {
@@ -638,6 +837,7 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     const ctx = persisted();
     const { calls, visited, storage } = await mountWith([{ kind: "unavailable" }, { kind: "none" }], [{ kind: "issued", token: TOKEN, issuedAt: ISSUED }], ctx);
     assert.match(text(), /δεν είναι διαθέσιμος αυτή τη στιγμή/);
+    assert.match(text(), /Θα ξαναπροσπαθήσουμε αυτόματα σε λίγο/);
     await dom.click(button("Δοκιμάστε ξανά"));
     await settle();
     assert.deepEqual(calls, ["GET", "GET", "POST {}"]);

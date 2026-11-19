@@ -84,6 +84,14 @@ approval: first on **staging**, and on **production** only after the owner appro
   default, for everyone (the Club join checkout included), and the WooCommerce integration's Default Contact Status
   «Transactional» (T11). It supersedes D12's "no newsletter checkbox" for the **shop checkout**; the Club code still
   never calls FluentCRM from the onboarding (D11 / D12 code rules stand). Pending the shop owner's consent.
+- **Owner decision D21** (2026-11-19, STAGE-08 round 6): the member card shows the QR **always** when the membership
+  is active, and the «Νέο QR» button is gone. A device without the current QR (another phone, a reload with nothing
+  kept, private browsing) asks for a new one by itself (`POST {"replace": true}`), which retires the old QR at once
+  everywhere, screenshots included; a visible-again tab re-checks (at most every 30 s); failures retry with backoff
+  (5 s, 15 s, 30 s, then 60 s) under a hard client cap of 8 requests / 3 new QRs per minute. **Server unchanged:** no
+  token expiry was added (D6 `without_expiry()` stands) and the customer QR route still has no server-side rate
+  limit; see K17 and [member-qr.md](member-qr.md). Staging check: open the card on a second phone, then rescan the
+  first phone's QR at the till: «δεν βρέθηκε μέλος».
 - **On a phone, the offer's «Πληρωμή 20 €» did not look like a button** (the owner only noticed the account link).
   Round 4: a full-width filled button; the account link below it is small.
 
@@ -156,6 +164,7 @@ Each with the owner decision that accepted it or the mitigation in place.
 | K13 | **A tablet that does not confirm sign-out** keeps its server session until the 30-minute inactivity limit. | Bounded by the session policy; «Αποσύνδεση από όλες τις συσκευές» ends it at once. |
 | K15 | **Plain permalinks** on a site: the pretty Club URLs are a 404. | Round 4: the plugin builds plain URLs then, and readiness reads «Λάθος» with the fix (T9). |
 | K16 | **FluentCRM's checkout checkbox is not shown on the Block Checkout** (D20). | Known FluentCRM limitation (acknowledged by its support, 2025-09). On a Block Checkout no consent is collected at the checkout; the D20 «Transactional» default keeps buyers out of the newsletter. Check on staging (T6). |
+| K17 | **D21: opening the card on a second device retires the first device's QR** (and any screenshot of it); two devices used in turn replace each other's QR. There is no token expiry, so a screenshot of the *current* QR keeps working until the next renewal. The customer `POST /me/qr` has no server-side rate limit; only the app's own cap (8 requests / 3 new QRs per minute per page) applies. | Owner decision D21 (2026-11-19); one coffee per Athens day and the staff's first-name check still limit the damage. A server-side limit or a token lifetime would be a new owner decision. |
 | K14 | **A page cache** could serve the join page to the wrong visitor. | `DONOTCACHEPAGE` + no-cache headers; readiness lists page-cache plugins; exclude `/club/join/` and `/club-member/` by hand if the host cache ignores them. |
 
 ## 6. Shipped-code TODO / FIXME
@@ -226,5 +235,11 @@ FluentCRM με το WooCommerce, το «Default Contact Status» γίνεται 
 αγοραστής γίνεται συνδρομητής newsletter). Περιμένουμε τη συγκατάθεση του καταστήματος μέσω του τεχνικού πριν
 γίνει στο κανονικό site. Προσοχή: το FluentCRM δείχνει το κουτάκι μόνο στο κλασικό checkout, όχι στο Block Checkout.
 
-**Γνωστοί κίνδυνοι** που έχετε αποφασίσει ή έχουν μέτρα: δείτε τον πίνακα «Known risks» (K1–K16) παραπάνω· ο
+**Απόφαση D21 (19/11/2026):** στην κάρτα μέλους ο QR φαίνεται πάντα και το κουμπί «Νέο QR» καταργήθηκε. Αν το
+κινητό δεν έχει τον ισχύοντα κωδικό (άλλο κινητό, ανανέωση σελίδας), η εφαρμογή βγάζει μόνη της νέο, και ο παλιός,
+μαζί με κάθε στιγμιότυπό του, σταματά αμέσως να δουλεύει στο ταμείο. Ο κωδικός δεν λήγει με τον χρόνο (αυτό θα ήταν
+νέα απόφαση). Δοκιμή στο staging: ανοίξτε την κάρτα σε δεύτερο κινητό και σαρώστε τον κωδικό του πρώτου· πρέπει να
+βγει «δεν βρέθηκε μέλος».
+
+**Γνωστοί κίνδυνοι** που έχετε αποφασίσει ή έχουν μέτρα: δείτε τον πίνακα «Known risks» (K1–K17) παραπάνω· ο
 τεχνικός μπορεί να σας τους εξηγήσει έναν έναν.

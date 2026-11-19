@@ -125,17 +125,36 @@ final class EVC_Rest_Security {
         return null;
     }
 
-    /** @return array<string,string> */
     /**
      * STAGE-08 round 5: the site's home path ("/" or "/sub/"), sent to the apps as homePath. With plain permalinks
-     * the apps accept a REST base only exactly at this path or its index.php (rest_url() uses home_url('index.php')).
+     * the apps accept a REST base only exactly at this path or its index.php (rest_url() uses home_url('index.php'));
+     * with pretty permalinks the base must sit under it.
+     *
+     * Round 6: each segment is percent-encoded (rawurlencode of the decoded segment) the way the browser's
+     * URL.pathname spells it, so a non-ASCII home path ("/καφές/") matches: "/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/".
+     * The characters the URL parser leaves as they are in a path stay unencoded too.
      */
     public static function home_path(): string {
         $path = wp_parse_url(home_url('/'), PHP_URL_PATH);
         $path = is_string($path) && $path !== '' ? $path : '/';
-        return substr($path, -1) === '/' ? $path : $path . '/';
+        $path = substr($path, -1) === '/' ? $path : $path . '/';
+        $segments = array_map(
+            static function (string $segment): string {
+                return strtr(rawurlencode(rawurldecode($segment)), self::PATH_KEEP);
+            },
+            explode('/', $path)
+        );
+        return implode('/', $segments);
     }
 
+    /** Characters rawurlencode() escapes but the WHATWG URL parser keeps as they are in a path. */
+    private const PATH_KEEP = array(
+        '%21' => '!', '%24' => '$', '%26' => '&', '%27' => "'", '%28' => '(', '%29' => ')', '%2A' => '*',
+        '%2B' => '+', '%2C' => ',', '%3B' => ';', '%3D' => '=', '%3A' => ':', '%40' => '@', '%5B' => '[',
+        '%5D' => ']', '%5E' => '^', '%7C' => '|',
+    );
+
+    /** @return array<string,string> */
     public static function security_headers(): array {
         return array(
             'Cache-Control' => 'no-store, private, max-age=0',

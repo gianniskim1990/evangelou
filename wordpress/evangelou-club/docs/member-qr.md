@@ -10,18 +10,20 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
 
 | | Απόφαση |
 |---|---|
-| **D6** διάρκεια / αλλαγή | «Ίδιος μέχρι να ζητηθεί νέος». Ο QR δεν λήγει. Αλλάζει μόνο όταν ο πελάτης πατήσει «νέο QR» ή όταν ο διαχειριστής ακυρώσει τον παλιό. Το κινητό τον κρατά. |
+| **D6** διάρκεια / αλλαγή | «Ίδιος μέχρι να ζητηθεί νέος». Ο QR δεν λήγει. Αλλάζει μόνο όταν ο πελάτης πατήσει «νέο QR» ή όταν ο διαχειριστής ακυρώσει τον παλιό. Το κινητό τον κρατά. **Το «πατήσει «νέο QR»» αντικαταστάθηκε από το D21.** |
 | **D7** στιγμιότυπο οθόνης | «Ναι, το δεχόμαστε». Μια φωτογραφία οθόνης του QR δουλεύει. Ο ένας καφές ανά ημέρα Αθήνας περιορίζει κάθε απώλεια. |
 | **D8** τι βλέπει το ταμείο | «Μικρό όνομα + κατάσταση»: «ενεργό», «όχι ενεργό» ή «ο καφές πάρθηκε σήμερα». Ποτέ επώνυμο, τηλέφωνο, e-mail ή άλλα στοιχεία. |
 | **D9** λάθος σαρώσεις | Περίπου **10 αποτυχίες ανά 5 λεπτά, ανά tablet**. Ο μετρητής ζει σε έναν νέο μικρό πίνακα (μετάβαση 003). Εγκρίθηκε ο **κώδικας**. Η εφαρμογή του 003 εγκρίθηκε **μόνο στο staging** (D19, 2026-11-10)· στην παραγωγή χρειάζεται **ξεχωριστή** έγκριση. |
 | **D9α** νέα σύνδεση tablet | «Όχι, μένει έτσι». Οι **επιτυχημένες** νέες συνδέσεις του tablet δεν έχουν όριο (το `EVC_Login_Throttle` μετρά μόνο λάθος κωδικούς). Κάθε νέα σύνδεση δίνει νέες ~10 προσπάθειες. **Αποδεκτός κίνδυνος**, χωρίς νέο κώδικα. |
 | **D10** ακύρωση QR | «Όχι, μόνο ο διαχειριστής». Το tablet μόνο σαρώνει. |
+| **D21** (2026-11-19) πάντα ορατός QR | Στην κάρτα μέλους ο QR φαίνεται **πάντα** όταν η συνδρομή είναι ενεργή· το κουμπί «Νέο QR» καταργείται. Αν σε αυτή τη συσκευή δεν υπάρχει ο ισχύων QR (άλλη συσκευή, ανανέωση σελίδας χωρίς αποθηκευμένο κωδικό), η εφαρμογή ζητά **μόνη της** νέο. Ο νέος ακυρώνει αμέσως τον παλιό, σε όλες τις συσκευές, μαζί με κάθε στιγμιότυπό του. Αλλάζει το D6 μόνο ως προς το «αλλάζει όταν πατήσει ο πελάτης»· ο διακομιστής δεν άλλαξε (καμία λήξη, κανένα νέο όριο). |
 
 ### Τι κάνει
 
 1. **Ο πελάτης** (με αριθμό μέλους, δηλαδή με καταγεγραμμένη πληρωμή, STAGE-05B) ανοίγει την κάρτα του
-   και παίρνει **έναν** QR. Αν τον ξαναζητήσει, παίρνει την απάντηση «υπάρχει ήδη QR» και ο QR **δεν**
-   αλλάζει. Μόνο με «νέο QR» αλλάζει, και τότε ο παλιός σταματά αμέσως να δουλεύει.
+   και παίρνει **έναν** QR. Αν τον ξαναζητήσει χωρίς αντικατάσταση, παίρνει την απάντηση «υπάρχει ήδη QR»
+   και ο QR **δεν** αλλάζει. Από το D21 η εφαρμογή ζητά αντικατάσταση **μόνη της** όταν η συσκευή δεν έχει
+   τον ισχύοντα QR· τότε ο παλιός σταματά αμέσως να δουλεύει.
 2. Στη βάση **δεν** γράφεται ποτέ ο ίδιος ο QR, μόνο ένα «αποτύπωμά» του. Γι' αυτό ο QR δίνεται στο
    κινητό **μόνο τη στιγμή που δημιουργείται** και το κινητό τον κρατά.
 3. **Το ταμείο** σαρώνει τον QR και βλέπει το μικρό όνομα και την κατάσταση. Ο QR **δεν δίνει μόνος του
@@ -32,7 +34,8 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
    ταμείο δεν μαθαίνει ποτέ αν ένας κωδικός υπήρξε κάποτε.
 5. Μετά από **10 αποτυχημένες σαρώσεις σε 5 λεπτά**, **αυτό** το tablet περιμένει ως το τέλος του
    5λεπτου. Τα άλλα tablets δουλεύουν κανονικά.
-6. **Χαμένο κινητό:** ο πελάτης συνδέεται από το νέο κινητό και πατά «νέο QR». Ο **διαχειριστής** του
+6. **Χαμένο κινητό:** ο πελάτης συνδέεται από το νέο κινητό και ανοίγει την κάρτα του· η εφαρμογή βγάζει
+   νέο QR και ο παλιός (στο χαμένο κινητό) σταματά να δουλεύει (D21). Ο **διαχειριστής** του
    WordPress μπορεί επίσης να ακυρώσει τον QR ενός πελάτη (με τον αριθμό χρήστη WordPress). Ο κοινός
    λογαριασμός του ταμείου **δεν** μπορεί.
 
@@ -63,10 +66,17 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
   - Η κάμερα κλείνει πάντα όταν κλειδώσει η οθόνη, ακόμη κι αν εκείνη τη στιγμή περίμενε ακόμη την άδεια.
 - **Κινητό του πελάτη.**
   - Η κάρτα δείχνει τον πραγματικό QR του μέλους.
-  - Ο QR μένει ίδιος μέχρι να πατήσει ο πελάτης «Νέο QR». Πριν αλλάξει, η εφαρμογή ρωτά ξεκάθαρα:
-    «Θέλετε νέο κωδικό QR; Ο τωρινός κωδικός, και κάθε στιγμιότυπο οθόνης του, θα σταματήσει να ισχύει
-    αμέσως, σε όλες τις συσκευές.»
-  - Στιγμιότυπο οθόνης επιτρέπεται.
+  - **D21 (2026-11-19):** ο QR φαίνεται πάντα· δεν υπάρχει κουμπί «Νέο QR» ούτε ερώτηση. Όσο έρχεται ο
+    κωδικός, η κάρτα γράφει «Φόρτωση του κωδικού σας…». Κάτω από τον QR: «Ο κωδικός ανανεώνεται
+    αυτόματα· μόλις ανανεωθεί, ο παλιός και κάθε στιγμιότυπο οθόνης του δεν ισχύουν πια στο ταμείο.»
+  - Η εφαρμογή ζητά νέο QR μόνη της όταν η συσκευή δεν έχει τον ισχύοντα (άλλη συσκευή, χαμένη
+    αποθήκευση, ιδιωτική περιήγηση). Όταν η καρτέλα ξαναγίνει ορατή, ρωτά τον διακομιστή (το πολύ κάθε
+    30 δευτερόλεπτα) αν ο QR που δείχνει ισχύει ακόμη.
+  - Αν αποτύχει (δίκτυο, διακομιστής), γράφει σύντομο μήνυμα, ξαναδοκιμάζει μόνη της σε 5, 15, 30 και μετά
+    κάθε 60 δευτερόλεπτα, και δείχνει έναν μικρό σύνδεσμο «Δοκιμάστε ξανά» **μόνο** τότε. Σε κάθε λεπτό
+    στέλνει το πολύ 8 αιτήματα, από τα οποία το πολύ 3 για νέο QR.
+  - Ένα στιγμιότυπο οθόνης του **τωρινού** QR δουλεύει ώσπου να ανανεωθεί ο QR (D7· ο διακομιστής δεν
+    βάζει λήξη, D6).
   - **Το κινητό θυμάται τον QR** (απόφαση ιδιοκτήτη 2026-11-04: «Ναι, να τον θυμάται»). Τον κρατά στην
     αποθήκευση του προγράμματος περιήγησης, χωρίς e-mail ή ημερομηνία σε αναγνώσιμη μορφή, και τον
     δείχνει **μόνο** αν ο διακομιστής λέει ότι ισχύει ακόμη ο ίδιος QR.
@@ -74,10 +84,10 @@ Club (βλ. «Πώς ενεργοποιείται»), οι νέες διαδρο
     - ο πελάτης αποσυνδέεται ή η σύνδεση έχει λήξει·
     - ο λογαριασμός δεν είναι (πια) μέλος ή η κάρτα είναι ανενεργή·
     - η λειτουργία QR είναι κλειστή·
-    - ζητηθεί νέος QR·
+    - βγει νέος QR·
     - ο διακομιστής έχει άλλον QR, για παράδειγμα αν ο διαχειριστής ακύρωσε τον παλιό.
-  - Ο διακομιστής **δεν** ξαναστέλνει ποτέ έναν QR. Αν το κινητό τον χάσει, ο πελάτης χρησιμοποιεί το
-    στιγμιότυπο οθόνης ή πατά «Νέο QR».
+  - Ο διακομιστής **δεν** ξαναστέλνει ποτέ έναν QR. Αν το κινητό τον χάσει, η εφαρμογή ζητά νέο μόνη
+    της (D21).
 
 ### Πώς ενεργοποιείται (ΜΟΝΟ με έγκριση του ιδιοκτήτη, πρώτα στο staging)
 
@@ -290,8 +300,7 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
     reviewer's reproduction (sign-out while the new QR is still being written) and mutants Q24–Q26.
   - **A change of the `issued_at` format fails safe.** The record key includes the exact `issued_at`
     string, so any change (time zone, precision) makes the stored record unreadable for that key, and it is
-    deleted on the next read. The member then sees «Νέο QR» or uses the screenshot; no wrong code is ever
-    shown.
+    deleted on the next read. The card then issues a new QR by itself (D21); no wrong code is ever shown.
   - **The account hash is unsalted (a deliberate choice, round 3).** It only keeps the e-mail from being
     readable at a glance. Anyone who can read this storage can also read the token itself, which is the
     valuable part, and a per-device salt kept in the same store would be just as readable. So a salt would
@@ -301,7 +310,8 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
     page of the site. Such a token works at the counter like a screenshot, so the limits are the same:
     - one free coffee per Athens day, enforced by the server;
     - the staff check of the first name;
-    - «Νέο QR» or the administrator's revocation retires it.
+    - a new QR (issued automatically on any device without the current one, D21) or the administrator's
+      revocation retires it.
     It is NOT secret storage.
 - **Guard.** `app/scripts/storage-guard.mjs` runs in the packager on the customer bundle's real esbuild
   import graph (app sources and `node_modules`) and in `tests/club/storageGuard.test.ts`:
@@ -338,8 +348,10 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
 | Server says | What the app does |
 |---|---|
 | `active`, the same `issued_at` kept (this visit or an earlier one) | Show the kept QR. |
-| `none` | Delete the account's record; `POST {}`; a `409 qr_exists` (another device was first) → "created elsewhere" + «Νέο QR». |
-| `active` with nothing (or an older QR) kept | Delete the old one, explain, offer «Νέο QR» → confirmation → delete → `POST {"replace": true}`. |
+| `none` | Delete the account's record; `POST {}`; a `409 qr_exists` (another device or tab was first) → `GET` again once and follow the rules. |
+| `active` with nothing (or an older QR) kept | D21: delete the old one, then `POST {"replace": true}` at once (no button, no question); show and keep the new QR. |
+| `unavailable` / error / spent request budget | Keep the record; short message; automatic retry after 5 s, 15 s, 30 s, then every 60 s (longer if the budget needs it); «Δοκιμάστε ξανά» link in this state only. Budget: 8 requests per rolling minute, at most 3 of them `POST`. |
+| tab visible again | `GET` again (at most every 30 s; 5 s in an error state); the shown QR stays on screen meanwhile. |
 | `not_member` / `member_disabled` | Delete; explain; no code. |
 | `404` (no route: the provenance gate is off) | Delete everything; the approved sample card, unchanged (never replaced by «Φόρτωση…» while the route is unknown). |
 | `409 concurrent_change` | `GET` again once, then follow the rules; twice in a row → error. |

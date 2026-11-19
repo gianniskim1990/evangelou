@@ -146,6 +146,65 @@ describe("STAGE-08 round 4: staff REST base in both permalink forms", () => {
     assert.ok(at(PRETTY), "no dot-segment, accepted");
   });
 
+  it("round 6: tab, CR and LF are refused anywhere in the base (the URL parser would strip them past the dot-segment check)", () => {
+    const at = (base: string, home: unknown = "/sub/") => sameOriginRestBase(base, ORIGIN, STAFF_NAMESPACE, home);
+    const sneaky = [
+      `${ORIGIN}/sub/wp-json/x/.\t./evangelou-club/v1`,
+      `${ORIGIN}/sub/wp-json/x/.\n./evangelou-club/v1`,
+      `${ORIGIN}/sub/wp-json/x/\r../evangelou-club/v1`,
+      `${ORIGIN}/sub/x/.\t./index.php?rest_route=/evangelou-club/v1`,
+      `${ORIGIN}/sub/index.php?rest_route=/evangelou-club/v1\n`,
+      `${ORIGIN}/sub/index.php?rest\t_route=/evangelou-club/v1`,
+      `\t${PRETTY}`,
+      `${PRETTY}\r\n`,
+      `${ORIGIN}/s\tub/wp-json/evangelou-club/v1`,
+    ];
+    assert.equal(new URL(sneaky[0]).pathname, "/sub/wp-json/evangelou-club/v1", "why: the parser strips the tab, then resolves «..»");
+    for (const base of sneaky) assert.equal(at(base), null, JSON.stringify(base));
+    assert.equal(at(PLAIN_INDEX, "/s\tub/"), null, "nor in the home path");
+    assert.throws(() => restRouteUrl(`${PRETTY}\t`, "/session"), TypeError);
+    assert.ok(at(PRETTY) && at(PLAIN_INDEX), "the clean bases still pass");
+  });
+
+  it("round 6: with a valid homePath a pretty base must sit under it (staging: /prometheus/)", () => {
+    const at = (base: string, home: unknown) => sameOriginRestBase(base, ORIGIN, STAFF_NAMESPACE, home);
+    const staging = `${ORIGIN}/prometheus/wp-json/evangelou-club/v1`;
+    assert.equal(at(staging, "/prometheus/"), staging, "the staging pretty base passes");
+    assert.equal(at(`${staging}/`, "/prometheus/"), staging);
+    assert.ok(at(`${ORIGIN}/wp-json/evangelou-club/v1`, "/"), "a root install");
+    assert.ok(at(staging, "/"), "the root home path covers every folder");
+    for (const [label, base, home] of [
+      ["another folder", `${ORIGIN}/other/wp-json/evangelou-club/v1`, "/prometheus/"],
+      ["the site root under a sub-folder install", `${ORIGIN}/wp-json/evangelou-club/v1`, "/prometheus/"],
+      ["a look-alike folder", `${ORIGIN}/prometheus-x/wp-json/evangelou-club/v1`, "/prometheus/"],
+      ["the folder without its slash", `${ORIGIN}/prometheuswp-json/evangelou-club/v1`, "/prometheus/"],
+    ] as const) {
+      assert.equal(at(base, home), null, label);
+    }
+    assert.equal(at(`${ORIGIN}/prometheus/wp-json/wp/v2`, "/prometheus/"), null, "the namespace suffix is still required");
+    assert.ok(at(staging, undefined), "no homePath (an older shell): the suffix check alone, as before");
+    assert.ok(at(staging, "not-a-path"), "an invalid homePath is ignored for a pretty base (it is refused for a plain one)");
+    assert.equal(at(`${ORIGIN}/prometheus/?rest_route=/evangelou-club/v1`, "not-a-path"), null);
+    const nonAscii = `${ORIGIN}/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/wp-json/evangelou-club/v1`;
+    assert.equal(at(`${ORIGIN}/καφές/wp-json/evangelou-club/v1`, "/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/"), nonAscii, "a non-ASCII home path in the encoded form PHP now sends");
+    assert.equal(at(`${ORIGIN}/καφές/index.php?rest_route=/evangelou-club/v1`, "/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/") !== null, true);
+    assert.equal(at(`${ORIGIN}/καφές/index.php?rest_route=/evangelou-club/v1`, "/καφές/"), null, "the raw form never matches URL.pathname");
+  });
+
+  it("round 6: a relative base must be root-relative (exactly one leading slash)", () => {
+    assert.equal(restRouteUrl("/wp-json/evangelou-club/v1", "/session"), "/wp-json/evangelou-club/v1/session");
+    for (const base of ["wp-json/evangelou-club/v1", "./wp-json/evangelou-club/v1", "//evil.example/wp-json/evangelou-club/v1", "/\\evil.example/wp-json/evangelou-club/v1", "\\evil.example/x", "?rest_route=/evangelou-club/v1", ""]) {
+      assert.throws(() => restRouteUrl(base, "/session"), TypeError, JSON.stringify(base));
+    }
+  });
+
+  it("round 6: a refused relative base reaches no server: the redeem client reports a network error", async () => {
+    const f = fakeFetch(() => json(200, {}));
+    const rest = createRestClubService({ baseUrl: "//evil.example/wp-json/evangelou-club/v1", fetchImpl: f });
+    await assert.rejects(rest.redeemBenefit({ memberId: "mem_x", benefitType: "free_coffee", requestId: "00000000-0000-4000-8000-000000000000", coffeeCode: "espresso" } as never), (e: { code?: string }) => e.code === "network_error");
+    assert.equal(f.calls.length, 0);
+  });
+
   it("builds request URLs in the base's own form, keeping other query parameters", () => {
     assert.equal(restRouteUrl(PRETTY, "/session"), `${PRETTY}/session`);
     assert.equal(restRouteUrl(`${PRETTY}/`, "/session"), `${PRETTY}/session`);

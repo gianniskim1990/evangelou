@@ -29,8 +29,8 @@ import type { QrKeeper } from "./memberQr";
  *   (private mode, blocked, full), nothing is persisted: the QR lives in
  *   memory only, as before. Every access is wrapped; a failure never shows a
  *   code and never throws into the app.
- * The server never re-sends a token: if this record is lost, the member uses
- * a screenshot or asks for «Νέο QR».
+ * The server never re-sends a token: if this record is lost, the card asks
+ * for a new one by itself (owner decision D21, memberQr.ts).
  */
 
 export const QR_STORE_PREFIX = "evc-club-qr:v1:";

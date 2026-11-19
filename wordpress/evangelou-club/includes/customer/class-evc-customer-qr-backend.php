@@ -13,7 +13,9 @@ defined('ABSPATH') || exit;
  * Rules:
  *  - Only a WordPress user with an `evc_members` row (created by STAGE-05B after a recorded payment)
  *    has a QR. A QR is identity only: it never grants a coffee (the redeem route re-checks).
- *  - D6: no age limit; a QR changes ONLY when the customer asks (replace = true) or staff revoke it.
+ *  - D6: no age limit; a QR changes ONLY on replace = true or when staff revoke it. Since owner decision
+ *    D21 (2026-11-19) the customer app sends replace = true by itself when its device lacks the current
+ *    QR (no «Νέο QR» button); this server code is unchanged.
  *    issue() without replace when a QR is already active answers 'qr_exists' and changes nothing.
  *  - Only the SHA-256 digest is stored, so the plaintext is returned ONLY by issue() (first QR or
  *    replacement). The customer app keeps it on the device (D6/D7: a screenshot works; one coffee per

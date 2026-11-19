@@ -273,13 +273,53 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         $this->assertStringContainsString(rawurlencode($plain), $config['loginUrl']);
         $this->assertStringContainsString('rest_route=', $config['restBase'], 'plain REST base for the app');
         // Round 5: the app accepts a plain base only exactly at homePath or its index.php.
-        $this->assertSame(EVC_Rest_Security::home_path(), $config['homePath']);
+        $this->assertSame('/', $config['homePath'], 'the test site sits at the root (fixed value, not recomputed)');
         $this->assertContains((string) wp_parse_url($config['restBase'], PHP_URL_PATH), array($config['homePath'], $config['homePath'] . 'index.php'), 'the plain base sits at the home path');
         unset($token);
 
         $this->set_permalink_structure('/%postname%/');
         $this->assertSame(home_url('/club-admin/'), EVC_Staff_Shell::shell_url());
         $this->assertSame(home_url('/club-admin/'), apply_filters('login_redirect', admin_url(), '', $staff));
+    }
+
+    /** STAGE-08 round 6: a subfolder install sends its own home path; fixed expected values, not recomputed. */
+    public function test_the_home_path_of_a_subfolder_install_is_sent_as_a_fixed_value(): void {
+        $this->set_permalink_structure('');
+        $sub = static function () {
+            return 'http://example.org/prometheus';
+        };
+        add_filter('pre_option_home', $sub);
+        try {
+            $this->assertSame('/prometheus/', EVC_Rest_Security::home_path());
+            $staff = get_userdata($this->create_staff_user());
+            $token = $this->login_as($staff->ID);
+            $config = self::config_of($this->shell());
+            $this->assertIsArray($config);
+            $this->assertSame('/prometheus/', $config['homePath']);
+            $this->assertSame('/prometheus/index.php', wp_parse_url($config['restBase'], PHP_URL_PATH), 'the plain base sits at that home path');
+            unset($token);
+        } finally {
+            remove_filter('pre_option_home', $sub);
+        }
+        $greek = static function () {
+            return 'http://example.org/καφές';
+        };
+        add_filter('pre_option_home', $greek);
+        try {
+            $this->assertSame('/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/', EVC_Rest_Security::home_path(), 'non-ASCII: the form URL.pathname uses');
+        } finally {
+            remove_filter('pre_option_home', $greek);
+        }
+        $spaced = static function () {
+            return 'http://example.org/my shop/caf%C3%A9';
+        };
+        add_filter('pre_option_home', $spaced);
+        try {
+            $this->assertSame('/my%20shop/caf%C3%A9/', EVC_Rest_Security::home_path(), 'already-encoded segments are not encoded twice');
+        } finally {
+            remove_filter('pre_option_home', $spaced);
+        }
+        $this->assertSame('/', EVC_Rest_Security::home_path());
     }
 
     public function test_rewrite_rules_are_flushed_only_when_the_state_changes(): void {
