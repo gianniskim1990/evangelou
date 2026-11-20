@@ -59,6 +59,33 @@ describe("STAGE-01 customer bootstrap config", () => {
     assert.equal(parseCustomerConfig(null, ORIGIN).ok, false);
     assert.equal(parseCustomerConfig("{", ORIGIN).ok, false);
   });
+
+  it("round 10: the join URL is optional, and when sent it is this site only, like the other URLs", () => {
+    const parsed = (over: Record<string, unknown>) => parseCustomerConfig(cfg(over), ORIGIN);
+    const none = parsed({});
+    assert.ok(none.ok);
+    assert.equal(none.config.joinUrl, "", "absent = no join action");
+    for (const url of [`${ORIGIN}/prometheus/club/join/`, `${ORIGIN}/prometheus/?evc_club_join=1`]) {
+      const r = parsed({ joinUrl: url });
+      assert.ok(r.ok, url);
+      assert.equal(r.config.joinUrl, url, "pretty and plain permalink forms");
+    }
+    const bad: [string, unknown][] = [
+      ["other origin", "https://evil.example/club/join/"],
+      ["other scheme", "javascript:alert(1)"],
+      ["protocol-relative to another host", "//evil.example/club/join/"],
+      ["credentials", "https://user:pw@evangelouprofiterole.gr/club/join/"],
+      ["fragment", `${ORIGIN}/club/join/#x`],
+      ["empty", ""],
+      ["not a string", 7],
+      ["null", null],
+    ];
+    for (const [label, joinUrl] of bad) {
+      const r = parsed({ joinUrl });
+      assert.equal(r.ok, false, label);
+      assert.equal(r.ok ? "" : r.reason, "join_url", label);
+    }
+  });
 });
 
 describe("STAGE-01 /me client", () => {

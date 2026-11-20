@@ -77,6 +77,8 @@ final class CustomerShellTest extends EVC_WP_Test_Case {
         $this->assertSame(200, $r['status']);
         $this->assertStringContainsString(self::ASSET_URL . '/assets/customer-Ab12Cd34.js', $r['body']);
         $config = $this->config_of($r['body']);
+        // Round 10: no joinUrl while the in-store join flow (EVC_CLUB_ONBOARDING_ENABLED) is off: nothing new is shown.
+        $this->assertFalse(EVC_Onboarding_Feature::enabled());
         $this->assertSame(array('restBase', 'homePath', 'nonce', 'loginUrl', 'logoutUrl', 'appVersion'), array_keys($config));
         $this->assertSame(wp_parse_url(home_url('/'), PHP_URL_PATH), $config['homePath'], 'round 5: the home path for a plain REST base');
         $this->assertSame(1, wp_verify_nonce($config['nonce'], 'wp_rest'));

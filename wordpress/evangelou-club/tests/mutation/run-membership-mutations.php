@@ -33,6 +33,7 @@
  * And STAGE-05B (MS6: the member-sync construction guard).
  * And STAGE-06 (FT1-FT40: FluentCRM membership tags).
  * And STAGE-07 (OR1-OR10: in-store onboarding rules).
+ * And STAGE-08 round 10 (DG1-DG10: the SHOW GRANTS reader of the migration-004 readiness row).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -2944,6 +2945,66 @@ $mutants = array(
         'file' => 'includes/class-evc-coffee-history.php',
         'search' => "|| (\$set !== null && isset(\$sets[\$set]))",
         'replace' => '',
+    ),    // STAGE-08 round 10 (LOW-1): the pure SHOW GRANTS reader behind the readiness row of migration 004.
+    array(
+        'id' => 'DG1-partial-revoke-ignored',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                \$revoked = true;\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'DG2-role-line-ignored',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                // A role granted to the user (no \"ON\"), or a line this reader does not understand.\n                \$uncertain = true;\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'DG3-column-privileges-counted-as-table',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                    \$uncertain = true; // column privileges are not table privileges, but they make the answer unsure\n                    continue;\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'DG4-db-wildcard-percent-not-read',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                \$regex .= '.*';",
+        'replace' => "                \$regex .= '%';",
+    ),
+    array(
+        'id' => 'DG5-escaped-wildcard-not-read',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "            if (\$c === '\\\\' && \$i + 1 < \$length) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'DG6-grant-on-another-table-counted',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "        if (\$table_name === \$table) {",
+        'replace' => "        if (true) {",
+    ),
+    array(
+        'id' => 'DG7-all-privileges-not-read',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "if (\$name === 'ALL' || \$name === 'ALL PRIVILEGES') {",
+        'replace' => "if (\$name === 'ALL') {",
+    ),
+    array(
+        'id' => 'DG8-missing-despite-uncertainty',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "        if (\$revoked || \$uncertain) {",
+        'replace' => "        if (\$revoked) {",
+    ),
+    array(
+        'id' => 'DG9-letter-case-read-as-another-database',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "            return self::db_matches(strtolower(\$db_name), strtolower(\$database)) ? null : false;",
+        'replace' => "            return false;",
+    ),
+    array(
+        'id' => 'DG10-no-current-database-still-read',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "        if (\$lines === array() || \$database === '') {",
+        'replace' => "        if (\$lines === array()) {",
     ),
 );
 

@@ -119,6 +119,29 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         $this->assertSame('/', $config['homePath'], 'round 5: the home path for a plain REST base (fixed value: the test site sits at the root)');
     }
 
+    /**
+     * STAGE-08 round 10 (owner's staging run): with the join flow on, the member page tells the app where to join, so
+     * a signed-in customer without a membership gets «Γίνετε μέλος». Pretty and plain permalinks; built here, never
+     * from the request.
+     */
+    public function test_the_member_page_carries_the_join_url_while_the_join_flow_is_on(): void {
+        $id = (int) self::factory()->user->create(array('role' => 'subscriber'));
+        wp_set_current_user($id);
+        $_GET['redirect_to'] = 'https://evil.example/';
+        $assets = new EVC_Staff_Assets($this->asset_dir, self::ASSET_URL, EVC_Customer_Shell::ASSET_ENTRY);
+        foreach (array('/%postname%/' => '/club/join/', '' => 'evc_club_join=1') as $structure => $needle) {
+            update_option('permalink_structure', $structure);
+            $config = $this->config(EVC_Customer_Shell::respond(wp_get_current_user(), $assets));
+            $this->assertSame(array('restBase', 'homePath', 'nonce', 'loginUrl', 'logoutUrl', 'joinUrl', 'appVersion'), array_keys($config));
+            $this->assertSame(EVC_Onboarding_Shell::join_url(), $config['joinUrl'], $structure);
+            $this->assertStringContainsString($needle, $config['joinUrl'], $structure);
+            $this->assertNotSame(EVC_Customer_Shell::shell_url(), $config['joinUrl'], 'the join page, not the member page');
+            $this->assertStringNotContainsString('src=store', $config['joinUrl'], 'not the poster marker');
+            $this->assertSame(wp_parse_url(home_url('/'), PHP_URL_HOST), wp_parse_url($config['joinUrl'], PHP_URL_HOST));
+        }
+        unset($_GET['redirect_to']);
+    }
+
     public function test_redirect_parameters_are_never_used(): void {
         $_GET['redirect_to'] = 'https://evil.example/steal';
         $_GET['next'] = '//evil.example';

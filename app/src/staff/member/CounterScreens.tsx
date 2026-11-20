@@ -386,7 +386,6 @@ function PreparedOrderPanel({ flow, state, catalogue }: { flow: CounterFlow; sta
             value={state.order.note}
             onChange={(e) => flow.setNote(e.target.value)}
             disabled={locked}
-            maxLength={NOTE_MAX}
             autoComplete="off"
             aria-describedby="evc-order-note-help"
             className="min-h-12 w-full rounded-xl border border-espresso/20 bg-white px-4 text-[15px]"

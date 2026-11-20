@@ -121,4 +121,6 @@ require_once $evc_includes . 'class-evc-customer-membership.php';
 require_once $evc_includes . 'class-evc-fluentcrm-tags.php';
 // STAGE-07 in-store onboarding, pure rules (definitions only; used behind EVC_CLUB_ONBOARDING_ENABLED).
 require_once $evc_includes . 'class-evc-onboarding-rules.php';
+// STAGE-08 round 10: pure reader of SHOW GRANTS lines (the readiness row of migration 004; runs nothing itself).
+require_once $evc_includes . 'class-evc-db-grants.php';
 unset($evc_includes);

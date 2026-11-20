@@ -59,8 +59,11 @@ export type CustomerView = {
   historyData?: "unavailable" | "recent";
 };
 
-/** Journey/live actions; without them the approved buttons stay disabled. */
-export type CustomerActions = { pay?: () => void; renew?: () => void; signOut?: () => void };
+/**
+ * Journey/live actions; without them the approved buttons stay disabled. `join` (STAGE-08 round 10, live app only)
+ * opens the in-store join flow; it exists only when the server sent a join URL (EVC_CLUB_ONBOARDING_ENABLED).
+ */
+export type CustomerActions = { pay?: () => void; renew?: () => void; signOut?: () => void; join?: () => void };
 
 function samplePaidUntil(state: PreviewMembershipState, today: string): string | null {
   if (state === "pending") return null;
@@ -83,6 +86,17 @@ export function sampleCustomerView(state: PreviewMembershipState, coffeeUsedToda
     minutesToMidnight: null,
     pendingRenewal: false,
   };
+}
+
+/**
+ * STAGE-08 round 10 (owner's staging run, 2026-11-20): a signed-in customer with NO membership gets «Γίνετε μέλος»,
+ * which opens the join flow (it skips the registration for a signed-in account and ends at the payment). Only for
+ * the state «none» and only when the join flow exists (a `join` action); otherwise nothing new is shown. Pending,
+ * expired, cancelled and unverified keep their existing buttons (paymentAction).
+ */
+export function joinAction(view: CustomerView, actions?: CustomerActions): { label: string; run: () => void } | null {
+  if (view.state !== "none" || !actions?.join) return null;
+  return { label: "Γίνετε μέλος", run: actions.join };
 }
 
 /** The payment button a non-active member sees; without a journey action it stays disabled. */

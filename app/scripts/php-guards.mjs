@@ -1347,6 +1347,9 @@ export const ONBOARDING_RULES = Object.freeze({
     "includes/onboarding/class-evc-onboarding-checkout-guard.php",
     // STAGE-08: the readiness checks reuse EVC_Onboarding_Shell::same_site_url() (D13 terms URL); they construct nothing.
     "includes/admin/class-evc-readiness.php",
+    // STAGE-08 round 10: the member page sends EVC_Onboarding_Shell::join_url() (static, behind
+    // EVC_Onboarding_Feature::enabled()) so a customer without a membership can join; it constructs nothing.
+    "includes/customer/class-evc-customer-shell.php",
   ],
   guardedFiles: [
     ONBOARDING_BOOTSTRAP,
@@ -1418,6 +1421,8 @@ function onboardingSelfTest() {
   expect("registration constructed elsewhere", "includes/x.php", "<?php\n$r = new EVC_Onboarding_Registration();", true);
   expect("controller constructed outside wire()", O.bootstrap, GOOD_ONBOARDING.replace("public static function build() {", "public static function build() { new EVC_Rest_Join_Controller(1, 2);"), true);
   expect("hand-off named outside the allowlist", "includes/x.php", "<?php\nfunction f(EVC_Onboarding_Handoff $h) { return $h; }", true);
+  expect("round 10: the member page reads the static join URL", "includes/customer/class-evc-customer-shell.php", "<?php\nif (EVC_Onboarding_Feature::enabled()) { $c['joinUrl'] = EVC_Onboarding_Shell::join_url(); }", false);
+  expect("round 10: the member page never constructs the join shell", "includes/customer/class-evc-customer-shell.php", "<?php\n$s = new EVC_Onboarding_Shell($h, $a);", true);
   expect("build() from another file", "includes/x.php", "<?php\nEVC_Onboarding_Plugin::build();", true);
   expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_ONBOARDING_ENABLED', true);", true);
   expect("a user created elsewhere", "includes/customer/x.php", "<?php\n$id = wp_insert_user(array());", true);
@@ -1592,6 +1597,8 @@ export const READ_ONLY_STATIC_ALLOW = Object.freeze([
   "evc_staff_auth::is_disabled", "evc_staff_role::is_restricted_staff_account",
   // Round 9 (D24): the readiness row «Καταγραφή προετοιμασίας καφέ» (pure catalogue check, reads nothing).
   "evc_club_prep_catalogue_authority::is_authorised",
+  // Round 10 (LOW-1): the pure reader of the SHOW GRANTS lines the readiness row read (runs nothing itself).
+  "evc_db_grants::table_privileges",
 ]);
 const SQL_WRITE = new RegExp([
   String.raw`\binsert\b`, // INSERT INTO, INSERT t VALUES, INSERT LOW_PRIORITY / DELAYED / IGNORE …

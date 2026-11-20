@@ -125,6 +125,70 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         $this->assertSame('unreadable', EVC_Readiness::prepared_row(4, true)['status']);
     }
 
+    /**
+     * Round 10 (LOW-1 of the round-9 review): at 004 the row also checks, by reading the user's own SHOW GRANTS
+     * only, that the Club database user may write and read evc_redemption_preparations. Nothing is written: no test
+     * row. Missing = wrong (with the names); cannot tell = a check by hand with a Greek explanation; never ok.
+     */
+    public function test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing(): void {
+        $club = $this->migrated_club(false);
+        (new EVC_Migrator($club->connect(), EVC_Test_Database::migrations_dir()))->migrate(4);
+        $user = 'evcrd_' . bin2hex(random_bytes(4));
+        $password = 'Pw-' . bin2hex(random_bytes(10));
+        $admin = EVC_Test_Database::admin_pdo();
+        $hosts = array('%', 'localhost', '127.0.0.1');
+        try {
+            foreach ($hosts as $host) {
+                $admin->exec(sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s'", $user, $host, $password));
+                $admin->exec(sprintf("GRANT SELECT ON `%s`.* TO '%s'@'%s'", $club->name(), $user, $host));
+            }
+            $config = new EVC_Db_Config(EVC_Test_Database::host(), EVC_Test_Database::port(), $club->name(), $user, $password);
+            $read = function () use ($config) {
+                return self::by_key($this->readiness(array('db_config' => function () use ($config) {
+                    return $config;
+                })));
+            };
+            $rows = $read();
+            $this->assertSame('ok', $rows['club_db']['status'], 'the limited user connects');
+            $row = $rows['prepared_redemption'];
+            $this->assertSame('wrong', $row['status'], 'SELECT only: the till could not record the preparation');
+            $this->assertStringContainsString('δεν έχει δικαίωμα INSERT στον πίνακα evc_redemption_preparations', $row['detail']);
+            $this->assertStringContainsString('EVC_CLUB_DB_USER', $row['detail'], 'names the constant, never the value');
+            $this->assertStringContainsString('δεν γράφει τίποτα', $row['detail']);
+            foreach (array($user, $password, $club->name()) as $secret) {
+                $this->assertStringNotContainsString($secret, $row['detail']);
+                $this->assertStringNotContainsString($secret, EVC_Admin_Tools_Plugin::parts()['readiness_page']->html());
+            }
+            foreach ($hosts as $host) {
+                $admin->exec(sprintf("GRANT INSERT ON `%s`.`evc_redemption_preparations` TO '%s'@'%s'", $club->name(), $user, $host));
+            }
+            $row = $read()['prepared_redemption'];
+            $this->assertSame('ok', $row['status'], 'INSERT on the table + SELECT on the database');
+            $this->assertStringContainsString('δικαίωμα καταχώρησης και ανάγνωσης (INSERT, SELECT)', $row['detail']);
+            $this->assertSame(0, (int) $club->connect()->fetch_one('SELECT COUNT(*) AS n FROM evc_redemption_preparations')['n'], 'no test row was written');
+            $this->assertSame(0, (int) $club->connect()->fetch_one('SELECT COUNT(*) AS n FROM evc_redemptions')['n'], 'no test coffee was written');
+        } finally {
+            foreach ($hosts as $host) {
+                $admin->exec(sprintf("DROP USER IF EXISTS '%s'@'%s'", $user, $host));
+            }
+        }
+        // The pure decision: not checked or cannot tell = a check by hand (Greek), never ok; missing = wrong.
+        $label = 'Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)';
+        foreach (array(null, array('state' => EVC_Db_Grants::UNKNOWN, 'missing' => array('INSERT')), array('state' => 'other', 'missing' => array())) as $grants) {
+            $row = EVC_Readiness::prepared_row(4, false, $grants);
+            $this->assertSame('manual', $row['status'], var_export($grants, true));
+            $this->assertSame($label, $row['label']);
+            $this->assertStringContainsString('δεν μπορεί να επιβεβαιωθεί', $row['detail']);
+            $this->assertStringContainsString('μέσω ρόλου', $row['detail']);
+            $this->assertStringContainsString('Ζητήστε από τον τεχνικό', $row['detail']);
+        }
+        $row = EVC_Readiness::prepared_row(5, false, array('state' => EVC_Db_Grants::MISSING, 'missing' => array('INSERT', 'SELECT')));
+        $this->assertSame('wrong', $row['status']);
+        $this->assertStringContainsString('δικαίωμα INSERT, SELECT στον πίνακα', $row['detail']);
+        $this->assertSame('ok', EVC_Readiness::prepared_row(4, false, array('state' => EVC_Db_Grants::OK, 'missing' => array()))['status']);
+        $this->assertSame('manual', EVC_Readiness::prepared_row(3, false, array('state' => EVC_Db_Grants::OK, 'missing' => array()))['status'], 'below 4 the rights do not matter');
+    }
+
     public function test_the_payment_provenance_reads_ok_only_for_the_exact_value(): void {
         $none = function () {
             return null;

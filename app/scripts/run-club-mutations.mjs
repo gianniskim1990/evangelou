@@ -2973,12 +2973,6 @@ const mutants = [
     replace: "",
   },
   {
-    id: "D24-S3-note-field-unlimited",
-    file: "staff/member/CounterScreens.tsx",
-    search: "            maxLength={NOTE_MAX}\n",
-    replace: "",
-  },
-  {
     id: "D24-S4-small-option-buttons",
     file: "staff/member/CounterScreens.tsx",
     search: "const BTN_CHOICE = \"min-h-14 ",
@@ -3079,6 +3073,91 @@ const mutants = [
     file: "customer/memberCoffees.ts",
     search: "    if (mine !== this.generation) return;\n    this.inFlight = false;",
     replace: "    this.inFlight = false;",
+  },  // ---- STAGE-08 round 10: «Γίνετε μέλος» on the no-membership state (A) and round-9 nits NIT-3 / NIT-4 (B) ----
+  // D24-S3 (maxLength removed) is gone: round 10 removed maxLength on purpose; R10-N3-1 now re-adds it as the mutant.
+  {
+    id: "R10-J1-join-url-of-another-site",
+    file: "customer/config.ts",
+    search: "    const url = sameOriginUrl(d.joinUrl, origin);",
+    replace: "    const url = typeof d.joinUrl === \"string\" && d.joinUrl !== \"\" ? new URL(d.joinUrl, origin) : null;",
+  },
+  {
+    id: "R10-J2-join-url-credentials-or-fragment-kept",
+    file: "customer/config.ts",
+    search: "    if (!url || url.username !== \"\" || url.password !== \"\" || url.hash !== \"\") return { ok: false, reason: \"join_url\" };",
+    replace: "    if (!url) return { ok: false, reason: \"join_url\" };",
+  },
+  {
+    id: "R10-J3-join-url-dropped",
+    file: "customer/config.ts",
+    search: "    joinUrl = url.href;",
+    replace: "    joinUrl = \"\";",
+  },
+  {
+    id: "R10-J4-join-offered-in-every-state",
+    file: "preview/customerView.ts",
+    search: "  if (view.state !== \"none\" || !actions?.join) return null;",
+    replace: "  if (!actions?.join) return null;",
+  },
+  {
+    id: "R10-J5-join-shown-without-the-join-flow",
+    file: "preview/customerView.ts",
+    search: "  if (view.state !== \"none\" || !actions?.join) return null;\n  return { label: \"Γίνετε μέλος\", run: actions.join };",
+    replace: "  if (view.state !== \"none\") return null;\n  return { label: \"Γίνετε μέλος\", run: actions?.join ?? (() => {}) };",
+  },
+  {
+    id: "R10-J6-no-join-on-the-dashboard",
+    file: "preview/CustomerPreview.tsx",
+    search: "            {join && (\n              <Btn tone=\"brass\" onClick={join.run} className=\"min-h-14",
+    replace: "            {false && join && (\n              <Btn tone=\"brass\" onClick={join.run} className=\"min-h-14",
+  },
+  {
+    id: "R10-J7-no-join-on-the-card",
+    file: "preview/CustomerSignature.tsx",
+    search: "          {join && (\n            <Btn tone=\"brass\" onClick={join.run} className=\"mt-8 w-full",
+    replace: "          {false && join && (\n            <Btn tone=\"brass\" onClick={join.run} className=\"mt-8 w-full",
+  },
+  {
+    id: "R10-J8-join-goes-to-another-page",
+    file: "customer/CustomerApp.tsx",
+    search: "{ signOut, join: () => navigate(joinUrl) }",
+    replace: "{ signOut, join: () => navigate(config.loginUrl) }",
+  },
+  {
+    id: "R10-J9-join-action-without-a-join-url",
+    file: "customer/CustomerApp.tsx",
+    search: "joinUrl !== \"\" ? { signOut, join: () => navigate(joinUrl) } : { signOut };",
+    replace: "{ signOut, join: () => navigate(joinUrl) };",
+  },
+  {
+    id: "R10-J10-join-a-small-button",
+    file: "preview/CustomerPreview.tsx",
+    search: "<Btn tone=\"brass\" onClick={join.run} className=\"min-h-14 px-8 text-[17px]",
+    replace: "<Btn tone=\"brass\" onClick={join.run} className=\"px-8 text-[17px]",
+  },
+  {
+    id: "R10-N3-1-note-field-cut-by-maxlength",
+    file: "staff/member/CounterScreens.tsx",
+    search: "            disabled={locked}\n            autoComplete=\"off\"",
+    replace: "            disabled={locked}\n            maxLength={NOTE_MAX}\n            autoComplete=\"off\"",
+  },
+  {
+    id: "R10-N3-2-note-cut-in-utf16-units",
+    file: "staff/member/preparedOrder.ts",
+    search: "  return [...cleaned].slice(0, NOTE_MAX).join(\"\");",
+    replace: "  return cleaned.slice(0, NOTE_MAX);",
+  },
+  {
+    id: "R10-N3-3-counter-in-utf16-units",
+    file: "staff/member/CounterScreens.tsx",
+    search: "{[...state.order.note].length}/{NOTE_MAX}",
+    replace: "{state.order.note.length}/{NOTE_MAX}",
+  },
+  {
+    id: "R10-X2-note-control-characters-kept",
+    file: "staff/member/preparedOrder.ts",
+    search: "  const cleaned = raw.replace(/[<>]/g, \"\").replace(/[\\p{Cc}\\p{Cf}]/gu, \" \");",
+    replace: "  const cleaned = raw.replace(/[<>]/g, \"\");",
   },
 ];
 

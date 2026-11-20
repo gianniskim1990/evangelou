@@ -41,6 +41,9 @@ final class EVC_Readiness {
     const QR_SECRET_CONSTANT = 'EVC_CLUB_QR_SECRET';
     /** The ledger table of EVC_Migrator. */
     const LEDGER_TABLE = 'evc_schema_migrations';
+    /** Round 10 (LOW-1): the table of migration 004 the till writes the preparation into, and what it needs on it. */
+    const PREPARATIONS_TABLE = EVC_Db_Grants::PREPARATIONS_TABLE;
+    const PREPARATIONS_PRIVILEGES = EVC_Db_Grants::PREPARATIONS_PRIVILEGES;
 
     /** The tested matrix (CI): PHP 7.4 / 8.2 / 8.4; MySQL 8.0 / 8.4, MariaDB 10.11. */
     const SUPPORTED_PHP = array('7.4', '8.2', '8.4');
@@ -147,7 +150,11 @@ final class EVC_Readiness {
         } else {
             $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', $applied >= $target ? self::OK : self::WRONG, sprintf('Εφαρμοσμένη έκδοση %d, στόχος %d. Κάθε νέα μετάβαση (π.χ. η 004) θέλει δική της έγκριση από τον ιδιοκτήτη.', $applied, $target));
         }
-        $rows[] = self::prepared_row($applied, $unreadable !== null);
+        $grants = null;
+        if ($unreadable === null && $applied >= EVC_Coffee_History::PREPARED_SCHEMA_VERSION) {
+            $grants = self::preparation_grants($db);
+        }
+        $rows[] = self::prepared_row($applied, $unreadable !== null, $grants);
         try {
             $version = (string) ($db->fetch_one('SELECT VERSION() AS v')['v'] ?? '');
         } catch (Throwable $e) {
@@ -158,10 +165,32 @@ final class EVC_Readiness {
     }
 
     /**
+     * Round 10 (LOW-1): may the Club database user of this site write and read the preparation table of 004? Read
+     * from the user's own SHOW GRANTS (a read; nothing is written, no test row): EVC_Db_Grants decides. Any failure
+     * to read is "unknown", never "ok". The lines and the database name are never shown or kept.
+     * @return array{state:string,missing:string[]}
+     */
+    private static function preparation_grants(EVC_Club_Db $db): array {
+        try {
+            $database = (string) ($db->fetch_one('SELECT DATABASE() AS d')['d'] ?? '');
+            $lines = array();
+            foreach ($db->fetch_all('SHOW GRANTS') as $row) {
+                $lines[] = is_array($row) ? reset($row) : null;
+            }
+        } catch (Throwable $e) {
+            return array('state' => EVC_Db_Grants::UNKNOWN, 'missing' => self::PREPARATIONS_PRIVILEGES);
+        }
+        return EVC_Db_Grants::table_privileges($lines, $database, self::PREPARATIONS_TABLE, self::PREPARATIONS_PRIVILEGES);
+    }
+
+    /**
      * Round 9 (owner decision D24): can the till record HOW the coffee was made (migration 004 + the approved
      * catalogue)? Pure. Below 4 this is not an error: the till keeps recording the coffee type only.
+     * Round 10 (LOW-1): at 4, also whether the database user may write and read the preparation table ($grants from
+     * EVC_Db_Grants; null = not checked, read as "cannot tell").
+     * @param array{state:string,missing:string[]}|null $grants
      */
-    public static function prepared_row(int $applied, bool $unreadable): array {
+    public static function prepared_row(int $applied, bool $unreadable, ?array $grants = null): array {
         $label = 'Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)';
         if ($unreadable) {
             return self::row('prepared_redemption', $label, self::UNREADABLE, 'Η έκδοση σχήματος δεν διαβάστηκε· δείτε την προηγούμενη γραμμή.');
@@ -172,7 +201,15 @@ final class EVC_Readiness {
         if (!EVC_Club_Prep_Catalogue_Authority::is_authorised()) {
             return self::row('prepared_redemption', $label, self::WRONG, 'Ο κατάλογος καφέδων του πρόσθετου δεν ταιριάζει με τον εγκεκριμένο: το ταμείο καταχωρεί μόνο το είδος του καφέ. Ειδοποιήστε τον προγραμματιστή.');
         }
-        return self::row('prepared_redemption', $label, self::OK, sprintf('Ενεργή: το ταμείο καταγράφει δόση, ζάχαρη, γάλα, μέγεθος και σημείωση (κατάλογος %s).', EVC_Club_Prep_Catalogue_Authority::VERSION_LABEL));
+        $state = $grants['state'] ?? EVC_Db_Grants::UNKNOWN;
+        $names = implode(', ', self::PREPARATIONS_PRIVILEGES);
+        if ($state === EVC_Db_Grants::MISSING) {
+            return self::row('prepared_redemption', $label, self::WRONG, sprintf('Η μετάβαση 004 έχει εφαρμοστεί, αλλά ο χρήστης της βάσης του Club (EVC_CLUB_DB_USER) δεν έχει δικαίωμα %s στον πίνακα %s: το ταμείο δεν θα μπορεί να καταχωρίσει την προετοιμασία του καφέ. Ζητήστε από τον τεχνικό να δώσει στον χρήστη δικαίωμα καταχώρησης και ανάγνωσης (%s) σε αυτόν τον πίνακα. Ο έλεγχος διαβάζει μόνο τα δικαιώματα· δεν γράφει τίποτα στη βάση.', implode(', ', $grants['missing'] ?? self::PREPARATIONS_PRIVILEGES), self::PREPARATIONS_TABLE, $names));
+        }
+        if ($state !== EVC_Db_Grants::OK) {
+            return self::row('prepared_redemption', $label, self::MANUAL, sprintf('Η μετάβαση 004 έχει εφαρμοστεί και ο κατάλογος καφέδων είναι ο εγκεκριμένος (%s), αλλά από εδώ δεν μπορεί να επιβεβαιωθεί ότι ο χρήστης της βάσης του Club (EVC_CLUB_DB_USER) έχει δικαίωμα καταχώρησης και ανάγνωσης (%s) στον πίνακα %s, π.χ. επειδή τα δικαιώματα δίνονται μέσω ρόλου ή η λίστα δικαιωμάτων δεν διαβάστηκε. Ζητήστε από τον τεχνικό να το επιβεβαιώσει. Ο έλεγχος διαβάζει μόνο τα δικαιώματα· δεν γράφει τίποτα στη βάση.', EVC_Club_Prep_Catalogue_Authority::VERSION_LABEL, $names, self::PREPARATIONS_TABLE));
+        }
+        return self::row('prepared_redemption', $label, self::OK, sprintf('Ενεργή: το ταμείο καταγράφει δόση, ζάχαρη, γάλα, μέγεθος και σημείωση (κατάλογος %s). Ο χρήστης της βάσης έχει δικαίωμα καταχώρησης και ανάγνωσης (%s) στον πίνακα %s.', EVC_Club_Prep_Catalogue_Authority::VERSION_LABEL, $names, self::PREPARATIONS_TABLE));
     }
 
     /**

@@ -961,6 +961,10 @@ describe("D24 the order model (preparedOrder.ts) over the approved catalogue", (
     assert.equal([...sanitizeNote("α".repeat(120))].length, NOTE_MAX);
     assert.equal(noteToSend("  πιο \n  ζεστό  "), "πιο ζεστό");
     assert.equal(noteToSend("   "), null);
+    // Round 10 NIT-4 (mutant X2): control and format characters become spaces while typing, as EVC_Prep_Note does.
+    assert.equal(sanitizeNote("α\u0007β\u200Bγ\u0000δ\u202Eε"), "α β γ δ ε");
+    assert.equal(noteToSend("λίγο\u0007\u200Bπάγο"), "λίγο πάγο");
+    assert.equal(noteToSend("\u200B\u0001\u2060"), null, "only invisible characters = no note");
     let o = selectCoffee(c, EMPTY_ORDER, "other_coffee");
     o = setNote(c, choose(c, o, "sweetness", "none"), "  μεγάλο ποτήρι \n  με καπάκι ");
     const body = preparedBody(c, o, "11111111-1111-4111-8111-111111111111")!;
@@ -1249,7 +1253,7 @@ describe("D24 the till screens (DOM)", () => {
     assert.ok(dom.document.querySelector("[data-evc-stage]") === null, "no order for a member who cannot redeem");
   });
 
-  it("one large button per option; each tap moves to the next step; the note field is limited to 80", async () => {
+  it("one large button per option; each tap moves to the next step; the note field is limited to 80 code points", async () => {
     await mountPrepared(null);
     assert.ok(dom.document.querySelector("[data-evc-recent]") === null, "no history panel without history");
     const coffees = [...dom.document.querySelectorAll("[data-evc-coffee]")];
@@ -1263,7 +1267,14 @@ describe("D24 the till screens (DOM)", () => {
     for (const opt of ["regular", "triple", "none", "plant"]) await dom.click(dom.document.querySelector(`[data-evc-option="${opt}"]`)!);
     assert.ok(dom.document.querySelector('[data-evc-stage="review"]'));
     const note = dom.document.getElementById("evc-order-note") as HTMLInputElement;
-    assert.equal(note.maxLength, NOTE_MAX);
+    // Round 10 NIT-3: 80 Unicode code points like the server, never maxLength (UTF-16 units: it would stop at 40 emoji).
+    assert.equal(note.hasAttribute("maxlength"), false, "no maxLength on the note field");
+    await type(note, "☕🍰".repeat(45));
+    assert.equal([...note.value].length, NOTE_MAX, "80 code points kept, even when each one is two UTF-16 units");
+    assert.equal(note.value, "☕🍰".repeat(40));
+    assert.match(dom.document.getElementById("evc-order-note-help")!.textContent ?? "", /80\/80$/, "the counter counts code points");
+    await type(note, "🍰".repeat(30));
+    assert.match(dom.document.getElementById("evc-order-note-help")!.textContent ?? "", /30\/80$/);
     await type(note, "<i>με κανέλα</i>");
     assert.equal(note.value, "iμε κανέλα/i");
     await dom.click(dom.document.querySelector('[data-evc-extra="foam:extra"]')!);

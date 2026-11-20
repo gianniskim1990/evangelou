@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { CLUB_RULES, COFFEES, greekDate, type PreviewMembershipState } from "./previewData";
 import type { CustomerScreen } from "./screens";
-import { paymentAction, sampleCustomerView, type CustomerActions, type CustomerMembershipState, type CustomerView } from "./customerView";
+import { joinAction, paymentAction, sampleCustomerView, type CustomerActions, type CustomerMembershipState, type CustomerView } from "./customerView";
 import { Btn, Glyph, Logo, PassQr, PreviewNote, WingLines } from "./ds";
 
 /* UI-01.R1 signature screens, Customer Club: welcome and membership pass. */
@@ -126,6 +126,7 @@ export function MemberPassView({
   const { state, today, member } = view;
   const line = todayLine(state, view.coffeeUsedToday, view.clubData === "unavailable");
   const pay = paymentAction(view, actions);
+  const join = joinAction(view, actions);
 
   return (
     <div className="on-dark min-h-[calc(100svh-52px)] bg-[var(--roast)] text-[var(--milk)]">
@@ -184,6 +185,11 @@ export function MemberPassView({
             <dt>Καφέδες αυτόν τον μήνα</dt>
             <dd className="t-num m-0 text-right text-[var(--milk)]">{view.clubData === "unavailable" ? "—" : view.visitsThisMonth}</dd>
           </dl>
+          {join && (
+            <Btn tone="brass" onClick={join.run} className="mt-8 w-full min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)] sm:w-auto" data-evc-action="join">
+              {join.label}
+            </Btn>
+          )}
           {pay && (
             <Btn tone="brass" disabled={!pay.run} title={pay.run ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={pay.run} className="mt-8">
               {pay.label}

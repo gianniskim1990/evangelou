@@ -91,7 +91,11 @@ function resolveQuickNotes(catalogue: Catalogue, coffee: CatalogueCoffee, ids: r
   return kept.slice(Math.max(0, kept.length - catalogue.maxQuickNotes));
 }
 
-/** Typing filter: no `<` / `>` (the server refuses HTML), no control characters, at most NOTE_MAX characters. */
+/**
+ * Typing filter: no `<` / `>` (the server refuses HTML), no control characters, at most NOTE_MAX characters counted
+ * as Unicode code points like the server (EVC_Prep_Note). Round 10 NIT-3: the field has no maxLength, which counts
+ * UTF-16 units and would stop at 40 emoji; this cut is the only limit.
+ */
 export function sanitizeNote(raw: string): string {
   const cleaned = raw.replace(/[<>]/g, "").replace(/[\p{Cc}\p{Cf}]/gu, " ");
   return [...cleaned].slice(0, NOTE_MAX).join("");

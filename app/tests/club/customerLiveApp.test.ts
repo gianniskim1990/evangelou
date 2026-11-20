@@ -49,11 +49,11 @@ function me(state: Me["state"], paidUntilUtc: string | null = null): Me {
   return { displayName: "Ελένη Μαρκοπούλου", email: "eleni@example.org", state, paidUntilUtc };
 }
 
-async function mount(results: MeResult[]) {
+async function mount(results: MeResult[], config: CustomerConfig = CONFIG) {
   let calls = 0;
   const api: CustomerApi = { me: async () => results[Math.min(calls++, results.length - 1)] };
   const visited: string[] = [];
-  await dom.render(createElement(CustomerApp, { config: CONFIG, api, now: () => NOW, navigate: (u: string) => visited.push(u) }));
+  await dom.render(createElement(CustomerApp, { config, api, now: () => NOW, navigate: (u: string) => visited.push(u) }));
   await act(async () => {});
   return { visited, calls: () => calls };
 }
@@ -107,6 +107,68 @@ describe("STAGE-01 customer app: membership states from GET /me", () => {
       assert.doesNotMatch(text(), /Η συνδρομή σας είναι ενεργή|Ο σημερινός καφές σας περιμένει|Ισχύει έως/, `${m.state} is never active`);
       assert.ok(app().querySelector('nav[aria-label="Μενού μέλους"]'), `${m.state} opens on the dashboard`);
       assertNoPreviewFiction(m.state);
+    }
+  });
+});
+
+describe("STAGE-08 round 10: «Γίνετε μέλος» for a signed-in customer without a membership", () => {
+  const JOIN = "https://shop.example/club/join/";
+  const WITH_JOIN: CustomerConfig = { ...CONFIG, joinUrl: JOIN };
+  const joinButtons = () => [...app().querySelectorAll('[data-evc-action="join"]')] as HTMLButtonElement[];
+
+  it("state «none» with the join flow on: a primary «Γίνετε μέλος» on the dashboard and on the card, to the join URL", async () => {
+    const { visited } = await mount([{ kind: "ok", me: me("none") }], WITH_JOIN);
+    assert.match(text(), /Δεν έχετε συνδρομή/);
+    let join = joinButtons();
+    assert.equal(join.length, 1, "one join button on the dashboard");
+    assert.equal(join[0].textContent?.trim(), "Γίνετε μέλος");
+    assert.equal(join[0].disabled, false);
+    assert.match(join[0].className, /min-h-14/, "a large primary action");
+    await dom.click(join[0]);
+    assert.deepEqual(visited, [JOIN]);
+
+    await dom.click(button("Άνοιγμα κάρτας"));
+    assert.ok(app().querySelector("article[aria-label]") !== null, "the card screen");
+    join = joinButtons();
+    assert.equal(join.length, 1, "one join button on the card screen");
+    assert.equal(join[0].textContent?.trim(), "Γίνετε μέλος");
+    await dom.click(join[0]);
+    assert.deepEqual(visited, [JOIN, JOIN]);
+    assertNoPreviewFiction("none with join");
+  });
+
+  it("state «none» without a join URL (onboarding off): nothing new is shown", async () => {
+    await mount([{ kind: "ok", me: me("none") }]);
+    assert.match(text(), /Δεν έχετε συνδρομή/);
+    assert.equal(joinButtons().length, 0, "dashboard: no join button");
+    assert.doesNotMatch(text(), /Γίνετε μέλος/);
+    await dom.click(button("Άνοιγμα κάρτας"));
+    assert.equal(joinButtons().length, 0, "card: no join button");
+    assert.doesNotMatch(text(), /Γίνετε μέλος/);
+  });
+
+  it("every other state keeps its existing buttons and never offers «Γίνετε μέλος», even with the join flow on", async () => {
+    const cases: [Me, string | null][] = [
+      [me("active", "2026-11-15T10:00:00+00:00"), null],
+      [me("pending_payment"), "Ολοκλήρωση πληρωμής"],
+      [me("expired", "2026-10-16T16:30:00+00:00"), "Ανανέωση 20 €"],
+      [me("cancelled"), null],
+      [me("unverified"), null],
+    ];
+    for (const [m, existing] of cases) {
+      await dom.reset();
+      const { visited } = await mount([{ kind: "ok", me: m }], WITH_JOIN);
+      if (app().querySelector('nav[aria-label="Μενού μέλους"]') === null) await dom.click(button("Αρχική"));
+      for (const where of ["dashboard", "card"]) {
+        assert.equal(joinButtons().length, 0, `${m.state} ${where}: no join button`);
+        assert.doesNotMatch(text(), /Γίνετε μέλος/, `${m.state} ${where}`);
+        if (existing !== null) {
+          const b = button(existing, app());
+          assert.equal(b.disabled, true, `${m.state} ${where}: «${existing}» stays as before (no live payment path here)`);
+        }
+        if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
+      }
+      assert.deepEqual(visited, [], `${m.state}: nothing navigates`);
     }
   });
 });

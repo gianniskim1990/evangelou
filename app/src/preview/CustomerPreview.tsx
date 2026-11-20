@@ -3,7 +3,7 @@ import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, CUSTOMER, addDays, coffeeName,
 import { cx, type CustomerScreen } from "./screens";
 import { ClubWelcome, MemberPass } from "./CustomerSignature";
 import { historyPreparation, preparationLine } from "./coffeeConfig";
-import { membershipLine, paymentAction, renewalLine, sampleCustomerView, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
+import { joinAction, membershipLine, paymentAction, renewalLine, sampleCustomerView, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
 import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote, StateMark, Steps } from "./ds";
 import { ONBOARDING_COPY, ONBOARDING_STEPS, consentsLine } from "./onboardingCopy";
 
@@ -223,6 +223,7 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
   const e = entitlement(state, view.coffeeUsedToday, view.clubData === "unavailable");
   const recent = view.history.slice(0, 3);
   const pay = paymentAction(view, actions);
+  const join = joinAction(view, actions);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
       <section>
@@ -233,6 +234,11 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
           <p className={cx("t-headline mt-2", e.ready ? "text-[var(--brass)]" : "text-[var(--milk)]")}>{e.headline}</p>
           <p className="t-body mt-2 text-[var(--milk)]/75">{e.detail}</p>
           <div className="mt-7 flex flex-wrap gap-3">
+            {join && (
+              <Btn tone="brass" onClick={join.run} className="min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)]" data-evc-action="join">
+                {join.label}
+              </Btn>
+            )}
             <Btn tone={state === "active" ? "brass" : "ghost-dark"} onClick={() => go("card")}>Άνοιγμα κάρτας</Btn>
             {pay && <Btn tone="brass" disabled={!pay.run} title={pay.run ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={pay.run}>{pay.label}</Btn>}
           </div>

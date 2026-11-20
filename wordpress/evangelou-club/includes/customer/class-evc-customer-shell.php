@@ -16,7 +16,8 @@ defined('ABSPATH') || exit;
  *   not signed in ................. 302 to wp-login.php (native e-mail/password login)
  *   staff / privileged account .... 403, no bootstrap
  *   assets missing or inconsistent  503, no bootstrap
- *   customer ...................... 200 page + bootstrap JSON (REST base + wp_rest nonce)
+ *   customer ...................... 200 page + bootstrap JSON (REST base + wp_rest nonce; the join URL only while
+ *                                   EVC_CLUB_ONBOARDING_ENABLED is on, STAGE-08 round 10)
  * Every response is private/no-store with no-referrer, nosniff, DENY framing
  * and a strict self-only CSP.
  */
@@ -117,8 +118,14 @@ final class EVC_Customer_Shell {
             'nonce' => wp_create_nonce('wp_rest'),
             'loginUrl' => wp_login_url(self::shell_url()),
             'logoutUrl' => wp_logout_url(self::shell_url()),
-            'appVersion' => EVC_CLUB_VERSION,
         );
+        // STAGE-08 round 10: the in-store join flow (/club/join/ or ?evc_club_join=1) is where a signed-in customer
+        // without a membership joins and pays. Its URL is sent ONLY while that flow exists
+        // (EVC_CLUB_ONBOARDING_ENABLED); otherwise the page carries no join link at all.
+        if (EVC_Onboarding_Feature::enabled()) {
+            $config['joinUrl'] = EVC_Onboarding_Shell::join_url();
+        }
+        $config['appVersion'] = EVC_CLUB_VERSION;
         return array(
             'status' => 200,
             'headers' => self::headers(EVC_Rest_Security::SHELL_CSP),

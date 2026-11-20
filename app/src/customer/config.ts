@@ -24,6 +24,11 @@ export interface CustomerConfig {
   loginUrl: string;
   /** Native WordPress logout (carries WordPress's own logout nonce). */
   logoutUrl: string;
+  /**
+   * STAGE-08 round 10: the in-store join flow (/club/join/ or ?evc_club_join=1), where a signed-in customer without a
+   * membership joins and pays. Sent by the server only while that flow is on (EVC_CLUB_ONBOARDING_ENABLED); "" = none.
+   */
+  joinUrl?: string;
   appVersion: string;
 }
 
@@ -63,6 +68,13 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
   if (!loginUrl) return { ok: false, reason: "login_url" };
   const logoutUrl = sameOriginUrl(d.logoutUrl, origin);
   if (!logoutUrl) return { ok: false, reason: "logout_url" };
+  // Round 10: optional; when sent it must be this site with no credentials and no fragment, like the other URLs.
+  let joinUrl = "";
+  if (d.joinUrl !== undefined) {
+    const url = sameOriginUrl(d.joinUrl, origin);
+    if (!url || url.username !== "" || url.password !== "" || url.hash !== "") return { ok: false, reason: "join_url" };
+    joinUrl = url.href;
+  }
   return {
     ok: true,
     config: {
@@ -70,6 +82,7 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
       nonce: d.nonce,
       loginUrl: loginUrl.href,
       logoutUrl: logoutUrl.href,
+      joinUrl,
       appVersion: typeof d.appVersion === "string" ? d.appVersion : "",
     },
   };

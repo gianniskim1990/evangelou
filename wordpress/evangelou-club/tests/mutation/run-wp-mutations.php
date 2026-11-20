@@ -1737,7 +1737,34 @@ $mutants = array(
         '            if ($this->has_open_club_order($user_id)) {
                 return true;', '            if (false) {
                 return true;',
-        array('OnboardingCommerceTest::test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found')),
+        array('OnboardingCommerceTest::test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found')),    // STAGE-08 round 10: «Γίνετε μέλος» join URL on the member page (A); readiness rights on the table of 004 (LOW-1).
+    array('R10W1-join-url-sent-without-the-join-flow', 'customer', 'includes/customer/class-evc-customer-shell.php',
+        "        if (EVC_Onboarding_Feature::enabled()) {\n            \$config['joinUrl']", "        if (true) {\n            \$config['joinUrl']",
+        array('CustomerShellTest::test_a_customer_gets_the_page_with_the_customer_rest_base_and_a_nonce')),
+    array('R10W2-join-url-never-sent', 'onboarding', 'includes/customer/class-evc-customer-shell.php',
+        "            \$config['joinUrl'] = EVC_Onboarding_Shell::join_url();\n", "",
+        array('OnboardingTest::test_the_member_page_carries_the_join_url_while_the_join_flow_is_on')),
+    array('R10W3-join-url-is-the-member-page', 'onboarding', 'includes/customer/class-evc-customer-shell.php',
+        "            \$config['joinUrl'] = EVC_Onboarding_Shell::join_url();", "            \$config['joinUrl'] = self::shell_url();",
+        array('OnboardingTest::test_the_member_page_carries_the_join_url_while_the_join_flow_is_on')),
+    array('R10W4-join-url-with-the-poster-marker', 'onboarding', 'includes/customer/class-evc-customer-shell.php',
+        "            \$config['joinUrl'] = EVC_Onboarding_Shell::join_url();", "            \$config['joinUrl'] = EVC_Onboarding_Shell::join_url(true);",
+        array('OnboardingTest::test_the_member_page_carries_the_join_url_while_the_join_flow_is_on')),
+    array('AT36-preparation-grants-not-read', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "            \$grants = self::preparation_grants(\$db);", "            \$grants = array('state' => EVC_Db_Grants::OK, 'missing' => array());",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT37-missing-grants-read-as-manual', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        if (\$state === EVC_Db_Grants::MISSING) {", "        if (false) {",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT38-unknown-grants-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        if (\$state !== EVC_Db_Grants::OK) {", "        if (\$state === EVC_Db_Grants::UNKNOWN) {",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT39-unchecked-grants-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        \$state = \$grants['state'] ?? EVC_Db_Grants::UNKNOWN;", "        \$state = \$grants['state'] ?? EVC_Db_Grants::OK;",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT40-grants-read-of-another-table', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        return EVC_Db_Grants::table_privileges(\$lines, \$database, self::PREPARATIONS_TABLE, self::PREPARATIONS_PRIVILEGES);", "        return EVC_Db_Grants::table_privileges(\$lines, \$database, 'evc_redemptions', self::PREPARATIONS_PRIVILEGES);",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */

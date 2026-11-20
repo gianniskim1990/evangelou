@@ -235,7 +235,9 @@ export function CustomerApp({
       navigated.current = true;
       setScreen((MEMBER_SCREENS as readonly string[]).includes(s) ? (s as MemberScreen) : "dashboard");
     };
-    const actions: CustomerActions = { signOut };
+    // Round 10: «Γίνετε μέλος» for a customer without a membership, only when the server sent the join URL.
+    const joinUrl = config.joinUrl ?? "";
+    const actions: CustomerActions = joinUrl !== "" ? { signOut, join: () => navigate(joinUrl) } : { signOut };
     body =
       current === "card" ? (
         <MemberPassView
