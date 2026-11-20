@@ -14,7 +14,7 @@ import { execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, problemsFor, qrProblemsFor, redemptionProblemsFor, selfTest } from "./php-guards.mjs";
+import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, PREPARED_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, preparedProblemsFor, problemsFor, qrProblemsFor, redemptionProblemsFor, selfTest } from "./php-guards.mjs";
 import { storageProblems, storageSelfTest } from "./storage-guard.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -52,7 +52,7 @@ const FORBIDDEN_CUSTOMER_BUNDLE_STRINGS = [
 const EXPECTED_CUSTOMER_LOCAL_STORAGE = 1;
 /** Destructuring a store out of navigator in the minified output: let{storage:e}=navigator. */
 const NAVIGATOR_DESTRUCTURING = /\{[^{}]*\bstorage\b[^{}]*\}\s*=\s*navigator\b/;
-const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Bacs_Payment_Confirmation", "new EVC_Bacs_Payment_Finalizer", "new EVC_Bacs_Payment_Issuer", "class EVC_Hooked_Provenance_Store", "class EVC_Bacs_Intent_Fixture", "class EVC_Read_Only_Provenance_Store_Spy", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup", "class EVC_In_Memory_Prepared_Redemption_Store", "class EVC_Fake_Prep_Catalogue_Authority", "new EVC_Prepared_Redemption_Service", "implements EVC_Prep_Redemption_Store", "implements EVC_Prep_Catalogue_Authority", "class EVC_Fake_Club_Staff_Authorizer", "new EVC_Handoff_Service", "new EVC_Fulfillment_Read_Model", "implements EVC_Redemption_Fulfillment_Store", "class EVC_Fake_Redemption_History", "class EVC_Fake_Member_Context_Verifier", "new EVC_Usual_Coffee_Service", "implements EVC_Redemption_History_Source", "new EVC_Signed_Member_Context_Verifier", "class EVC_Fake_Qr_Token_Store", "class EVC_Fake_Member_Phone_Directory", "class EVC_Fake_Lookup_Rate_Limiter", "class EVC_Fake_Member_Identity_Store", "class EVC_Fake_Wp_Account_Directory", "class EVC_Fake_Member_Status_Policy", "class EVC_Fake_Qr_Delivery_Policy", "new EVC_Member_Account_Service", "new EVC_Member_Qr_Coordinator", "implements EVC_Member_Status_Policy", "implements EVC_Qr_Delivery_Policy", "class EVC_Contract_Vector_Builder", "EVC_Test_Redemption_Backend", "EVC_Test_Coffee_Catalogue", "fixtures/coffee-catalog.php", "new EVC_Rest_V2_Domain_Response", "register_rest_route(EVC_Rest_V2_Routes", "'EVC_Rest_V2_Security'", "EVC_Rest_V2_Security::filter_post_dispatch", "EVC_Test_V2_Harness", "EVC_Staff_Role_Upgrade_Planner::", "new EVC_Staff_Role_Upgrade_Approval", "EVC_Staff_Role_Versions::VERSION_OPTION"];
+const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Bacs_Payment_Confirmation", "new EVC_Bacs_Payment_Finalizer", "new EVC_Bacs_Payment_Issuer", "class EVC_Hooked_Provenance_Store", "class EVC_Bacs_Intent_Fixture", "class EVC_Read_Only_Provenance_Store_Spy", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup", "class EVC_In_Memory_Prepared_Redemption_Store", "class EVC_Fake_Prep_Catalogue_Authority", "class EVC_Fake_Club_Staff_Authorizer", "new EVC_Handoff_Service", "new EVC_Fulfillment_Read_Model", "implements EVC_Redemption_Fulfillment_Store", "class EVC_Fake_Redemption_History", "class EVC_Fake_Member_Context_Verifier", "new EVC_Usual_Coffee_Service", "implements EVC_Redemption_History_Source", "new EVC_Signed_Member_Context_Verifier", "class EVC_Fake_Qr_Token_Store", "class EVC_Fake_Member_Phone_Directory", "class EVC_Fake_Lookup_Rate_Limiter", "class EVC_Fake_Member_Identity_Store", "class EVC_Fake_Wp_Account_Directory", "class EVC_Fake_Member_Status_Policy", "class EVC_Fake_Qr_Delivery_Policy", "new EVC_Member_Account_Service", "new EVC_Member_Qr_Coordinator", "implements EVC_Member_Status_Policy", "implements EVC_Qr_Delivery_Policy", "class EVC_Contract_Vector_Builder", "EVC_Test_Redemption_Backend", "EVC_Test_Coffee_Catalogue", "fixtures/coffee-catalog.php", "new EVC_Rest_V2_Domain_Response", "register_rest_route(EVC_Rest_V2_Routes", "'EVC_Rest_V2_Security'", "EVC_Rest_V2_Security::filter_post_dispatch", "EVC_Test_V2_Harness", "EVC_Staff_Role_Upgrade_Planner::", "new EVC_Staff_Role_Upgrade_Approval", "EVC_Staff_Role_Versions::VERSION_OPTION"];
 const SILENCE = "<?php\n// Silence is golden.\n";
 
 function fail(message) {
@@ -219,6 +219,7 @@ const sawQr = new Set();
 const sawFluentcrm = new Set();
 const sawOnboarding = new Set();
 const sawAdminTools = new Set();
+const sawPrepared = new Set();
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
   const path = f.replace(/\\/g, "/");
@@ -259,6 +260,11 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   for (const problem of problemsFor(path, text, ADMIN_TOOLS_RULES).concat(adminToolsProblemsFor(path, text))) {
     fail(problem);
   }
+  // Round 9 (D24): the prepared-redemption pieces only at their one construction site, behind the redemption opt-in.
+  if (Object.values(PREPARED_RULES).includes(path)) sawPrepared.add(path);
+  for (const problem of preparedProblemsFor(path, text)) {
+    fail(problem);
+  }
   // STAGE-05C: the QR pieces only at their one construction site, behind the customer / staff opt-ins.
   if (Object.values(QR_RULES).includes(path)) sawQr.add(path);
   for (const problem of qrProblemsFor(path, text)) {
@@ -266,6 +272,7 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   }
 }
 if (sawQr.size !== Object.values(QR_RULES).length) fail("a STAGE-05C QR file is missing from the package");
+if (sawPrepared.size !== new Set(Object.values(PREPARED_RULES)).size) fail("a round-9 prepared-redemption file is missing from the package");
 if (sawFluentcrm.size !== 2) fail("a STAGE-06 FluentCRM file (plugin or gateway) is missing from the package");
 if (sawOnboarding.size !== ONBOARDING_RULES.guardedFiles.length) fail("a STAGE-07 onboarding file is missing from the package");
 if (sawAdminTools.size !== ADMIN_TOOLS_RULES.guardedFiles.length) fail("a STAGE-08 admin-tools file is missing from the package");

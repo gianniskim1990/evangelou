@@ -145,8 +145,9 @@ final class EVC_Readiness {
                 ? sprintf('Δεν έχει εφαρμοστεί καμία μετάβαση (στόχος %d).', $target)
                 : sprintf('Ο πίνακας μεταβάσεων λείπει ή ο χρήστης της βάσης δεν έχει δικαίωμα να τον δει· ελέγξτε τη σελίδα Εργαλεία → «Evangelou Club — Βάση δεδομένων» (στόχος %d).', $target));
         } else {
-            $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', $applied >= $target ? self::OK : self::WRONG, sprintf('Εφαρμοσμένη έκδοση %d, στόχος %d. Η μετάβαση 003 θέλει δική της έγκριση.', $applied, $target));
+            $rows[] = self::row('club_db_schema', 'Έκδοση σχήματος', $applied >= $target ? self::OK : self::WRONG, sprintf('Εφαρμοσμένη έκδοση %d, στόχος %d. Κάθε νέα μετάβαση (π.χ. η 004) θέλει δική της έγκριση από τον ιδιοκτήτη.', $applied, $target));
         }
+        $rows[] = self::prepared_row($applied, $unreadable !== null);
         try {
             $version = (string) ($db->fetch_one('SELECT VERSION() AS v')['v'] ?? '');
         } catch (Throwable $e) {
@@ -154,6 +155,24 @@ final class EVC_Readiness {
         }
         $rows[] = self::db_version_row('club_db_server', 'Διακομιστής βάσης του Club', $version);
         return $rows;
+    }
+
+    /**
+     * Round 9 (owner decision D24): can the till record HOW the coffee was made (migration 004 + the approved
+     * catalogue)? Pure. Below 4 this is not an error: the till keeps recording the coffee type only.
+     */
+    public static function prepared_row(int $applied, bool $unreadable): array {
+        $label = 'Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)';
+        if ($unreadable) {
+            return self::row('prepared_redemption', $label, self::UNREADABLE, 'Η έκδοση σχήματος δεν διαβάστηκε· δείτε την προηγούμενη γραμμή.');
+        }
+        if ($applied < EVC_Coffee_History::PREPARED_SCHEMA_VERSION) {
+            return self::row('prepared_redemption', $label, self::MANUAL, sprintf('Ανενεργή: εφαρμοσμένη έκδοση %d. Το ταμείο καταχωρεί μόνο το είδος του καφέ και το ιστορικό δείχνει μόνο ονόματα καφέ. Για να ενεργοποιηθεί: έγκριση της μετάβασης 004 από τον ιδιοκτήτη, EVC_CLUB_MIGRATIONS_TARGET 4 στο wp-config.php και εφαρμογή από τη σελίδα μεταβάσεων.', $applied));
+        }
+        if (!EVC_Club_Prep_Catalogue_Authority::is_authorised()) {
+            return self::row('prepared_redemption', $label, self::WRONG, 'Ο κατάλογος καφέδων του πρόσθετου δεν ταιριάζει με τον εγκεκριμένο: το ταμείο καταχωρεί μόνο το είδος του καφέ. Ειδοποιήστε τον προγραμματιστή.');
+        }
+        return self::row('prepared_redemption', $label, self::OK, sprintf('Ενεργή: το ταμείο καταγράφει δόση, ζάχαρη, γάλα, μέγεθος και σημείωση (κατάλογος %s).', EVC_Club_Prep_Catalogue_Authority::VERSION_LABEL));
     }
 
     /**
@@ -312,7 +331,7 @@ final class EVC_Readiness {
         $details = array(
             self::OK => 'Ορίστηκε και είναι έγκυρο (τουλάχιστον 32 χαρακτήρες, τυχαίο, διαφορετικό από το κλειδί σκαναρίσματος).',
             self::MISSING => 'Δεν έχει οριστεί: η κάρτα μέλους δεν δείχνει κωδικό QR.',
-            self::WRONG => 'Ορίστηκε, αλλά δεν είναι έγκυρο (χρειάζεται τυχαίο κείμενο τουλάχιστον 32 χαρακτήρων, όχι το παράδειγμα των οδηγιών ούτε τον ίδιο χαρακτήρα ξανά και ξανά, διαφορετικό από το κλειδί σκαναρίσματος): η κάρτα μέλους δεν δείχνει κωδικό QR.',
+            self::WRONG => 'Ορίστηκε, αλλά δεν είναι έγκυρο (χρειάζεται τυχαίο κείμενο τουλάχιστον 32 χαρακτήρων: όχι το παράδειγμα των οδηγιών, ούτε έναν χαρακτήρα που επαναλαμβάνεται, και διαφορετικό από το κλειδί σκαναρίσματος): η κάρτα μέλους δεν δείχνει κωδικό QR.',
         );
         return self::row('qr_secret', 'Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)', $status, $details[$status]);
     }

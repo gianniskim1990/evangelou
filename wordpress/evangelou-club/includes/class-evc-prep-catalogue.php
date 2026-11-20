@@ -7,8 +7,11 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  * Strict, immutable model of the coffees staff may serve and the structured
  * preparation options each one supports. Owner decisions (2026-10-13):
  *
- * - D-NOTES: structured options ONLY. `free_text_note` must be false; there is
- *   no free-text field anywhere in this model.
+ * - D-NOTES (2026-10-13) made the options structured only; owner decision D24
+ *   (2026-11-20) reverses the free-text part: `free_text_note` is a boolean, and a
+ *   catalogue that says true lets the till add ONE short staff note
+ *   (EVC_Prep_Note: at most 80 characters, plain text, normalised on the server).
+ *   The note is never part of the canonical preparation or of prep_hash.
  * - D-PRICING: undecided. `pricing_policy` must be "undecided"; no option
  *   carries a price and no surcharge logic exists. Do not read "no price" as
  *   "free": an approved catalogue still needs the owner's pricing decision.
@@ -53,6 +56,8 @@ final class EVC_Prep_Catalogue {
     private $status;
     /** @var int */
     private $max_quick_notes;
+    /** @var bool D24: the till may add one short staff note (EVC_Prep_Note) */
+    private $free_text_note;
     /** @var array<string,array{label:string,applies_to:string}> */
     private $quick_notes = array();
     /** @var array<string,int> quick-note id => exclusive set index */
@@ -87,7 +92,7 @@ final class EVC_Prep_Catalogue {
         if ($d['pricing_policy'] !== self::PRICING_UNDECIDED) {
             self::fail('pricing_policy');
         }
-        if ($d['free_text_note'] !== false) {
+        if (!is_bool($d['free_text_note'])) {
             self::fail('free_text_note');
         }
         if (!is_int($d['max_quick_notes']) || $d['max_quick_notes'] < 1 || $d['max_quick_notes'] > self::MAX_SELECTABLE_QUICK_NOTES) {
@@ -95,6 +100,7 @@ final class EVC_Prep_Catalogue {
         }
         $this->version = $d['catalogue_version'];
         $this->status = $d['status'];
+        $this->free_text_note = $d['free_text_note'];
         $this->max_quick_notes = $d['max_quick_notes'];
 
         if (!self::is_list($d['quick_notes']) || count($d['quick_notes']) > self::MAX_QUICK_NOTES_DEFINED) {
@@ -233,6 +239,11 @@ final class EVC_Prep_Catalogue {
 
     public function is_approved(): bool {
         return $this->status === self::STATUS_APPROVED;
+    }
+
+    /** D24: a short staff note may accompany an order of this catalogue. */
+    public function allows_free_text_note(): bool {
+        return $this->free_text_note;
     }
 
     public function max_quick_notes(): int {

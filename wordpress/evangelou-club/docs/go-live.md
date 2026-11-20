@@ -106,6 +106,21 @@ approval: first on **staging**, and on **production** only after the owner appro
 - **Never delete rows of `evc_qr_tokens`** (round 8): a member's QR comes from that member's row count; deleted
   rows can bring a revoked code back or leave the member without a QR (log reason `qr_generation_stuck` beyond 16
   deleted rows of one member). See [member-qr.md](member-qr.md).
+- **Owner decision D24** (2026-11-20, round 9a: backend): at the till, after the scan, staff choose the coffee step
+  by step (dose incl. **triple**, sugar, sweetener, milk, size, quick notes and a **short staff note**), see the
+  member's **last 3 coffees** with a «Το ίδιο με την τελευταία φορά» pre-fill (staff still review and confirm), and the
+  member card shows the member's own last coffees. Needs **migration 004** (new `evc_redemption_preparations` table +
+  four nullable ledger columns; additive, v1 rows keep working and show as the coffee name only). **004 is NOT
+  approved for any database yet.** Until it is applied the till keeps the v1 flow (coffee type only), history shows
+  coffee names only, and readiness row «Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)» reads «Έλεγχος με το
+  χέρι» (not an error). **Owner steps for staging, in this order:** (1) the owner approves 004 for staging;
+  (2) backup of the staging Club DB; (3) the technician changes `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` to
+  `define('EVC_CLUB_MIGRATIONS_TARGET', 4);` in the staging wp-config.php (and has `EVC_CLUB_MIGRATIONS_ENABLED` on
+  for the moment); (4) Tools → «Evangelou Club — Βάση δεδομένων»: all checks green, then apply (only 004 is pending);
+  (5) remove `EVC_CLUB_MIGRATIONS_ENABLED` again; (6) Readiness: «Έκδοση σχήματος» «Εντάξει» and «Καταγραφή
+  προετοιμασίας καφέ» «Εντάξει». The Club DB user needs `SELECT`/`INSERT` on `evc_redemption_preparations` (the
+  technician reports full access on the staging Club DB). **Production** needs its own approval of 004 (as of 001-003).
+  The staff note has an open retention question: K18.
 - **On a phone, the offer's «Πληρωμή 20 €» did not look like a button** (the owner only noticed the account link).
   Round 4: a full-width filled button; the account link below it is small.
 
@@ -118,7 +133,7 @@ read «Εντάξει» (or the «manual» items are confirmed).
 |---|---|---|
 | 0 | Backups of both databases (on a WP Staging clone the WordPress database is shared with live). Settings → Permalinks = «Post name» (T9). On staging: the «Disable Emails» plugin active. | Restore tested. Readiness «Μόνιμοι σύνδεσμοι»: «Εντάξει». |
 | 1 | `define('EVC_CLUB_ADMIN_TOOLS_ENABLED', true);` | The «Evangelou Club» menu appears for administrators only. Readiness shows the current state. |
-| 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);`; on **staging** also `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` (D19) | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green (this also verifies T1); apply 001 + 002 (approved for staging on 2026-10-27) and, on staging, 003 (D19, 2026-11-10). **Production:** 001, 002 and 003 each need the owner's own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: «Βάση δεδομένων του Club» and «Έκδοση σχήματος» «Εντάξει» (a «Δεν διαβάζεται» schema row means the migrations table could not be read: go back to the migrations page checks). |
+| 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);`; on **staging** also `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` (D19) | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green (this also verifies T1); apply 001 + 002 (approved for staging on 2026-10-27) and, on staging, 003 (D19, 2026-11-10). **004 (D24, round 9) is not approved anywhere yet:** at the owner's go-ahead the technician sets `EVC_CLUB_MIGRATIONS_TARGET` to 4 and applies it the same way. **Production:** 001, 002, 003 and 004 each need the owner's own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: «Βάση δεδομένων του Club» and «Έκδοση σχήματος» «Εντάξει» (a «Δεν διαβάζεται» schema row means the migrations table could not be read: go back to the migrations page checks). |
 | 3 | `EVC_CLUB_MEMBERSHIP_SOURCE`, `EVC_CLUB_PMPRO_LEVEL_ID`, `EVC_CLUB_WC_PRODUCT_ID`, `EVC_CLUB_EVIDENCE_KEY`, `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` | Readiness «Κατάστημα»: all «Εντάξει» (pinned versions, product 20.00 €, sold individually, one-month level, Athens clock, BACS on), **including «Καταγραφή πληρωμών στη βάση του Club (EVC_CLUB_PAYMENT_PROVENANCE)»**: «Εντάξει» only for the exact `'club_db_v1'`; «Λάθος» or «Λείπει» means payment confirmation, the member QR and redemption stay closed. |
 | 4 | `define('EVC_CLUB_WC_COMPLETION_ENABLED', true);` | One test order by bank transfer, marked «Ολοκληρωμένη» by the shop: the member reads active ([commerce-membership-source.md](commerce-membership-source.md)). |
 | 5 | `define('EVC_CLUB_CUSTOMER_ENABLED', true);`, `EVC_CLUB_LOOKUP_KEY` (a random secret of at least 32 bytes, for the QR scan) and (D22) `EVC_CLUB_QR_SECRET` (another, **different** random secret of at least 32 bytes, for the member's QR; never change it without reason: every member's QR changes once when it does; the docs placeholder and a repeated character are refused). Generate each one separately: `php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"` or, in Windows PowerShell 5, `$b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b\|%{$_.ToString('x2')}) -join ''` | Readiness «Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)» and «Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)»: «Εντάξει» (values never shown). `/club-member/` shows the test member as active; the QR appears only after 003, and is the same on a second phone. |
@@ -179,6 +194,8 @@ Each with the owner decision that accepted it or the mitigation in place.
 | K15 | **Plain permalinks** on a site: the pretty Club URLs are a 404. | Round 4: the plugin builds plain URLs then, and readiness reads «Λάθος» with the fix (T9). |
 | K16 | **FluentCRM's checkout checkbox is not shown on the Block Checkout** (D20). | Known FluentCRM limitation (acknowledged by its support, 2025-09). On a Block Checkout no consent is collected at the checkout; the D20 «Transactional» default keeps buyers out of the newsletter. Check on staging (T6). |
 | K17 | **Resolved by D22 (2026-11-19).** Was: opening the card on a second device retired the first device's QR. Now the QR is the same on every device and only an administrator's revocation changes it. What remains: a screenshot of the QR keeps working on any device until that revocation (D6 no expiry, D7 accepted); `EVC_CLUB_QR_SECRET` is a new secret to keep (a leak lets someone compute members' codes if they also know the member ids; changing it gives every member a new code once); the customer `POST /me/qr` has no server-side rate limit (it now writes only on a first QR, after a revocation, or once for a pre-D22 token), only the app's cap of 8 requests / 3 POSTs per minute. | One coffee per Athens day and the staff's first-name check limit the damage; the secret lives only in wp-config.php (packager guard: no secret in a shipped file) and is never logged or shown. A token lifetime or a server-side limit would be a new owner decision. |
+| K18 | **The staff note (D24) is free text linked to a member's redemption, kept with no retention limit.** Staff could write personal data in it (e.g. a health remark). Owner decision **D9 (retention / access / erasure of member-linked history) is still open**; there is no purge mechanism. | Limited to 80 characters, plain text (HTML refused), never logged, never in the audit trail, never shown to the customer (only to the till, in the last 3 coffees). **Owner decision needed:** how long notes are kept (e.g. 12 months), and an instruction to staff: only preparation wishes, never health or personal remarks. Until then, every note stays in the Club DB. |
+| K19 | **Older tablets keep the v1 route** (coffee type only). | Deliberate (round 9a): v1 and the prepared route share one ledger and its unique keys, so one coffee per member per Athens day holds across both; a tablet on the new app uses the prepared route once 004 is applied. The v1 route can be retired later by a separate decision. |
 | K14 | **A page cache** could serve the join page to the wrong visitor. | `DONOTCACHEPAGE` + no-cache headers; readiness lists page-cache plugins; exclude `/club/join/` and `/club-member/` by hand if the host cache ignores them. |
 
 ## 6. Shipped-code TODO / FIXME
@@ -265,16 +282,36 @@ FluentCRM με το WooCommerce, το «Default Contact Status» γίνεται 
     $b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b|%{$_.ToString('x2')}) -join ''
 
 **Δεν** χρειάζεται νέα μετάβαση βάσης. Στο staging, οι
-QR που βγήκαν πριν από το D22 αλλάζουν **μία φορά** στο επόμενο άνοιγμα της κάρτας και μετά μένουν ίδιοι. Δοκιμή
-στο staging: ανοίξτε την κάρτα σε δύο κινητά· πρέπει να δείχνουν τον ίδιο QR, και η σάρωση και των δύο στο ταμείο
+QR που βγήκαν πριν από το D22 αλλάζουν **μία φορά** στο επόμενο άνοιγμα της κάρτας και μετά μένουν ίδιοι. Έλεγχος
+στο δοκιμαστικό αντίγραφο: ανοίξτε την κάρτα σε δύο κινητά· πρέπει να δείχνουν τον ίδιο QR, και η σάρωση και των δύο στο ταμείο
 βρίσκει το ίδιο μέλος. **Ποτέ μη σβήνετε γραμμές του πίνακα `evc_qr_tokens`** στη βάση του Club: ο κωδικός κάθε
 μέλους βγαίνει από αυτές, και αν σβηστούν, ένας παλιός ακυρωμένος κωδικός μπορεί να ξαναγίνει έγκυρος.
 
 **Απόφαση D23 (19/11/2026):** η κάρτα μέλους δείχνει πια **πραγματικά** στοιχεία: πόσους δωρεάν καφέδες πήρε το
 μέλος αυτόν τον μήνα και αν πήρε ήδη τον σημερινό («Τον απολαύσατε σήμερα»). Αν η βάση του Club δεν απαντά, η
-κάρτα δείχνει «—» όπως πριν. Δεν χρειάζεται νέα μετάβαση ούτε νέο μυστικό. Δοκιμή στο staging: δώστε έναν καφέ στο
+κάρτα δείχνει «—» όπως πριν. Δεν χρειάζεται νέα μετάβαση ούτε νέο μυστικό. Έλεγχος στο δοκιμαστικό αντίγραφο: δώστε έναν καφέ στο
 ταμείο και ξανανοίξτε την κάρτα· πρέπει να γράφει «Τον απολαύσατε σήμερα» και ο αριθμός του μήνα να έχει
 ανέβει κατά ένα.
 
-**Γνωστοί κίνδυνοι** που έχετε αποφασίσει ή έχουν μέτρα: δείτε τον πίνακα «Known risks» (K1–K17) παραπάνω· ο
+**Απόφαση D24 (20/11/2026):** στο ταμείο, μετά τη σάρωση, το προσωπικό διαλέγει τον καφέ βήμα βήμα (δόση, και
+**τριπλός**, ζάχαρη, γλυκαντικό, γάλα, μέγεθος, γρήγορες σημειώσεις και **μια σύντομη σημείωση**), βλέπει τους
+**3 τελευταίους καφέδες** του μέλους με το κουμπί «Το ίδιο με την τελευταία φορά» (το προσωπικό ελέγχει και
+επιβεβαιώνει πάντα), και η κάρτα μέλους δείχνει τους δικούς του τελευταίους καφέδες (χωρίς τη σημείωση του
+ταμείου). Χρειάζεται τη **μετάβαση 004**, που **δεν έχει εγκριθεί** για καμία βάση. Μέχρι να εφαρμοστεί, το ταμείο
+καταχωρεί μόνο το είδος του καφέ, όπως σήμερα, και το ιστορικό δείχνει μόνο ονόματα καφέ. **Τα βήματα για το
+δοκιμαστικό αντίγραφο:**
+1. εγκρίνετε τη μετάβαση 004 για το δοκιμαστικό αντίγραφο·
+2. ο τεχνικός παίρνει αντίγραφο ασφαλείας της βάσης του Club·
+3. ο τεχνικός αλλάζει στο wp-config.php του δοκιμαστικού αντιγράφου το `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` σε
+   `define('EVC_CLUB_MIGRATIONS_TARGET', 4);` (με το `EVC_CLUB_MIGRATIONS_ENABLED` ενεργό προσωρινά)·
+4. Εργαλεία → «Evangelou Club — Βάση δεδομένων»: όλοι οι έλεγχοι πράσινοι, μετά εφαρμογή (εκκρεμεί μόνο η 004)·
+5. ο τεχνικός αφαιρεί ξανά το `EVC_CLUB_MIGRATIONS_ENABLED`·
+6. στην «Ετοιμότητα», η γραμμή «Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)» γράφει «Εντάξει».
+
+Για το κανονικό site η 004 θέλει ξεχωριστή έγκρισή σας. **Κίνδυνος για απόφαση (K18):** η σημείωση του ταμείου
+είναι ελεύθερο κείμενο (έως 80 χαρακτήρες) και μένει στη βάση μαζί με τον καφέ του μέλους χωρίς όριο χρόνου· η
+απόφαση D9 (πόσο κρατάμε το ιστορικό) είναι ακόμη ανοιχτή. Προτείνουμε να ορίσετε πόσο καιρό κρατιούνται οι
+σημειώσεις και να πείτε στο προσωπικό να γράφει μόνο επιθυμίες για τον καφέ, ποτέ στοιχεία υγείας ή προσωπικά.
+
+**Γνωστοί κίνδυνοι** που έχετε αποφασίσει ή έχουν μέτρα: δείτε τον πίνακα «Known risks» (K1–K19) παραπάνω· ο
 τεχνικός μπορεί να σας τους εξηγήσει έναν έναν.

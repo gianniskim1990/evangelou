@@ -67,7 +67,11 @@ final class EVC_Customer_Qr_Backend {
     const REASON_FAILED = 'qr_failed';
     const REASON_GENERATION = 'qr_generation_stuck';
     const REASON_COFFEES = 'coffees_failed';
+    /** Round 9 (D24): the member card's own coffee history could not be read. */
+    const REASON_HISTORY = 'history_failed';
 
+    /** @var int the schema version open() read for this request (0 before) */
+    private $schema = 0;
     /** @var callable(): array */
     private $environment;
     /** @var callable(EVC_Db_Config): EVC_Club_Db */
@@ -236,6 +240,34 @@ final class EVC_Customer_Qr_Backend {
      * @return array{state:string,today?:string,taken_today?:bool,this_month?:int}
      *   state: unavailable | not_member | member_disabled | member (+ today «Y-m-d» Athens, taken_today, this_month)
      */
+    /**
+     * Owner decision D24 (round 9): the member's OWN last coffees for the card's «Ιστορικό»: date, coffee and
+     * preparation only (EVC_Coffee_History::for_customer: never the staff note, never staff). Schema below 4:
+     * coffee names only. Same gates as coffees() (no QR secret needed).
+     *
+     * @return array{state:string,items?:array}
+     */
+    public function history(int $wp_user_id): array {
+        $db = $this->open(false);
+        if ($db === null) {
+            return array('state' => 'unavailable');
+        }
+        try {
+            $member = EVC_Club_Qr_Services::store($db)->find_member_by_wp_user($wp_user_id);
+            if ($member === null) {
+                return array('state' => 'not_member');
+            }
+            if ($member['status'] !== 'enabled') {
+                return array('state' => 'member_disabled');
+            }
+            $items = EVC_Coffee_History::recent($db, $member['id'], EVC_Coffee_History::CUSTOMER_LIMIT, $this->schema >= EVC_Coffee_History::PREPARED_SCHEMA_VERSION, EVC_Club_Prep_Catalogue_Authority::coffee_labels(), EVC_Club_Prep_Catalogue_Authority::catalogue());
+            return array('state' => 'member', 'items' => EVC_Coffee_History::for_customer($items));
+        } catch (Throwable $e) {
+            $this->refuse(self::REASON_HISTORY, $e);
+            return array('state' => 'unavailable');
+        }
+    }
+
     public function coffees(int $wp_user_id): array {
         $db = $this->open(false);
         if ($db === null) {
@@ -265,6 +297,7 @@ final class EVC_Customer_Qr_Backend {
     private function open(bool $needs_secret = true): ?EVC_Club_Db {
         $this->last_reason = null;
         $this->secret = null;
+        $this->schema = 0;
         try {
             $env = ($this->environment)();
         } catch (Throwable $e) {
@@ -305,6 +338,7 @@ final class EVC_Customer_Qr_Backend {
             return $this->refuse(self::REASON_SCHEMA);
         }
         $this->secret = $needs_secret ? $env['qr_secret'] : null;
+        $this->schema = (int) $row['v'];
         return $db;
     }
 

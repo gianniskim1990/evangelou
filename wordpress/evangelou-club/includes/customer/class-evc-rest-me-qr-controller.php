@@ -21,6 +21,11 @@ defined('ABSPATH') || exit;
  *                      "this_month":<int>}}   today = the Europe/Athens business day the figures belong to
  *                 200 {"result":"ok","coffees":{"state":"not_member"}} / {"state":"member_disabled"}
  *                 503 {"result":"unavailable"} (the card then shows «—»: fail soft). Needs no QR secret.
+ *   GET  /me/history  owner decision D24 (round 9): the member card's own last coffees («Ιστορικό»), read only
+ *                 200 {"result":"ok","history":{"state":"member","items":[{"business_date":"YYYY-MM-DD",
+ *                      "coffee":"<label>","details":["<label>", …]}, …]}}   newest first, at most 5
+ *                 200 {"result":"ok","history":{"state":"not_member"}} / {"state":"member_disabled"}
+ *                 503 {"result":"unavailable"}. NEVER the staff note, a staff id or name. Needs no QR secret.
  * All: customer accounts only (EVC_Customer_Auth: cookie session + own wp_rest nonce), the user is
  * ALWAYS get_current_user_id(); nothing identifying is read from the request. Responses are no-store
  * (EVC_Customer_Rest_Security). The token is never logged.
@@ -29,6 +34,8 @@ final class EVC_Rest_Me_Qr_Controller {
     const ROUTE = '/me/qr';
     /** D23: the member's own coffee figures (same gates and the same backend as the QR). */
     const COFFEES_ROUTE = '/me/coffees';
+    /** D24: the member's own last coffees (same gates and the same backend). */
+    const HISTORY_ROUTE = '/me/history';
 
     /** @var EVC_Customer_Qr_Backend */
     private $backend;
@@ -60,6 +67,37 @@ final class EVC_Rest_Me_Qr_Controller {
                 'args' => array(),
             ),
         ), $override);
+        register_rest_route(EVC_Customer_Rest_Security::NAMESPACE_V1, self::HISTORY_ROUTE, array(
+            array(
+                'methods' => 'GET',
+                'callback' => array($this, 'history'),
+                'permission_callback' => array('EVC_Customer_Auth', 'authorize'),
+                'args' => array(),
+            ),
+        ), $override);
+    }
+
+    /** @return WP_REST_Response|WP_Error */
+    public function history(WP_REST_Request $request) {
+        $auth = EVC_Customer_Auth::authorize($request);
+        if ($auth instanceof WP_Error) {
+            return $auth;
+        }
+        try {
+            // Always the caller's own member row: nothing identifying is read from the request.
+            $history = $this->backend->history(get_current_user_id());
+        } catch (Throwable $e) {
+            return self::unavailable();
+        }
+        switch ($history['state']) {
+            case 'member':
+                return new WP_REST_Response(array('result' => 'ok', 'history' => array('state' => 'member', 'items' => $history['items'])), 200);
+            case 'not_member':
+            case 'member_disabled':
+                return new WP_REST_Response(array('result' => 'ok', 'history' => array('state' => $history['state'])), 200);
+            default:
+                return self::unavailable();
+        }
     }
 
     /** @return WP_REST_Response|WP_Error */

@@ -49,6 +49,8 @@ final class EVC_Rest_Security {
         'member_disabled' => 'Η κάρτα μέλους δεν είναι διαθέσιμη.',
         'qr_exists' => 'Υπάρχει ήδη QR. Ζητήστε νέο μόνο αν χάθηκε.',
         'concurrent_change' => 'Το QR άλλαξε μόλις τώρα. Ανανεώστε τη σελίδα.',
+        // Round 9 (D24): migration 004 is not applied yet; the till records the coffee type only.
+        'prepared_unavailable' => 'Η καταγραφή της προετοιμασίας δεν είναι ακόμη διαθέσιμη. Καταχωρήστε μόνο το είδος του καφέ.',
     );
 
     public static function register_hooks(): void {

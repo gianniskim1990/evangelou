@@ -526,7 +526,7 @@ const mutants = [
   {
     id: "V6-catalogue-allows-free-text",
     file: "preparationContract.ts",
-    search: 'if (c.free_text_note !== false) fail("free_text_note");',
+    search: 'if (typeof c.free_text_note !== "boolean") fail("free_text_note");',
     replace: "",
   },
   {

@@ -595,7 +595,16 @@ installs a disposable WordPress, serves it with `php -S`, installs the
 **packaged** plugin and checks redirects, real headers, real CORS, cookies,
 logout replay and the reauth form with the flag on and off.
 
-## Prepared redemption transaction model (UI-03D.A — pure PHP, NOT wired)
+## Prepared redemption transaction model (UI-03D.A; round 9 / D24: wired behind EVC_CLUB_REDEMPTION_SOURCE, migration 004 written, NOT applied)
+
+**Round 9 (owner decision D24, 2026-11-20).** The till can record HOW the free coffee was prepared (dose incl.
+triple, sugar, sweetener, milk, size, quick notes, a short staff note) through
+`POST evangelou-club/v1/members/{id}/benefits/free_coffee/prepared-redeem` (+ `GET /coffee-catalogue`), behind the
+same opt-in as the v1 route; the lookup reply with `"history": true` carries the member's last 3 coffees and a
+«Το ίδιο» pre-fill, and the member card gets `GET evangelou-club-customer/v1/me/history` (last 5, never the staff
+note). Needs **migration 004** (not approved for any database; below 4 everything falls back to v1 gracefully).
+Details and the v1/v2 coexistence choice: `docs/prepared-redemption-transaction.md`; owner steps: `docs/go-live.md`.
+
 
 `EVC_Prepared_Redemption_Service` models how one verified, eligible redemption
 atomically records its structured preparation: exactly one ledger row, one

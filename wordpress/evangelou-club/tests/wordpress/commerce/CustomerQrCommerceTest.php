@@ -54,6 +54,9 @@ final class CustomerQrCommerceTest extends EVC_WP_Test_Case {
         $coffees = $this->rest('GET', '/evangelou-club-customer/v1/me/coffees', null, $this->nonce());
         $this->assertSame(200, $coffees->get_status(), wp_json_encode($coffees->get_data()));
         $this->assertSame(array('result' => 'ok', 'coffees' => array('state' => 'member', 'today' => EVC_Clock::business_date(), 'taken_today' => false, 'this_month' => 0)), $coffees->get_data());
+        // D24 (round 9): the member card's own history over the same shipped wiring (no coffee yet).
+        $this->assertArrayHasKey('/evangelou-club-customer/v1/me/history', rest_get_server()->get_routes());
+        $this->assertSame(array('result' => 'ok', 'history' => array('state' => 'member', 'items' => array())), $this->rest('GET', '/evangelou-club-customer/v1/me/history', null, $this->nonce())->get_data());
 
         $this->login_as($this->customer());
         $this->assertSame('not_member', $this->rest('GET', self::QR, null, $this->nonce())->get_data()['qr']['state']);

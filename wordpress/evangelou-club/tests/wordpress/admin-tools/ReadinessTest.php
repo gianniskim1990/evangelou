@@ -97,7 +97,32 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         $this->assertSame('Δεν διαβάζεται', EVC_Readiness::STATUS_LABELS['unreadable']);
         $html = EVC_Admin_Tools_Plugin::parts()['readiness_page']->html();
         $this->assertStringContainsString('data-check="club_db_schema" data-status="unreadable"', $html);
-        $this->assertStringContainsString('Δεν διαβάζεται: 1', $html);
+        // Round 9: the prepared-redemption row depends on the same version, so it cannot be read either.
+        $this->assertSame('unreadable', $rows['prepared_redemption']['status']);
+        $this->assertStringContainsString('Δεν διαβάζεται: 2', $html);
+    }
+
+    /** Round 9 (owner decision D24): the schema level and the prepared redemption are shown plainly. */
+    public function test_the_prepared_redemption_row_follows_migration_004(): void {
+        $club = $this->migrated_club(false);
+        $rows = function () use ($club) {
+            return self::by_key($this->readiness(array('db_config' => function () use ($club) {
+                return $club->config();
+            })));
+        };
+        (new EVC_Migrator($club->connect(), EVC_Test_Database::migrations_dir()))->migrate(3);
+        $three = $rows();
+        $this->assertSame('manual', $three['prepared_redemption']['status'], 'below 4 is not an error: the till records the coffee type only');
+        $this->assertStringContainsString('εφαρμοσμένη έκδοση 3', $three['prepared_redemption']['detail']);
+        $this->assertStringContainsString('EVC_CLUB_MIGRATIONS_TARGET 4', $three['prepared_redemption']['detail']);
+        $this->assertStringContainsString('μόνο το είδος του καφέ', $three['prepared_redemption']['detail']);
+        $this->assertStringContainsString('Εφαρμοσμένη έκδοση 3, στόχος 2', $three['club_db_schema']['detail']);
+        (new EVC_Migrator($club->connect(), EVC_Test_Database::migrations_dir()))->migrate(4);
+        $four = $rows();
+        $this->assertSame('ok', $four['prepared_redemption']['status']);
+        $this->assertStringContainsString('evc-coffee-v2-2026-11-20', $four['prepared_redemption']['detail']);
+        $this->assertSame(array('key' => 'prepared_redemption', 'label' => 'Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)', 'status' => 'manual', 'detail' => EVC_Readiness::prepared_row(0, false)['detail']), EVC_Readiness::prepared_row(0, false));
+        $this->assertSame('unreadable', EVC_Readiness::prepared_row(4, true)['status']);
     }
 
     public function test_the_payment_provenance_reads_ok_only_for_the_exact_value(): void {

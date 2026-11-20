@@ -560,6 +560,153 @@ function memberSyncSelfTest() {
   return bad;
 }
 
+// ---- Round 9 rule set: prepared redemption (owner decision D24) ---------------------------------------------------
+// Lifts the packager's blanket string bans on `new EVC_Prepared_Redemption_Service`, `implements EVC_Prep_Redemption_Store`
+// and `implements EVC_Prep_Catalogue_Authority` for ONE approved site each (as STAGE-05B / 05C did for their pieces):
+// 1. CONSTRUCTION: EVC_Prepared_Redemption_Service, EVC_Sql_Prep_Redemption_Store and EVC_Club_Prep_Catalogue_Authority
+//    are constructed only in the backend file, inside EVC_Club_Prepared_Redemption_Backend::build() (defined exactly
+//    once), each exactly once. The backend and the controller are constructed only in EVC_Staff_Plugin::register_routes()
+//    (whose staff gate the redemption rules already require) as the exact standalone statement
+//    `if (EVC_Club_Redemption_Feature::enabled()) { (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes(); }`
+//    (no test-seam arguments), exactly once.
+// 2. IMPLEMENTS: EVC_Prep_Redemption_Store only by `class EVC_Sql_Prep_Redemption_Store` in the store file;
+//    EVC_Prep_Catalogue_Authority only by `class EVC_Club_Prep_Catalogue_Authority` in the catalogue file; neither is
+//    extended. EVC_Prep_Request_Lookup / the precheck stay banned (packager string bans), as do the test fakes.
+// 3. NAMES: the SQL store, the backend and the controller are named (identifier or string) only in their allowlisted
+//    files (the service's name stays free: the handoff contract reads its REQUEST_ID_PATTERN constant).
+// 4. NO DYNAMIC CONSTRUCTION (`new $x`, `new (…)`, `new self|static|parent|class`, class_alias, Reflection*,
+//    newInstance*, unserialize) in the store, catalogue, backend and controller files.
+// Not covered statically (documented): a class name assembled at run time from pieces in a file outside those four.
+export const PREPARED_RULES = Object.freeze({
+  plugin: STAFF_PLUGIN,
+  coreFile: "includes/class-evc-prepared-redemption.php",
+  storeFile: "includes/class-evc-sql-prep-redemption-store.php",
+  catalogueFile: "includes/class-evc-club-prep-catalogue.php",
+  historyFile: "includes/class-evc-coffee-history.php",
+  backendFile: "includes/staff/class-evc-club-prepared-redemption-backend.php",
+  controllerFile: "includes/staff/class-evc-rest-prepared-redeem-controller.php",
+});
+const PR = PREPARED_RULES;
+const PREPARED_SITES = [
+  ["EVC_Prepared_Redemption_Service", PR.backendFile, "build"],
+  ["EVC_Sql_Prep_Redemption_Store", PR.backendFile, "build"],
+  ["EVC_Club_Prep_Catalogue_Authority", PR.backendFile, "build"],
+  ["EVC_Club_Prepared_Redemption_Backend", PR.plugin, "register_routes"],
+  ["EVC_Rest_Prepared_Redeem_Controller", PR.plugin, "register_routes"],
+];
+const PREPARED_NAMES = [
+  ["evc_sql_prep_redemption_store", [PR.storeFile, PR.backendFile, PR.historyFile]],
+  ["evc_club_prepared_redemption_backend", [PR.backendFile, PR.controllerFile, PR.plugin]],
+  ["evc_rest_prepared_redeem_controller", [PR.controllerFile, PR.plugin]],
+];
+const PREPARED_IMPLEMENTS = [
+  ["EVC_Prep_Redemption_Store", "EVC_Sql_Prep_Redemption_Store", PR.storeFile],
+  ["EVC_Prep_Catalogue_Authority", "EVC_Club_Prep_Catalogue_Authority", PR.catalogueFile],
+];
+const PREPARED_FILES = [PR.storeFile, PR.catalogueFile, PR.backendFile, PR.controllerFile];
+const PREPARED_STATEMENT = ["if", "(", "EVC_Club_Redemption_Feature", "::", "enabled", "(", ")", ")", "{", "(", "new", "EVC_Rest_Prepared_Redeem_Controller", "(", "new", "EVC_Club_Prepared_Redemption_Backend", "(", ")", ")", ")", "->", "register_routes", "(", ")", ";", "}"];
+
+export function preparedProblemsFor(path, src) {
+  const tokens = tokenize(src);
+  const bodies = functionBodies(tokens);
+  const problems = [];
+  const guardedFile = PREPARED_FILES.includes(path);
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id" || tk.t === "str") {
+      const v = bare(tk.v).toLowerCase();
+      for (const [name, files] of PREPARED_NAMES) {
+        const hit = tk.t === "id" ? v === name || v.endsWith("\\" + name) : v.includes(name);
+        if (hit && !files.includes(path)) problems.push(`${path}: names ${name} (prepared-redemption allowlist)`);
+      }
+    }
+    if (tk.t === "id" && ["implements", "extends"].includes(tk.v.toLowerCase())) {
+      for (let j = k + 1; j < tokens.length && tokens[j].v !== "{"; j++) {
+        if (tokens[j].t !== "id") continue;
+        for (const [iface, cls, file] of PREPARED_IMPLEMENTS) {
+          if (!same(tokens[j].v, iface)) continue;
+          if (tk.v.toLowerCase() === "extends") { problems.push(`${path}: extends ${iface}`); continue; }
+          const d = declarationBefore(tokens, k);
+          if (!(d.kind === "class" && !d.anonymous && path === file && same(d.name, cls))) problems.push(`${path}: ${d.anonymous ? "anonymous class" : d.kind + " " + d.name} implements ${iface}`);
+        }
+      }
+    }
+    if (guardedFile && tk.t === "id" && DANGEROUS.includes(tk.v.toLowerCase())) problems.push(`${path}: ${tk.v} in a prepared-redemption file`);
+    if (guardedFile && tk.t === "id" && tk.v.toLowerCase() === "new") {
+      const next = tokens[k + 1];
+      if (!next || next.t !== "id" || ["self", "static", "parent", "class"].includes(next.v.toLowerCase())) problems.push(`${path}: dynamic or self construction (new ${next ? next.v : ""}) in a prepared-redemption file`);
+    }
+  });
+  const counts = {};
+  for (const c of constructions(tokens)) {
+    for (const [cls, file, fn] of PREPARED_SITES) {
+      if (!same(c.name, cls)) continue;
+      counts[cls] = (counts[cls] ?? 0) + 1;
+      if (!(path === file && inside(bodies, fn, c.at))) problems.push(`${path}: ${cls} constructed outside ${file} ${fn}()`);
+    }
+  }
+  for (const [cls, n] of Object.entries(counts)) if (n > 1) problems.push(`${path}: ${cls} constructed more than once`);
+  if (path === PR.backendFile && (bodies.__count.build ?? 0) !== 1) problems.push(`${path}: build() must be defined exactly once`);
+  if (path === PR.plugin) {
+    const b = bodies.register_routes;
+    let found = 0;
+    if (b) {
+      for (let k = b.start; k < b.end; k++) if (matchAt(tokens, k, PREPARED_STATEMENT) && [";", "{", "}"].includes(tokens[k - 1]?.v)) found++;
+    }
+    if (found !== 1) problems.push(`${path}: register_routes() must hold exactly one \`if (EVC_Club_Redemption_Feature::enabled()) { (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes(); }\``);
+  }
+  return problems;
+}
+
+const GOOD_PREPARED_PLUGIN = GOOD_STAFF_PLUGIN.replace("(new EVC_Rest_Redeem_Controller($backend))->register_routes();", "(new EVC_Rest_Redeem_Controller($backend))->register_routes();\n        if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes();\n        }");
+const GOOD_PREPARED_BACKEND = `<?php
+final class EVC_Club_Prepared_Redemption_Backend {
+    private function build(): ?EVC_Prepared_Redemption_Service {
+        return new EVC_Prepared_Redemption_Service(new EVC_Sql_Prep_Redemption_Store($db), new EVC_Club_Prep_Catalogue_Authority(), $m, $this->clock, null, function (array $d) { return 1; });
+    }
+}`;
+
+function preparedSelfTest() {
+  const bad = [];
+  const expect = (label, path, src, want) => {
+    const got = preparedProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`prepared ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good staff plugin", PR.plugin, GOOD_PREPARED_PLUGIN, false);
+  expect("good backend", PR.backendFile, GOOD_PREPARED_BACKEND, false);
+  expect("good store", PR.storeFile, "<?php\nfinal class EVC_Sql_Prep_Redemption_Store implements EVC_Prep_Redemption_Store { }", false);
+  expect("good catalogue", PR.catalogueFile, "<?php\nfinal class EVC_Club_Prep_Catalogue_Authority implements EVC_Prep_Catalogue_Authority { }", false);
+  expect("good controller", PR.controllerFile, "<?php\nfinal class EVC_Rest_Prepared_Redeem_Controller { public function __construct(EVC_Club_Prepared_Redemption_Backend $b) { } }", false);
+  expect("history may read the store's static helper", PR.historyFile, "<?php\n$s = EVC_Sql_Prep_Redemption_Store::snapshot($row);", false);
+  expect("registration missing", PR.plugin, GOOD_STAFF_PLUGIN, true);
+  expect("registration without the opt-in", PR.plugin, GOOD_PREPARED_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared", "if (true) {\n            (new EVC_Rest_Prepared"), true);
+  expect("opt-in widened", PR.plugin, GOOD_PREPARED_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared", "if (EVC_Club_Redemption_Feature::enabled() || true) {\n            (new EVC_Rest_Prepared"), true);
+  expect("opt-in negated", PR.plugin, GOOD_PREPARED_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared", "if (!EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared"), true);
+  expect("test seam passed", PR.plugin, GOOD_PREPARED_PLUGIN.replace("new EVC_Club_Prepared_Redemption_Backend()", "new EVC_Club_Prepared_Redemption_Backend($env)"), true);
+  expect("registered twice", PR.plugin, GOOD_PREPARED_PLUGIN.replace("    }\n}", "        if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes();\n        }\n    }\n}"), true);
+  expect("backend constructed in boot()", PR.plugin, GOOD_PREPARED_PLUGIN.replace("final class EVC_Staff_Plugin {", "final class EVC_Staff_Plugin {\n    public static function boot() { $b = new EVC_Club_Prepared_Redemption_Backend(); }"), true);
+  expect("backend constructed elsewhere", "includes/x.php", "<?php\n$b = new EVC_Club_Prepared_Redemption_Backend();", true);
+  expect("backend named in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_Club_Prepared_Redemption_Backend';", true);
+  expect("service constructed elsewhere", "includes/x.php", "<?php\n$s = new \\EVC_Prepared_Redemption_Service($a, $b, $c, $d);", true);
+  expect("service constructed outside build()", PR.backendFile, GOOD_PREPARED_BACKEND.replace("    private function build()", "    public function other() { return new EVC_Prepared_Redemption_Service($a, $b, $c, $d); }\n    private function build()"), true);
+  expect("service constructed twice", PR.backendFile, GOOD_PREPARED_BACKEND.replace("        return new EVC_Prepared_Redemption_Service(", "        $x = new EVC_Prepared_Redemption_Service($a, $b, $c, $d);\n        return new EVC_Prepared_Redemption_Service("), true);
+  expect("build() defined twice", PR.backendFile, GOOD_PREPARED_BACKEND.replace("final class EVC_Club_Prepared_Redemption_Backend {", "final class Y { private function build() { return 1; } }\nfinal class EVC_Club_Prepared_Redemption_Backend {"), true);
+  expect("store constructed elsewhere", "includes/x.php", "<?php\n$s = new EVC_Sql_Prep_Redemption_Store($db);", true);
+  expect("store constructed in its own file", PR.storeFile, "<?php\nfinal class EVC_Sql_Prep_Redemption_Store implements EVC_Prep_Redemption_Store { public static function make($db) { return new EVC_Sql_Prep_Redemption_Store($db); } }", true);
+  expect("store named elsewhere", "includes/x.php", "<?php\nfunction f(EVC_Sql_Prep_Redemption_Store $s) { return $s; }", true);
+  expect("catalogue authority constructed elsewhere", "includes/x.php", "<?php\n$a = new EVC_Club_Prep_Catalogue_Authority();", true);
+  expect("another store implementation", "includes/x.php", "<?php\nfinal class X implements EVC_Prep_Redemption_Store { }", true);
+  expect("store implementation listed second", "includes/x.php", "<?php\nfinal class X implements Countable, \\EVC_Prep_Redemption_Store { }", true);
+  expect("anonymous store implementation", PR.storeFile, "<?php\n$x = new class() implements EVC_Prep_Redemption_Store { };", true);
+  expect("store interface extended", "includes/x.php", "<?php\ninterface X extends EVC_Prep_Redemption_Store { }", true);
+  expect("another catalogue authority", "includes/x.php", "<?php\nfinal class X implements EVC_Prep_Catalogue_Authority { }", true);
+  expect("catalogue authority in the store file", PR.storeFile, "<?php\nfinal class EVC_Sql_Prep_Redemption_Store implements EVC_Prep_Catalogue_Authority { }", true);
+  expect("new $x in the backend", PR.backendFile, GOOD_PREPARED_BACKEND + "\n$o = new $cls();", true);
+  expect("new self in the store", PR.storeFile, "<?php\nfinal class EVC_Sql_Prep_Redemption_Store implements EVC_Prep_Redemption_Store { public static function make() { return new self(); } }", true);
+  expect("reflection in the controller", PR.controllerFile, "<?php\n$r = new ReflectionClass($c);", true);
+  expect("comment mention is fine", "includes/x.php", "<?php\n// new EVC_Prepared_Redemption_Service(new EVC_Sql_Prep_Redemption_Store($db))\n$x = 1;", false);
+  return bad;
+}
+
 // ---- STAGE-05C rule set: Club member QR (token store, customer QR, staff lookup) -------------------------------
 // Lifts the packager's blanket string bans on `new EVC_Qr_Token_Service`, `new EVC_Member_Lookup_Service`,
 // `new EVC_Lookup_Key_Ring`, `implements EVC_Qr_Token_Store`, `implements EVC_Member_Phone_Directory`,
@@ -1340,7 +1487,7 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest(), adminToolsSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), preparedSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest(), adminToolsSelfTest());
 }
 
 // ---- STAGE-08 rule set: the Club admin pages, only behind EVC_CLUB_ADMIN_TOOLS_ENABLED --------------------------------
@@ -1443,6 +1590,8 @@ export const READ_ONLY_STATIC_ALLOW = Object.freeze([
   "evc_bacs_payment_issuer::site_problem", "evc_onboarding_shell::same_site_url", "evc_fluentcrm_plugin::problem",
   "evc_club_qr_services::is_lookup_secret", "evc_qr_token::is_derivation_secret", "evc_staff_account_reader::accounts", "evc_staff_account_service::may_manage",
   "evc_staff_auth::is_disabled", "evc_staff_role::is_restricted_staff_account",
+  // Round 9 (D24): the readiness row «Καταγραφή προετοιμασίας καφέ» (pure catalogue check, reads nothing).
+  "evc_club_prep_catalogue_authority::is_authorised",
 ]);
 const SQL_WRITE = new RegExp([
   String.raw`\binsert\b`, // INSERT INTO, INSERT t VALUES, INSERT LOW_PRIORITY / DELAYED / IGNORE …

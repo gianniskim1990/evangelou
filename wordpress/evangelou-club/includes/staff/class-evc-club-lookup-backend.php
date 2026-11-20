@@ -42,6 +42,8 @@ final class EVC_Club_Lookup_Backend {
     const REASON_CONNECT = 'club_db_unavailable';
     const REASON_SCHEMA = 'club_db_schema_too_old';
     const REASON_FAILED = 'lookup_failed';
+    /** Round 9 (D24): the member's recent coffees could not be read (the lookup itself still answers). */
+    const REASON_HISTORY = 'history_failed';
     /** ready(): a real outage (connect / schema) is logged at most once per reason in this window. */
     const READY_LOG_SECONDS = 300;
 
@@ -122,15 +124,21 @@ final class EVC_Club_Lookup_Backend {
     }
 
     /**
+     * Round 9 (owner decision D24), with $history: the found member's OWN last coffees
+     * (EVC_Coffee_History::for_staff, at most STAFF_LIMIT = 3, newest first: date, coffee, preparation, staff
+     * note, pre-fill; never a staff id or name) as `recent_coffees` (null when they cannot be read: the scan
+     * still answers), and `prepared` = migration 004 is applied AND the shipped catalogue is the approved one
+     * (the till then records the preparation; otherwise the coffee type only, v1).
+     *
      * @param mixed $token the scanned text
-     * @return array{result:string,member_id?:string,first_name?:?string,status?:string}
+     * @return array{result:string,member_id?:string,first_name?:?string,status?:string,prepared?:bool,recent_coffees?:?array}
      */
-    public function lookup(EVC_Staff_Actor $actor, $token): array {
+    public function lookup(EVC_Staff_Actor $actor, $token, bool $history = false): array {
         $open = $this->open();
         if ($open === null) {
             return array('result' => 'unavailable');
         }
-        list($db, $commerce, $secret) = $open;
+        list($db, $commerce, $secret, $schema) = $open;
         try {
             $found = EVC_Club_Qr_Services::lookup_service($db, $secret, $this->clock, $this->reporter('member_lookup'))->by_qr($actor, $token);
             switch ($found->kind()) {
@@ -150,12 +158,18 @@ final class EVC_Club_Lookup_Backend {
             if ($member === null || $member['status'] !== 'enabled') {
                 return array('result' => 'not_found');
             }
-            return array(
+            $found = array(
                 'result' => 'found',
                 'member_id' => $public_id,
                 'first_name' => ($this->first_name)($member['wp_user_id']),
                 'status' => $this->status($db, $commerce, $member),
             );
+            if ($history) {
+                $prepared = $schema >= EVC_Coffee_History::PREPARED_SCHEMA_VERSION;
+                $found['prepared'] = $prepared && EVC_Club_Prep_Catalogue_Authority::is_authorised();
+                $found['recent_coffees'] = $this->recent_coffees($db, $member['id'], $prepared);
+            }
+            return $found;
         } catch (Throwable $e) {
             $this->refuse(self::REASON_FAILED, $e);
             return array('result' => 'unavailable');
@@ -194,6 +208,23 @@ final class EVC_Club_Lookup_Backend {
         }
     }
 
+    /** @return array|null the member's own recent coffees for the till, or null (logged) when unreadable */
+    private function recent_coffees(EVC_Club_Db $db, int $member_id, bool $prepared): ?array {
+        try {
+            return EVC_Coffee_History::for_staff(EVC_Coffee_History::recent(
+                $db,
+                $member_id,
+                EVC_Coffee_History::STAFF_LIMIT,
+                $prepared,
+                EVC_Club_Prep_Catalogue_Authority::coffee_labels(),
+                EVC_Club_Prep_Catalogue_Authority::catalogue()
+            ));
+        } catch (Throwable $e) {
+            $this->refuse(self::REASON_HISTORY, $e);
+            return null;
+        }
+    }
+
     /** active | used_today | inactive, decided at this instant from the redeem route's own sources. */
     private function status(EVC_Club_Db $db, EVC_Commerce_Source_Config $commerce, array $member): string {
         $now = EVC_Clock::to_utc($this->clock->now());
@@ -222,7 +253,7 @@ final class EVC_Club_Lookup_Backend {
         }
     }
 
-    /** @return array{0:EVC_Club_Db,1:EVC_Commerce_Source_Config,2:string}|null */
+    /** @return array{0:EVC_Club_Db,1:EVC_Commerce_Source_Config,2:string,3:int}|null */
     private function open(bool $quiet = false): ?array {
         $this->last_reason = null;
         $this->quiet = $quiet;
@@ -272,7 +303,7 @@ final class EVC_Club_Lookup_Backend {
         if ($row === null || $row['v'] === null || (int) $row['v'] < self::MIN_SCHEMA_VERSION) {
             return $this->refuse(self::REASON_SCHEMA);
         }
-        return array($db, $commerce, $secret);
+        return array($db, $commerce, $secret, (int) $row['v']);
     }
 
     private function reporter(string $label): callable {

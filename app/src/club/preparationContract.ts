@@ -103,7 +103,7 @@ export function parseCatalogue(d: unknown): Catalogue {
   if (!isInt(c.catalogue_version, 1, MAX_VERSION)) fail("catalogue_version");
   if (c.status !== "illustrative" && c.status !== "approved") fail("status");
   if (c.pricing_policy !== "undecided") fail("pricing_policy");
-  if (c.free_text_note !== false) fail("free_text_note");
+  if (typeof c.free_text_note !== "boolean") fail("free_text_note");
   if (!isInt(c.max_quick_notes, 1, MAX_SELECTABLE_QUICK_NOTES)) fail("max_quick_notes");
 
   const quickNotes = new Map<string, { label: string; appliesTo: AppliesTo }>();

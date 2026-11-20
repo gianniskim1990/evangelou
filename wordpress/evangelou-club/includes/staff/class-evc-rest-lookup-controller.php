@@ -7,6 +7,11 @@ defined('ABSPATH') || exit;
  * POST /members/lookup   the shared Club staff account (EVC_Staff_Auth, capability evc_lookup_member)
  *   body {"method":"qr","qr_token":"evc_<48 hex>"}   (phone lookup is not offered: 400 invalid_request)
  *   200 {"member":{"member_id":"mem_…","first_name":"…"|null},"status":"active"|"used_today"|"inactive"}
+ *   Round 9 (owner decision D24): with "history": true in the body (newer tills only; older tills never send
+ *   it and get exactly the reply above) the reply ALSO carries
+ *     "prepared": true|false     the till may record the preparation (migration 004 + approved catalogue)
+ *     "recent_coffees": [ {"business_date","coffee_label","details":[…],"note":…|null,"prefill":{…}|null,
+ *                          "prefill_partial":bool}, … ] | null   THIS member's last 3, newest first; no staff
  *   400 invalid_qr          not a Club QR at all
  *   404 member_not_found    unknown, replaced, revoked or disabled: ONE answer, never "existed once"
  *   429 rate_limited        ~10 failed scans / 5 minutes on THIS tablet (D9); Retry-After 300
@@ -79,19 +84,25 @@ final class EVC_Rest_Lookup_Controller {
             $body = $request->get_json_params();
             $keys = is_array($body) ? array_keys($body) : array();
             sort($keys);
-            if (!is_array($body) || $keys !== array('method', 'qr_token') || $body['method'] !== 'qr' || !is_string($body['qr_token'])
-                || strlen($body['qr_token']) > 256) {
+            $history = $keys === array('history', 'method', 'qr_token');
+            if (!is_array($body) || ($keys !== array('method', 'qr_token') && !$history) || $body['method'] !== 'qr' || !is_string($body['qr_token'])
+                || strlen($body['qr_token']) > 256 || ($history && $body['history'] !== true)) {
                 return EVC_Rest_Security::error_response('invalid_request', 400);
             }
             $token = wp_get_session_token();
             $actor = new EVC_Staff_Actor(get_current_user_id(), (is_string($token) && $token !== '') ? EVC_Staff_Session::session_ref($token) : null);
-            $r = $this->backend->lookup($actor, $body['qr_token']);
+            $r = $this->backend->lookup($actor, $body['qr_token'], $history);
             switch ($r['result']) {
                 case 'found':
-                    return new WP_REST_Response(array(
+                    $reply = array(
                         'member' => array('member_id' => $r['member_id'], 'first_name' => $r['first_name']),
                         'status' => $r['status'],
-                    ), 200);
+                    );
+                    if ($history) {
+                        $reply['prepared'] = $r['prepared'] === true;
+                        $reply['recent_coffees'] = $r['recent_coffees'];
+                    }
+                    return new WP_REST_Response($reply, 200);
                 case 'invalid_qr':
                     return EVC_Rest_Security::error_response('invalid_qr', 400);
                 case 'not_found':

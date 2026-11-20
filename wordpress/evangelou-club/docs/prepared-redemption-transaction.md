@@ -1,16 +1,38 @@
 # Prepared redemption: atomic transaction model (UI-03D.A)
 
-Status: **pure PHP model, NOT wired, NOT a migration.** The plugin ships the
-definitions (`EVC_Prepared_Redemption_Service`, `EVC_Prep_Redemption_Store`,
-`EVC_Prep_Catalogue_Authority`, `EVC_Prep_Snapshot`), but nothing constructs
-them. The packager rejects any store implementation, any catalogue authority
-implementation and any `new EVC_Prepared_Redemption_Service` in shipped code. Only
-the test fakes in `tests/support/class-evc-in-memory-prepared-redemption-store.php`
-exist.
+Status (round 9, owner decision **D24**, 2026-11-20): **wired behind the existing opt-in, migration 004 written,
+NOT applied anywhere.**
 
-- No SQL is written or executed, and no migration exists. Migration 003 (the
-  payment-identity design) remains unapproved and is NOT used for this.
-- The staff flag stays off and production redemption stays HTTP 503.
+- `POST evangelou-club/v1/members/{member_id}/benefits/free_coffee/prepared-redeem` and
+  `GET evangelou-club/v1/coffee-catalogue` exist only with the staff flag and
+  `EVC_CLUB_REDEMPTION_SOURCE === 'club_db_v1'` (`EVC_Staff_Plugin::register_routes()`, packager rule set
+  `preparedProblemsFor`). The backend (`EVC_Club_Prepared_Redemption_Backend`) builds the service with the real
+  `EVC_Sql_Prep_Redemption_Store` (§4), the approved catalogue `EVC_Club_Prep_Catalogue_Authority` (D24 document,
+  version 2 / `evc-coffee-v2-2026-11-20`, digest pinned in code) and the v1 route's membership source.
+- **Migration 004** (`database/004_prepared_redemptions.sql`) implements §4: four nullable ledger columns with a
+  CHECK, and `evc_redemption_preparations` (primary key = foreign key `redemption_id`). It is additive; v1 rows keep
+  NULLs. **Schema below 4 = fail closed and graceful:** the route answers `409 prepared_unavailable` (nothing read or
+  written), the lookup reply says `prepared: false`, the till keeps the v1 flow and history shows coffee names only.
+- **The reply is always HTTP 200 with the UI-04G domain body** (`EVC_Redemption_Response::payload`): the body is the
+  contract's source of truth, and a hosting proxy cannot replace a 5xx body (which would hide `outcome_unknown` and
+  its retry id). Transport failures before the service keep the v1 `{"error":…}` envelope.
+- **v1 stays for older tablets** (decision of this round): both routes write ONE ledger with the same unique keys, so
+  one coffee per member per Athens day holds across them (tested: v1 then v2, v2 then v1, request ids of one route
+  are `idempotency_key_reused` on the other). Routing v1 through v2 was not chosen: v1 bodies carry no catalogue
+  version or preparation, and turning them into a v2 order would invent a preparation.
+- **D24 staff note** (reverses the D-NOTES free-text ban for ONE field): `preparation.note`, normalised by
+  `EVC_Prep_Note` (white space collapsed, trimmed, `<`/`>` refused, at most 80 characters, empty = none), kept OUT
+  of the canonical preparation and `prep_hash` (so D-USUAL groups by codes only), bound by the fingerprint
+  (`…\nnote=<sha256>`: the same id with another note is `idempotency_key_reused`) and by the snapshot
+  (`evc-prep-snapshot-v2` = v1 + `note`, inside `snapshot_hash`; an order without a note is still stored as v1).
+  Stored in `note_text`, never logged or audited, never returned to the customer. Retention: owner decision D9 is
+  open (go-live.md K18). The catalogue's `free_text_note` is now a boolean (the approved one says true).
+- Handoff confirmation (`docs/fulfillment-contract.md`) is still NOT wired (no handoff table): a replay of today's
+  coffee says `verify_handoff`, never `prepare`.
+- The v2 namespace / lookup proof of `docs/rest-v2-boundary.md` stays unwired; the prepared route is protected like
+  the v1 redeem route (shared staff account, `evc_redeem_benefit`, member id from the QR lookup).
+
+The original UI-03D.A description follows; where it says "not wired" or "no migration", the status above wins.
 
 ## 1. The contract
 

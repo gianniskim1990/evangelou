@@ -77,11 +77,16 @@ require_once $evc_includes . 'class-evc-redemption-service.php';
 require_once $evc_includes . 'class-evc-prep-catalogue.php';
 require_once $evc_includes . 'class-evc-prep-contract.php';
 require_once $evc_includes . 'class-evc-prep-redeem-precheck.php';
-// UI-03D.A atomic redemption + preparation transaction model: definitions only,
-// NOT wired. No store or catalogue authority implementation ships (the packager
-// rejects one); only test fakes exist.
+// UI-03D.A atomic redemption + preparation transaction model. Round 9 wires it (D24) through
+// EVC_Club_Prepared_Redemption_Backend only.
 require_once $evc_includes . 'class-evc-prep-snapshot.php';
 require_once $evc_includes . 'class-evc-prepared-redemption.php';
+// Round 9 (owner decision D24): the approved preparation catalogue (server authority), the SQL store of
+// migration 004 and the read-only coffee history. Constructed only by the staff / customer backends
+// (packager rule set preparedProblemsFor).
+require_once $evc_includes . 'class-evc-club-prep-catalogue.php';
+require_once $evc_includes . 'class-evc-sql-prep-redemption-store.php';
+require_once $evc_includes . 'class-evc-coffee-history.php';
 // UI-03D.C safe fulfillment contract: handoff confirmations are a separate
 // statement about a redemption, never a coffee. Definitions only, NOT wired.
 require_once $evc_includes . 'class-evc-handoff.php';

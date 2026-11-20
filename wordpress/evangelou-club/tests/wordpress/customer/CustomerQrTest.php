@@ -17,6 +17,8 @@ final class CustomerQrTest extends EVC_WP_Test_Case {
     const QR = '/evangelou-club-customer/v1/me/qr';
     /** Owner decision D23: the member card's own coffee figures. */
     const COFFEES = '/evangelou-club-customer/v1/me/coffees';
+    /** Owner decision D24 (round 9): the member card's own last coffees. */
+    const HISTORY = '/evangelou-club-customer/v1/me/history';
     /** Test-only derivation secret (D22); a real site keeps its own in wp-config.php. */
     const SECRET = 'evc-test-only-qr-secret-0123456789abcdef';
     const LOOKUP = 'evc-test-only-lookup-key-0123456789abcdef';
@@ -571,5 +573,97 @@ final class CustomerQrTest extends EVC_WP_Test_Case {
             $this->assertSame(array('result' => 'unavailable'), $r->get_data(), $reason);
             $this->assertSame($reason, $backend->last_reason());
         }
+    }
+
+    // ---- D24 (round 9): GET /me/history --------------------------------------------------------------------------
+
+    private function history_of(int $user): array {
+        wp_set_current_user(0);
+        $this->login_as($user);
+        $r = $this->rest('GET', self::HISTORY, null, $this->nonce());
+        $this->assertSame(200, $r->get_status(), wp_json_encode($r->get_data()));
+        $this->assertSame('no-store, private, max-age=0', $r->get_headers()['Cache-Control']);
+        return $r->get_data();
+    }
+
+    /** A prepared redemption with a staff note, written by the real v2 service + SQL store (migration 004). */
+    private function prepared_coffee(string $public_id, int $wp_user_id, string $at, string $note): void {
+        $adapter = new EVC_Mock_Membership_Adapter();
+        $adapter->set($wp_user_id, EVC_Mock_Membership_Adapter::active_until('2027-01-01T00:00:00Z'));
+        $outcome = (new EVC_Prepared_Redemption_Service(new EVC_Sql_Prep_Redemption_Store($this->db()), new EVC_Club_Prep_Catalogue_Authority(), $adapter, new EVC_Fixed_Clock($at)))
+            ->redeem($public_id, 'free_coffee', new EVC_Staff_Actor(99), array('request_id' => wp_generate_uuid4(), 'catalogue_version' => 2, 'coffee_code' => 'cappuccino', 'preparation' => array(
+                'modifiers' => array(array('group' => 'size', 'option' => 'regular'), array('group' => 'shots', 'option' => 'double'), array('group' => 'sweetness', 'option' => 'none'), array('group' => 'milk', 'option' => 'plant')),
+                'quick_notes' => array('cinnamon'),
+                'note' => $note,
+            )));
+        $this->assertSame('redeemed', $outcome->kind());
+    }
+
+    public function test_d24_the_card_history_is_the_members_own_newest_first_without_the_note_or_staff(): void {
+        $this->use_backend();
+        $a = $this->customer();
+        $b = $this->customer();
+        $ma = $this->member($a);
+        $mb = $this->member($b);
+        for ($d = 10; $d <= 15; $d++) {
+            $this->coffee($ma, sprintf('2026-11-%02d 08:00:00', $d)); // six v1 rows: espresso
+        }
+        $this->prepared_coffee($this->public_id($ma), $a, '2026-11-16T08:00:00Z', 'ιδιωτική σημείωση ταμείου');
+        $this->prepared_coffee($this->public_id($mb), $b, '2026-11-16T08:00:00Z', 'σημείωση του Β');
+
+        $history = $this->history_of($a);
+        $this->assertSame('ok', $history['result']);
+        $this->assertSame('member', $history['history']['state']);
+        $items = $history['history']['items'];
+        $this->assertCount(5, $items, 'at most 5');
+        $this->assertSame(array('business_date' => '2026-11-16', 'coffee' => 'Cappuccino', 'details' => array('Κανονικό μέγεθος', 'Διπλός', 'Σκέτος', 'Φυτικό γάλα', 'Κανέλα στον αφρό')), $items[0]);
+        $this->assertSame(array('business_date' => '2026-11-15', 'coffee' => 'Espresso', 'details' => array()), $items[1], 'a v1 row: the coffee name only');
+        $this->assertSame('2026-11-12', $items[4]['business_date']);
+        $encoded = wp_json_encode($history, JSON_UNESCAPED_UNICODE);
+        $this->assertStringNotContainsString('σημείωση', $encoded, 'never the staff note (own or another member\'s)');
+        $this->assertStringNotContainsString('99', $encoded, 'never the staff id');
+        foreach ($items as $item) {
+            $this->assertSame(array('business_date', 'coffee', 'details'), array_keys($item));
+        }
+        $this->assertCount(1, $this->history_of($b)['history']['items'], 'B sees only B\'s coffee');
+        foreach (array('POST', 'PUT', 'DELETE') as $method) {
+            $this->assertSame(404, $this->rest($method, self::HISTORY, array(), $this->nonce())->get_status(), $method . ': no write route');
+        }
+    }
+
+    public function test_d24_history_states_auth_and_schema_below_4(): void {
+        $this->use_backend();
+        $stranger = $this->customer();
+        $this->assertSame(array('result' => 'ok', 'history' => array('state' => 'not_member')), $this->history_of($stranger));
+        $disabled = $this->customer();
+        $this->member($disabled, 'disabled');
+        $this->assertSame(array('result' => 'ok', 'history' => array('state' => 'member_disabled')), $this->history_of($disabled));
+        wp_set_current_user(0);
+        $this->assertEnvelope($this->rest('GET', self::HISTORY), 401, 'unauthorized');
+        $this->login_as($this->create_staff_user());
+        $this->assertEnvelope($this->rest('GET', self::HISTORY, null, $this->nonce()), 403, 'forbidden');
+
+        // Migration 004 not applied: coffee names only; no QR secret needed either.
+        $this->club = $this->database(array('001_initial.sql', '002_payment_provenance.sql', '003_lookup_failures.sql'));
+        $this->use_backend(array_merge($this->environment(), array('qr_secret' => null)));
+        $user = $this->customer();
+        $member = $this->member($user);
+        $this->coffee($member, '2026-11-03 08:00:00');
+        $this->assertSame(array('result' => 'ok', 'history' => array('state' => 'member', 'items' => array(
+            array('business_date' => '2026-11-03', 'coffee' => 'Espresso', 'details' => array()),
+        ))), $this->history_of($user));
+
+        // A failing read: 503 {"result":"unavailable"}, logged with the reason only.
+        $this->use_backend(null, function (EVC_Db_Config $config) {
+            $pdo = new EVC_Faulty_Pdo($config->dsn(), $config->user(), $config->password(), array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
+            $pdo->fail_prepare_matching = '/FROM evc_redemptions r/';
+            return new EVC_Club_Db($pdo);
+        });
+        $this->log = array();
+        $this->login_as($user);
+        $r = $this->rest('GET', self::HISTORY, null, $this->nonce());
+        $this->assertSame(503, $r->get_status());
+        $this->assertSame(array('result' => 'unavailable'), $r->get_data());
+        $this->assertSame(array('Evangelou Club: customer QR unavailable (history_failed, EVC_Db_Exception).'), $this->log);
     }
 }

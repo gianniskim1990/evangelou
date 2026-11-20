@@ -42,7 +42,7 @@ final class MigratorTest extends EVC_Db_Test_Case {
 
     public function test_fresh_database_migrates_and_records_version_and_checksum(): void {
         $migrator = new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir());
-        $this->assertSame(array(1, 2, 3), $migrator->migrate(PHP_INT_MAX));
+        $this->assertSame(array(1, 2, 3, 4), $migrator->migrate(PHP_INT_MAX));
 
         $this->assertSame(array(
             'evc_audit_events' => 'InnoDB',
@@ -55,15 +55,21 @@ final class MigratorTest extends EVC_Db_Test_Case {
             'evc_pay_movements' => 'InnoDB',
             'evc_pay_periods' => 'InnoDB',
             'evc_qr_tokens' => 'InnoDB',
+            'evc_redemption_preparations' => 'InnoDB',
             'evc_redemptions' => 'InnoDB',
             'evc_schema_migrations' => 'InnoDB',
         ), $this->tables());
 
         $applied = $migrator->applied();
-        $this->assertSame(array(1, 2, 3), array_keys($applied));
+        $this->assertSame(array(1, 2, 3, 4), array_keys($applied));
         $this->assertSame('initial', $applied[1]['name']);
         $this->assertSame('payment_provenance', $applied[2]['name']);
         $this->assertSame('lookup_failures', $applied[3]['name']);
+        $this->assertSame('prepared_redemptions', $applied[4]['name']);
+        $this->assertSame(
+            EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/004_prepared_redemptions.sql'),
+            $applied[4]['checksum']
+        );
         $this->assertSame(
             EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/003_lookup_failures.sql'),
             $applied[3]['checksum']
@@ -96,7 +102,7 @@ final class MigratorTest extends EVC_Db_Test_Case {
         $this->assertSame(array(), $migrator->migrate(PHP_INT_MAX));
         $this->assertSame(array(), (new EVC_Migrator($this->db, EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX));
         $this->assertSame($before, $this->tables());
-        $this->assertSame(3, $this->count_rows('evc_schema_migrations'));
+        $this->assertSame(4, $this->count_rows('evc_schema_migrations'));
     }
 
     public function test_required_unique_keys_and_foreign_keys_exist(): void {
@@ -113,6 +119,8 @@ final class MigratorTest extends EVC_Db_Test_Case {
         }
         $this->assertSame('member_id,benefit_type,business_date', $by_name['uq_redemptions_one_per_day']);
         $this->assertSame('request_id', $by_name['uq_redemptions_request']);
+        // Round 9: migration 004 adds no unique key to the ledger (the preparation is never part of one).
+        $this->assertSame(array('PRIMARY', 'uq_redemptions_one_per_day', 'uq_redemptions_request'), array_keys($by_name));
 
         $fks = $this->db->fetch_all(
             "SELECT CONSTRAINT_NAME AS c FROM information_schema.REFERENTIAL_CONSTRAINTS
@@ -122,7 +130,7 @@ final class MigratorTest extends EVC_Db_Test_Case {
         sort($names, SORT_STRING);
         $this->assertSame(
             array('fk_audit_member', 'fk_audit_redemption', 'fk_pay_alias_movement', 'fk_pay_corr_head', 'fk_pay_corr_prior', 'fk_pay_head_latest',
-                'fk_pay_period_movement', 'fk_pay_period_predecessor', 'fk_qr_tokens_member', 'fk_redemptions_member'),
+                'fk_pay_period_movement', 'fk_pay_period_predecessor', 'fk_preparations_redemption', 'fk_qr_tokens_member', 'fk_redemptions_member'),
             $names
         );
     }
