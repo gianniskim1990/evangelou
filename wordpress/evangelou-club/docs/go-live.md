@@ -110,10 +110,10 @@ approval: first on **staging**, and on **production** only after the owner appro
   by step (dose incl. **triple**, sugar, sweetener, milk, size, quick notes and a **short staff note**), see the
   member's **last 3 coffees** with a «Το ίδιο με την τελευταία φορά» pre-fill (staff still review and confirm), and the
   member card shows the member's own last coffees. Needs **migration 004** (new `evc_redemption_preparations` table +
-  four nullable ledger columns; additive, v1 rows keep working and show as the coffee name only). **004 is NOT
-  approved for any database yet.** Until it is applied the till keeps the v1 flow (coffee type only), history shows
+  four nullable ledger columns; additive, v1 rows keep working and show as the coffee name only). **004 is approved
+  for the STAGING Club DB only (D25, below); production is not approved.** Until it is applied the till keeps the v1 flow (coffee type only), history shows
   coffee names only, and readiness row «Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)» reads «Έλεγχος με το
-  χέρι» (not an error). **Owner steps for staging, in this order:** (1) the owner approves 004 for staging;
+  χέρι» (not an error). **Owner steps for staging, in this order:** (1) the owner approves 004 for staging (done: D25);
   (2) backup of the staging Club DB; (3) the technician changes `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` to
   `define('EVC_CLUB_MIGRATIONS_TARGET', 4);` in the staging wp-config.php (and has `EVC_CLUB_MIGRATIONS_ENABLED` on
   for the moment); (4) Tools → «Evangelou Club — Βάση δεδομένων»: all checks green, then apply (only 004 is pending);
@@ -130,6 +130,9 @@ approval: first on **staging**, and on **production** only after the owner appro
   note; scan again: the coffee appears in «Τελευταίοι καφέδες» with the note, a second coffee is refused; the next
   Athens day «Το ίδιο» fills the order and only «Καταχώρηση καφέ» is needed; the member card's «Ιστορικό» shows the
   coffee without the note.
+- **Owner decision D25** (2026-11-20 13:09, relayed by the coordinator): migration **004 is APPROVED for the STAGING
+  Club DB only**. The owner / technician applies it (steps (2)-(6) of D24 above); the developer side applies nothing.
+  **Production still needs its own approval of 004.** K18 (retention of the staff note, D9) stays open.
 - **On a phone, the offer's «Πληρωμή 20 €» did not look like a button** (the owner only noticed the account link).
   Round 4: a full-width filled button; the account link below it is small.
 
@@ -142,7 +145,7 @@ read «Εντάξει» (or the «manual» items are confirmed).
 |---|---|---|
 | 0 | Backups of both databases (on a WP Staging clone the WordPress database is shared with live). Settings → Permalinks = «Post name» (T9). On staging: the «Disable Emails» plugin active. | Restore tested. Readiness «Μόνιμοι σύνδεσμοι»: «Εντάξει». |
 | 1 | `define('EVC_CLUB_ADMIN_TOOLS_ENABLED', true);` | The «Evangelou Club» menu appears for administrators only. Readiness shows the current state. |
-| 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);`; on **staging** also `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` (D19) | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green (this also verifies T1); apply 001 + 002 (approved for staging on 2026-10-27) and, on staging, 003 (D19, 2026-11-10). **004 (D24, round 9) is not approved anywhere yet:** at the owner's go-ahead the technician sets `EVC_CLUB_MIGRATIONS_TARGET` to 4 and applies it the same way. **Production:** 001, 002, 003 and 004 each need the owner's own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: «Βάση δεδομένων του Club» and «Έκδοση σχήματος» «Εντάξει» (a «Δεν διαβάζεται» schema row means the migrations table could not be read: go back to the migrations page checks). |
+| 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);`; on **staging** also `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` (D19) | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green (this also verifies T1); apply 001 + 002 (approved for staging on 2026-10-27) and, on staging, 003 (D19, 2026-11-10). **004 (D24, round 9) is approved for staging only (D25, 2026-11-20):** the technician sets `EVC_CLUB_MIGRATIONS_TARGET` to 4 and applies it the same way. **Production:** 001, 002, 003 and 004 each need the owner's own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: «Βάση δεδομένων του Club» and «Έκδοση σχήματος» «Εντάξει» (a «Δεν διαβάζεται» schema row means the migrations table could not be read: go back to the migrations page checks). |
 | 3 | `EVC_CLUB_MEMBERSHIP_SOURCE`, `EVC_CLUB_PMPRO_LEVEL_ID`, `EVC_CLUB_WC_PRODUCT_ID`, `EVC_CLUB_EVIDENCE_KEY`, `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` | Readiness «Κατάστημα»: all «Εντάξει» (pinned versions, product 20.00 €, sold individually, one-month level, Athens clock, BACS on), **including «Καταγραφή πληρωμών στη βάση του Club (EVC_CLUB_PAYMENT_PROVENANCE)»**: «Εντάξει» only for the exact `'club_db_v1'`; «Λάθος» or «Λείπει» means payment confirmation, the member QR and redemption stay closed. |
 | 4 | `define('EVC_CLUB_WC_COMPLETION_ENABLED', true);` | One test order by bank transfer, marked «Ολοκληρωμένη» by the shop: the member reads active ([commerce-membership-source.md](commerce-membership-source.md)). |
 | 5 | `define('EVC_CLUB_CUSTOMER_ENABLED', true);`, `EVC_CLUB_LOOKUP_KEY` (a random secret of at least 32 bytes, for the QR scan) and (D22) `EVC_CLUB_QR_SECRET` (another, **different** random secret of at least 32 bytes, for the member's QR; never change it without reason: every member's QR changes once when it does; the docs placeholder and a repeated character are refused). Generate each one separately: `php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"` or, in Windows PowerShell 5, `$b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b\|%{$_.ToString('x2')}) -join ''` | Readiness «Κλειδί σκαναρίσματος QR (EVC_CLUB_LOOKUP_KEY)» and «Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)»: «Εντάξει» (values never shown). `/club-member/` shows the test member as active; the QR appears only after 003, and is the same on a second phone. |
@@ -306,10 +309,10 @@ QR που βγήκαν πριν από το D22 αλλάζουν **μία φορ
 **τριπλός**, ζάχαρη, γλυκαντικό, γάλα, μέγεθος, γρήγορες σημειώσεις και **μια σύντομη σημείωση**), βλέπει τους
 **3 τελευταίους καφέδες** του μέλους με το κουμπί «Το ίδιο με την τελευταία φορά» (το προσωπικό ελέγχει και
 επιβεβαιώνει πάντα), και η κάρτα μέλους δείχνει τους δικούς του τελευταίους καφέδες (χωρίς τη σημείωση του
-ταμείου). Χρειάζεται τη **μετάβαση 004**, που **δεν έχει εγκριθεί** για καμία βάση. Μέχρι να εφαρμοστεί, το ταμείο
+ταμείου). Χρειάζεται τη **μετάβαση 004**, που έχει εγκριθεί **μόνο για το δοκιμαστικό αντίγραφο** (απόφαση D25). Μέχρι να εφαρμοστεί, το ταμείο
 καταχωρεί μόνο το είδος του καφέ, όπως σήμερα, και το ιστορικό δείχνει μόνο ονόματα καφέ. **Τα βήματα για το
 δοκιμαστικό αντίγραφο:**
-1. εγκρίνετε τη μετάβαση 004 για το δοκιμαστικό αντίγραφο·
+1. εγκρίνετε τη μετάβαση 004 για το δοκιμαστικό αντίγραφο (έγινε: απόφαση D25, 20/11/2026)·
 2. ο τεχνικός παίρνει αντίγραφο ασφαλείας της βάσης του Club·
 3. ο τεχνικός αλλάζει στο wp-config.php του δοκιμαστικού αντιγράφου το `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` σε
    `define('EVC_CLUB_MIGRATIONS_TARGET', 4);` (με το `EVC_CLUB_MIGRATIONS_ENABLED` ενεργό προσωρινά)·
@@ -327,7 +330,7 @@ QR που βγήκαν πριν από το D22 αλλάζουν **μία φορ
 δίνεται· την επόμενη μέρα το «Το ίδιο» συμπληρώνει την παραγγελία και αρκεί το «Καταχώρηση καφέ»· στην κάρτα, το
 «Ιστορικό» δείχνει τον καφέ χωρίς τη σημείωση.
 
-Για το κανονικό site η 004 θέλει ξεχωριστή έγκρισή σας. **Κίνδυνος για απόφαση (K18):** η σημείωση του ταμείου
+**Απόφαση D25 (20/11/2026, 13:09):** εγκρίνατε την εφαρμογή της μετάβασης 004 **μόνο στο δοκιμαστικό αντίγραφο**. Την εφαρμόζει ο τεχνικός με τα βήματα 2 έως 6 παραπάνω. Για το κανονικό site η 004 θέλει ξεχωριστή έγκρισή σας. **Κίνδυνος για απόφαση (K18):** η σημείωση του ταμείου
 είναι ελεύθερο κείμενο (έως 80 χαρακτήρες) και μένει στη βάση μαζί με τον καφέ του μέλους χωρίς όριο χρόνου· η
 απόφαση D9 (πόσο κρατάμε το ιστορικό) είναι ακόμη ανοιχτή. Προτείνουμε να ορίσετε πόσο καιρό κρατιούνται οι
 σημειώσεις και να πείτε στο προσωπικό να γράφει μόνο επιθυμίες για τον καφέ, ποτέ στοιχεία υγείας ή προσωπικά.
