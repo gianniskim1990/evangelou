@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import type { Catalogue } from "../../club/preparationContract";
 import { COUNTER_COFFEES } from "./coffeeCatalogue";
-import { NOTE_MAX, visibleOrderGroups } from "./preparedOrder";
+import { NOTE_MAX, NOTE_TOO_LONG, acceptNoteEdit, visibleOrderGroups } from "./preparedOrder";
 import { countdown, type CounterFlow, type CounterState, type ScanNotice } from "./counterFlow";
 import { cameraSupported, startQrCamera, type CameraEnv, type CameraFailure } from "./qrCamera";
 
@@ -376,25 +376,7 @@ function PreparedOrderPanel({ flow, state, catalogue }: { flow: CounterFlow; sta
           </div>
         </fieldset>
       )}
-      {catalogue.freeTextNote && (
-        <div className="mb-5">
-          <label htmlFor="evc-order-note" className="mb-2 block text-[14px] font-semibold">
-            Σημείωση (προαιρετικά)
-          </label>
-          <input
-            id="evc-order-note"
-            value={state.order.note}
-            onChange={(e) => flow.setNote(e.target.value)}
-            disabled={locked}
-            autoComplete="off"
-            aria-describedby="evc-order-note-help"
-            className="min-h-12 w-full rounded-xl border border-espresso/20 bg-white px-4 text-[15px]"
-          />
-          <p id="evc-order-note-help" className="mt-1 text-[12.5px] text-espresso/55">
-            Μόνο για την προετοιμασία, για το προσωπικό· δεν τη βλέπει ο πελάτης. {[...state.order.note].length}/{NOTE_MAX}
-          </p>
-        </div>
-      )}
+      {catalogue.freeTextNote && <NoteField note={state.order.note} locked={locked} onNote={(n) => flow.setNote(n)} />}
       <button type="button" onClick={() => void flow.redeem()} disabled={busy} aria-busy={busy} className={`${BTN_PRIMARY} min-h-14 w-full text-[16px]`} data-evc-action="record">
         {busy ? "Καταχώρηση…" : state.redeem === "retry" ? "Δοκιμή ξανά" : "Καταχώρηση καφέ"}
       </button>
@@ -462,4 +444,56 @@ export function CounterScreens({ flow, camera }: { flow: CounterFlow; camera: Ca
   if (state.screen === "scan") return <Scan flow={flow} state={state} camera={camera} />;
   if (state.screen === "member") return <Member flow={flow} state={state} />;
   return null;
+}
+
+/**
+ * STAGE-08 round 11 (C1): the free-text staff note. An edit that would pass NOTE_MAX code points (typing or a
+ * paste) is refused as a whole, the previous note stays and a short notice says why. While an IME composition is
+ * running (compositionstart … compositionend: Greek accents on some keyboards, Chinese / Japanese input) the field
+ * shows what is being composed and nothing is rewritten; the rule applies once, at compositionend.
+ */
+function NoteField({ note, locked, onNote }: { note: string; locked: boolean; onNote: (note: string) => void }) {
+  const [composing, setComposing] = useState<string | null>(null);
+  const [tooLong, setTooLong] = useState(false);
+  const commit = (next: string) => {
+    const r = acceptNoteEdit(note, next);
+    setTooLong(r.refused);
+    if (!r.refused) onNote(r.note);
+  };
+  return (
+    <div className="mb-5">
+      <label htmlFor="evc-order-note" className="mb-2 block text-[14px] font-semibold">
+        Σημείωση (προαιρετικά)
+      </label>
+      <input
+        id="evc-order-note"
+        value={composing ?? note}
+        onCompositionStart={(e) => setComposing(e.currentTarget.value)}
+        onCompositionEnd={(e) => {
+          setComposing(null);
+          commit(e.currentTarget.value);
+        }}
+        onChange={(e) => {
+          if (composing !== null || (e.nativeEvent as InputEvent).isComposing === true) {
+            setComposing(e.target.value);
+            return;
+          }
+          commit(e.target.value);
+        }}
+        disabled={locked}
+        autoComplete="off"
+        aria-describedby="evc-order-note-help"
+        aria-invalid={tooLong || undefined}
+        className="min-h-12 w-full rounded-xl border border-espresso/20 bg-white px-4 text-[15px]"
+      />
+      <p id="evc-order-note-help" className="mt-1 text-[12.5px] text-espresso/55">
+        Μόνο για την προετοιμασία, για το προσωπικό· δεν τη βλέπει ο πελάτης. {[...note].length}/{NOTE_MAX}
+      </p>
+      {tooLong && (
+        <p role="alert" className="mt-1 text-[13px] font-semibold text-maroon" data-evc-note-notice="too-long">
+          {NOTE_TOO_LONG}
+        </p>
+      )}
+    </div>
+  );
 }

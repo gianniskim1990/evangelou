@@ -1765,6 +1765,106 @@ $mutants = array(
     array('AT40-grants-read-of-another-table', 'admin_tools', 'includes/admin/class-evc-readiness.php',
         "        return EVC_Db_Grants::table_privileges(\$lines, \$database, self::PREPARATIONS_TABLE, self::PREPARATIONS_PRIVILEGES);", "        return EVC_Db_Grants::table_privileges(\$lines, \$database, 'evc_redemptions', self::PREPARATIONS_PRIVILEGES);",
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    // STAGE-08 round 11: home-screen app (D26: R11W1-W12), checkout race lock (R11W13-W22), SHOW GRANTS failure (C3: AT41-AT42).
+    array('R11W1-worker-on-plain-permalinks', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        if (!self::pretty() || $request_path !== self::scope() . self::WORKER_FILE) {', '        if ($request_path !== self::scope() . self::WORKER_FILE) {',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W2-worker-at-any-path', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        if (!self::pretty() || $request_path !== self::scope() . self::WORKER_FILE) {', '        if (!self::pretty()) {',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W3-worker-offered-with-plain-permalinks', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        return self::pretty() ? home_url(\'/\' . EVC_Customer_Shell::SLUG . \'/\' . self::WORKER_FILE) : null;', '        return home_url(\'/\' . EVC_Customer_Shell::SLUG . \'/\' . self::WORKER_FILE);',
+        array('CustomerShellTest::test_round11_the_service_worker_is_offered_only_with_pretty_permalinks_and_only_for_the_member_path')),
+    array('R11W4-manifest-scope-the-whole-site', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '            \'scope\' => self::pretty() ? self::scope() : EVC_Rest_Security::home_path(),', '            \'scope\' => EVC_Rest_Security::home_path(),',
+        array('CustomerShellTest::test_round11_the_manifest_is_public_and_points_at_the_member_page')),
+    array('R11W5-manifest-starts-elsewhere', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        $start = EVC_Customer_Shell::shell_url();', '        $start = home_url(\'/\');',
+        array('CustomerShellTest::test_round11_the_manifest_is_public_and_points_at_the_member_page')),
+    array('R11W6-pwa-without-the-flag', 'disabled', 'includes/customer/class-evc-customer-shell.php',
+        '        if (!EVC_Customer_Feature::enabled()) {
+            return EVC_Customer_Pwa::not_found();
+        }
+', '',
+        array('CustomerFeatureOffTest::test_the_customer_surface_does_not_exist')),
+    array('R11W7-no-manifest-link', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        return \'<link rel="manifest" href="\' . esc_url(self::manifest_url()) . \'">\' . "\\n"
+            . ', '        return \'\' . ',
+        array('CustomerShellTest::test_round11_the_page_links_the_manifest_and_the_ios_tags_with_both_permalink_forms')),
+    array('R11W8-worker-scope-widened', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        $headers[\'Content-Type\'] = \'text/javascript; charset=utf-8\';', '        $headers[\'Content-Type\'] = \'text/javascript; charset=utf-8\';
+        $headers[\'Service-Worker-Allowed\'] = \'/\';',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W9-worker-precaches-nothing', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        $precache = array_values(array_unique(array_merge($resolved[\'scripts\'], $resolved[\'preloads\'], $resolved[\'styles\'])));', '        $precache = array();',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W10-new-build-same-cache', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        'implode("\\n", $precache) . "\\n" . hash(\'sha256\', $script)', 'implode("\\n", $precache)',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W11-rewrite-rules-never-flushed-again', 'customer', 'includes/customer/class-evc-customer-shell.php',
+        '    const REWRITE_STATE_ON = \'on-v2\';', '    const REWRITE_STATE_ON = \'on-v1\';',
+        array('CustomerShellTest::test_round11_the_rewrite_rules_cover_the_manifest_and_the_worker')),
+    array('R11W12-manifest-icons-dropped', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '            \'icons\' => $icons,', '            \'icons\' => array(),',
+        array('CustomerShellTest::test_round11_the_manifest_is_public_and_points_at_the_member_page')),
+    array('R11W13-checkout-lock-ignored', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($submitting && $this->hold_lock($user) === false) {', '        if (false) {',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W14-orders-read-before-the-lock', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($submitting && $this->hold_lock($user) === false) {
+            $this->last_message = self::BUSY;
+            $errors->add(\'evc_club_checkout_busy\', self::BUSY);
+            return;
+        }
+        if ($this->handoff->blocks_new_order($user)) {
+            $this->last_message = self::DUPLICATE;
+            $errors->add(\'evc_club_duplicate_order\', self::DUPLICATE);
+        }', '        if ($this->handoff->blocks_new_order($user)) {
+            $this->last_message = self::DUPLICATE;
+            $errors->add(\'evc_club_duplicate_order\', self::DUPLICATE);
+        }
+        if ($submitting && $this->hold_lock($user) === false) {
+            $this->last_message = self::BUSY;
+            $errors->add(\'evc_club_checkout_busy\', self::BUSY);
+            return;
+        }',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W15-classic-checkout-not-locked', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        $this->cart_rules($errors, true);', '        $this->cart_rules($errors);',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W16-cart-reads-locked-too', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '            $this->cart_rules($errors, $this->submitting);', '            $this->cart_rules($errors, true);',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W17-store-api-submission-not-recognised', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        $this->submitting = $request instanceof WP_REST_Request && $request->get_method() === \'POST\' &&', '        $this->submitting = false &&',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W18-lock-taken-on-every-call', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($this->locked_for === $user_id) {
+            return true;
+        }
+', '',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W19-no-named-locks-refuses-the-checkout', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        return $held === true || $held === false ? $held : null;', '        return $held === true;',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W20-one-lock-for-every-account', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        'substr(hash(\'sha256\', $site), 0, 16) . \'_\' . $user_id;', 'substr(hash(\'sha256\', $site), 0, 16) . \'_0\';',
+        array('OnboardingTest::test_round11_the_checkout_lock_is_a_real_per_account_database_lock')),
+    array('R11W21-lock-never-released', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        $wpdb->get_var($wpdb->prepare(\'SELECT RELEASE_LOCK(%s)\', $name));', '        unset($name);',
+        array('OnboardingTest::test_round11_the_checkout_lock_is_a_real_per_account_database_lock')),
+    array('R11W22-submission-outlives-its-request', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        $this->paying = null;
+        $this->submitting = false;
+        return $response;', '        $this->paying = null;
+        return $response;',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('AT41-grants-read-failure-read-as-missing', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => self::PREPARATIONS_PRIVILEGES);', '            return array(\'state\' => EVC_Db_Grants::MISSING, \'missing\' => self::PREPARATIONS_PRIVILEGES);',
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT42-grants-read-failure-read-as-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => self::PREPARATIONS_PRIVILEGES);', '            return array(\'state\' => EVC_Db_Grants::OK, \'missing\' => array());',
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */

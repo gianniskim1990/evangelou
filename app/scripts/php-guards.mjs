@@ -1361,6 +1361,12 @@ export const ONBOARDING_RULES = Object.freeze({
   ],
   memberLockFiles: null,
   forbiddenDefines: ["EVC_CLUB_ONBOARDING_ENABLED"],
+  // STAGE-08 round 11 (C4 of the round-10 review): an allowlisted file outside the onboarding path may name the
+  // onboarding classes ONLY through these exact static calls (class::method followed by "("), nothing else: no other
+  // method (accept_terms, poster_url, …), no ::class, no string, no type hint.
+  pinnedCalls: {
+    "includes/customer/class-evc-customer-shell.php": ["evc_onboarding_shell::join_url"],
+  },
   registrationFile: "includes/onboarding/class-evc-onboarding-registration.php",
   handoffFile: "includes/onboarding/class-evc-onboarding-handoff.php",
   checkoutGuardFile: "includes/onboarding/class-evc-onboarding-checkout-guard.php",
@@ -1382,6 +1388,17 @@ const STAFF_ACCOUNT_SERVICE = "includes/admin/class-evc-staff-account-service.ph
 
 export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
   const problems = [];
+  const pinned = rules.pinnedCalls?.[path];
+  if (pinned) {
+    const names = [...rules.guarded, rules.pluginClass].map((n) => n.toLowerCase());
+    const tokens = tokenize(src);
+    tokens.forEach((tk, k) => {
+      if (tk.t === "str" && names.some((n) => tk.v.toLowerCase().includes(n))) problems.push(`${path}: a string names an onboarding class (only ${pinned.join(", ")}( is allowed here)`);
+      if (tk.t !== "id" || !names.includes(bare(tk.v).toLowerCase())) return;
+      const method = tokens[k + 1]?.v === "::" && tokens[k + 2]?.t === "id" ? `${bare(tk.v).toLowerCase()}::${tokens[k + 2].v.toLowerCase()}` : null;
+      if (method === null || !pinned.includes(method) || tokens[k + 3]?.v !== "(") problems.push(`${path}: names ${bare(tk.v)} other than through ${pinned.join(", ")}(`);
+    });
+  }
   for (const tk of tokenize(src)) {
     if (tk.t !== "id" && tk.t !== "str") continue;
     const v = bare(tk.v).toLowerCase();
@@ -1423,6 +1440,16 @@ function onboardingSelfTest() {
   expect("hand-off named outside the allowlist", "includes/x.php", "<?php\nfunction f(EVC_Onboarding_Handoff $h) { return $h; }", true);
   expect("round 10: the member page reads the static join URL", "includes/customer/class-evc-customer-shell.php", "<?php\nif (EVC_Onboarding_Feature::enabled()) { $c['joinUrl'] = EVC_Onboarding_Shell::join_url(); }", false);
   expect("round 10: the member page never constructs the join shell", "includes/customer/class-evc-customer-shell.php", "<?php\n$s = new EVC_Onboarding_Shell($h, $a);", true);
+  // Round 11 (C4): the member page is pinned to the one static call.
+  const SHELL = "includes/customer/class-evc-customer-shell.php";
+  expect("round 11: the member page may not accept the terms", SHELL, "<?php\nEVC_Onboarding_Handoff::accept_terms($id);", true);
+  expect("round 11: the member page may not send the poster URL", SHELL, "<?php\n$c['joinUrl'] = EVC_Onboarding_Shell::poster_url();", true);
+  expect("round 11: nor read the terms", SHELL, "<?php\n$t = EVC_Onboarding_Handoff::terms_accepted($id);", true);
+  expect("round 11: nor name the class", SHELL, "<?php\n$c = EVC_Onboarding_Shell::class;", true);
+  expect("round 11: nor take the method as a callable", SHELL, "<?php\n$f = array('EVC_Onboarding_Shell', 'join_url');", true);
+  expect("round 11: nor a type hint", SHELL, "<?php\nfunction f(EVC_Onboarding_Shell $s) { return 1; }", true);
+  expect("round 11: nor the plugin's parts", SHELL, "<?php\n$p = EVC_Onboarding_Plugin::parts();", true);
+  expect("round 11: the pinned call with a leading backslash and spaces", SHELL, "<?php\n$u = \\EVC_Onboarding_Shell :: join_url ();", false);
   expect("build() from another file", "includes/x.php", "<?php\nEVC_Onboarding_Plugin::build();", true);
   expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_ONBOARDING_ENABLED', true);", true);
   expect("a user created elsewhere", "includes/customer/x.php", "<?php\n$id = wp_insert_user(array());", true);
@@ -1442,6 +1469,75 @@ function onboardingSelfTest() {
   expect("an add-to-cart URL in the registration", O.registrationFile, "<?php\n$u = 'ADD-TO-CART';", true);
   expect("the hand-off builds it", O.handoffFile, "<?php\n$u = add_query_arg('add-to-cart', 5, $c);", false);
   expect("a comment mention is fine", "includes/x.php", "<?php\n// wp_insert_user() add-to-cart\n$x = 1;", false);
+  return bad;
+}
+
+// ---- STAGE-08 round 11 (owner decision D26 part 1): the member app's home-screen files ---------------------------
+// PHP: only EVC_Customer_Pwa (and the member page that calls it) may name it; the manifest link, the iOS tags and
+// the worker exist in that one file (so the staff app, the join pages and every other page get none of them); no
+// shipped file may send Service-Worker-Allowed (the worker's scope can never be wider than /club-member/).
+export const PWA_RULES = Object.freeze({
+  pwaFile: "includes/customer/class-evc-customer-pwa.php",
+  allowlist: ["includes/customer/class-evc-customer-pwa.php", "includes/customer/class-evc-customer-shell.php"],
+  pwaStrings: ['rel="manifest"', "manifest+json", "apple-touch-icon", "apple-mobile-web-app", "serviceworker", "sw.js", "__evc_sw__", "webmanifest"],
+});
+
+export function pwaProblemsFor(path, src, rules = PWA_RULES) {
+  const problems = [];
+  for (const tk of tokenize(src)) {
+    if (tk.t === "id" && bare(tk.v).toLowerCase() === "evc_customer_pwa" && !rules.allowlist.includes(path)) problems.push(`${path}: names EVC_Customer_Pwa (only the member page may)`);
+    if (tk.t !== "str") continue;
+    const v = tk.v.toLowerCase();
+    if (v.includes("service-worker-allowed")) problems.push(`${path}: sends Service-Worker-Allowed (the worker's scope stays /club-member/)`);
+    if (v.includes("evc_customer_pwa") && !rules.allowlist.includes(path)) problems.push(`${path}: a string names EVC_Customer_Pwa`);
+    if (path !== rules.pwaFile) {
+      for (const needle of rules.pwaStrings) if (v.includes(needle)) problems.push(`${path}: home-screen app text "${needle}" outside ${rules.pwaFile}`);
+    }
+  }
+  return problems;
+}
+
+// The BUILT worker (customer-app/pwa/sw.js, esbuild, not minified). It may store nothing but its versioned cache,
+// may never load other code, and keeps the REST network-only rule and exactly its two cache writes / answers.
+export const WORKER_FORBIDDEN = ["localStorage", "sessionStorage", "indexedDB", "document.cookie", "cookieStore", "importScripts", "eval(", "new Function", "XMLHttpRequest", "club-admin", "pushManager", "showNotification", '"push"', '"sync"', "BroadcastChannel", "postMessage"];
+export function workerProblems(text) {
+  const problems = [];
+  for (const word of WORKER_FORBIDDEN) if (text.includes(word)) problems.push(`service worker: uses ${word}`);
+  for (const word of ["rest_route", "evc-club-member-", "__EVC_SW__", "no-store"]) if (!text.includes(word)) problems.push(`service worker: ${word} missing`);
+  const count = (needle) => text.split(needle).length - 1;
+  if (count("cache.put(") !== 2) problems.push(`service worker: ${count("cache.put(")} cache writes (expected 2: install and the asset rule)`);
+  if (count(".respondWith(") !== 2) problems.push(`service worker: ${count(".respondWith(")} answers (expected 2: the member page and the asset rule)`);
+  return problems;
+}
+
+function pwaSelfTest() {
+  const bad = [];
+  const expect = (label, path, src, want) => {
+    if ((pwaProblemsFor(path, src).length > 0) !== want) bad.push(`pwa ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  const P = PWA_RULES.pwaFile;
+  const SHELL = "includes/customer/class-evc-customer-shell.php";
+  expect("the PWA file writes the manifest link", P, "<?php\n$h = '<link rel=\"manifest\" href=\"' . $u . '\">';", false);
+  expect("the member page calls the PWA class", SHELL, "<?php\n$c = EVC_Customer_Pwa::config();", false);
+  expect("the staff page names the PWA class", "includes/staff/class-evc-staff-shell.php", "<?php\n$c = EVC_Customer_Pwa::config();", true);
+  expect("the join page writes a manifest link", "includes/onboarding/class-evc-onboarding-shell.php", "<?php\n$h = '<link rel=\"manifest\" href=\"x\">';", true);
+  expect("the staff page names a worker", "includes/staff/class-evc-staff-shell.php", "<?php\n$c['serviceWorkerUrl'] = home_url('/club-admin/sw.js');", true);
+  expect("an apple tag elsewhere", "includes/x.php", "<?php\necho '<link rel=\"apple-touch-icon\" href=\"x\">';", true);
+  expect("Service-Worker-Allowed even in the PWA file", P, "<?php\n$h['Service-Worker-Allowed'] = '/';", true);
+  expect("a string naming the class elsewhere", "includes/x.php", "<?php\ncall_user_func(array('EVC_Customer_Pwa', 'config'));", true);
+  const W = "self.__EVC_SW__; const p = 'evc-club-member-'; u.searchParams.has('rest_route'); h = 'no-store'; await cache.put(a, b); await cache.put(c, d); e.respondWith(x); e.respondWith(y);";
+  const wexpect = (label, text, want) => {
+    if ((workerProblems(text).length > 0) !== want) bad.push(`worker ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  wexpect("a good worker", W, false);
+  wexpect("REST rule removed", W.replace("rest_route", "rest"), true);
+  wexpect("a third cache write", W + " await cache.put(e, f);", true);
+  wexpect("a third answer", W + " e.respondWith(z);", true);
+  wexpect("only one answer", W.replace(" e.respondWith(y);", ""), true);
+  wexpect("localStorage", W + " localStorage.x = 1;", true);
+  wexpect("importScripts", W + " importScripts('/x.js');", true);
+  wexpect("push", W + ' self.addEventListener("push", f);', true);
+  wexpect("the staff app", W + " fetch('/club-admin/');", true);
   return bad;
 }
 
@@ -1492,7 +1588,7 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), preparedSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest(), adminToolsSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), preparedSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest(), adminToolsSelfTest(), pwaSelfTest());
 }
 
 // ---- STAGE-08 rule set: the Club admin pages, only behind EVC_CLUB_ADMIN_TOOLS_ENABLED --------------------------------

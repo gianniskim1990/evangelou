@@ -8,7 +8,7 @@ import type { RedeemBenefitRequest, RedemptionOutcome } from "../../src/club/typ
 import type { StaffConfig } from "../../src/staff/config";
 import { COFFEE_CATALOGUE_VERSION, COUNTER_COFFEES } from "../../src/staff/member/coffeeCatalogue";
 import { ALREADY_MESSAGE, CATALOGUE_CHANGED_MESSAGE, CounterFlow, countdown, INTEGRITY_MESSAGE, PREPARED_OFF_MESSAGE, REPLAYED_MESSAGE, RETRY_MESSAGE } from "../../src/staff/member/counterFlow";
-import { EMPTY_ORDER, NOTE_MAX, choose, clearOptional, fromPrefill, isComplete, missingSteps, noteToSend, preparedBody, sanitizeNote, selectCoffee, setNote, summaryLine, toggleQuickNote, visibleOrderGroups } from "../../src/staff/member/preparedOrder";
+import { EMPTY_ORDER, NOTE_MAX, acceptNoteEdit, choose, clearOptional, fromPrefill, isComplete, missingSteps, noteToSend, preparedBody, sanitizeNote, selectCoffee, setNote, summaryLine, toggleQuickNote, visibleOrderGroups } from "../../src/staff/member/preparedOrder";
 import { createMemberApi, mapLookupReply, normalizeScannedCode, parseCatalogueReply, parseLookupFound, parseRecentCoffees, retryAfterOf, type LookupOutcome, type MemberApi, type PreparedRedeemResult, type RecentCoffee } from "../../src/staff/member/memberApi";
 import { parsePreparedReply } from "../../src/staff/member/preparedReply";
 import { parseCatalogue, type Catalogue } from "../../src/club/preparationContract";
@@ -955,10 +955,25 @@ describe("D24 the order model (preparedOrder.ts) over the approved catalogue", (
     assert.deepEqual(cap.quickNotes, ["lukewarm"]);
   });
 
+  it("round 11 (C1): an edit past 80 code points is refused as a whole (the previous note stays), never cut", () => {
+    const c = approved();
+    const o = setNote(c, selectCoffee(c, EMPTY_ORDER, "other_coffee"), "λίγο πάγο");
+    assert.equal(o.note, "λίγο πάγο");
+    assert.equal(setNote(c, o, "α".repeat(81)).note, "λίγο πάγο", "too long: unchanged, not the first 80");
+    assert.equal(setNote(c, o, "α".repeat(80)).note, "α".repeat(80), "exactly 80: accepted");
+    assert.deepEqual(acceptNoteEdit("πριν", "🍰".repeat(81)), { note: "πριν", refused: true });
+    assert.deepEqual(acceptNoteEdit("πριν", "🍰".repeat(80)), { note: "🍰".repeat(80), refused: false }, "code points, not UTF-16 units");
+    assert.deepEqual(acceptNoteEdit("", "<b>x</b>"), { note: "bx/b", refused: false }, "the typing filter still applies");
+    assert.deepEqual(acceptNoteEdit("", "α\u0007β"), { note: "α β", refused: false });
+    assert.deepEqual(acceptNoteEdit("x", "<".repeat(200) + "α"), { note: "α", refused: false }, "counted after the filter, like the server");
+  });
+
   it("the note: no HTML, at most 80 characters while typing; collapsed and trimmed when sent; empty = none", () => {
     const c = approved();
     assert.equal(sanitizeNote("<b>λίγο</b> γλυκό"), "bλίγο/b γλυκό");
     assert.equal([...sanitizeNote("α".repeat(120))].length, NOTE_MAX);
+    // A pre-filled note (sanitizeNote) is cut in code points like the server, never in UTF-16 units (40 emoji).
+    assert.equal(sanitizeNote("🍰".repeat(90)), "🍰".repeat(80));
     assert.equal(noteToSend("  πιο \n  ζεστό  "), "πιο ζεστό");
     assert.equal(noteToSend("   "), null);
     // Round 10 NIT-4 (mutant X2): control and format characters become spaces while typing, as EVC_Prep_Note does.
@@ -1267,19 +1282,62 @@ describe("D24 the till screens (DOM)", () => {
     for (const opt of ["regular", "triple", "none", "plant"]) await dom.click(dom.document.querySelector(`[data-evc-option="${opt}"]`)!);
     assert.ok(dom.document.querySelector('[data-evc-stage="review"]'));
     const note = dom.document.getElementById("evc-order-note") as HTMLInputElement;
+    const notice = () => dom.document.querySelector('[data-evc-note-notice="too-long"]');
     // Round 10 NIT-3: 80 Unicode code points like the server, never maxLength (UTF-16 units: it would stop at 40 emoji).
     assert.equal(note.hasAttribute("maxlength"), false, "no maxLength on the note field");
-    await type(note, "☕🍰".repeat(45));
-    assert.equal([...note.value].length, NOTE_MAX, "80 code points kept, even when each one is two UTF-16 units");
-    assert.equal(note.value, "☕🍰".repeat(40));
+    await type(note, "☕🍰".repeat(40));
+    assert.equal([...note.value].length, NOTE_MAX, "80 code points accepted, even when each one is two UTF-16 units");
     assert.match(dom.document.getElementById("evc-order-note-help")!.textContent ?? "", /80\/80$/, "the counter counts code points");
+    assert.equal(notice(), null);
+    // Round 11 (C1): one more character is refused as a whole edit: the previous note stays, nothing is cut.
+    await type(note, "☕🍰".repeat(40) + "x");
+    assert.equal(note.value, "☕🍰".repeat(40), "the previous value stays");
+    assert.equal(notice()?.textContent, "Η σημείωση χωράει έως 80 χαρακτήρες· η αλλαγή δεν έγινε.");
+    assert.equal(notice()?.getAttribute("role"), "alert");
     await type(note, "🍰".repeat(30));
     assert.match(dom.document.getElementById("evc-order-note-help")!.textContent ?? "", /30\/80$/);
+    assert.equal(notice(), null, "an accepted edit clears the notice");
     await type(note, "<i>με κανέλα</i>");
     assert.equal(note.value, "iμε κανέλα/i");
     await dom.click(dom.document.querySelector('[data-evc-extra="foam:extra"]')!);
     assert.equal(dom.document.querySelector('[data-evc-extra="foam:extra"]')!.getAttribute("aria-pressed"), "true");
     await dom.click(dom.document.querySelector('[aria-label="Αλλαγή: Δόση"]')!);
     assert.equal(dom.document.querySelector("[data-evc-stage]")!.getAttribute("data-evc-group"), "shots");
+  });
+
+  it("round 11 (C1): an IME composition is never rewritten while it runs; the rule applies at its end; a long paste is refused", async () => {
+    await mountPrepared(null);
+    await dom.click(dom.document.querySelector('[data-evc-coffee="cappuccino"]')!);
+    for (const opt of ["regular", "triple", "none", "plant"]) await dom.click(dom.document.querySelector(`[data-evc-option="${opt}"]`)!);
+    const note = dom.document.getElementById("evc-order-note") as HTMLInputElement;
+    const notice = () => dom.document.querySelector('[data-evc-note-notice="too-long"]');
+    const help = () => dom.document.getElementById("evc-order-note-help")!.textContent ?? "";
+    const compose = async (type: "compositionstart" | "compositionend") => {
+      await act(async () => {
+        note.dispatchEvent(new dom.window.CompositionEvent(type, { bubbles: true }));
+      });
+    };
+    await type(note, "λίγο");
+    await compose("compositionstart");
+    const composing = "λίγο " + "ά".repeat(90);
+    await type(note, composing);
+    assert.equal(note.value, composing, "while composing the field shows exactly what is being typed");
+    assert.equal(notice(), null, "and says nothing yet");
+    await type(note, "λίγο γάλα");
+    await compose("compositionend");
+    assert.equal(note.value, "λίγο γάλα", "committed at compositionend");
+    assert.match(help(), /9\/80$/);
+    await compose("compositionstart");
+    await type(note, "λίγο γάλα " + "ά".repeat(80));
+    await compose("compositionend");
+    assert.equal(note.value, "λίγο γάλα", "a composition that ends too long is refused as a whole");
+    assert.ok(notice(), "with the notice");
+    // A paste is one edit: too long = refused, the previous note stays (never its first 80 characters).
+    await type(note, "λίγο γάλα" + "π".repeat(120));
+    assert.equal(note.value, "λίγο γάλα");
+    assert.ok(notice());
+    await type(note, "πολύ ζεστό");
+    assert.equal(note.value, "πολύ ζεστό");
+    assert.equal(notice(), null);
   });
 });

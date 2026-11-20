@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { createElement } from "react";
 import type { CustomerConfig } from "../../src/customer/config";
-import { CustomerApp } from "../../src/customer/CustomerApp";
+import { CustomerApp, OfflineApp } from "../../src/customer/CustomerApp";
+import { parseCustomerConfig } from "../../src/customer/config";
+import { InstallHintFlow } from "../../src/customer/pwa/installHint";
+import { toLiveView } from "../../src/customer/liveView";
+import { Profile } from "../../src/preview/CustomerPreview";
+import { joinAction, liveActions } from "../../src/preview/customerView";
 import type { CustomerApi, Me, MeResult } from "../../src/customer/customerApi";
 import { createDom, type DomHarness } from "../staff/support/dom";
 
@@ -147,29 +152,242 @@ describe("STAGE-08 round 10: «Γίνετε μέλος» for a signed-in custome
     assert.doesNotMatch(text(), /Γίνετε μέλος/);
   });
 
-  it("every other state keeps its existing buttons and never offers «Γίνετε μέλος», even with the join flow on", async () => {
-    const cases: [Me, string | null][] = [
-      [me("active", "2026-11-15T10:00:00+00:00"), null],
-      [me("pending_payment"), "Ολοκλήρωση πληρωμής"],
-      [me("expired", "2026-10-16T16:30:00+00:00"), "Ανανέωση 20 €"],
-      [me("cancelled"), null],
-      [me("unverified"), null],
-    ];
-    for (const [m, existing] of cases) {
+  it("every other state never offers «Γίνετε μέλος», even with the join flow on", async () => {
+    for (const m of [me("active", "2026-11-15T10:00:00+00:00"), me("pending_payment"), me("expired", "2026-10-16T16:30:00+00:00"), me("cancelled"), me("unverified")]) {
       await dom.reset();
-      const { visited } = await mount([{ kind: "ok", me: m }], WITH_JOIN);
+      await mount([{ kind: "ok", me: m }], WITH_JOIN);
       if (app().querySelector('nav[aria-label="Μενού μέλους"]') === null) await dom.click(button("Αρχική"));
       for (const where of ["dashboard", "card"]) {
         assert.equal(joinButtons().length, 0, `${m.state} ${where}: no join button`);
         assert.doesNotMatch(text(), /Γίνετε μέλος/, `${m.state} ${where}`);
-        if (existing !== null) {
-          const b = button(existing, app());
-          assert.equal(b.disabled, true, `${m.state} ${where}: «${existing}» stays as before (no live payment path here)`);
-        }
         if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
       }
-      assert.deepEqual(visited, [], `${m.state}: nothing navigates`);
     }
+  });
+});
+
+describe("STAGE-08 round 11, owner decision D27: renewal from the member card", () => {
+  const JOIN = "https://shop.example/club/join/";
+  const WITH_JOIN: CustomerConfig = { ...CONFIG, joinUrl: JOIN };
+  const actions = (kind: string) => [...app().querySelectorAll(`[data-evc-action="${kind}"]`)] as HTMLButtonElement[];
+  const note = () => app().querySelector('[data-evc-note="payment"]');
+  const toDashboard = async () => {
+    if (app().querySelector('nav[aria-label="Μενού μέλους"]') === null) await dom.click(button("Αρχική"));
+  };
+
+  it("EXPIRED: «Ανανέωση 20 €» on the dashboard and the card opens the join flow, the same payment as joining", async () => {
+    const { visited } = await mount([{ kind: "ok", me: me("expired", "2026-10-16T16:30:00+00:00") }], WITH_JOIN);
+    await toDashboard();
+    for (const where of ["dashboard", "card"]) {
+      const renew = actions("renew");
+      assert.equal(renew.length, 1, `${where}: one renewal button`);
+      assert.equal(renew[0].textContent?.trim(), "Ανανέωση 20 €");
+      assert.equal(renew[0].disabled, false, `${where}: it works`);
+      assert.equal(renew[0].getAttribute("title"), null, `${where}: no preview tooltip`);
+      assert.match(renew[0].className, /min-h-14/, `${where}: a large target`);
+      await dom.click(renew[0]);
+      assert.equal(visited.at(-1), JOIN, `${where}: to the join flow`);
+      assert.equal(note(), null, `${where}: no extra text`);
+      if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
+    }
+    assert.deepEqual(visited, [JOIN, JOIN]);
+  });
+
+  it("EXPIRED without the join flow: no button at all, a plain line to renew at the shop", async () => {
+    await mount([{ kind: "ok", me: me("expired", "2026-10-16T16:30:00+00:00") }]);
+    await toDashboard();
+    for (const where of ["dashboard", "card"]) {
+      assert.equal(actions("renew").length, 0, where);
+      assert.equal([...app().querySelectorAll("button")].some((b) => /Ανανέωση/.test(b.textContent ?? "")), false, `${where}: no renewal button`);
+      assert.equal(note()?.textContent, "Για να ανανεώσετε τη συνδρομή σας, μιλήστε με το κατάστημα.", where);
+      if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
+    }
+  });
+
+  it("ACTIVE: no renewal before the end of the paid month, anywhere (dashboard, card, account)", async () => {
+    await mount([{ kind: "ok", me: me("active", "2026-11-15T10:00:00+00:00") }], WITH_JOIN);
+    for (const screen of ["card", "Αρχική", "Λογαριασμός"]) {
+      if (screen === "Αρχική") await dom.click(button("Αρχική"));
+      if (screen === "Λογαριασμός") await dom.click(button("Λογαριασμός", app().querySelector('nav[aria-label="Μενού μέλους"]')!));
+      assert.equal(actions("renew").length, 0, screen);
+      assert.equal([...app().querySelectorAll("button")].some((b) => /Ανανέωση/.test(b.textContent ?? "")), false, `${screen}: no renewal button`);
+    }
+  });
+
+  it("PENDING: the disabled «Ολοκλήρωση πληρωμής» is gone; plain information about the bank transfer instead", async () => {
+    const { visited } = await mount([{ kind: "ok", me: me("pending_payment") }], WITH_JOIN);
+    await toDashboard();
+    for (const where of ["dashboard", "card"]) {
+      assert.equal([...app().querySelectorAll("button")].some((b) => /Ολοκλήρωση πληρωμής|Ανανέωση/.test(b.textContent ?? "")), false, `${where}: no payment button`);
+      const n = note();
+      assert.ok(n, `${where}: the information`);
+      assert.equal(n!.getAttribute("role"), "status");
+      assert.match(n!.textContent ?? "", /περιμένει την τραπεζική μεταφορά/);
+      assert.match(n!.textContent ?? "", /στο μήνυμα επιβεβαίωσης της παραγγελίας/);
+      assert.match(n!.textContent ?? "", /μόλις το κατάστημα επιβεβαιώσει/);
+      assert.equal(n!.querySelector("a"), null, "no link: the shop's order page does not show the bank details");
+      if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
+    }
+    assert.deepEqual(visited, []);
+  });
+
+  it("CANCELLED and UNVERIFIED: no payment or renewal button and no new text (the shop decides; blocks_new_order refuses unverified)", async () => {
+    for (const m of [me("cancelled"), me("unverified")]) {
+      await dom.reset();
+      const { visited } = await mount([{ kind: "ok", me: m }], WITH_JOIN);
+      for (const where of ["dashboard", "card"]) {
+        assert.equal(actions("renew").length + actions("pay").length + actions("join").length, 0, `${m.state} ${where}`);
+        assert.equal(note(), null, `${m.state} ${where}`);
+        if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
+      }
+      assert.deepEqual(visited, []);
+    }
+  });
+
+  it("no live control carries the preview tooltip, in any state or screen", async () => {
+    const states = [me("active", "2026-11-15T10:00:00+00:00"), me("pending_payment"), me("expired", "2026-10-16T16:30:00+00:00"), me("cancelled"), me("none"), me("unverified")];
+    for (const config of [CONFIG, WITH_JOIN]) {
+      for (const m of states) {
+        await dom.reset();
+        await mount([{ kind: "ok", me: m }], config);
+        const check = (where: string) => {
+          for (const el of app().querySelectorAll("[title]")) assert.doesNotMatch(el.getAttribute("title") ?? "", /προεπισκόπηση/i, `${m.state} ${where}`);
+          assert.doesNotMatch(text(), /προεπισκόπηση/i, `${m.state} ${where}`);
+        };
+        check("first screen");
+        await toDashboard();
+        for (const label of ["Αρχική", "Σήμερα", "Ιστορικό", "Λογαριασμός"]) {
+          await dom.click(button(label, app().querySelector('nav[aria-label="Μενού μέλους"]')!));
+          check(label);
+        }
+        assert.equal([...app().querySelectorAll("button")].some((b) => b.textContent?.trim() === "Επεξεργασία στοιχείων"), false, "the preview-only edit button is not on the live app");
+      }
+    }
+  });
+});
+
+describe("STAGE-08 round 11, D27: the rules behind the buttons (pure)", () => {
+  it("liveActions: join only without a membership, renew only when expired, both only with a join URL", () => {
+    const JOIN = "https://shop.example/club/join/";
+    const visited: string[] = [];
+    const signOut = () => {};
+    for (const state of ["active", "pending", "cancelled", "unverified"] as const) {
+      assert.deepEqual(Object.keys(liveActions(state, JOIN, (u) => visited.push(u), signOut)), ["signOut"], state);
+    }
+    const none = liveActions("none", JOIN, (u) => visited.push(u), signOut);
+    assert.deepEqual(Object.keys(none).sort(), ["join", "signOut"]);
+    const expired = liveActions("expired", JOIN, (u) => visited.push(u), signOut);
+    assert.deepEqual(Object.keys(expired).sort(), ["renew", "signOut"]);
+    none.join!();
+    expired.renew!();
+    assert.deepEqual(visited, [JOIN, JOIN]);
+    for (const state of ["none", "expired"] as const) assert.deepEqual(Object.keys(liveActions(state, "", () => {}, signOut)), ["signOut"], `${state} without a join URL`);
+  });
+
+  it("joinAction: «Γίνετε μέλος» only for «none», even when a join action is given", () => {
+    const join = () => {};
+    for (const m of [me("active", "2026-11-15T10:00:00+00:00"), me("pending_payment"), me("expired", "2026-10-16T16:30:00+00:00"), me("cancelled"), me("unverified")]) {
+      assert.equal(joinAction(toLiveView(m, NOW), { join }), null, m.state);
+    }
+    assert.deepEqual(joinAction(toLiveView(me("none"), NOW), { join }), { label: "Γίνετε μέλος", run: join });
+    assert.equal(joinAction(toLiveView(me("none"), NOW), {}), null, "no join flow, no button");
+  });
+
+  it("the account screen never offers an early renewal on the live app, even if an action were given", async () => {
+    const view = { ...toLiveView(me("active", "2026-11-15T10:00:00+00:00"), NOW) };
+    await dom.render(createElement(Profile, { view, go: () => {}, actions: { renew: () => {}, signOut: () => {} } }));
+    assert.equal([...dom.document.querySelectorAll("button")].some((b) => /Ανανέωση/.test(b.textContent ?? "")), false);
+    await dom.render(createElement(Profile, { view: { ...view, live: false }, go: () => {}, actions: { renew: () => {}, signOut: () => {} } }));
+    assert.ok([...dom.document.querySelectorAll("button")].some((b) => /Ανανέωση τώρα/.test(b.textContent ?? "")), "the design preview keeps its sample");
+  });
+});
+
+describe("STAGE-08 round 11 (C2): a bad optional join URL never breaks the member app", () => {
+  it("is dropped: the app starts and «Γίνετε μέλος» is simply not shown", async () => {
+    const raw = { restBase: "https://shop.example/wp-json/evangelou-club-customer/v1", homePath: "/", nonce: "0123456789", loginUrl: "https://shop.example/wp-login.php", logoutUrl: "https://shop.example/wp-login.php?action=logout", joinUrl: "https://evil.example/club/join/", appVersion: "t" };
+    const parsed = parseCustomerConfig(JSON.stringify(raw), "https://shop.example");
+    assert.ok(parsed.ok, "the member app starts");
+    assert.equal(parsed.config.joinUrl, "");
+    const { visited } = await mount([{ kind: "ok", me: me("none") }], parsed.config);
+    assert.match(text(), /Δεν έχετε συνδρομή/);
+    assert.equal(app().querySelectorAll('[data-evc-action="join"]').length, 0);
+    await mount([{ kind: "ok", me: me("expired", "2026-10-16T16:30:00+00:00") }], parsed.config);
+    assert.equal(app().querySelectorAll('[data-evc-action="renew"]').length, 0, "no renewal link either");
+    assert.deepEqual(visited, []);
+  });
+});
+
+describe("STAGE-08 round 11 (D26): «Εγκατάσταση στο κινητό» in the member area", () => {
+  class Target {
+    readonly fns = new Map<string, ((e: Event) => void)[]>();
+    addEventListener(type: string, fn: (e: Event) => void) {
+      this.fns.set(type, [...(this.fns.get(type) ?? []), fn]);
+    }
+    emit(type: string, e: unknown) {
+      for (const fn of this.fns.get(type) ?? []) fn(e as Event);
+    }
+  }
+  const hint = () => app().querySelector("[data-evc-install]");
+
+  async function mountWithHint(result: MeResult, ios: boolean, target: Target, stored: Map<string, string>) {
+    const flag = { get: () => stored.get("x") === "1", set: () => void stored.set("x", "1") };
+    const installHint = new InstallHintFlow({ standalone: () => false, ios, flag }, target);
+    const api: CustomerApi = { me: async () => result };
+    await dom.render(createElement(CustomerApp, { config: CONFIG, api, now: () => NOW, navigate: () => {}, installHint }));
+    await act(async () => {});
+    return installHint;
+  }
+
+  it("Android: shown below the member area once the browser offers it; «Όχι τώρα» closes it for good", async () => {
+    const target = new Target();
+    const stored = new Map<string, string>();
+    await mountWithHint({ kind: "ok", me: me("active", "2026-11-15T10:00:00+00:00") }, false, target, stored);
+    assert.equal(hint(), null, "nothing before the browser's event");
+    let prompted = 0;
+    await act(async () => target.emit("beforeinstallprompt", { preventDefault() {}, prompt: async () => void prompted++, userChoice: Promise.resolve({ outcome: "accepted" }) }));
+    assert.equal(hint()?.getAttribute("data-evc-install"), "prompt");
+    assert.match(hint()!.textContent ?? "", /Εγκατάσταση στο κινητό/);
+    assert.ok(app().querySelector("article")!.compareDocumentPosition(hint()!) & 4, "after the card, never over the QR");
+    await dom.click(button("Όχι τώρα", hint()!));
+    assert.equal(hint(), null);
+    assert.equal(stored.get("x"), "1");
+    assert.equal(prompted, 0);
+  });
+
+  it("Android: «Εγκατάσταση» shows the browser's own prompt", async () => {
+    const target = new Target();
+    await mountWithHint({ kind: "ok", me: me("none") }, false, target, new Map());
+    let prompted = 0;
+    await act(async () => target.emit("beforeinstallprompt", { preventDefault() {}, prompt: async () => void prompted++, userChoice: Promise.resolve({ outcome: "accepted" }) }));
+    await dom.click(button("Εγκατάσταση", hint()!));
+    await act(async () => {});
+    assert.equal(prompted, 1);
+    assert.equal(hint(), null);
+  });
+
+  it("iPhone: the Safari steps; «Εντάξει» closes them; never on the sign-in or error pages", async () => {
+    const stored = new Map<string, string>();
+    await mountWithHint({ kind: "ok", me: me("pending_payment") }, true, new Target(), stored);
+    assert.match(hint()!.textContent ?? "", /«Κοινή χρήση» και μετά «Προσθήκη στην οθόνη Αφετηρίας»/);
+    await dom.click(button("Εντάξει", hint()!));
+    assert.equal(hint(), null);
+    for (const r of [{ kind: "signed_out" }, { kind: "error" }, { kind: "unavailable" }, { kind: "forbidden" }] as MeResult[]) {
+      await dom.reset();
+      await mountWithHint(r, true, new Target(), new Map());
+      assert.equal(hint(), null, r.kind);
+    }
+  });
+});
+
+describe("STAGE-08 round 11 (D26): the offline page", () => {
+  it("says there is no connection and offers a retry, knowing nothing about the member", async () => {
+    let reloads = 0;
+    await dom.render(createElement(OfflineApp, { reload: () => void reloads++ }));
+    const root = dom.document.querySelector('[data-evc-customer="app"]') as HTMLElement;
+    assert.equal(root.dataset.evcCustomerState, "offline");
+    assert.match(root.textContent ?? "", /Δεν υπάρχει σύνδεση/);
+    await dom.click(button("Δοκιμάστε ξανά", root));
+    assert.equal(reloads, 1);
   });
 });
 

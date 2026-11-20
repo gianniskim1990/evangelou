@@ -178,19 +178,27 @@ final class EVC_Db_Grants {
 
     /**
      * Whether a grant on db.table covers $table in $database: true / false, or null when it cannot be told
-     * (a db pattern that matches only when letter case is ignored).
+     * (a name that matches only when letter case is ignored).
+     *
+     * Round 11 (C3 of the round-10 review): only a DATABASE-level grant (db.*) reads its database name as a pattern
+     * (unescaped % and _ are wildcards, \_ and \% are the plain characters). In a TABLE-level grant (db.table) the
+     * server stores and compares the database name literally: no wildcard, and a backslash is part of the name
+     * (checked on MariaDB 10.11: GRANT … ON `a\_b`.`t` needs a database really named «a\_b», and
+     * GRANT … ON `a_b`.`t` does not cover a database «aXb»). Table names are always literal.
      */
     private static function scope_applies(string $db, string $tbl, string $database, string $table): ?bool {
         if ($db === '*') {
             return $tbl === '*';
         }
         $db_name = self::unquote($db);
-        $db_match = self::db_matches($db_name, $database);
-        if ($db_match === false) {
+        if ($tbl === '*') {
+            if (self::db_matches($db_name, $database)) {
+                return true;
+            }
             return self::db_matches(strtolower($db_name), strtolower($database)) ? null : false;
         }
-        if ($tbl === '*') {
-            return true;
+        if ($db_name !== $database) {
+            return strtolower($db_name) === strtolower($database) ? null : false;
         }
         $table_name = self::unquote($tbl);
         if ($table_name === $table) {
@@ -199,11 +207,12 @@ final class EVC_Db_Grants {
         return strtolower($table_name) === strtolower($table) ? null : false;
     }
 
-    /** A grant's database name, where an unescaped % or _ is a wildcard (as MySQL reads db-level grants). */
+    /**
+     * A database-level grant's database name, where an unescaped % or _ is a wildcard and a backslash makes the next
+     * character plain (as MySQL / MariaDB read db-level grants). Round 11: no "equal strings" shortcut: a database
+     * really named «a\_b» is NOT covered by the pattern a\_b (that pattern means «a_b»).
+     */
     private static function db_matches(string $pattern, string $database): bool {
-        if ($pattern === $database) {
-            return true;
-        }
         $regex = '';
         $length = strlen($pattern);
         for ($i = 0; $i < $length; $i++) {

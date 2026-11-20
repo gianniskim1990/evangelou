@@ -101,6 +101,20 @@ export function sanitizeNote(raw: string): string {
   return [...cleaned].slice(0, NOTE_MAX).join("");
 }
 
+/** Round 11 (C1): the Greek notice when an edit of the note is refused for its length. */
+export const NOTE_TOO_LONG = `Η σημείωση χωράει έως ${NOTE_MAX} χαρακτήρες· η αλλαγή δεν έγινε.`;
+
+/**
+ * STAGE-08 round 11 (C1, round-10 review): an edit (typing, paste, the end of an IME composition) that would make
+ * the note longer than NOTE_MAX code points is REFUSED as a whole: the previous note stays, nothing is cut off its
+ * end. Otherwise the typing filter applies (no `<` / `>`, control and format characters become spaces).
+ */
+export function acceptNoteEdit(previous: string, next: string): { note: string; refused: boolean } {
+  const cleaned = next.replace(/[<>]/g, "").replace(/[\p{Cc}\p{Cf}]/gu, " ");
+  if ([...cleaned].length > NOTE_MAX) return { note: previous, refused: true };
+  return { note: cleaned, refused: false };
+}
+
 /** What is sent: white space collapsed and trimmed (as EVC_Prep_Note does); empty = no note. */
 export function noteToSend(note: string): string | null {
   const text = sanitizeNote(note).replace(/[\s\p{Z}]+/gu, " ").trim();
@@ -138,7 +152,8 @@ export function toggleQuickNote(catalogue: Catalogue, order: PreparedOrder, id: 
 
 export function setNote(catalogue: Catalogue, order: PreparedOrder, note: string): PreparedOrder {
   if (!catalogue.freeTextNote) return order;
-  return { ...order, note: sanitizeNote(note) };
+  // Round 11 (C1): too long = refused (the order keeps its note), never cut.
+  return { ...order, note: acceptNoteEdit(order.note, note).note };
 }
 
 /** «Το ίδιο με την τελευταία φορά»: only what the current catalogue offers is taken over. */

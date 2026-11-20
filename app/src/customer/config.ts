@@ -10,6 +10,7 @@
  */
 
 import { restRouteUrl, sameOriginRestBase } from "../lib/restRoute";
+import { parseServiceWorker, type ServiceWorkerSetting } from "./pwa/register";
 
 export const CONFIG_ELEMENT_ID = "evc-customer-config";
 export const CUSTOMER_NAMESPACE = "/evangelou-club-customer/v1";
@@ -29,6 +30,11 @@ export interface CustomerConfig {
    * membership joins and pays. Sent by the server only while that flow is on (EVC_CLUB_ONBOARDING_ENABLED); "" = none.
    */
   joinUrl?: string;
+  /**
+   * STAGE-08 round 11 (D26): the member app's service worker, sent only with pretty permalinks; null = none.
+   * Optional like joinUrl: a bad value is dropped, never a reason to refuse the page.
+   */
+  serviceWorker?: ServiceWorkerSetting | null;
   appVersion: string;
 }
 
@@ -69,11 +75,11 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
   const logoutUrl = sameOriginUrl(d.logoutUrl, origin);
   if (!logoutUrl) return { ok: false, reason: "logout_url" };
   // Round 10: optional; when sent it must be this site with no credentials and no fragment, like the other URLs.
+  // Round 11 (C2): a bad join URL is DROPPED (no «Γίνετε μέλος» / «Ανανέωση» button), it never stops the member app.
   let joinUrl = "";
   if (d.joinUrl !== undefined) {
     const url = sameOriginUrl(d.joinUrl, origin);
-    if (!url || url.username !== "" || url.password !== "" || url.hash !== "") return { ok: false, reason: "join_url" };
-    joinUrl = url.href;
+    joinUrl = url && url.username === "" && url.password === "" && url.hash === "" ? url.href : "";
   }
   return {
     ok: true,
@@ -83,6 +89,7 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
       loginUrl: loginUrl.href,
       logoutUrl: logoutUrl.href,
       joinUrl,
+      serviceWorker: parseServiceWorker(d.serviceWorkerUrl, d.serviceWorkerScope, origin),
       appVersion: typeof d.appVersion === "string" ? d.appVersion : "",
     },
   };

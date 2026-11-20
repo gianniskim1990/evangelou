@@ -60,7 +60,7 @@ describe("STAGE-01 customer bootstrap config", () => {
     assert.equal(parseCustomerConfig("{", ORIGIN).ok, false);
   });
 
-  it("round 10: the join URL is optional, and when sent it is this site only, like the other URLs", () => {
+  it("round 10: the join URL is optional, and only this site's is kept (round 11: a bad one is dropped)", () => {
     const parsed = (over: Record<string, unknown>) => parseCustomerConfig(cfg(over), ORIGIN);
     const none = parsed({});
     assert.ok(none.ok);
@@ -80,10 +80,11 @@ describe("STAGE-01 customer bootstrap config", () => {
       ["not a string", 7],
       ["null", null],
     ];
+    // Round 11 (C2): a bad optional join URL is DROPPED (no join / renewal button); it never stops the member app.
     for (const [label, joinUrl] of bad) {
       const r = parsed({ joinUrl });
-      assert.equal(r.ok, false, label);
-      assert.equal(r.ok ? "" : r.reason, "join_url", label);
+      assert.ok(r.ok, label);
+      assert.equal(r.config.joinUrl, "", label);
     }
   });
 });

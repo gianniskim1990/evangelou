@@ -14,7 +14,7 @@ import { execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, PREPARED_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, preparedProblemsFor, problemsFor, qrProblemsFor, redemptionProblemsFor, selfTest } from "./php-guards.mjs";
+import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, PREPARED_RULES, PWA_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, preparedProblemsFor, problemsFor, pwaProblemsFor, qrProblemsFor, redemptionProblemsFor, selfTest, workerProblems } from "./php-guards.mjs";
 import { storageProblems, storageSelfTest } from "./storage-guard.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,6 +29,8 @@ const FORBIDDEN_BUNDLE_STRINGS = [
   "mockClubService", "createMockClubService", "TEST Espresso", "x-admin-password", "/api/orders", "/api/overrides",
   // UI-01 design preview must never reach the real staff bundle.
   "evc-club-design-preview", "ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ", "ΠΡΟΕΠΙΣΚΟΠΗΣΗ ΣΧΕΔΙΑΣΜΟΥ", "example.invalid",
+  // STAGE-08 round 11 (D26): the member app's home-screen pieces never reach the staff app.
+  "serviceWorker", "beforeinstallprompt", "webmanifest", "Εγκατάσταση στο κινητό",
 ];
 // STAGE-01 customer app: the approved screens with the non-redeemable sample QR stamp are expected,
 // but never the synthetic roster, the local journey simulation, the staff app or a mock service.
@@ -93,6 +95,30 @@ cpSync(customerManifestPath, join(out, "customer-app", "manifest.json"));
 writeFileSync(join(out, "customer-app", "index.php"), SILENCE);
 writeFileSync(join(out, "customer-app", "assets", "index.php"), SILENCE);
 
+// STAGE-08 round 11 (owner decision D26 part 1): the member app's service worker and home-screen icons in
+// customer-app/pwa/. The worker is one classic script built from src/customer/pwa/sw.ts (not minified, so it can be
+// read and checked below); EVC_Customer_Pwa serves it at /club-member/sw.js with its configuration in front. The
+// icons are the committed PNG files made by scripts/generate-pwa-icons.mjs from the bundled logo.
+const PWA_ICONS = { "icon-192.png": 192, "icon-512.png": 512, "icon-maskable-512.png": 512, "apple-touch-icon.png": 180 };
+{
+  mkdirSync(join(out, "customer-app", "pwa"), { recursive: true });
+  const { build: esbuildWorker } = await import("esbuild");
+  await esbuildWorker({
+    entryPoints: [join(appDir, "src", "customer", "pwa", "sw.ts")],
+    absWorkingDir: appDir,
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    target: "es2020",
+    minify: false,
+    legalComments: "none",
+    outfile: join(out, "customer-app", "pwa", "sw.js"),
+    logLevel: "warning",
+  });
+  for (const icon of Object.keys(PWA_ICONS)) cpSync(join(appDir, "src", "customer", "pwa", "icons", icon), join(out, "customer-app", "pwa", icon));
+  writeFileSync(join(out, "customer-app", "pwa", "index.php"), SILENCE);
+}
+
 let commit = "unknown";
 try {
   commit = execSync("git rev-parse HEAD", { cwd: appDir }).toString().trim();
@@ -127,8 +153,20 @@ for (const f of files) {
   }
   if (f.endsWith(".map")) fail(`source map shipped: ${f}`);
 }
+// Round 11: the worker has its own rules (it is not part of the app bundle and may use the cache).
+const WORKER_FILE = "customer-app/pwa/sw.js";
 {
-  const customerJs = files.filter((x) => x.startsWith("customer-app/") && x.endsWith(".js"));
+  if (!files.includes(WORKER_FILE)) fail("the member app's service worker is missing from the package");
+  const problems = workerProblems(readFileSync(join(out, WORKER_FILE), "utf8"));
+  if (problems.length > 0) fail(problems.join("; "));
+  for (const [icon, size] of Object.entries(PWA_ICONS)) {
+    const png = readFileSync(join(out, "customer-app", "pwa", icon));
+    const isPng = png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    if (!isPng || png.readUInt32BE(16) !== size || png.readUInt32BE(20) !== size) fail(`home-screen icon ${icon} is not a ${size} x ${size} PNG`);
+  }
+}
+{
+  const customerJs = files.filter((x) => x.startsWith("customer-app/") && x.endsWith(".js") && x !== WORKER_FILE);
   const texts = customerJs.map((f) => readFileSync(join(out, f), "utf8"));
   for (const word of ["localStorage", "Storage"]) {
     const count = texts.reduce((n, t) => n + t.split(word).length - 1, 0);
@@ -136,7 +174,7 @@ for (const f of files) {
   }
   if (texts.some((t) => NAVIGATOR_DESTRUCTURING.test(t))) fail("the built customer JS destructures storage out of navigator");
 }
-for (const f of files.filter((x) => /\.(js|css)$/.test(x))) {
+for (const f of files.filter((x) => /\.(js|css)$/.test(x) && x !== WORKER_FILE)) {
   const text = readFileSync(join(out, f), "utf8");
   const customer = f.startsWith("customer-app/");
   if (!customer && !f.startsWith("staff-app/")) fail(`unexpected bundle file ${f}`);
@@ -220,6 +258,7 @@ const sawFluentcrm = new Set();
 const sawOnboarding = new Set();
 const sawAdminTools = new Set();
 const sawPrepared = new Set();
+let sawPwa = false;
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
   const path = f.replace(/\\/g, "/");
@@ -265,6 +304,11 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   for (const problem of preparedProblemsFor(path, text)) {
     fail(problem);
   }
+  // Round 11 (D26): the manifest, the iOS tags and the worker only in EVC_Customer_Pwa; never Service-Worker-Allowed.
+  if (path === PWA_RULES.pwaFile) sawPwa = true;
+  for (const problem of pwaProblemsFor(path, text)) {
+    fail(problem);
+  }
   // STAGE-05C: the QR pieces only at their one construction site, behind the customer / staff opt-ins.
   if (Object.values(QR_RULES).includes(path)) sawQr.add(path);
   for (const problem of qrProblemsFor(path, text)) {
@@ -272,6 +316,7 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   }
 }
 if (sawQr.size !== Object.values(QR_RULES).length) fail("a STAGE-05C QR file is missing from the package");
+if (!sawPwa) fail("the round-11 home-screen app file (EVC_Customer_Pwa) is missing from the package");
 if (sawPrepared.size !== new Set(Object.values(PREPARED_RULES)).size) fail("a round-9 prepared-redemption file is missing from the package");
 if (sawFluentcrm.size !== 2) fail("a STAGE-06 FluentCRM file (plugin or gateway) is missing from the package");
 if (sawOnboarding.size !== ONBOARDING_RULES.guardedFiles.length) fail("a STAGE-07 onboarding file is missing from the package");

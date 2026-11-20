@@ -121,6 +121,14 @@ final class StaffShellTest extends EVC_WP_Test_Case {
             $this->assertArrayNotHasKey($secretish, $config);
         }
         $this->assertStringNotContainsString('_wpnonce', $r['body'], 'no nonce in any URL');
+        // STAGE-08 round 11 (D26): the member page's home-screen app never reaches the staff app, with either permalink form.
+        foreach (array('', '/%postname%/') as $structure) {
+            update_option('permalink_structure', $structure);
+            $body = $this->shell()['body'];
+            foreach (array('rel="manifest"', 'apple-touch-icon', 'apple-mobile-web-app', 'serviceWorker', 'sw.js', 'manifest.webmanifest', 'theme-color') as $needle) {
+                $this->assertStringNotContainsString($needle, $body, $needle);
+            }
+        }
     }
 
     public function test_page_load_counts_as_staff_activity(): void {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { MemberPassView } from "../preview/CustomerSignature";
 import { Dashboard, History, MemberChrome, Profile, Today } from "../preview/CustomerPreview";
-import type { CustomerActions } from "../preview/customerView";
+import { liveActions, type CustomerActions } from "../preview/customerView";
 import { Btn, Logo } from "../preview/ds";
 import type { CustomerScreen } from "../preview/screens";
 import type { CustomerConfig } from "./config";
@@ -13,6 +13,8 @@ import type { MemberCoffeesFlow } from "./memberCoffees";
 import type { MemberHistoryFlow } from "./memberHistory";
 import type { MemberQrFlow, MemberQrState } from "./memberQr";
 import { MemberQrPanel } from "./MemberQrPanel";
+import { InstallHint } from "./InstallHint";
+import type { InstallHintFlow } from "./pwa/installHint";
 
 /*
  * STAGE-01 REAL customer app (served by WordPress at /club-member/, flag-gated).
@@ -78,6 +80,7 @@ export function CustomerApp({
   coffeesFlow,
   historyFlow,
   timers = REAL_TIMERS,
+  installHint,
 }: {
   config: CustomerConfig;
   api: CustomerApi;
@@ -91,6 +94,8 @@ export function CustomerApp({
   historyFlow?: MemberHistoryFlow;
   /** LOW-2: the Athens-midnight re-render timer. */
   timers?: MidnightTimers;
+  /** Round 11 (D26): «Εγκατάσταση στο κινητό», shown below the member area only. */
+  installHint?: InstallHintFlow;
 }) {
   const [result, setResult] = useState<MeResult | null>(null);
   const qrState = useSyncExternalStore(qrFlow?.subscribe ?? noSubscribe, qrFlow?.getState ?? (() => NO_QR));
@@ -235,9 +240,9 @@ export function CustomerApp({
       navigated.current = true;
       setScreen((MEMBER_SCREENS as readonly string[]).includes(s) ? (s as MemberScreen) : "dashboard");
     };
-    // Round 10: «Γίνετε μέλος» for a customer without a membership, only when the server sent the join URL.
-    const joinUrl = config.joinUrl ?? "";
-    const actions: CustomerActions = joinUrl !== "" ? { signOut, join: () => navigate(joinUrl) } : { signOut };
+    // Round 10: «Γίνετε μέλος» for a customer without a membership; round 11 (D27): «Ανανέωση 20 €» for an expired
+    // membership. Both only when the server sent the join URL (customerView.ts liveActions).
+    const actions: CustomerActions = liveActions(view.state, config.joinUrl ?? "", navigate, signOut);
     body =
       current === "card" ? (
         <MemberPassView
@@ -261,6 +266,22 @@ export function CustomerApp({
   return (
     <div ref={root} className="evc-ds" data-evc-customer="app" data-evc-customer-state={result?.kind === "ok" ? result.me.state : (result?.kind ?? "loading")}>
       {body}
+      {result?.kind === "ok" && installHint && <InstallHint flow={installHint} />}
+    </div>
+  );
+}
+
+/**
+ * Round 11 (D26): the page the service worker builds when the member page cannot be fetched (pwa/swRules.ts
+ * offlineShell). It knows nothing about the member (no nonce, no account), so it shows no card: only that there
+ * is no connection, and a retry.
+ */
+export function OfflineApp({ reload }: { reload: () => void }) {
+  return (
+    <div className="evc-ds" data-evc-customer="app" data-evc-customer-state="offline">
+      <StatusPage title="Δεν υπάρχει σύνδεση" lede="Η κάρτα σας εμφανίζεται μόλις το κινητό συνδεθεί ξανά στο διαδίκτυο.">
+        <Btn onClick={reload} className="px-8">Δοκιμάστε ξανά</Btn>
+      </StatusPage>
     </div>
   );
 }

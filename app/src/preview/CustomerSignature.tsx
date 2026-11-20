@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { CLUB_RULES, COFFEES, greekDate, type PreviewMembershipState } from "./previewData";
 import type { CustomerScreen } from "./screens";
-import { joinAction, paymentAction, sampleCustomerView, type CustomerActions, type CustomerMembershipState, type CustomerView } from "./customerView";
+import { PREVIEW_ONLY, joinAction, paymentAction, paymentNote, sampleCustomerView, type CustomerActions, type CustomerMembershipState, type CustomerView } from "./customerView";
 import { Btn, Glyph, Logo, PassQr, PreviewNote, WingLines } from "./ds";
 
 /* UI-01.R1 signature screens, Customer Club: welcome and membership pass. */
@@ -127,6 +127,7 @@ export function MemberPassView({
   const line = todayLine(state, view.coffeeUsedToday, view.clubData === "unavailable");
   const pay = paymentAction(view, actions);
   const join = joinAction(view, actions);
+  const note = paymentNote(view, actions);
 
   return (
     <div className="on-dark min-h-[calc(100svh-52px)] bg-[var(--roast)] text-[var(--milk)]">
@@ -191,9 +192,14 @@ export function MemberPassView({
             </Btn>
           )}
           {pay && (
-            <Btn tone="brass" disabled={!pay.run} title={pay.run ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={pay.run} className="mt-8">
+            <Btn tone="brass" disabled={!pay.run} title={pay.run || view.live ? undefined : PREVIEW_ONLY} onClick={pay.run} className={pay.run ? "mt-8 w-full min-h-14 px-8 text-[17px] sm:w-auto" : "mt-8"} data-evc-action={pay.run ? pay.kind : undefined}>
               {pay.label}
             </Btn>
+          )}
+          {note && (
+            <p role="status" className="t-body mt-8 max-w-[44ch] border-t border-[var(--brass-soft)] pt-5 text-[var(--milk)]/85" data-evc-note="payment">
+              {note}
+            </p>
           )}
           <PreviewNote dark className="mt-10">{qrNote ?? (view.live ? "Ο κωδικός QR δεν είναι ακόμη ενεργός: δεν σαρώνεται και δεν εξαργυρώνεται." : "Ο κωδικός είναι δείγμα: δεν αντιστοιχεί σε μέλος, δεν σαρώνεται και δεν εξαργυρώνεται.")}</PreviewNote>
         </section>

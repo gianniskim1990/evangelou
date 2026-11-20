@@ -1,4 +1,6 @@
 <?php
+// Round 11 (C3): a connection whose SHOW GRANTS fails.
+require_once dirname(__DIR__, 2) . '/support/class-evc-faulty-pdo.php';
 /**
  * STAGE-08: the read-only «Ετοιμότητα» checks (no commerce plugins in this suite; see ReadinessCommerceTest for the
  * real shop). Each status, no side effects, no secrets.
@@ -172,6 +174,17 @@ final class ReadinessTest extends EVC_WP_Test_Case {
                 $admin->exec(sprintf("DROP USER IF EXISTS '%s'@'%s'", $user, $host));
             }
         }
+        // Round 11 (C3): SHOW GRANTS itself fails (a host that refuses it, a lost connection): cannot tell, never ok
+        // and never «missing».
+        $faulty = $club->faulty_pdo();
+        $faulty->fail_prepare_matching = '/^\s*SHOW\s+GRANTS/i';
+        $row = self::by_key($this->readiness(array('db_config' => function () use ($club) {
+            return $club->config();
+        }, 'connect' => function () use ($faulty) {
+            return new EVC_Club_Db($faulty);
+        })))['prepared_redemption'];
+        $this->assertSame('manual', $row['status'], 'SHOW GRANTS threw');
+        $this->assertStringContainsString('δεν μπορεί να επιβεβαιωθεί', $row['detail']);
         // The pure decision: not checked or cannot tell = a check by hand (Greek), never ok; missing = wrong.
         $label = 'Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)';
         foreach (array(null, array('state' => EVC_Db_Grants::UNKNOWN, 'missing' => array('INSERT')), array('state' => 'other', 'missing' => array())) as $grants) {

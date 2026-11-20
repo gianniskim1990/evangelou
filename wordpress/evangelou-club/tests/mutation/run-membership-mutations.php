@@ -33,7 +33,7 @@
  * And STAGE-05B (MS6: the member-sync construction guard).
  * And STAGE-06 (FT1-FT40: FluentCRM membership tags).
  * And STAGE-07 (OR1-OR10: in-store onboarding rules).
- * And STAGE-08 round 10 (DG1-DG10: the SHOW GRANTS reader of the migration-004 readiness row).
+ * And STAGE-08 round 10 (DG1-DG10: the SHOW GRANTS reader of the migration-004 readiness row); round 11 DG11-DG13.
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -3005,6 +3005,25 @@ $mutants = array(
         'file' => 'includes/class-evc-db-grants.php',
         'search' => "        if (\$lines === array() || \$database === '') {",
         'replace' => "        if (\$lines === array()) {",
+    ),
+    // STAGE-08 round 11 (C3 of the round-10 review): escaped underscores and literal database names.
+    array(
+        'id' => 'DG11-table-level-database-read-as-a-pattern',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "        if (\$db_name !== \$database) {",
+        'replace' => "        if (!self::db_matches(\$db_name, \$database)) {",
+    ),
+    array(
+        'id' => 'DG12-equal-names-shortcut',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "    private static function db_matches(string \$pattern, string \$database): bool {\n",
+        'replace' => "    private static function db_matches(string \$pattern, string \$database): bool {\n        if (\$pattern === \$database) {\n            return true;\n        }\n",
+    ),
+    array(
+        'id' => 'DG13-escaped-underscore-read-as-a-wildcard',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                \$regex .= preg_quote(\$pattern[++\$i], '/');",
+        'replace' => "                \$regex .= \$pattern[++\$i] === '_' ? '.' : preg_quote(\$pattern[\$i], '/');",
     ),
 );
 

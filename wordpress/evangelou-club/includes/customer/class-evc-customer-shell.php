@@ -17,7 +17,12 @@ defined('ABSPATH') || exit;
  *   staff / privileged account .... 403, no bootstrap
  *   assets missing or inconsistent  503, no bootstrap
  *   customer ...................... 200 page + bootstrap JSON (REST base + wp_rest nonce; the join URL only while
- *                                   EVC_CLUB_ONBOARDING_ENABLED is on, STAGE-08 round 10)
+ *                                   EVC_CLUB_ONBOARDING_ENABLED is on, STAGE-08 round 10; the service worker's URL
+ *                                   and scope only with pretty permalinks, round 11)
+ *
+ * STAGE-08 round 11 (owner decision D26 part 1, EVC_Customer_Pwa): the same query variable also serves the web app
+ * manifest (=manifest; pretty /club-member/manifest.webmanifest) and the service worker (=sw; ONLY at the pretty
+ * /club-member/sw.js). Both are public (no personal data, no nonce) and exist only while the flag is on.
  * Every response is private/no-store with no-referrer, nosniff, DENY framing
  * and a strict self-only CSP.
  */
@@ -25,7 +30,8 @@ final class EVC_Customer_Shell {
     const QUERY_VAR = 'evc_club_member';
     const SLUG = 'club-member';
     const REWRITE_STATE_OPTION = 'evc_club_member_rewrite_state';
-    const REWRITE_STATE_ON = 'on-v1';
+    // Round 11: v2 adds the manifest and service worker rules (one flush when an existing site updates).
+    const REWRITE_STATE_ON = 'on-v2';
     const REWRITE_STATE_OFF = 'off';
     const CONFIG_ELEMENT_ID = 'evc-customer-config';
     const ASSET_ENTRY = 'customer.html';
@@ -57,6 +63,9 @@ final class EVC_Customer_Shell {
         $state = self::desired_rewrite_state();
         if ($state === self::REWRITE_STATE_ON) {
             add_rewrite_rule('^' . self::SLUG . '/?$', 'index.php?' . self::QUERY_VAR . '=1', 'top');
+            foreach (EVC_Customer_Pwa::REWRITES as $regex => $page) {
+                add_rewrite_rule('^' . self::SLUG . $regex, 'index.php?' . self::QUERY_VAR . '=' . $page, 'top');
+            }
         }
         $current = get_option(self::REWRITE_STATE_OPTION, null);
         if ($current === $state) {
@@ -74,12 +83,34 @@ final class EVC_Customer_Shell {
     }
 
     public static function serve(): void {
-        if ((string) get_query_var(self::QUERY_VAR) !== '1') {
+        $page = (string) get_query_var(self::QUERY_VAR);
+        if ($page === '1') {
+            $response = self::respond(wp_get_current_user(), self::production_assets());
+        } elseif ($page === EVC_Customer_Pwa::MANIFEST || $page === EVC_Customer_Pwa::WORKER) {
+            $path = wp_parse_url(isset($_SERVER['REQUEST_URI']) ? (string) wp_unslash($_SERVER['REQUEST_URI']) : '', PHP_URL_PATH);
+            $response = self::respond_pwa($page, is_string($path) ? $path : '', self::production_assets(), plugins_url('customer-app', EVC_CLUB_FILE), EVC_CLUB_PATH . 'customer-app/pwa/' . EVC_Customer_Pwa::WORKER_FILE);
+        } else {
             return;
         }
-        $response = self::respond(wp_get_current_user(), self::production_assets());
         self::emit($response);
         exit;
+    }
+
+    /**
+     * Round 11: the manifest and the service worker (EVC_Customer_Pwa); 404 while the flag is off.
+     * @return array{status:int,headers:array<string,string>,body:string,location:?string}
+     */
+    public static function respond_pwa(string $page, string $request_path, EVC_Staff_Assets $assets, string $asset_url, string $worker_file): array {
+        if (!EVC_Customer_Feature::enabled()) {
+            return EVC_Customer_Pwa::not_found();
+        }
+        if ($page === EVC_Customer_Pwa::MANIFEST) {
+            return EVC_Customer_Pwa::manifest_response(EVC_Customer_Pwa::icon_base());
+        }
+        if ($page === EVC_Customer_Pwa::WORKER) {
+            return EVC_Customer_Pwa::worker_response($request_path, $assets, $asset_url, $worker_file);
+        }
+        return EVC_Customer_Pwa::not_found();
     }
 
     public static function production_assets(): EVC_Staff_Assets {
@@ -125,11 +156,13 @@ final class EVC_Customer_Shell {
         if (EVC_Onboarding_Feature::enabled()) {
             $config['joinUrl'] = EVC_Onboarding_Shell::join_url();
         }
+        // Round 11 (D26): the home-screen app's service worker, only with pretty permalinks (EVC_Customer_Pwa).
+        $config = array_merge($config, EVC_Customer_Pwa::config());
         $config['appVersion'] = EVC_CLUB_VERSION;
         return array(
             'status' => 200,
             'headers' => self::headers(EVC_Rest_Security::SHELL_CSP),
-            'body' => self::render_shell($config, $resolved),
+            'body' => self::render_shell($config, $resolved, EVC_Customer_Pwa::head_tags(EVC_Customer_Pwa::icon_base())),
             'location' => null,
         );
     }
@@ -140,8 +173,8 @@ final class EVC_Customer_Shell {
     }
 
     /** @param array{scripts:string[],preloads:string[],styles:string[]} $assets */
-    private static function render_shell(array $config, array $assets): string {
-        $head = '';
+    private static function render_shell(array $config, array $assets, string $pwa_head = ''): string {
+        $head = $pwa_head;
         foreach ($assets['styles'] as $href) {
             $head .= '<link rel="stylesheet" href="' . esc_url($href) . '">' . "\n";
         }

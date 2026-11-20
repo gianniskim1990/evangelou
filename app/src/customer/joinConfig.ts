@@ -31,7 +31,8 @@ export interface PosterConfig {
   appVersion: string;
 }
 
-export type BootMode = "member" | "join" | "poster";
+/** "offline" (STAGE-08 round 11): the page the member app's service worker builds when the network fails (pwa/swRules.ts). */
+export type BootMode = "member" | "join" | "poster" | "offline";
 export type Parsed<T> = { ok: true; config: T } | { ok: false; reason: string };
 
 const NONCE_RE = /^[0-9a-f]{10}$/;
@@ -64,7 +65,7 @@ export function bootMode(raw: string | null | undefined): BootMode | null {
   const data = readJson(raw);
   if (!data) return null;
   if (!("mode" in data)) return "member";
-  return data.mode === "join" || data.mode === "poster" ? data.mode : null;
+  return data.mode === "join" || data.mode === "poster" || data.mode === "offline" ? data.mode : null;
 }
 
 function restBaseOk(value: unknown, origin: string, homePath: unknown): string | null {

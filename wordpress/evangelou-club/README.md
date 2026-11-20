@@ -889,6 +889,21 @@ screenshot works from any device; only an administrator's revocation gives a new
 
 Greek operator note and developer notes: `docs/member-qr.md`.
 
+## Member app on the home screen (STAGE-08 round 11, owner decision D26 part 1 — behind EVC_CLUB_CUSTOMER_ENABLED)
+
+- `EVC_Customer_Pwa` (includes/customer/class-evc-customer-pwa.php), served only through the member page's query
+  variable: a web app manifest (`/club-member/manifest.webmanifest`, plain `?evc_club_member=manifest`), the iOS
+  home-screen tags, and a service worker at `/club-member/sw.js` with the scope `/club-member/` — **only with pretty
+  permalinks** (with plain permalinks a worker would control the whole site, the till included: none is served).
+- The worker (built from `app/src/customer/pwa/sw.ts` into `customer-app/pwa/sw.js`) caches only the app's hashed
+  build files; REST (`/wp-json/`, `rest_route`), any non-GET request and any page with a nonce are never answered or
+  stored. Offline, the member page becomes a «Δεν υπάρχει σύνδεση» page without any member data. No push.
+- Icons in `customer-app/pwa/` (from the bundled logo). Packager guards: `pwaProblemsFor`, `workerProblems`.
+- Owner decision D27: «Ανανέωση 20 €» for an expired membership opens the join flow; the checkout guard serialises two
+  simultaneous Club checkouts of one account with a database `GET_LOCK` (no migration).
+
+Details and the real-phone test steps: `docs/member-pwa.md`.
+
 ## Known deployment blockers
 
 - Hosting PHP version, MySQL/MariaDB version and pdo_mysql availability.

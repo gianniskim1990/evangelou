@@ -382,6 +382,31 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
     }
 
     /**
+     * STAGE-08 round 11 (review race): on the real shop a signed-in customer's Club checkout holds that account's
+     * database lock from its validation to the end of the request, so a second checkout of the same account (another
+     * phone, a double tap) cannot read the open orders before this one's order is written. Another account is free.
+     */
+    public function test_round11_a_club_checkout_holds_the_account_lock_until_the_request_ends(): void {
+        $user = $this->customer();
+        $this->login_as($user);
+        $this->cart = array(EVC_TEST_CLUB_PRODUCT);
+        $name = EVC_Onboarding_Checkout_Guard::lock_name($user);
+        $other = new wpdb(DB_USER, DB_PASSWORD, DB_NAME, DB_HOST);
+        try {
+            $this->assertSame('1', $other->get_var($other->prepare('SELECT IS_FREE_LOCK(%s)', $name)), 'free before the checkout');
+            $this->assertSame(array(), $this->checkout_errors(), 'one Club item, a signed-in customer');
+            $this->assertSame('0', $other->get_var($other->prepare('SELECT GET_LOCK(%s, 0)', $name)), 'a second checkout of this account has to wait');
+            $this->assertSame('1', $other->get_var($other->prepare('SELECT GET_LOCK(%s, 0)', EVC_Onboarding_Checkout_Guard::lock_name($this->customer()))), 'another account is free');
+            $this->order($user, 'on-hold'); // the first checkout's order is written, then its request ends
+            EVC_Onboarding_Checkout_Guard::release_lock($name);
+            $this->assertSame('1', $other->get_var($other->prepare('SELECT GET_LOCK(%s, 0)', $name)), 'free once the request ended');
+        } finally {
+            $other->close();
+        }
+        $this->assertSame(array('evc_club_duplicate_order'), $this->checkout_errors(), 'the next checkout sees the first order');
+    }
+
+    /**
      * STAGE-08 round 4, D20: FluentCRM's own newsletter checkbox on the classic checkout is a posted field the Club never
      * strips or blocks: a valid Club checkout with the box ticked (or not) gets no Club error and WooCommerce's posted
      * data still carries it. (The field name is a stand-in; FluentCRM reads its own field after the order.)

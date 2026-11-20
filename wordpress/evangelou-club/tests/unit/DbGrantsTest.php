@@ -84,6 +84,27 @@ final class DbGrantsTest extends TestCase {
         $this->assertState('unknown', array('GRANT ALL ON *.* TO `evc`@`%`'), 'no current database', null, '');
     }
 
+    /**
+     * Round 11 (C3): a database-level grant reads its name as a pattern, where \_ is a plain underscore; a
+     * table-level grant names its database literally (MariaDB 10.11, checked against the server: no wildcard, and a
+     * backslash is part of the name).
+     */
+    public function test_round11_escaped_underscores_and_literal_database_names(): void {
+        $usage = 'GRANT USAGE ON *.* TO `evc`@`%`';
+        $db_level = 'GRANT SELECT, INSERT ON `evc\\_club`.* TO `evc`@`%`';
+        $this->assertState('ok', array($usage, $db_level), 'db level: \\_ is the underscore itself', array(), 'evc_club');
+        $this->assertState('missing', array($usage, $db_level), 'db level: an escaped underscore is not a wildcard', null, 'evcXclub');
+        $this->assertState('missing', array($usage, $db_level), 'db level: a database really named with the backslash is not covered', null, 'evc\\_club');
+        $this->assertState('ok', array($usage, 'GRANT SELECT, INSERT ON `evc_club`.* TO `evc`@`%`'), 'db level: an unescaped underscore is a wildcard', array(), 'evcXclub');
+        $table = 'GRANT SELECT, INSERT ON `evc\\_club`.`evc_redemption_preparations` TO `evc`@`%`';
+        $this->assertState('missing', array($usage, $table), 'table level: the database name is literal, \\_ included', null, 'evc_club');
+        $this->assertState('ok', array($usage, $table), 'table level: the database really named «evc\\_club»', array(), 'evc\\_club');
+        $this->assertState('missing', array($usage, 'GRANT SELECT, INSERT ON `evc_club`.`evc_redemption_preparations` TO `evc`@`%`'), 'table level: no wildcard in the database name', null, 'evcXclub');
+        $this->assertState('missing', array($usage, 'GRANT SELECT, INSERT ON `evc%`.`evc_redemption_preparations` TO `evc`@`%`'), 'table level: no % wildcard either', null, 'evc_club');
+        $this->assertState('missing', array($usage, 'GRANT SELECT, INSERT ON `evc_club`.`evc\\_redemption\\_preparations` TO `evc`@`%`'), 'the table name is literal', null, 'evc_club');
+        $this->assertState('unknown', array($usage, 'GRANT SELECT, INSERT ON `EVC_CLUB`.`evc_redemption_preparations` TO `evc`@`%`'), 'table level: letter case only = cannot tell', null, 'evc_club');
+    }
+
     public function test_the_answer_carries_no_part_of_a_line(): void {
         $line = "GRANT USAGE ON *.* TO `secret_user`@`10.0.0.7` IDENTIFIED BY PASSWORD '*SECRETHASH'";
         $out = json_encode(array(self::read(array($line)), self::read(array($line, 'GRANT `r` TO `secret_user`@`10.0.0.7`'))));

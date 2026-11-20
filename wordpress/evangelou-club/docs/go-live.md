@@ -133,6 +133,23 @@ approval: first on **staging**, and on **production** only after the owner appro
 - **Owner decision D25** (2026-11-20 13:09, relayed by the coordinator): migration **004 is APPROVED for the STAGING
   Club DB only**. The owner / technician applies it (steps (2)-(6) of D24 above); the developer side applies nothing.
   **Production still needs its own approval of 004.** K18 (retention of the staff note, D9) stays open.
+- **Owner decision D26 part 1** (2026-11-20, STAGE-08 round 11): the member page can be **installed on the phone's
+  home screen** (web app manifest, icons from the logo, iOS tags, a service worker that caches only the app's own
+  build files and never REST, `/me`, QR or coffee data or any page with a nonce, and a «Εγκατάσταση στο κινητό» hint).
+  **No push yet** (round 12, migration 005). The worker exists only with «Post name» permalinks (scope
+  `/club-member/`; with plain permalinks it would control the whole site, the till included, so none is served).
+  Nothing new in wp-config.php; after installing the package, open Settings → Permalinks once and save (the two new
+  rewrite rules `/club-member/manifest.webmanifest` and `/club-member/sw.js` are also added automatically on the
+  first page load). Details and the **real-phone test steps**: [member-pwa.md](member-pwa.md).
+- **Owner decision D27** (2026-11-20, round 11): **renewal from the member card**. An EXPIRED member gets
+  «Ανανέωση 20 €» on the dashboard and the card; it opens the join flow (the same payment as joining; needs
+  `EVC_CLUB_ONBOARDING_ENABLED`, otherwise a line «μιλήστε με το κατάστημα»). No renewal for an active member. A
+  pending bank transfer shows plain text (the bank details are in the order e-mail) instead of the old disabled
+  «Ολοκλήρωση πληρωμής». Cancelled and unverified: no button (unchanged). The preview tooltip «Μη διαθέσιμο στην
+  προεπισκόπηση» is gone from the live app. Two simultaneous Club checkouts of one account are now serialised by a
+  per-account database lock (K5). **Staging check:** an expired test member taps «Ανανέωση 20 €» → the join page →
+  terms (if not accepted yet) → the checkout with the Club product → bank transfer; the order is «Σε αναμονή»; back
+  on the card the text about the bank transfer, no button.
 - **On a phone, the offer's «Πληρωμή 20 €» did not look like a button** (the owner only noticed the account link).
   Round 4: a full-width filled button; the account link below it is small.
 
@@ -194,7 +211,7 @@ Each with the owner decision that accepted it or the mitigation in place.
 | K2 | The **total sign-up cap** (100 per hour) can be used to stop QR sign-up for an hour. | Kept blocking on purpose; one log line and an admin notice per hour; the technician tunes `EVC_CLUB_JOIN_MAX_PER_HOUR` ([store-onboarding.md](store-onboarding.md)). |
 | K3 | **Enumeration and pre-registration** of e-mails at sign-up. | Owner decision D14 (no e-mail confirmation); recovery by password reset; a squatter's order stays unpaid and unconfirmed. |
 | K4 | **REMOTE_ADDR behind a proxy/CDN** would make all customers one client. | Go-live check (readiness «manual» + store-onboarding checklist). |
-| K5 | **Two checkouts at the same instant** (two devices) can leave two unpaid Club orders. | Accepted (STAGE-07 R6): the shop's manual confirmation is the final gate; one transfer never funds two orders; the Greek operator note says to cancel the other. |
+| K5 | **Two checkouts at the same instant** (two devices) can leave two unpaid Club orders. | Accepted (STAGE-07 R6): the shop's manual confirmation is the final gate; one transfer never funds two orders; the Greek operator note says to cancel the other. **Round 11:** a submitted Club checkout of a signed-in customer (classic checkout validation, Store API POST /checkout) first takes a per-account `GET_LOCK` of the WordPress database (no table, no migration) and reads the open orders only then; the lock lasts until the request ends, so the second checkout waits up to 10 s and then sees the first order («Υπάρχει ήδη…»), or reads «Μια άλλη πληρωμή συνδρομής … είναι σε εξέλιξη». **Residual:** a database server that refuses named locks (`GET_LOCK` answers NULL, e.g. some clusters) runs the check as before (never refuses the checkout); a guest who creates the account at the checkout has no earlier order and is not locked. `add_option()` was not used: WordPress inserts options with ON DUPLICATE KEY UPDATE, so two racing calls can both succeed. |
 | K6 | **The failure-row ceiling**: a flood from many addresses stops counting failures of NEW clients for up to 5 minutes. | Sign-up is never refused because of it (STAGE-07 B1); admin notice; rows expire after 5 minutes. The expired-row cleanup runs at most once per request. |
 | K7 | **The till password**: successful re-logins are not limited; anyone who knows it can log in again. | Owner decision «Όχι, μένει έτσι» (2026-11-04); change the password when staff leave (D18 operator note). |
 | K8 | **The shared till account** (D18): redemptions are not attributed to a person. | Owner decision D18. |
@@ -208,6 +225,7 @@ Each with the owner decision that accepted it or the mitigation in place.
 | K17 | **Resolved by D22 (2026-11-19).** Was: opening the card on a second device retired the first device's QR. Now the QR is the same on every device and only an administrator's revocation changes it. What remains: a screenshot of the QR keeps working on any device until that revocation (D6 no expiry, D7 accepted); `EVC_CLUB_QR_SECRET` is a new secret to keep (a leak lets someone compute members' codes if they also know the member ids; changing it gives every member a new code once); the customer `POST /me/qr` has no server-side rate limit (it now writes only on a first QR, after a revocation, or once for a pre-D22 token), only the app's cap of 8 requests / 3 POSTs per minute. | One coffee per Athens day and the staff's first-name check limit the damage; the secret lives only in wp-config.php (packager guard: no secret in a shipped file) and is never logged or shown. A token lifetime or a server-side limit would be a new owner decision. |
 | K18 | **The staff note (D24) is free text linked to a member's redemption, kept with no retention limit.** Staff could write personal data in it (e.g. a health remark). Owner decision **D9 (retention / access / erasure of member-linked history) is still open**; there is no purge mechanism. | Limited to 80 characters, plain text (HTML refused), never logged, never in the audit trail, never shown to the customer (only to the till, in the last 3 coffees). **Owner decision needed:** how long notes are kept (e.g. 12 months), and an instruction to staff: only preparation wishes, never health or personal remarks. Until then, every note stays in the Club DB. |
 | K19 | **Older tablets keep the v1 route** (coffee type only). | Deliberate (round 9a): v1 and the prepared route share one ledger and its unique keys, so one coffee per member per Athens day holds across both. The new till app (round 9b) uses the prepared route only when the scan reply says `prepared` (004 applied and the approved catalogue loaded); otherwise, and after a `409 prepared_unavailable`, it records the coffee type through v1 exactly as before. A tablet keeps an old app until its page is reloaded: reload the till page once after installing a new package. The v1 route can be retired later by a separate decision. |
+| K20 | **The home-screen app (D26, round 11).** (a) A cold start without any network shows only «Δεν υπάρχει σύνδεση» (the offline page knows nothing about the member, so no card or QR; the «unchecked» QR needs `/me` first). (b) With plain permalinks there is no service worker (no offline page); the app can still be installed. (c) iOS keeps an installed web app's sign-in apart from Safari: the member may have to sign in again inside the app; the sign-in page (`wp-login.php`) is outside the manifest's scope `/club-member/` and has not been tested on a real iPhone. (d) Nothing was tested on real phones. | (a) Showing the kept QR without `/me` would be a new owner decision (shared phones). (b) Use «Post name» (T9). (c) Owner test step on an iPhone ([member-pwa.md](member-pwa.md)); if the sign-in loops, the fix is a wider manifest scope for navigation only (not the worker's), a decision. |
 | K14 | **A page cache** could serve the join page to the wrong visitor. | `DONOTCACHEPAGE` + no-cache headers; readiness lists page-cache plugins; exclude `/club/join/` and `/club-member/` by hand if the host cache ignores them. |
 
 ## 6. Shipped-code TODO / FIXME
@@ -335,5 +353,19 @@ QR που βγήκαν πριν από το D22 αλλάζουν **μία φορ
 απόφαση D9 (πόσο κρατάμε το ιστορικό) είναι ακόμη ανοιχτή. Προτείνουμε να ορίσετε πόσο καιρό κρατιούνται οι
 σημειώσεις και να πείτε στο προσωπικό να γράφει μόνο επιθυμίες για τον καφέ, ποτέ στοιχεία υγείας ή προσωπικά.
 
-**Γνωστοί κίνδυνοι** που έχετε αποφασίσει ή έχουν μέτρα: δείτε τον πίνακα «Known risks» (K1–K19) παραπάνω· ο
+**Απόφαση D26, μέρος 1 (20/11/2026):** η σελίδα μέλους μπαίνει στην αρχική οθόνη του κινητού σαν εφαρμογή, με το
+δικό της εικονίδιο (το φτερό του λογότυπου). Στο Android το κινητό ρωτά «Εγκατάσταση»· στο iPhone ο πελάτης πατά στο
+Safari «Κοινή χρήση» και μετά «Προσθήκη στην οθόνη Αφετηρίας». Ειδοποιήσεις δεν υπάρχουν ακόμη (έρχονται στον επόμενο
+γύρο, με τη μετάβαση 005). Χρειάζονται οι «όμορφοι» σύνδεσμοι (Ρυθμίσεις → Μόνιμοι σύνδεσμοι → «Όνομα άρθρου»)·
+μετά την εγκατάσταση του νέου πακέτου ανοίξτε αυτή τη σελίδα ρυθμίσεων μία φορά και πατήστε «Αποθήκευση». Τα βήματα
+δοκιμής σε πραγματικό Android και iPhone είναι στο [member-pwa.md](member-pwa.md).
+
+**Απόφαση D27 (20/11/2026):** ανανέωση από την κάρτα. Όταν η συνδρομή έχει **λήξει**, το κουμπί «Ανανέωση 20 €»
+οδηγεί στην ίδια πληρωμή με την εγγραφή. Όσο η συνδρομή είναι ενεργή, κουμπί ανανέωσης δεν εμφανίζεται. Όταν
+περιμένουμε τραπεζική μεταφορά, η κάρτα γράφει ότι τα στοιχεία του λογαριασμού είναι στο μήνυμα της παραγγελίας και ότι
+η συνδρομή ενεργοποιείται μόλις το κατάστημα επιβεβαιώσει τη μεταφορά. Σε ακυρωμένη ή μη επιβεβαιωμένη συνδρομή δεν
+εμφανίζεται κουμπί· ο πελάτης μιλά με το κατάστημα. Δύο ταυτόχρονες πληρωμές συνδρομής από τον ίδιο λογαριασμό δεν
+περνούν πια και οι δύο (K5).
+
+**Γνωστοί κίνδυνοι** που έχετε αποφασίσει ή έχουν μέτρα: δείτε τον πίνακα «Known risks» (K1–K20) παραπάνω· ο
 τεχνικός μπορεί να σας τους εξηγήσει έναν έναν.

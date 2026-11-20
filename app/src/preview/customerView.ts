@@ -65,6 +65,20 @@ export type CustomerView = {
  */
 export type CustomerActions = { pay?: () => void; renew?: () => void; signOut?: () => void; join?: () => void };
 
+/**
+ * STAGE-08 round 11 (owner decision D27): the live member area's actions. Both «Γίνετε μέλος» (no membership) and
+ * «Ανανέωση 20 €» (EXPIRED membership) open the join flow, which already leads an expired or new customer through
+ * the terms to the same checkout as joining, and which never takes a second order while one is open
+ * (EVC_Onboarding_Handoff::blocks_new_order). No action without a join URL; none for an active member (no renewal
+ * before the end of the paid month), a pending payment, a cancelled or an unverified membership.
+ */
+export function liveActions(state: CustomerMembershipState, joinUrl: string, navigate: (url: string) => void, signOut: () => void): CustomerActions {
+  if (joinUrl === "") return { signOut };
+  if (state === "none") return { signOut, join: () => navigate(joinUrl) };
+  if (state === "expired") return { signOut, renew: () => navigate(joinUrl) };
+  return { signOut };
+}
+
 function samplePaidUntil(state: PreviewMembershipState, today: string): string | null {
   if (state === "pending") return null;
   return addDays(today, state === "active" ? CUSTOMER.paidUntilOffsetDays : -3);
@@ -99,10 +113,32 @@ export function joinAction(view: CustomerView, actions?: CustomerActions): { lab
   return { label: "Γίνετε μέλος", run: actions.join };
 }
 
-/** The payment button a non-active member sees; without a journey action it stays disabled. */
-export function paymentAction(view: CustomerView, actions?: CustomerActions): { label: string; run?: () => void } | null {
-  if (view.state === "pending" || (view.state === "expired" && view.pendingRenewal)) return { label: "Ολοκλήρωση πληρωμής", run: actions?.pay };
-  if (view.state === "expired") return { label: `Ανανέωση ${CLUB_RULES.monthlyPriceEur} €`, run: actions?.renew };
+/** The tooltip of a button that only the design preview leaves disabled. Never on the live app (round 11). */
+export const PREVIEW_ONLY = "Μη διαθέσιμο στην προεπισκόπηση";
+
+/**
+ * The payment button a non-active member sees; without a journey action it stays disabled (preview only).
+ * STAGE-08 round 11, owner decision D27 (live app): «Ανανέωση 20 €» only for an EXPIRED membership and only with a
+ * `renew` action (the join flow, the same payment as joining); no disabled button ever. A pending payment has no
+ * button at all on the live app: it is a bank transfer the shop confirms, so paymentNote() says what to do.
+ */
+export function paymentAction(view: CustomerView, actions?: CustomerActions): { kind: "pay" | "renew"; label: string; run?: () => void } | null {
+  if (view.state === "pending" || (view.state === "expired" && view.pendingRenewal)) return view.live ? null : { kind: "pay", label: "Ολοκλήρωση πληρωμής", run: actions?.pay };
+  if (view.state === "expired") return view.live && !actions?.renew ? null : { kind: "renew", label: `Ανανέωση ${CLUB_RULES.monthlyPriceEur} €`, run: actions?.renew };
+  return null;
+}
+
+/** Round 11 (D27): what a pending payment means, in place of the old disabled «Ολοκλήρωση πληρωμής». */
+export const PENDING_PAYMENT_NOTE =
+  "Η πληρωμή σας περιμένει την τραπεζική μεταφορά. Τα στοιχεία του λογαριασμού για τη μεταφορά υπάρχουν στο μήνυμα επιβεβαίωσης της παραγγελίας που λάβατε με ηλεκτρονικό ταχυδρομείο. Η συνδρομή ενεργοποιείται μόλις το κατάστημα επιβεβαιώσει τη μεταφορά.";
+/** Round 11: an expired membership when the join flow is off on this site (no renewal link exists). */
+export const RENEW_IN_STORE_NOTE = "Για να ανανεώσετε τη συνδρομή σας, μιλήστε με το κατάστημα.";
+
+/** Round 11 (D27): plain information instead of a button (live app only; the preview keeps its sample buttons). */
+export function paymentNote(view: CustomerView, actions?: CustomerActions): string | null {
+  if (!view.live) return null;
+  if (view.state === "pending" || (view.state === "expired" && view.pendingRenewal)) return PENDING_PAYMENT_NOTE;
+  if (view.state === "expired" && !actions?.renew) return RENEW_IN_STORE_NOTE;
   return null;
 }
 

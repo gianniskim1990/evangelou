@@ -3,7 +3,7 @@ import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, CUSTOMER, addDays, coffeeName,
 import { cx, type CustomerScreen } from "./screens";
 import { ClubWelcome, MemberPass } from "./CustomerSignature";
 import { historyPreparation, preparationLine } from "./coffeeConfig";
-import { joinAction, membershipLine, paymentAction, renewalLine, sampleCustomerView, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
+import { PREVIEW_ONLY, joinAction, membershipLine, paymentAction, paymentNote, renewalLine, sampleCustomerView, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
 import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote, StateMark, Steps } from "./ds";
 import { ONBOARDING_COPY, ONBOARDING_STEPS, consentsLine } from "./onboardingCopy";
 
@@ -182,7 +182,7 @@ export function Offer({ go, onPay, secondary, steps, live }: { go: (s: CustomerS
         {/* STAGE-08 round 4 (owner's staging run on a phone): the payment is THE action of this step, a full-width
             filled button with a clear edge and a shadow; the account link below it is small and quiet. */}
         <div className="mt-8 flex flex-col items-stretch gap-y-3 sm:max-w-[420px]">
-          <Btn tone="brass" disabled={!onPay} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"} onClick={onPay} className="w-full min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)]" data-evc-action="pay">
+          <Btn tone="brass" disabled={!onPay} title={onPay || live ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"} onClick={onPay} className="w-full min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)]" data-evc-action="pay">
             Πληρωμή {CLUB_RULES.monthlyPriceEur} €
           </Btn>
           <button type="button" data-evc-action="secondary" onClick={secondary ? secondary.onClick : () => go("dashboard")} className="t-small self-center py-3 text-[var(--milk)]/60 underline decoration-[var(--brass-soft)] underline-offset-4 hover:text-[var(--milk)]">{secondary ? secondary.label : "Δείτε τον λογαριασμό μέλους"}</button>
@@ -224,6 +224,7 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
   const recent = view.history.slice(0, 3);
   const pay = paymentAction(view, actions);
   const join = joinAction(view, actions);
+  const note = paymentNote(view, actions);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
       <section>
@@ -240,8 +241,17 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
               </Btn>
             )}
             <Btn tone={state === "active" ? "brass" : "ghost-dark"} onClick={() => go("card")}>Άνοιγμα κάρτας</Btn>
-            {pay && <Btn tone="brass" disabled={!pay.run} title={pay.run ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={pay.run}>{pay.label}</Btn>}
+            {pay && (
+              <Btn tone="brass" disabled={!pay.run} title={pay.run || view.live ? undefined : PREVIEW_ONLY} onClick={pay.run} className={pay.run ? "min-h-14 px-8 text-[17px]" : undefined} data-evc-action={pay.run ? pay.kind : undefined}>
+                {pay.label}
+              </Btn>
+            )}
           </div>
+          {note && (
+            <p role="status" className="t-body mt-6 max-w-[46ch] border-t border-[var(--milk)]/20 pt-5 text-[var(--milk)]/85" data-evc-note="payment">
+              {note}
+            </p>
+          )}
         </div>
       </section>
       <section className="lg:pt-[4.6rem]">
@@ -426,15 +436,20 @@ export function History({ view }: MemberScreenProps) {
 
 export function Profile({ view, actions }: MemberScreenProps) {
   const { state, member } = view;
-  const renew = state === "active" && !view.pendingRenewal ? actions?.renew : undefined;
+  // Early renewal of an active membership exists only in the design preview: the live app never offers it (D27).
+  const renew = !view.live && state === "active" && !view.pendingRenewal ? actions?.renew : undefined;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
       <section>
         <h1 className="t-headline text-[var(--roast)]">{member.name}</h1>
         {member.memberSince && <p className="t-body mt-2 text-[var(--ink-2)]">Μέλος από τις {greekDate(member.memberSince)}</p>}
         <div className="mt-8 flex flex-wrap gap-3">
-          <Btn tone="line" disabled title="Μη διαθέσιμο στην προεπισκόπηση">Επεξεργασία στοιχείων</Btn>
-          <Btn tone="line" disabled={!actions?.signOut} title={actions?.signOut ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={actions?.signOut}>Αποσύνδεση</Btn>
+          {!view.live && (
+            <Btn tone="line" disabled title={PREVIEW_ONLY}>
+              Επεξεργασία στοιχείων
+            </Btn>
+          )}
+          <Btn tone="line" disabled={!actions?.signOut} title={actions?.signOut || view.live ? undefined : PREVIEW_ONLY} onClick={actions?.signOut}>Αποσύνδεση</Btn>
         </div>
       </section>
       <section>

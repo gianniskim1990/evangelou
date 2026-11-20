@@ -34,6 +34,10 @@ import type { QrKeeper } from "./memberQr";
  * on every device (memberQr.ts).
  * - Round 7, peek(): while the server cannot be reached, the card may show
  *   the account's kept token as «unchecked» (read only, nothing deleted).
+ * - STAGE-08 round 11 (owner decision D26): ONE other thing is remembered on
+ *   this device, through createDeviceFlag() below: that the member closed the
+ *   «Εγκατάσταση στο κινητό» hint. A fixed key with the value "1"; nothing
+ *   personal. Same storage access (browserStorage), same try/catch rule.
  */
 
 export const QR_STORE_PREFIX = "evc-club-qr:v1:";
@@ -221,6 +225,33 @@ export function createStorageQrKeeper(
     },
     onExternalChange(listener) {
       externalListeners.add(listener);
+    },
+  };
+}
+
+/** STAGE-08 round 11 (D26): the install hint was closed on this device (pwa/installHint.ts). Not a QR key. */
+export const INSTALL_HINT_KEY = "evc-club-install-hint:v1";
+
+/**
+ * A one-flag device memory for the install hint (fixed key, value "1"), or null without working storage. Every
+ * access is wrapped: a failure reads as "not set" and a write that fails is simply forgotten.
+ */
+export function createDeviceFlag(storage: StorageLike | null = browserStorage()): { get(): boolean; set(): void } | null {
+  if (!storage) return null;
+  return {
+    get: () => {
+      try {
+        return storage.getItem(INSTALL_HINT_KEY) === "1";
+      } catch {
+        return false;
+      }
+    },
+    set: () => {
+      try {
+        storage.setItem(INSTALL_HINT_KEY, "1");
+      } catch {
+        // full or blocked: the hint stays closed for this page only
+      }
     },
   };
 }
