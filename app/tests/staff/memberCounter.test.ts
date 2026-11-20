@@ -1243,13 +1243,15 @@ describe("D24 the till screens (DOM)", () => {
     await ctx.flow.submitScan(TOKEN);
     await dom.render(createElement(StaffApp, { controller: ctx.controller, counter: ctx.flow, camera: NO_CAMERA }));
     assert.ok(dom.document.querySelector("[data-evc-recent]"));
-    assert.equal(dom.document.querySelector('[data-evc-action="same-as-last"]'), null);
-    assert.equal(dom.document.querySelector("[data-evc-stage]"), null, "no order for a member who cannot redeem");
+    // assert.ok(x === null) and never assert.equal(element, null): a failing equal would inspect the whole jsdom
+    // tree for its message (gigabytes; it took the CI runner down in round 9b, mutant D24-S1).
+    assert.ok(dom.document.querySelector('[data-evc-action="same-as-last"]') === null, "«Το ίδιο» is not offered");
+    assert.ok(dom.document.querySelector("[data-evc-stage]") === null, "no order for a member who cannot redeem");
   });
 
   it("one large button per option; each tap moves to the next step; the note field is limited to 80", async () => {
     await mountPrepared(null);
-    assert.equal(dom.document.querySelector("[data-evc-recent]"), null);
+    assert.ok(dom.document.querySelector("[data-evc-recent]") === null, "no history panel without history");
     const coffees = [...dom.document.querySelectorAll("[data-evc-coffee]")];
     assert.equal(coffees.length, 7, "the seven coffees");
     for (const b of coffees) assert.match(b.className, /min-h-14/, "large touch targets");
