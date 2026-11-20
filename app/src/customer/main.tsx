@@ -7,6 +7,8 @@ import { CustomerApp } from "./CustomerApp";
 import { createCustomerCoffeesApi } from "./coffeesApi";
 import { createCustomerApi, createNonceBox } from "./customerApi";
 import { MemberCoffeesFlow } from "./memberCoffees";
+import { createCustomerHistoryApi } from "./historyApi";
+import { MemberHistoryFlow } from "./memberHistory";
 import { createQrKeeper, MemberQrFlow } from "./memberQr";
 import { createCustomerQrApi } from "./qrApi";
 import { createStorageQrKeeper } from "./qrStore";
@@ -59,9 +61,11 @@ if (root) {
       const qrFlow = new MemberQrFlow(createCustomerQrApi(parsed.config, nonce), createQrKeeper(createStorageQrKeeper()));
       // D23: the member card's real coffee figures (read only).
       const coffeesFlow = new MemberCoffeesFlow(createCustomerCoffeesApi(parsed.config, nonce));
+      // D24: the member card's own last coffees (read only, never the staff note).
+      const historyFlow = new MemberHistoryFlow(createCustomerHistoryApi(parsed.config, nonce));
       createRoot(root).render(
         <StrictMode>
-          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} coffeesFlow={coffeesFlow} navigate={(url) => window.location.assign(url)} />
+          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} coffeesFlow={coffeesFlow} historyFlow={historyFlow} navigate={(url) => window.location.assign(url)} />
         </StrictMode>,
       );
     }

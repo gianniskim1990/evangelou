@@ -112,6 +112,14 @@ describe("D23: the GET /me/coffees client", () => {
     assert.equal(new URL(seen[0].url).searchParams.get("rest_route"), "/evangelou-club-customer/v1/me/coffees");
   });
 
+  it("round 8 NIT-3: a REST base that is not an absolute same-origin URL never reaches fetch", async () => {
+    for (const restBase of ["/wp-json/evangelou-club-customer/v1", "wp-json/evangelou-club-customer/v1", "https://shop.example/wp-json/evangelou-club-customer/v1\n"]) {
+      const { impl, seen } = fakeFetch([json(200, body(MEMBER))]);
+      assert.deepEqual(await createCustomerCoffeesApi({ ...CONFIG, restBase }, createNonceBox(CONFIG.nonce), impl).coffees(), { kind: "error" }, restBase);
+      assert.equal(seen.length, 0, `${restBase}: nothing sent`);
+    }
+  });
+
   it("only coffeesApi.ts talks to /me/coffees, with GET only", () => {
     const client = readFileSync(join(appDir, "src/customer/coffeesApi.ts"), "utf8");
     assert.match(client, /endpointUrl\(config\.restBase, "\/me\/coffees"\)/);
@@ -306,6 +314,29 @@ describe("D23: the refresh flow (throttled, fail soft)", () => {
       assert.equal(f.calls(), 2, answer.kind);
       assert.equal(flow.getState()?.thisMonth, 3, answer.kind);
     }
+  });
+
+  it("round 8 LOW-1: an answer for the previous account that lands after a switch is dropped (generation guard)", async () => {
+    const f = fakeApi([OK3, OK4]);
+    const flow = new MemberCoffeesFlow(f.api, { now: () => 0 });
+    f.hold(true);
+    flow.open("eleni@example.org");
+    flow.open("nikos@example.org");
+    assert.equal(f.calls(), 2, "the new account asks at once");
+    f.release();
+    await tick();
+    // Both answers landed in order: Eleni's (3) first, then Nikos's (4). Only Nikos's may ever be shown.
+    assert.equal(flow.getState()?.thisMonth, 4);
+    const seen: (number | undefined)[] = [];
+    const g = fakeApi([OK3, OK4]);
+    const other = new MemberCoffeesFlow(g.api, { now: () => 0 });
+    other.subscribe(() => seen.push(other.getState()?.thisMonth));
+    g.hold(true);
+    other.open("eleni@example.org");
+    other.open("nikos@example.org");
+    g.release();
+    await tick();
+    assert.deepEqual(seen, [4], "Eleni's figures never reached Nikos's card, not even for a moment");
   });
 
   it("another account never sees the previous figures; pause stops wakes until the next open", async () => {

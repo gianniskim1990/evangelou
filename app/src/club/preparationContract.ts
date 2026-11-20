@@ -9,8 +9,10 @@
  * wordpress/evangelou-club/tests/fixtures/preparation/.
  *
  * Owner decisions (2026-10-13):
- * - D-NOTES: structured options only. There is NO free-text note; an absent
- *   or null `note` is tolerated, anything else is `free_text_not_supported`.
+ * - D-NOTES: structured options only; parsePreparation() still refuses a note.
+ *   Owner decision D24 (2026-11-20) allows ONE short staff note when the
+ *   catalogue says `free_text_note: true` (the live till sends it as
+ *   `preparation.note`; the server normalises it: EVC_Prep_Note).
  * - D-PRICING: undecided. `pricing_policy` must be "undecided"; no prices.
  * - D3: no approved menu. Only an illustrative fixture exists.
  *
@@ -40,6 +42,8 @@ export type CatalogueCoffee = { code: string; label: string; temperature: Temper
 export type Catalogue = {
   version: number;
   status: "illustrative" | "approved";
+  /** Owner decision D24 (2026-11-20): the catalogue allows ONE short staff note (at most NOTE_MAX characters). */
+  freeTextNote: boolean;
   maxQuickNotes: number;
   quickNotes: Map<string, { label: string; appliesTo: AppliesTo }>;
   exclusive: Map<string, number>;
@@ -166,7 +170,7 @@ export function parseCatalogue(d: unknown): Catalogue {
     }
     coffees.set(cr.code, { code: cr.code, label: cr.label, temperature: cr.temperature, groups, quickNotes: notes });
   }
-  return { version: c.catalogue_version as number, status: c.status as "illustrative" | "approved", maxQuickNotes: c.max_quick_notes as number, quickNotes, exclusive, coffees };
+  return { version: c.catalogue_version as number, status: c.status as "illustrative" | "approved", freeTextNote: c.free_text_note as boolean, maxQuickNotes: c.max_quick_notes as number, quickNotes, exclusive, coffees };
 }
 
 // ---- request preparation: shape + canonical form (no catalogue) ---------------------------------

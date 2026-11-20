@@ -121,6 +121,15 @@ approval: first on **staging**, and on **production** only after the owner appro
   προετοιμασίας καφέ» «Εντάξει». The Club DB user needs `SELECT`/`INSERT` on `evc_redemption_preparations` (the
   technician reports full access on the staging Club DB). **Production** needs its own approval of 004 (as of 001-003).
   The staff note has an open retention question: K18.
+  **Round 9b (till and card):** after the scan the till shows the member's last 3 coffees (date, coffee,
+  preparation, the staff note) and a large «Το ίδιο με την τελευταία φορά» button; the coffee is chosen with one
+  large button per step (only the steps of that coffee), then a review screen with the extras (ice, foam, decaf),
+  the quick notes and the note (80 characters at most), and «Καταχώρηση καφέ». Older tablets / before 004: the
+  coffee type only, as today. The member card's «Ιστορικό» lists the member's own last 5 coffees (no staff note).
+  **Staging check after 004:** scan a test member, record a Freddo Espresso «Μεγάλο μέγεθος · Τριπλός» with a
+  note; scan again: the coffee appears in «Τελευταίοι καφέδες» with the note, a second coffee is refused; the next
+  Athens day «Το ίδιο» fills the order and only «Καταχώρηση καφέ» is needed; the member card's «Ιστορικό» shows the
+  coffee without the note.
 - **On a phone, the offer's «Πληρωμή 20 €» did not look like a button** (the owner only noticed the account link).
   Round 4: a full-width filled button; the account link below it is small.
 
@@ -307,6 +316,16 @@ QR που βγήκαν πριν από το D22 αλλάζουν **μία φορ
 4. Εργαλεία → «Evangelou Club — Βάση δεδομένων»: όλοι οι έλεγχοι πράσινοι, μετά εφαρμογή (εκκρεμεί μόνο η 004)·
 5. ο τεχνικός αφαιρεί ξανά το `EVC_CLUB_MIGRATIONS_ENABLED`·
 6. στην «Ετοιμότητα», η γραμμή «Καταγραφή προετοιμασίας καφέ στο ταμείο (μετάβαση 004)» γράφει «Εντάξει».
+
+**Τι βλέπετε μετά την εφαρμογή:** στο ταμείο, μετά τη σάρωση, οι 3 τελευταίοι καφέδες του μέλους (ημερομηνία,
+καφές, πώς φτιάχτηκε, η σημείωση) και το μεγάλο κουμπί «Το ίδιο με την τελευταία φορά»· ο καφές διαλέγεται με ένα
+μεγάλο κουμπί σε κάθε βήμα (μόνο τα βήματα του συγκεκριμένου καφέ), μετά έλεγχος της παραγγελίας με τα επιπλέον
+(πάγος, αφρόγαλα, χωρίς καφεΐνη), τις γρήγορες σημειώσεις και τη σημείωση, και «Καταχώρηση καφέ». Στην κάρτα του
+μέλους, το «Ιστορικό» δείχνει τους 5 τελευταίους καφέδες του, χωρίς τη σημείωση του ταμείου. **Έλεγχος στο
+δοκιμαστικό αντίγραφο:** σαρώστε ένα δοκιμαστικό μέλος, καταχωρήστε Freddo Espresso «Μεγάλο μέγεθος · Τριπλός» με
+μια σημείωση· σαρώστε ξανά: ο καφές φαίνεται στους «Τελευταίους καφέδες» με τη σημείωση και δεύτερος καφές δεν
+δίνεται· την επόμενη μέρα το «Το ίδιο» συμπληρώνει την παραγγελία και αρκεί το «Καταχώρηση καφέ»· στην κάρτα, το
+«Ιστορικό» δείχνει τον καφέ χωρίς τη σημείωση.
 
 Για το κανονικό site η 004 θέλει ξεχωριστή έγκρισή σας. **Κίνδυνος για απόφαση (K18):** η σημείωση του ταμείου
 είναι ελεύθερο κείμενο (έως 80 χαρακτήρες) και μένει στη βάση μαζί με τον καφέ του μέλους χωρίς όριο χρόνου· η

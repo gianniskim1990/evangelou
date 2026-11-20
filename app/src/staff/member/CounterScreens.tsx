@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import type { Catalogue } from "../../club/preparationContract";
 import { COUNTER_COFFEES } from "./coffeeCatalogue";
+import { NOTE_MAX, visibleOrderGroups } from "./preparedOrder";
 import { countdown, type CounterFlow, type CounterState, type ScanNotice } from "./counterFlow";
 import { cameraSupported, startQrCamera, type CameraEnv, type CameraFailure } from "./qrCamera";
 
@@ -227,11 +229,186 @@ function Scan({ flow, state, camera }: { flow: CounterFlow; state: Extract<Count
   );
 }
 
+/** «20/11» in Athens terms (the server sends the Athens business day). */
+function shortDate(day: string): string {
+  return `${Number(day.slice(8, 10))}/${Number(day.slice(5, 7))}`;
+}
+
+const BTN_CHOICE = "min-h-14 rounded-xl border px-4 py-3 text-left text-[16px] font-semibold";
+const CHOICE_ON = "border-bronze-dark bg-bronze/10";
+const CHOICE_OFF = "border-espresso/15 bg-surface";
+const CHIP = "min-h-12 rounded-full border px-4 py-2 text-[14px] font-semibold";
+
+/** D24: the member's own last coffees, with «Το ίδιο με την τελευταία φορά» on the newest. */
+function RecentCoffees({ flow, state }: { flow: CounterFlow; state: Extract<CounterState, { screen: "member" }> }) {
+  const recent = state.recent;
+  if (recent === null || recent.length === 0) return null;
+  const last = recent[0];
+  const canRepeat = state.status === "active" && state.redeem === "idle" && last.prefill !== null;
+  return (
+    <section aria-labelledby="evc-recent-title" className="mb-6 rounded-2xl border border-espresso/10 bg-surface p-4" data-evc-recent="">
+      <h2 id="evc-recent-title" className="mb-2 text-[15px] font-semibold">
+        Τελευταίοι καφέδες
+      </h2>
+      <ol className="m-0 list-none p-0">
+        {recent.map((r, i) => (
+          <li key={`${r.businessDate}-${i}`} className="border-b border-espresso/10 py-2 last:border-b-0">
+            <p className="text-[15px]">
+              <span className="mr-2 text-espresso/60">{shortDate(r.businessDate)}</span>
+              <span className="font-semibold">{r.coffeeLabel}</span>
+              {r.details.length > 0 && <span className="text-espresso/75"> · {r.details.join(" · ")}</span>}
+            </p>
+            {r.note !== null && <p className="text-[13.5px] text-espresso/70">Σημείωση: {r.note}</p>}
+          </li>
+        ))}
+      </ol>
+      {canRepeat && (
+        <>
+          <button type="button" onClick={() => flow.sameAsLast()} className={`${BTN_PRIMARY} mt-3 min-h-14 w-full text-[16px]`} data-evc-action="same-as-last">
+            Το ίδιο με την τελευταία φορά
+          </button>
+          {last.prefillPartial && <p className="mt-2 text-[13px] text-espresso/65">Κάποια επιλογή εκείνου του καφέ δεν υπάρχει πια: θα τη διαλέξετε ξανά.</p>}
+        </>
+      )}
+    </section>
+  );
+}
+
+/** D24: the step-by-step order (coffee → each required step → review with extras and the note). */
+function PreparedOrderPanel({ flow, state, catalogue }: { flow: CounterFlow; state: Extract<CounterState, { screen: "member" }>; catalogue: Catalogue }) {
+  const stage = flow.stage();
+  const heading = useFocusHeading(`${state.member.memberId}-${stage.kind}-${stage.kind === "step" ? stage.group : ""}`);
+  const busy = state.redeem === "busy";
+  const locked = state.redeem !== "idle";
+  const coffee = state.order.coffee === null ? null : (catalogue.coffees.get(state.order.coffee) ?? null);
+
+  if (stage.kind === "coffee" || coffee === null) {
+    return (
+      <section aria-labelledby="evc-step-title" data-evc-stage="coffee">
+        <h2 ref={heading} id="evc-step-title" tabIndex={-1} className="mb-3 text-[17px] font-semibold outline-none">
+          Ποιος καφές;
+        </h2>
+        <div className="grid grid-cols-2 gap-2.5">
+          {[...catalogue.coffees.values()].map((c) => (
+            <button key={c.code} type="button" disabled={locked} onClick={() => flow.chooseCoffee(c.code)} className={`${BTN_CHOICE} ${CHOICE_OFF}`} data-evc-coffee={c.code}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (stage.kind === "step") {
+    const group = coffee.groups.find((g) => g.id === stage.group)!;
+    const chosen = state.order.choices[group.id];
+    return (
+      <section aria-labelledby="evc-step-title" data-evc-stage="step" data-evc-group={group.id}>
+        <p className="mb-1 text-[14px] text-espresso/65">{coffee.label}</p>
+        <h2 ref={heading} id="evc-step-title" tabIndex={-1} className="mb-3 text-[20px] font-semibold outline-none">
+          {group.label}
+        </h2>
+        <div className="grid grid-cols-2 gap-2.5">
+          {group.options.map((o) => (
+            <button key={o.id} type="button" disabled={locked} aria-pressed={chosen === o.id} onClick={() => flow.choose(group.id, o.id)} className={`${BTN_CHOICE} ${chosen === o.id ? CHOICE_ON : CHOICE_OFF}`} data-evc-option={o.id}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <button type="button" disabled={locked} onClick={() => flow.back()} className={`${BTN_SECONDARY} mt-4 w-full`}>
+          Πίσω
+        </button>
+      </section>
+    );
+  }
+
+  // Review: what will be recorded, the optional extras, the quick notes and the note; then confirm.
+  const visible = visibleOrderGroups(catalogue, state.order);
+  const optional = visible.filter((g) => !g.required);
+  const notes = coffee.quickNotes;
+  return (
+    <section aria-labelledby="evc-step-title" data-evc-stage="review">
+      <h2 ref={heading} id="evc-step-title" tabIndex={-1} className="mb-3 text-[20px] font-semibold outline-none">
+        Έλεγχος παραγγελίας
+      </h2>
+      <dl className="m-0 mb-4 rounded-2xl border border-espresso/10 bg-surface px-4">
+        {[{ id: null as string | null, label: "Καφές", value: coffee.label }, ...visible.filter((g) => g.required && state.order.choices[g.id] !== undefined).map((g) => ({ id: g.id as string | null, label: g.label, value: g.options.find((o) => o.id === state.order.choices[g.id])?.label ?? "" }))].map((row) => (
+          <div key={row.id ?? "coffee"} className="flex min-h-12 items-center justify-between gap-3 border-b border-espresso/10 py-2 last:border-b-0" data-evc-review-row={row.id ?? "coffee"}>
+            <dt className="text-[14px] text-espresso/65">{row.label}</dt>
+            <dd className="m-0 flex items-center gap-3 text-[15px] font-semibold">
+              {row.value}
+              {!locked && (
+                <button type="button" onClick={() => (row.id === null ? flow.startOver() : flow.edit(row.id))} className="min-h-11 rounded-lg px-2 text-[13.5px] font-semibold text-bronze-dark underline" aria-label={`Αλλαγή: ${row.label}`}>
+                  Αλλαγή
+                </button>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {optional.map((g) => (
+        <fieldset key={g.id} disabled={locked} className="mb-4">
+          <legend className="mb-2 text-[14px] font-semibold">{g.label}</legend>
+          <div className="flex flex-wrap gap-2">
+            {g.options.map((o) => {
+              const on = state.order.choices[g.id] === o.id;
+              return (
+                <button key={o.id} type="button" aria-pressed={on} onClick={() => (on ? flow.clearOptional(g.id) : flow.choose(g.id, o.id))} className={`${CHIP} ${on ? CHOICE_ON : CHOICE_OFF}`} data-evc-extra={`${g.id}:${o.id}`}>
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+      ))}
+      {notes.length > 0 && (
+        <fieldset disabled={locked} className="mb-4">
+          <legend className="mb-2 text-[14px] font-semibold">Γρήγορες σημειώσεις</legend>
+          <div className="flex flex-wrap gap-2">
+            {notes.map((id) => {
+              const on = state.order.quickNotes.includes(id);
+              return (
+                <button key={id} type="button" aria-pressed={on} onClick={() => flow.toggleQuickNote(id)} className={`${CHIP} ${on ? CHOICE_ON : CHOICE_OFF}`} data-evc-quick-note={id}>
+                  {catalogue.quickNotes.get(id)?.label ?? id}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+      )}
+      {catalogue.freeTextNote && (
+        <div className="mb-5">
+          <label htmlFor="evc-order-note" className="mb-2 block text-[14px] font-semibold">
+            Σημείωση (προαιρετικά)
+          </label>
+          <input
+            id="evc-order-note"
+            value={state.order.note}
+            onChange={(e) => flow.setNote(e.target.value)}
+            disabled={locked}
+            maxLength={NOTE_MAX}
+            autoComplete="off"
+            aria-describedby="evc-order-note-help"
+            className="min-h-12 w-full rounded-xl border border-espresso/20 bg-white px-4 text-[15px]"
+          />
+          <p id="evc-order-note-help" className="mt-1 text-[12.5px] text-espresso/55">
+            Μόνο για την προετοιμασία, για το προσωπικό· δεν τη βλέπει ο πελάτης. {[...state.order.note].length}/{NOTE_MAX}
+          </p>
+        </div>
+      )}
+      <button type="button" onClick={() => void flow.redeem()} disabled={busy} aria-busy={busy} className={`${BTN_PRIMARY} min-h-14 w-full text-[16px]`} data-evc-action="record">
+        {busy ? "Καταχώρηση…" : state.redeem === "retry" ? "Δοκιμή ξανά" : "Καταχώρηση καφέ"}
+      </button>
+    </section>
+  );
+}
+
 function Member({ flow, state }: { flow: CounterFlow; state: Extract<CounterState, { screen: "member" }> }) {
   const heading = useFocusHeading(`member-${state.member.memberId}`);
   const name = state.member.firstName ?? "Μέλος του Club";
   const busy = state.redeem === "busy";
   const locked = state.redeem !== "idle";
+  const catalogue = flow.getCatalogue();
   return (
     <main className="mx-auto max-w-[560px] px-5 pt-8 pb-12 md:px-8 md:pt-12" data-evc-counter="member" data-evc-member-status={state.status}>
       <h1 ref={heading} tabIndex={-1} className="font-literata mb-2 text-[28px] font-semibold outline-none">
@@ -246,7 +423,11 @@ function Member({ flow, state }: { flow: CounterFlow; state: Extract<CounterStat
         {state.message && <p className="mb-5 rounded-xl bg-maroon/10 px-4 py-3 text-[14px] text-maroon">{state.message}</p>}
       </div>
 
-      {state.status === "active" && (
+      <RecentCoffees flow={flow} state={state} />
+
+      {state.status === "active" && state.prepared && catalogue !== null && <PreparedOrderPanel flow={flow} state={state} catalogue={catalogue} />}
+
+      {state.status === "active" && !state.prepared && (
         <form
           onSubmit={(e) => {
             e.preventDefault();

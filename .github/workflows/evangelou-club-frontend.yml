@@ -96,10 +96,10 @@ jobs:
         run: npm run package:club-plugin
       - name: Club + staff tests (fake fetch/clock, no network, TZ=UTC+14)
         run: npm run test:club
-      - name: Mutation partition is exact (456 mutants, 2 shards of 228 + 228, nothing duplicated or missing)
+      - name: Mutation partition is exact (505 mutants, 3 shards of 169 + 168 + 168, nothing duplicated or missing)
         run: |
-          node scripts/run-club-mutations.mjs --verify-partition 2
-          test "$(node scripts/run-club-mutations.mjs --list | wc -l)" = "456"
+          node scripts/run-club-mutations.mjs --verify-partition 3
+          test "$(node scripts/run-club-mutations.mjs --list | wc -l)" = "505"
       - name: Isolated-build detector can fail (canary)
         run: node scripts/check-isolated-build.mjs --canary
       - name: Non-shipped files (tests, docs, scripts, unwired modules) do not change the shipped build
@@ -109,10 +109,10 @@ jobs:
         working-directory: .
         run: git diff --exit-code -- app/src app/tests app/scripts
 
-  # Mutation testing, split into two independent jobs of 228 mutants each (STAGE-08 round 8:
-  # about 30 minutes each on a normal runner, 45+ on a slow one (run 44516010119 was
-  # cancelled at 45), hence the 60-minute limit) (shard K/2:
-  # mutants whose index % 2 == K-1). Each has its own checkout, npm ci and working
+  # Mutation testing, split into three independent jobs (STAGE-08 round 9: 505 mutants = 169 + 168 + 168;
+  # round 8 had two shards of 228, about 30 minutes each on a normal runner and up to 51.5 on a slow one,
+  # so a third shard keeps each job well inside its 60-minute limit) (shard K/3: mutants whose
+  # index % 3 == K-1). Each has its own checkout, npm ci and working
   # tree. A shard passes only if it ran ALL of its mutants, every one was killed by
   # the test suite (or hung until the runner's own limit) and the sources were
   # restored. A cancelled job or a runner shutdown is an infrastructure failure and
@@ -131,8 +131,8 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
-      - name: Mutation shard 1/2 (228 mutants)
-        run: node scripts/run-club-mutations.mjs --shard 1/2 --expect-total 456 --out mutation-shard-1.json
+      - name: Mutation shard 1/3 (169 mutants)
+        run: node scripts/run-club-mutations.mjs --shard 1/3 --expect-total 505 --out mutation-shard-1.json
       - name: Upload the shard report
         if: always()
         uses: actions/upload-artifact@v4
@@ -160,8 +160,8 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
-      - name: Mutation shard 2/2 (228 mutants)
-        run: node scripts/run-club-mutations.mjs --shard 2/2 --expect-total 456 --out mutation-shard-2.json
+      - name: Mutation shard 2/3 (168 mutants)
+        run: node scripts/run-club-mutations.mjs --shard 2/3 --expect-total 505 --out mutation-shard-2.json
       - name: Upload the shard report
         if: always()
         uses: actions/upload-artifact@v4
@@ -175,11 +175,40 @@ jobs:
         working-directory: .
         run: git diff --exit-code -- app/src app/tests app/scripts
 
-  # Proves the two shards TOGETHER covered all 456 mutants exactly once. It runs even
+  club-mutation-shard-3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Mutation shard 3/3 (168 mutants)
+        run: node scripts/run-club-mutations.mjs --shard 3/3 --expect-total 505 --out mutation-shard-3.json
+      - name: Upload the shard report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-shard-3
+          path: app/mutation-shard-3.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Confirm sources unchanged by the mutation run
+        if: always()
+        working-directory: .
+        run: git diff --exit-code -- app/src app/tests app/scripts
+
+  # Proves the three shards TOGETHER covered all 505 mutants exactly once. It runs even
   # when a shard failed or was cancelled (if: always()) and then fails on the missing
   # or incomplete report, so the workflow can never be green on a partial run.
   club-mutation-coverage:
-    needs: [club-mutation-shard-1, club-mutation-shard-2]
+    needs: [club-mutation-shard-1, club-mutation-shard-2, club-mutation-shard-3]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -196,15 +225,18 @@ jobs:
         continue-on-error: true # a missing artifact is reported by the coverage check below
         with:
           path: app/mutation-reports
-      - name: Require both shards to have passed
+      - name: Require all three shards to have passed
         run: |
           echo "shard 1: ${{ needs.club-mutation-shard-1.result }}"
           echo "shard 2: ${{ needs.club-mutation-shard-2.result }}"
+          echo "shard 3: ${{ needs.club-mutation-shard-3.result }}"
           test "${{ needs.club-mutation-shard-1.result }}" = "success"
           test "${{ needs.club-mutation-shard-2.result }}" = "success"
+          test "${{ needs.club-mutation-shard-3.result }}" = "success"
       - name: Shards together cover every mutant exactly once
         if: always()
         run: >
-          node scripts/check-mutation-coverage.mjs --expect-total 456 --shards 2
+          node scripts/check-mutation-coverage.mjs --expect-total 505 --shards 3
           mutation-reports/mutation-shard-1/mutation-shard-1.json
           mutation-reports/mutation-shard-2/mutation-shard-2.json
+          mutation-reports/mutation-shard-3/mutation-shard-3.json

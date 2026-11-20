@@ -1,6 +1,7 @@
 import type { CustomerMembershipState, CustomerView } from "../preview/customerView";
 import type { PreviewMember } from "../preview/previewData";
 import type { MemberCoffees } from "./coffeesApi";
+import type { HistoryCoffee } from "./historyApi";
 import type { Me, MembershipState } from "./customerApi";
 
 /*
@@ -13,8 +14,12 @@ import type { Me, MembershipState } from "./customerApi";
  * GET /me/coffees (memberCoffees.ts), today's coffee and the coffees of this
  * Athens month are real. They are used ONLY for the Athens day they belong
  * to: figures of another day (fetched before midnight, shown after it) are
- * unknown again («—») until the next answer. The coffee history itself is
- * not sent by the server, so it stays unavailable (historyData).
+ * unknown again («—») until the next answer.
+ *
+ * Owner decision D24 (round 9): with GET /me/history (memberHistory.ts) the
+ * «Ιστορικό» lists show the member's own last coffees (date, coffee and its
+ * preparation; never the staff note); without an answer they stay «δεν
+ * είναι ακόμη διαθέσιμο». The 7-day strip is never drawn from that short list.
  */
 
 const ATHENS = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Athens", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -61,7 +66,26 @@ function memberOf(me: Me): PreviewMember {
   };
 }
 
-export function toLiveView(me: Me, now: number, coffees: MemberCoffees | null = null): CustomerView {
+/**
+ * Milliseconds from `now` to (just after) the next Europe/Athens midnight: the first instant, to the second,
+ * whose Athens calendar date is no longer today's. DST days (23 or 25 hours) included; at least 1 s.
+ */
+export function msToNextAthensMidnight(now: number): number {
+  const today = athensParts(now).date;
+  let lo = now;
+  let hi = now + 26 * 3_600_000;
+  while (hi - lo > 1000) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    if (athensParts(mid).date === today) lo = mid;
+    else hi = mid;
+  }
+  // Midnights fall on whole seconds: the first whole second after `lo` that is no longer today.
+  let at = Math.floor(lo / 1000) * 1000 + 1000;
+  while (athensParts(at).date === today) at += 1000;
+  return Math.max(1000, at - now);
+}
+
+export function toLiveView(me: Me, now: number, coffees: MemberCoffees | null = null, history: HistoryCoffee[] | null = null): CustomerView {
   const today = athensParts(now);
   const known = coffees !== null && coffees.today === today.date;
   const until = me.paidUntilUtc === null ? null : athensParts(Date.parse(me.paidUntilUtc));
@@ -75,12 +99,12 @@ export function toLiveView(me: Me, now: number, coffees: MemberCoffees | null = 
     paidUntilTime: until?.time ?? null,
     daysLeft,
     visitsThisMonth: known ? coffees.thisMonth : 0,
-    history: [],
+    history: (history ?? []).map((h) => ({ date: h.businessDate, time: "", coffee: "espresso" as const, memberId: "me", label: h.coffee, details: h.details })),
     usual: null,
     minutesToMidnight: 24 * 60 - today.minutes,
     pendingRenewal: false,
     live: true,
     ...(known ? {} : { clubData: "unavailable" as const }),
-    historyData: "unavailable",
+    historyData: history === null ? "unavailable" : "recent",
   };
 }

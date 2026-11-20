@@ -17,7 +17,11 @@ import { CLUB_RULES, CUSTOMER, addDays, greekDate, memberHistory, type CoffeeCod
  */
 export type CustomerMembershipState = PreviewMembershipState | "cancelled" | "none" | "unverified";
 
-export type CustomerHistoryItem = PreviewRedemption & { preparation?: CoffeeOrder };
+/**
+ * D24 live app: `label` (the coffee as the till recorded it) and `details` (its preparation labels) replace the
+ * preview's code-based name and synthetic preparation; the live app never knows the time (`time` is "").
+ */
+export type CustomerHistoryItem = PreviewRedemption & { preparation?: CoffeeOrder; label?: string; details?: string[] };
 
 export type CustomerView = {
   member: PreviewMember;
@@ -49,8 +53,10 @@ export type CustomerView = {
   /**
    * D23 live app: today's coffee and this month's count are real (clubData absent), but the coffee history
    * is not sent by the server, so the history lists and the 7-day strip are not claimed either.
+   * D24 (round 9): "recent" = the member's own LAST coffees (at most 5) are real; the lists show them, but the
+   * 7-day strip and the per-month counts are not claimed (a short list cannot prove a day without coffee).
    */
-  historyData?: "unavailable";
+  historyData?: "unavailable" | "recent";
 };
 
 /** Journey/live actions; without them the approved buttons stay disabled. */

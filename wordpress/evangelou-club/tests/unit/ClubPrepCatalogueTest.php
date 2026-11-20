@@ -35,6 +35,13 @@ final class ClubPrepCatalogueTest extends TestCase {
         $this->assertSame('undecided', EVC_Club_Prep_Catalogue_Authority::document()['pricing_policy'], 'D-PRICING stays open');
     }
 
+    /** The till's tests (app/tests/staff) read this fixture: it must be byte-for-byte the shipped document. */
+    public function test_the_shared_fixture_is_the_shipped_document(): void {
+        $fixture = json_decode((string) file_get_contents(dirname(__DIR__) . '/fixtures/preparation/catalogue-approved-v2.json'), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame(EVC_Club_Prep_Catalogue_Authority::document(), $fixture);
+        $this->assertSame(EVC_Club_Prep_Catalogue_Authority::APPROVED_DIGESTS[2], EVC_Prep_Catalogue_Digest::of($fixture));
+    }
+
     public function test_the_seven_coffees_are_exactly_the_d3_list_with_the_same_labels(): void {
         $source = (string) file_get_contents(dirname(__DIR__, 2) . '/includes/staff/class-evc-redemption-catalogue-source.php');
         $this->assertSame(1, preg_match('/const ITEMS = array\((.*?)\);/s', $source, $m));
