@@ -1590,6 +1590,253 @@ final class PushTest extends EVC_WP_Test_Case {
 
     // ---- automatic notifications --------------------------------------------------------------------------------
 
+    // ---- round 16: the revision is compared; a refused cancel / takeover; a lock lost in every batch ends; starts first ---
+
+    /** The reviewer's probe RV-A: a stale runner writes the job after the holder read it; the holder's next save is refused. */
+    public function test_round16_a_write_by_a_stale_runner_refuses_the_holders_next_save_and_no_row_goes_twice(): void {
+        $this->subscribers(3);
+        $c = $this->parts['campaign'];
+        $this->assertSame('ok', $c->start(get_userdata($this->admin()), 'Τ', 'Κ', 'all', 0, 3)['result']);
+        $stale = array();
+        $this->on_request = function (int $n) use ($c, &$stale) {
+            if ($n !== 1) {
+                return;
+            }
+            // While the holder's message 1 is in flight, a stale runner (its lock check passed just before it lost the lock)
+            // sends row 2 and writes the job (still running, cursor past row 2) over the value the holder last wrote.
+            $seconds = $this->now_seconds;
+            $this->tick = 8.0; // one message, then the stale runner's time budget ends its batch
+            try {
+                $stale[] = $this->as_another_process(function () use ($c) {
+                    return $c->step();
+                });
+            } finally {
+                $this->tick = 0.0;
+                $this->now_seconds = $seconds;
+            }
+        };
+        $this->assertSame(EVC_Push_Campaign::NONE, $c->step(), 'the holder\'s save after message 1 is refused: another runner wrote the job');
+        $this->assertSame(array('running'), $stale);
+        $this->assertCount(2, $this->requests, 'the holder sent nothing after the refusal');
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame('running', $job['state']);
+        $this->assertSame((int) $this->rows()[1]['id'], (int) $job['cursor'], 'the newer cursor is kept, never put back');
+        $this->on_request = null;
+        $this->assertSame('done', $c->step());
+        $urls = array_column($this->requests, 'url');
+        $this->assertCount(3, $urls, 'three subscriptions, three messages');
+        $this->assertSame($urls, array_values(array_unique($urls)), 'no row was sent twice');
+        $this->assertSame(array('done', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
+    }
+
+    /** Round 16: the revision alone does not decide: another job, or an ended one, with the same revision is never overwritten. */
+    public function test_round16_the_job_id_and_the_running_state_are_still_compared_when_the_revision_matches(): void {
+        $this->subscribers(3);
+        $admin = get_userdata($this->admin());
+        $c = $this->parts['campaign'];
+        $c->start($admin, 'Τ', 'Κ', 'all', 0, 3);
+        global $wpdb;
+        $newer = array('id' => 'fedcba9876543210', 'state' => 'running', 'title' => 'Ν', 'body' => 'Ν', 'audience' => 'all', 'days' => 0, 'planned' => 0, 'user_id' => 1, 'user_login' => 'x', 'started' => time(), 'touched' => time(), 'cursor' => 0, 'steps' => 0, 'sent' => 0, 'failed' => 0, 'removed' => 0, 'skipped' => 0);
+        $this->on_request = function (int $n) use ($wpdb, $newer) {
+            if ($n === 1) {
+                // Another running job, stored with the very revision the batch holds.
+                $newer['rev'] = (int) EVC_Push_Campaign::fresh_job()['rev'];
+                $wpdb->update($wpdb->options, array('option_value' => maybe_serialize($newer)), array('option_name' => EVC_Push_Campaign::JOB_OPTION));
+            }
+        };
+        $this->assertSame('none', $c->step());
+        $this->assertCount(1, $this->requests);
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame('fedcba9876543210', $job['id'], 'the other job is left alone');
+        $this->assertSame(0, (int) $job['cursor']);
+        // The same job, ended by a write that kept its revision: never written back as running.
+        delete_option(EVC_Push_Campaign::JOB_OPTION);
+        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
+        $this->assertSame('ok', $c->start($admin, 'Τ', 'Κ', 'all', 0, 3)['result']);
+        $this->on_request = function (int $n) use ($wpdb) {
+            if ($n === 2) {
+                $job = EVC_Push_Campaign::fresh_job();
+                $job['state'] = 'cancelled';
+                $wpdb->update($wpdb->options, array('option_value' => maybe_serialize($job)), array('option_name' => EVC_Push_Campaign::JOB_OPTION));
+            }
+        };
+        $this->assertSame('none', $c->step());
+        $this->assertCount(2, $this->requests, 'not one message after the job ended');
+        $this->assertSame('cancelled', EVC_Push_Campaign::fresh_job()['state']);
+    }
+
+    public function test_round16_the_compare_and_replace_compares_the_stored_value_byte_for_byte(): void {
+        $this->subscribers(2);
+        $c = $this->parts['campaign'];
+        $c->start(get_userdata($this->admin()), 'Τ', 'Κ', 'all', 0, 2);
+        $login = (string) EVC_Push_Campaign::fresh_job()['user_login'];
+        $this->assertNotSame(strtoupper($login), $login);
+        global $wpdb;
+        $once = false;
+        $between = function ($query) use ($wpdb, $login, &$once) {
+            if (!$once && stripos($query, 'UPDATE') === 0 && strpos($query, EVC_Push_Campaign::JOB_OPTION) !== false) {
+                // Between the batch's read and its write another writer changes only the letter case of one value (same
+                // length, same revision): the table's case-insensitive collation would still call the two values equal.
+                $once = true;
+                $raw = EVC_Push_Campaign::fresh_raw(EVC_Push_Campaign::JOB_OPTION);
+                $wpdb->update($wpdb->options, array('option_value' => str_replace('"' . $login . '"', '"' . strtoupper($login) . '"', $raw)), array('option_name' => EVC_Push_Campaign::JOB_OPTION));
+            }
+            return $query;
+        };
+        add_filter('query', $between);
+        try {
+            $this->assertSame('none', $c->step(), 'the write matched nothing: the stored bytes had changed');
+        } finally {
+            remove_filter('query', $between);
+        }
+        $this->assertTrue($once);
+        $this->assertSame(array(), $this->requests, 'the first row\'s cursor was never saved, so it was never sent');
+        $this->assertSame(strtoupper($login), EVC_Push_Campaign::fresh_job()['user_login'], 'the other writer\'s value is kept');
+    }
+
+    /** Round 16 (L-b): RELEASE_LOCK at the first lock check of cancel() / of start()'s stale takeover. */
+    public function test_round16_a_cancel_or_a_takeover_whose_write_under_the_lock_is_refused_does_not_say_it_happened(): void {
+        $this->subscribers(2);
+        $admin = get_userdata($this->admin());
+        $c = $this->parts['campaign'];
+        $this->assertSame('ok', $c->start($admin, 'Τ', 'Κ', 'all', 0, 2)['result']);
+        $id = EVC_Push_Campaign::fresh_job()['id'];
+        global $wpdb;
+        $release_at_first_check = function () use ($wpdb) {
+            $checks = 0;
+            $inside = false;
+            return function ($query) use ($wpdb, &$checks, &$inside) {
+                if (!$inside && stripos($query, 'IS_USED_LOCK(') !== false && ++$checks === 1) {
+                    $inside = true;
+                    $wpdb->query($wpdb->prepare('SELECT RELEASE_LOCK(%s)', EVC_Push_Campaign::lock_name()));
+                    $inside = false;
+                }
+                return $query;
+            };
+        };
+        $drop = $release_at_first_check();
+        add_filter('query', $drop);
+        try {
+            $answer = $c->cancel($admin);
+        } finally {
+            remove_filter('query', $drop);
+        }
+        $this->assertSame(EVC_Push_Campaign::CANCEL_PENDING, $answer, 'not «stopped»: the write under the lock was refused');
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame('running', $job['state']);
+        $this->assertTrue(EVC_Push_Campaign::cancel_pending_for($job), 'the request stays recorded');
+        $this->assertSame(array('started'), array_column(EVC_Push_Campaign::audit(), 'event'));
+        $this->assertSame('cancelled', $c->step(), 'the next batch ends the job');
+        $this->assertSame(array(), $this->requests);
+        $this->assertSame(array('cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
+        // start(): a stale running job whose takeover is refused: nothing is created, and the answer says why.
+        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
+        $this->assertSame('ok', $c->start($admin, 'Τ', 'Κ', 'all', 0, 2)['result']);
+        $stale = EVC_Push_Campaign::fresh_job();
+        $stale['touched'] = time() - EVC_Push_Campaign::STALE_SECONDS - 1;
+        update_option(EVC_Push_Campaign::JOB_OPTION, $stale, false);
+        update_option(EVC_Push_Campaign::STARTS_OPTION, array(time() - 60));
+        $drop = $release_at_first_check();
+        add_filter('query', $drop);
+        try {
+            $result = $c->start($admin, 'Ν', 'Ν', 'all', 0, 2);
+        } finally {
+            remove_filter('query', $drop);
+        }
+        $this->assertSame(EVC_Push_Campaign::LOST_LOCK, $result['result'], 'stops at the refused takeover');
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame($stale['id'], $job['id'], 'the stale job was neither ended nor replaced');
+        $this->assertSame('running', $job['state']);
+        $this->assertCount(1, EVC_Push_Campaign::starts(), 'no start counted');
+        $this->assertSame(array('started', 'cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
+        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
+        $this->assertSame('ok', $c->start($admin, 'Ν', 'Ν', 'all', 0, 2)['result'], 'with the lock the takeover goes through');
+        $this->assertSame(array('started', 'stopped', 'started', 'cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
+        $this->assertNotSame($id, EVC_Push_Campaign::fresh_job()['id']);
+    }
+
+    /** The reviewer's probe RV-C: GET_LOCK grants the lock, but IS_USED_LOCK never equals CONNECTION_ID (LOST_LOCK always). */
+    public function test_round16_a_lock_lost_in_every_batch_ends_the_job_after_the_same_bound_and_cancel_can_end_it(): void {
+        $this->subscribers(3);
+        $admin = $this->admin();
+        wp_set_current_user($admin);
+        $c = $this->parts['campaign'];
+        $this->assertSame('ok', $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 3)['result']);
+        $id = EVC_Push_Campaign::fresh_job()['id'];
+        $never_mine = function ($query) {
+            return stripos($query, 'IS_USED_LOCK(') !== false ? 'SELECT 0' : $query;
+        };
+        $lost_crons = function (int $n, string $job_id) use ($c, $never_mine) {
+            add_filter('query', $never_mine);
+            try {
+                for ($i = 0; $i < $n; $i++) {
+                    $this->pop_batch_event($job_id);
+                    $c->cron($job_id);
+                }
+            } finally {
+                remove_filter('query', $never_mine);
+            }
+        };
+        $lost_crons(EVC_Push_Campaign::NO_LOCK_TRIES - 1, $id);
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame('running', $job['state']);
+        $this->assertSame(EVC_Push_Campaign::NO_LOCK_TRIES - 1, EVC_Push_Campaign::no_lock_count($job), 'each lost-lock batch counts');
+        $this->assertNotFalse(wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($id)));
+        $this->assertStringContainsString(EVC_Push_Admin_Page::NO_LOCK_NOTICES['stuck'], EVC_Push_Admin_Page::club_notice_html());
+        $lost_crons(1, $id);
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame('stopped', $job['state'], 'bounded: the same NO_LOCK_TRIES');
+        $this->assertSame(EVC_Push_Campaign::REASON_NO_LOCK, $job['reason']);
+        $this->assertSame('', $job['title']);
+        $this->assertFalse(wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($id)), 'no further batch');
+        $this->assertStringContainsString(EVC_Push_Admin_Page::NO_LOCK_NOTICES['stopped'], EVC_Push_Admin_Page::club_notice_html());
+        $audit = EVC_Push_Campaign::audit();
+        $this->assertSame(array('stopped', 'started'), array_column($audit, 'event'));
+        $this->assertSame(EVC_Push_Campaign::REASON_NO_LOCK, $audit[0]['reason']);
+        $this->assertSame(array(), $this->requests, 'nothing was sent without a usable lock');
+        // «Διακοπή αποστολής» on such a job: its write under the lock is refused, so the lock-free conditional stop ends it.
+        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
+        $this->assertSame('ok', $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 3)['result']);
+        $second = EVC_Push_Campaign::fresh_job()['id'];
+        $lost_crons(1, $second);
+        add_filter('query', $never_mine);
+        try {
+            $answer = $c->cancel(get_userdata($admin));
+        } finally {
+            remove_filter('query', $never_mine);
+        }
+        $this->assertSame(EVC_Push_Campaign::OK, $answer, 'ended now, not left pending for a batch that never keeps the lock');
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame($second, $job['id']);
+        $this->assertSame('cancelled', $job['state']);
+        $this->assertSame($admin, (int) $job['cancelled_by']);
+        $this->assertSame('', $job['title']);
+        $this->assertFalse(wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($second)));
+        $this->assertSame('cancelled', EVC_Push_Campaign::audit()[0]['event']);
+        $this->assertSame(array(), $this->requests);
+    }
+
+    public function test_round16_a_start_is_counted_before_its_job_is_written(): void {
+        $this->subscribers(1);
+        $admin = get_userdata($this->admin());
+        $c = $this->parts['campaign'];
+        $fail = function () {
+            throw new RuntimeException('the job write fails');
+        };
+        add_filter('pre_update_option_' . EVC_Push_Campaign::JOB_OPTION, $fail);
+        try {
+            $c->start($admin, 'Τ', 'Κ', 'all', 0, 1);
+            $this->fail('the job write was expected to fail');
+        } catch (RuntimeException $e) {
+            $this->assertSame('the job write fails', $e->getMessage());
+        } finally {
+            remove_filter('pre_update_option_' . EVC_Push_Campaign::JOB_OPTION, $fail);
+        }
+        $this->assertNull(EVC_Push_Campaign::fresh_job(), 'no job');
+        $this->assertCount(1, EVC_Push_Campaign::starts(), 'the start is counted although its job was never written');
+        $this->assertSame('rate_limited', $c->start($admin, 'Τ', 'Κ', 'all', 0, 1)['result']);
+    }
+
     public function test_the_activated_notification_goes_once_per_paid_period_to_an_active_member_only(): void {
         $user = $this->customer();
         $this->member($user);

@@ -1602,6 +1602,8 @@ function pwaSelfTest() {
 //    hostname, href, … as a snake_case / camelCase part; $ghost or $security do not), and property arguments count:
 //    file_get_contents($this->url) elsewhere, error_log($this->endpoint) in a push file. Round 15 (nit): a method call
 //    ($this->url(), $o?->endpoint()) is not a property argument, for URLs exactly as for secrets.
+//    Round 16: no rule changed: the campaign's byte-wise compare-and-replace (BINARY option_value) and its revision check
+//    are plain $wpdb calls in a push file (no HTTP, no URL-capable function, no endpoint or key in any output).
 //    LIMITS — these guards are ACCIDENT PREVENTION, NOT AN ANTI-EVASION BOUNDARY. They read tokens of each shipped file
 //    on its own; they do not follow data. Code written to evade them (names built by string concatenation outside the
 //    push files, variable variables, include of generated files, callbacks handed to WordPress or to a third-party

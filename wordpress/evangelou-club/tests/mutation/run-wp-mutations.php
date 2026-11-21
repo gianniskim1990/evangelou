@@ -2158,15 +2158,17 @@ $mutants = array(
     // finish() is refused as well: equivalent, it only stops later).
     array('PN65-job-write-ignores-the-job-id', 'push', 'includes/push/class-evc-push-campaign.php',
         '        if (!is_array($fresh) || (string) ($fresh[\'id\'] ?? \'\') !== (string) ($job[\'id\'] ?? \'\')) {', '        if (!is_array($fresh)) {',
-        array('PushTest::test_round15_a_job_replaced_meanwhile_is_never_overwritten')),
+        // Round 16: re-pointed: the revision check now also refuses the round-15 scenario; here the revision matches.
+        array('PushTest::test_round16_the_job_id_and_the_running_state_are_still_compared_when_the_revision_matches')),
     array('PN66-job-write-ignores-the-ended-state', 'push', 'includes/push/class-evc-push-campaign.php',
         '        if (($fresh[\'state\'] ?? \'\') !== \'running\') {
             return false;
         }
 ', '',
-        array('PushTest::test_round15_a_job_ended_without_the_lock_is_never_written_back_by_the_batch')),
+        // Round 16: re-pointed (as PN65).
+        array('PushTest::test_round16_the_job_id_and_the_running_state_are_still_compared_when_the_revision_matches')),
     array('PN67-job-write-without-compare', 'push', 'includes/push/class-evc-push-campaign.php',
-        'WHERE option_name = %s AND option_value = %s", $new, $name, $expected));', 'WHERE option_name = %s AND %s IS NOT NULL", $new, $name, $expected));',
+        'WHERE option_name = %s AND BINARY option_value = %s", $new, $name, $expected));', 'WHERE option_name = %s AND %s IS NOT NULL", $new, $name, $expected));',
         array('PushTest::test_round15_the_job_write_compares_and_replaces_in_one_statement')),
     array('PN68-cursor-saved-only-after-the-send', 'push', 'includes/push/class-evc-push-campaign.php',
         '            $job[\'touched\'] = time();
@@ -2181,9 +2183,11 @@ $mutants = array(
     array('PN70-no-lock-retried-for-ever', 'push', 'includes/push/class-evc-push-campaign.php',
         '        if ($count < self::NO_LOCK_TRIES) {', '        if (true) {',
         array('PushTest::test_round15_cron_stops_a_job_that_never_gets_a_named_lock_and_the_club_pages_say_so')),
+    // Round 16: re-pointed: the run is ended after a batch that got the lock and did not lose it (step()).
     array('PN71-no-lock-count-not-reset-by-a-locked-batch', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        // Round 15 (L1): a batch that got the lock ends a run of batches without one.
-        delete_option(self::NO_LOCK_OPTION);
+        '            if ($result !== self::LOST_LOCK) {
+                delete_option(self::NO_LOCK_OPTION);
+            }
 ', '',
         array('PushTest::test_round15_cron_stops_a_job_that_never_gets_a_named_lock_and_the_club_pages_say_so')),
     array('PN72-club-notice-missing', 'push', 'includes/push/class-evc-push-admin-page.php',
@@ -2194,12 +2198,13 @@ $mutants = array(
     array('PN73-club-notice-on-every-page', 'push', 'includes/push/class-evc-push-admin-page.php',
         '        if (strpos($page, self::PARENT_SLUG) !== 0 || !self::may_send(wp_get_current_user())) {', '        if (!self::may_send(wp_get_current_user())) {',
         array('PushTest::test_round15_cron_stops_a_job_that_never_gets_a_named_lock_and_the_club_pages_say_so')),
+    // Round 16: re-pointed: the lock-free stop of a cancel moved into cancel_without_lock() (same intent).
     array('PN74-cancel-without-any-lock-only-recorded', 'push', 'includes/push/class-evc-push-campaign.php',
-        '            if ($this->finish($job, self::CANCELLED, false)) {
-                return self::OK;
-            }', '            if (false) {
-                return self::OK;
-            }',
+        '        if ($this->finish($job, self::CANCELLED, false)) {
+            return self::OK;
+        }', '        if (false) {
+            return self::OK;
+        }',
         array('PushTest::test_round13_without_a_named_lock_nothing_is_sent_and_the_page_says_why')),
     array('PN75-page-continues-after-repeated-lost-locks', 'push', 'includes/push/class-evc-push-admin-page.php',
         '$running && !$no_lock && $lost < self::LOST_LOCK_STOP, $lost);', '$running && !$no_lock, $lost);',
@@ -2230,6 +2235,50 @@ $mutants = array(
     array('PN83-starts-not-capped', 'push', 'includes/push/class-evc-push-campaign.php',
         '        return array_slice($starts, 0, self::STARTS_KEEP);', '        return $starts;',
         array('PushTest::test_round15_the_audit_merges_the_stores_newest_first_and_the_rate_limit_keeps_the_newest_starts')),
+    // STAGE-08 round 16 (round-15 review: L-a revision compared, L-b refused cancel / takeover, L-c LOST_LOCK bounded, nit).
+    // Not a mutant: save_running_job() taking the job by value again (every batch's second save is then refused: it breaks
+    // nearly every push test, not a subtle survivor).
+    array('PN84-job-write-ignores-the-revision', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if ((int) ($fresh[\'rev\'] ?? 0) !== (int) ($job[\'rev\'] ?? 0)) {
+            return false;
+        }
+', '',
+        array('PushTest::test_round16_a_write_by_a_stale_runner_refuses_the_holders_next_save_and_no_row_goes_twice')),
+    array('PN85-compare-and-replace-by-collation', 'push', 'includes/push/class-evc-push-campaign.php',
+        'AND BINARY option_value = %s"', 'AND option_value = %s"',
+        array('PushTest::test_round16_the_compare_and_replace_compares_the_stored_value_byte_for_byte')),
+    array('PN86-refused-cancel-reads-as-stopped', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            if ($this->finish($job, self::CANCELLED)) {
+                return self::OK;
+            }
+            // Round 16 (L-c)', '            $this->finish($job, self::CANCELLED);
+            return self::OK;
+            // Round 16 (L-c)',
+        array('PushTest::test_round16_a_cancel_or_a_takeover_whose_write_under_the_lock_is_refused_does_not_say_it_happened')),
+    array('PN87-refused-takeover-ignored', 'push', 'includes/push/class-evc-push-campaign.php',
+        '                if (!$this->finish($job, \'stopped\')) {', '                if (!$this->finish($job, \'stopped\') && false) {',
+        array('PushTest::test_round16_a_cancel_or_a_takeover_whose_write_under_the_lock_is_refused_does_not_say_it_happened')),
+    array('PN88-cancel-lock-free-without-the-count', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            if (!self::holds_lock(self::lock_name()) && self::no_lock_count($job) > 0) {', '            if (!self::holds_lock(self::lock_name())) {',
+        array('PushTest::test_round16_a_cancel_or_a_takeover_whose_write_under_the_lock_is_refused_does_not_say_it_happened')),
+    array('PN89-lost-lock-not-counted', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if ($result === self::NO_LOCK || $result === self::LOST_LOCK) {
+            $this->no_lock_seen();', '        if ($result === self::NO_LOCK) {
+            $this->no_lock_seen();',
+        array('PushTest::test_round16_a_lock_lost_in_every_batch_ends_the_job_after_the_same_bound_and_cancel_can_end_it')),
+    array('PN90-lost-lock-batch-resets-the-count', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            if ($result !== self::LOST_LOCK) {
+                delete_option(self::NO_LOCK_OPTION);', '            if (true) {
+                delete_option(self::NO_LOCK_OPTION);',
+        array('PushTest::test_round16_a_lock_lost_in_every_batch_ends_the_job_after_the_same_bound_and_cancel_can_end_it')),
+    array('PN91-cancel-of-a-lost-lock-job-left-pending', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            if (!self::holds_lock(self::lock_name()) && self::no_lock_count($job) > 0) {', '            if (false) {',
+        array('PushTest::test_round16_a_lock_lost_in_every_batch_ends_the_job_after_the_same_bound_and_cancel_can_end_it')),
+    array('PN92-start-counted-after-the-job', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            update_option(self::STARTS_OPTION, array_slice(array_merge(array($now), self::starts()), 0, self::STARTS_KEEP), false);
+            update_option(self::JOB_OPTION, $job, false);', '            update_option(self::JOB_OPTION, $job, false);
+            update_option(self::STARTS_OPTION, array_slice(array_merge(array($now), self::starts()), 0, self::STARTS_KEEP), false);',
+        array('PushTest::test_round16_a_start_is_counted_before_its_job_is_written')),
     array('AT43-mismatched-vapid-pair-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
         '        if ($problem !== null) {
             return self::row(\'push_vapid\'', '        if (false) {

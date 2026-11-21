@@ -187,6 +187,24 @@ Round 15:
 - **The daily expiry run** writes its position and counts only while holding its lock, and only over the value it read
   or last wrote (compare-and-replace); a runner that lost the lock never overwrites another runner's position.
 
+Round 16:
+
+- **The job's revision is compared too.** A write of the job now also requires the stored revision to be the one this
+  runner read or last wrote, and the new revision is handed back to the runner. So if anyone else wrote the job in
+  between (for example a runner whose lock check passed just before it lost the lock), this runner's next write is
+  refused and it stops; it never puts an older cursor back, so no subscription gets the message twice. The
+  compare-and-replace compares the stored value byte for byte (`BINARY option_value = …`; the options table's collation
+  ignores letter case).
+- **A refused «Διακοπή αποστολής» or takeover is not reported as done.** If the stop's write under the lock is refused,
+  the page says the stop is pending (the request stays recorded and the next batch ends the send). A new send that
+  finds a stale running send and cannot end it creates nothing and says why.
+- **A lock that is lost in every batch also ends.** Some database proxies grant the lock but answer the «does this
+  connection hold it» check differently every time, so every batch stops at once (nothing is sent). Such batches now
+  count like batches without any lock: after the same 10 in a row the send is stopped (reason `no_lock`, the same notice
+  on the Club pages). «Διακοπή αποστολής» on such a send ends it at once by the same conditional write without the lock.
+- **A start is counted first.** The start time is stored for the rate limit before the send is written, so a failure in
+  between can only leave a counted start without a send, never a send that the rate limit did not count.
+
 ## Security notes
 
 - SSRF: only `https://` + exactly `fcm.googleapis.com`, `web.push.apple.com`, `updates.push.services.mozilla.com` or

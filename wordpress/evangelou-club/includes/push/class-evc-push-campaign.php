@@ -55,6 +55,22 @@ defined('ABSPATH') || exit;
  *     was stopped for this reason (EVC_Push_Admin_Page::club_notice()).
  *   - L2: LOST_LOCK is handled like BUSY: the next WP-Cron batch comes RETRY_SECONDS later, not at once.
  *
+ * Round 16 (review of round 15):
+ *   - L-a: save_running_job() takes the job BY REFERENCE and hands the new revision ('rev') back to the caller, and the
+ *     conditional write also requires the stored revision to be the one this runner last wrote (or read). So a write by
+ *     anyone else in between (e.g. a stale runner whose lock check passed just before it lost the lock) refuses this
+ *     runner's next save: it never puts an older cursor back, so no row is sent twice. The compare-and-replace compares
+ *     the stored value byte for byte (BINARY option_value = …; the options table's collation ignores letter case).
+ *   - L-b: cancel() holding the lock answers CANCEL_PENDING when its write was refused (the request stays recorded; the
+ *     next batch ends the job), never OK; start() does not go on after a refused stale takeover (LOST_LOCK or BUSY).
+ *   - L-c: a batch that got the named lock but lost it (LOST_LOCK, e.g. IS_USED_LOCK never equals CONNECTION_ID on a
+ *     proxy that spreads queries over several connections) counts in the same NO_LOCK_OPTION counter as a batch without
+ *     any lock; only a batch that did NOT lose the lock clears it. So such a job is stopped after the same NO_LOCK_TRIES
+ *     (reason 'no_lock', the same notice), and cancel() ends it with the lock-free conditional stop when its own write
+ *     under the lock is refused because the lock is gone while the counter shows batches in a row without a usable lock.
+ *   - start() stores the start time (STARTS_OPTION) BEFORE it writes the job: a failure in between leaves a counted start
+ *     without a job (stricter), never a job whose send the rate limit did not count.
+ *
  * Rate limit: at most MAX_PER_DAY started sends in any 24 hours and at least MIN_INTERVAL seconds between two, counted
  * from their own small store (STARTS_OPTION, the newest STARTS_KEEP start times, written under the lock), not from the
  * audit (automatic notifications add audit entries and could push the starts out of its AUDIT_KEEP entries). Round 14:
@@ -90,7 +106,10 @@ final class EVC_Push_Campaign {
     const LOCK_TIMEOUT = 0;
     /** Round 14: a WP-Cron batch that found the lock busy (or missing) comes back this many seconds later. */
     const RETRY_SECONDS = 60;
-    /** Round 15 (L1): consecutive WP-Cron batches without a named lock for the running job: '<job id>:<count>'. */
+    /**
+     * Round 15 (L1): consecutive WP-Cron batches without a named lock for the running job: '<job id>:<count>'. Round 16
+     * (L-c): batches that lost the lock (LOST_LOCK) count here too.
+     */
     const NO_LOCK_OPTION = 'evc_club_push_no_lock';
     /** Round 15 (L1): after this many WP-Cron batches in a row without a named lock the job is stopped (about 10 minutes). */
     const NO_LOCK_TRIES = 10;
@@ -345,7 +364,10 @@ final class EVC_Push_Campaign {
                 if ($now - (int) ($job['touched'] ?? 0) < self::STALE_SECONDS) {
                     return array('result' => self::BUSY);
                 }
-                $this->finish($job, 'stopped');
+                // Round 16 (L-b): a refused takeover (the lock is gone, or the job changed meanwhile) creates nothing.
+                if (!$this->finish($job, 'stopped')) {
+                    return array('result' => self::holds_lock(self::lock_name()) ? self::BUSY : self::LOST_LOCK);
+                }
             }
             $wait = self::wait_seconds($now);
             if ($wait > 0) {
@@ -363,6 +385,7 @@ final class EVC_Push_Campaign {
                 'user_login' => (string) $user->user_login,
                 'started' => $now,
                 'touched' => $now,
+                'rev' => 0,
                 'cursor' => 0,
                 'steps' => 0,
                 'sent' => 0,
@@ -374,10 +397,11 @@ final class EVC_Push_Campaign {
             if (!self::holds_lock(self::lock_name())) {
                 return array('result' => self::LOST_LOCK);
             }
+            // Round 16 (nit): the start is counted BEFORE the job exists, so a failure in between never leaves an uncounted send.
+            update_option(self::STARTS_OPTION, array_slice(array_merge(array($now), self::starts()), 0, self::STARTS_KEEP), false);
             update_option(self::JOB_OPTION, $job, false);
             delete_option(self::CANCEL_OPTION);
             delete_option(self::NO_LOCK_OPTION);
-            update_option(self::STARTS_OPTION, array_slice(array_merge(array($now), self::starts()), 0, self::STARTS_KEEP), false);
             $this->record('started', $job);
             return array('result' => self::OK);
         } finally {
@@ -394,6 +418,8 @@ final class EVC_Push_Campaign {
      * Round 15 (L1): with NO named lock at all (GET_LOCK NULL or failing) the job is ended here by the conditional write
      * (same job id, still running; no lock needed, it can only end that job), instead of waiting for a batch that may never
      * get a lock.
+     * Round 16: with the lock, a refused write answers CANCEL_PENDING (L-b), unless the lock is gone AND WP-Cron batches have
+     * already been counted in a row without a usable lock (L-c): then the same lock-free conditional stop ends it.
      */
     public function cancel(WP_User $user): string {
         $job = self::fresh_job();
@@ -404,15 +430,7 @@ final class EVC_Push_Campaign {
         $lock = self::acquire_lock(self::lock_name());
         if ($lock === null) {
             $job['cancelled_by'] = (int) $user->ID;
-            if ($this->finish($job, self::CANCELLED, false)) {
-                return self::OK;
-            }
-            $now = self::fresh_job();
-            if ($now === null || ($now['state'] ?? '') === 'running') {
-                return $now === null ? self::NONE : self::CANCEL_PENDING;
-            }
-            delete_option(self::CANCEL_OPTION);
-            return ($now['state'] ?? '') === self::CANCELLED ? self::OK : self::DONE_BEFORE_CANCEL;
+            return $this->cancel_without_lock($job);
         }
         if ($lock !== true) {
             return self::CANCEL_PENDING;
@@ -428,11 +446,34 @@ final class EVC_Push_Campaign {
                 return ($job['state'] ?? '') === self::CANCELLED ? self::OK : self::DONE_BEFORE_CANCEL;
             }
             $job['cancelled_by'] = (int) $user->ID;
-            $this->finish($job, self::CANCELLED);
-            return self::OK;
+            if ($this->finish($job, self::CANCELLED)) {
+                return self::OK;
+            }
+            // Round 16 (L-c): the lock is gone and batches keep finding no usable lock: nothing would ever end the job.
+            if (!self::holds_lock(self::lock_name()) && self::no_lock_count($job) > 0) {
+                return $this->cancel_without_lock($job);
+            }
+            // Round 16 (L-b): not stopped here; the request stays recorded and the next batch ends the job.
+            return self::CANCEL_PENDING;
         } finally {
             self::release_lock(self::lock_name());
         }
+    }
+
+    /**
+     * Round 15 (L1) / round 16 (L-c): the lock-free stop of a cancel: the conditional write can only end this same, still
+     * running job. @return string OK | CANCEL_PENDING (still running: a batch ends it) | DONE_BEFORE_CANCEL | NONE
+     */
+    private function cancel_without_lock(array $job): string {
+        if ($this->finish($job, self::CANCELLED, false)) {
+            return self::OK;
+        }
+        $now = self::fresh_job();
+        if ($now === null || ($now['state'] ?? '') === 'running') {
+            return $now === null ? self::NONE : self::CANCEL_PENDING;
+        }
+        delete_option(self::CANCEL_OPTION);
+        return ($now['state'] ?? '') === self::CANCELLED ? self::OK : self::DONE_BEFORE_CANCEL;
     }
 
     /**
@@ -464,6 +505,11 @@ final class EVC_Push_Campaign {
         $result = null;
         try {
             $result = $this->step_locked();
+            // Round 15 (L1) / round 16 (L-c): a batch that got the lock AND kept it ends a run of batches without a usable
+            // lock; a batch that lost it (LOST_LOCK) counts like one without any lock (cron()).
+            if ($result !== self::LOST_LOCK) {
+                delete_option(self::NO_LOCK_OPTION);
+            }
             return $result;
         } finally {
             self::release_lock(self::lock_name());
@@ -475,8 +521,6 @@ final class EVC_Push_Campaign {
 
     /** step() while holding the campaign lock. */
     private function step_locked(): string {
-        // Round 15 (L1): a batch that got the lock ends a run of batches without one.
-        delete_option(self::NO_LOCK_OPTION);
         $job = self::fresh_job();
         if ($job === null || ($job['state'] ?? '') !== 'running') {
             return self::NONE;
@@ -539,12 +583,15 @@ final class EVC_Push_Campaign {
     /**
      * Round 15 (M1): the ONLY writer of a running job. Writes $job only if
      *   (1) $locked: this request's connection still holds the campaign lock (checked right before the write), and
-     *   (2) the database still holds a RUNNING job with the same id: read straight from the database and replaced in one
-     *       statement (UPDATE … WHERE option_value = the value just read), so nothing written in between is overwritten.
-     * $locked = false only for the lock-free stops (no named lock at all, L1): they can only END that same running job.
-     * @return bool false = nothing written (the lock is gone, or the job ended / was replaced meanwhile)
+     *   (2) the database still holds a RUNNING job with the same id AND the same revision as $job (round 16, L-a: the one
+     *       this runner read or last wrote; anyone else's write in between refuses this one): read straight from the
+     *       database and replaced in one statement (UPDATE … WHERE BINARY option_value = the value just read).
+     * $job is passed by reference: after a write that went through it carries the new revision (round 16, L-a); after a
+     * refusal it is unchanged.
+     * $locked = false only for the lock-free stops (no usable named lock, L1 / L-c): they can only END that same running job.
+     * @return bool false = nothing written (the lock is gone, or the job ended / was replaced / was written by another meanwhile)
      */
-    private static function save_running_job(array $job, bool $locked = true): bool {
+    private static function save_running_job(array &$job, bool $locked = true): bool {
         if ($locked && !self::holds_lock(self::lock_name())) {
             return false;
         }
@@ -556,9 +603,18 @@ final class EVC_Push_Campaign {
         if (($fresh['state'] ?? '') !== 'running') {
             return false;
         }
+        // Round 16 (L-a): the stored revision must still be the one this runner holds.
+        if ((int) ($fresh['rev'] ?? 0) !== (int) ($job['rev'] ?? 0)) {
+            return false;
+        }
         // A revision number: every write changes the stored value (a compare-and-replace never matches an older one).
-        $job['rev'] = (int) ($fresh['rev'] ?? 0) + 1;
-        return self::replace_option(self::JOB_OPTION, $raw, maybe_serialize($job));
+        $next = $job;
+        $next['rev'] = (int) ($fresh['rev'] ?? 0) + 1;
+        if (!self::replace_option(self::JOB_OPTION, $raw, maybe_serialize($next))) {
+            return false;
+        }
+        $job = $next;
+        return true;
     }
 
     /** Round 15: why a job write was refused: the lock is gone (LOST_LOCK) or the job is no longer this running one (NONE). */
@@ -576,7 +632,7 @@ final class EVC_Push_Campaign {
 
     /**
      * Round 15: compare and replace in ONE statement: the option becomes $new only if it still holds exactly $expected
-     * (null = only if it does not exist yet). The same value again counts as written. @return bool true = written
+     * (null = only if it does not exist yet; round 16: compared byte for byte, BINARY, not by the table's collation). The same value again counts as written. @return bool true = written
      */
     public static function replace_option(string $name, ?string $expected, string $new): bool {
         global $wpdb;
@@ -586,7 +642,7 @@ final class EVC_Push_Campaign {
         if ($expected === null) {
             $changed = $wpdb->query($wpdb->prepare("INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", $name, $new));
         } else {
-            $changed = $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $new, $name, $expected));
+            $changed = $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND BINARY option_value = %s", $new, $name, $expected));
         }
         wp_cache_delete($name, 'options');
         wp_cache_delete('notoptions', 'options');
@@ -714,7 +770,8 @@ final class EVC_Push_Campaign {
      */
     public function cron($job_id = null): void {
         $result = $this->step();
-        if ($result === self::NO_LOCK) {
+        // Round 16 (L-c): a batch that lost the lock counts like one that got none (the same bound ends the job).
+        if ($result === self::NO_LOCK || $result === self::LOST_LOCK) {
             $this->no_lock_seen();
         }
         // Round 15 (L2): a lost lock is retried like a busy one.
@@ -724,8 +781,9 @@ final class EVC_Push_Campaign {
     }
 
     /**
-     * Round 15 (L1): one more WP-Cron batch without a named lock for the running job. At NO_LOCK_TRIES in a row the job is
-     * stopped (reason 'no_lock') by the lock-free conditional write: it only ends that same, still running job.
+     * Round 15 (L1): one more WP-Cron batch without a named lock for the running job (round 16, L-c: or one that lost it).
+     * At NO_LOCK_TRIES in a row the job is stopped (reason 'no_lock') by the lock-free conditional write: it only ends that
+     * same, still running job.
      */
     private function no_lock_seen(): void {
         $job = self::fresh_job();
