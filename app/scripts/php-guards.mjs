@@ -1598,6 +1598,9 @@ function pwaSelfTest() {
 //      Reflection* class and Closure::fromCallable;
 //    - the sender's real request (EVC_Push_Sender::post) called or named as a callable (static call, 'EVC_Push_Sender::post',
 //      array('EVC_Push_Sender', 'post'), array(EVC_Push_Sender::class, 'post')) outside the sender.
+//    Round 14 (review f): a variable "looks like a URL" only by a whole word of its name (url, uri, endpoint, host,
+//    hostname, href, … as a snake_case / camelCase part; $ghost or $security do not), and property arguments count:
+//    file_get_contents($this->url) elsewhere, error_log($this->endpoint) in a push file.
 //    LIMITS — these guards are ACCIDENT PREVENTION, NOT AN ANTI-EVASION BOUNDARY. They read tokens of each shipped file
 //    on its own; they do not follow data. Code written to evade them (names built by string concatenation outside the
 //    push files, variable variables, include of generated files, callbacks handed to WordPress or to a third-party
@@ -1637,12 +1640,22 @@ const PUSH_URL_IO = ["file_get_contents", "fopen", "file", "readfile", "copy", "
 const PUSH_ALWAYS_NETWORK = ["get_headers", "get_meta_tags", "stream_context_create", "socket_connect"];
 const PUSH_URL_FILE = ["file_get_contents", "fopen", "file", "readfile", "copy", "simplexml_load_file", "getimagesize", "md5_file", "sha1_file", "hash_file"];
 const PUSH_DYNAMIC_CALLS = ["call_user_func", "call_user_func_array", "forward_static_call", "forward_static_call_array", "eval"];
-const looksLikeUrl = (t) => (t.t === "str" && /^[a-z][a-z0-9+.-]*:\/\//i.test(t.v) && !/^php:\/\//i.test(t.v)) || (t.t === "var" && /url|uri|endpoint|host/i.test(t.v));
+// Round 14 (review f): a name looks like a URL only by a whole word of it (snake_case / camelCase parts), so $ghost,
+// $security or $posthost_count no longer match; and a property argument ($this->url, $o?->endpoint) is read as well.
+const URL_WORDS = new Set(["url", "urls", "uri", "uris", "endpoint", "endpoints", "host", "hosts", "hostname", "href"]);
+const nameWords = (name) => name.replace(/^\$/, "").replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+const urlName = (name) => nameWords(name).some((w) => URL_WORDS.has(w));
+const looksLikeUrl = (t, i, args) => (t.t === "str" && /^[a-z][a-z0-9+.-]*:\/\//i.test(t.v) && !/^php:\/\//i.test(t.v))
+  || (t.t === "var" && urlName(t.v))
+  || (t.t === "id" && (args?.[i - 1]?.v === "->" || args?.[i - 1]?.v === "?->") && urlName(t.v));
 const PUSH_HTTP = ["wp_remote_post", "wp_remote_get", "wp_remote_request", "wp_remote_head", "wp_safe_remote_post", "wp_safe_remote_get", "wp_safe_remote_request", "wp_safe_remote_head", "curl_init", "curl_exec", "curl_multi_exec", "fsockopen", "pfsockopen", "stream_socket_client", "wp_http", "requests", "_wp_http_get_object", "download_url"];
 const PUSH_LOG = ["error_log", "print_r", "var_export", "var_dump", "trigger_error", "user_error", "syslog", "file_put_contents", "fwrite", "fputs", "printf", "vprintf", "wp_die", "wp_mail", "set_transient", "update_option", "add_option", "update_user_meta", "do_action", "apply_filters"];
 const PUSH_SECRET_VAR = /endpoint|p256dh|auth|private|secret|subscription|^\$row$|payload|^\$keys?$|sending|^\$body$|^\$json$/i;
 function carriesPushSecret(args) {
-  return args.some((t, i) => (t.t === "var" && PUSH_SECRET_VAR.test(t.v)) || (t.t === "str" && ["endpoint", "p256dh", "auth", "private", "keys"].includes(t.v.toLowerCase()) && args[i - 1]?.v === "["));
+  // Round 14 (review f): a property ($this->endpoint, $s?->keys) counts like the variable of that name.
+  return args.some((t, i) => (t.t === "var" && PUSH_SECRET_VAR.test(t.v))
+    || (t.t === "id" && (args[i - 1]?.v === "->" || args[i - 1]?.v === "?->") && args[i + 1]?.v !== "(" && PUSH_SECRET_VAR.test("$" + t.v))
+    || (t.t === "str" && ["endpoint", "p256dh", "auth", "private", "keys"].includes(t.v.toLowerCase()) && args[i - 1]?.v === "["));
 }
 
 export function pushProblemsFor(path, src, rules = PUSH_RULES) {
@@ -1769,6 +1782,19 @@ function pushSelfTest() {
   expect("r13 the sender's post as a callable array", "includes/push/class-evc-push-plugin.php", "<?php\n$h = array('EVC_Push_Sender', 'post');", true);
   expect("r13 the sender's post as ::class callable", C, "<?php\n$h = array(EVC_Push_Sender::class, 'post');", true);
   expect("r13 the sender's post as a string", "includes/push/class-evc-push-auto.php", "<?php\n$h = 'EVC_Push_Sender::post';", true);
+  // round 14 (review f)
+  expect("r14 a ghost is not a host", "includes/customer/x.php", "<?php\n$x = file_get_contents($ghost);", false);
+  expect("r14 security is not a uri", "includes/customer/x.php", "<?php\n$x = file_get_contents($security_file);", false);
+  expect("r14 a word inside a word is not a host", "includes/customer/x.php", "<?php\n$x = file($posthost_count);", false);
+  expect("r14 a host variable is", "includes/customer/x.php", "<?php\n$x = file_get_contents($push_host);", true);
+  expect("r14 a camelCase URL variable is", "includes/customer/x.php", "<?php\n$x = file_get_contents($remoteUrl);", true);
+  expect("r14 file($this->url) elsewhere", "includes/customer/x.php", "<?php\n$x = file($this->url);", true);
+  expect("r14 fopen($o?->endpoint) elsewhere", "includes/x.php", "<?php\n$h = fopen($o?->endpoint, 'r');", true);
+  expect("r14 file($this->script_file) elsewhere is fine", "includes/customer/x.php", "<?php\n$x = file($this->script_file);", false);
+  expect("r14 file($this->url) in a push file", "includes/push/class-evc-push-backend.php", "<?php\n$x = file($this->url);", true);
+  expect("r14 a property endpoint logged in a push file", "includes/push/class-evc-push-backend.php", "<?php\nerror_log('x ' . $this->endpoint);", true);
+  expect("r14 a property key logged in a push file", R.senderFile, "<?php\nerror_log(print_r($this->keys, true));", true);
+  expect("r14 a fixed reason through a property call is fine", "includes/push/class-evc-push-backend.php", "<?php\nerror_log('Evangelou Club: push unavailable (' . $this->reason() . ').');", false);
   expect("r13 the sender names its own post", R.senderFile, "<?php\n$this->http = $http ?? array(__CLASS__, 'post');", false);
   expect("r13 the sender's constants elsewhere", C, "<?php\nif ($o === EVC_Push_Sender::SENT) { }", false);
   return bad;

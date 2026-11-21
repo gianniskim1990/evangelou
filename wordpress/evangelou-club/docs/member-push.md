@@ -131,6 +131,35 @@ Round 13:
 - **Rate limit store:** the 15-minute / 4-a-day limit is counted from its own option (`evc_club_push_starts`, the newest
   10 start times), not from the audit, which automatic entries can fill.
 
+Round 14:
+
+- **A running send never stalls.** WP-Cron takes an event off its queue before it runs it; if the page's batch holds the
+  lock at that moment, the WP-Cron batch answers busy. It now queues itself again 60 seconds later (also when there is
+  no named lock), and every batch queues the next one after it has released the lock (also when the batch failed with
+  an error). So a job stored as «running» always has a WP-Cron event, even when the administrator closed the page.
+- **Two audit stores, nothing lost.** The administrators' sends (`evc_club_push_audit`, written only under the send
+  lock) and the automatic notifications (`evc_club_push_auto_audit`, written only under their own lock) keep separate
+  stores, each re-read straight from the database right before it is written. Before, an automatic entry and an
+  administrator's entry written at the same moment could overwrite each other (the two locks are different). The page
+  shows both stores merged, newest first (10 rows).
+- **The stop arriving just as the send finishes** says «Η αποστολή είχε ήδη ολοκληρωθεί πριν από τη διακοπή.» (not «Δεν
+  υπάρχει αποστολή σε εξέλιξη.») and leaves no stop request behind.
+- **No lock = no automatic reload.** After a batch that got no named lock, the page shows the explanation and the
+  «Συνέχεια αποστολής» / «Διακοπή αποστολής» buttons, but no longer submits the next batch by itself every 1.5 seconds.
+- **«Η συνδρομή σας ενεργοποιήθηκε» without a lock** comes back 5 minutes later, at most 6 tries (30 minutes); after the
+  last try nothing is sent for that order (fail closed; the card shows the active membership anyway).
+- **«Η συνδρομή σας λήγει σε 3 ημέρες» without a lock:** that day's run is skipped and the next run is the next day's
+  10:00 (unchanged). Members whose paid period ends on the skipped day's target day get NO 3-day notice that period,
+  because the next run looks three days ahead of its own day. Accepted: fail closed (a database without named locks
+  sends nothing at all, and the page says why); the member still sees the end date and «Ανανέωση» on the card.
+- **A reconnect while holding the lock** (wpdb reconnects silently after «MySQL server has gone away», and the new
+  connection holds no lock) is detected: before every message and before writing the job, the batch checks
+  `IS_USED_LOCK(name) = CONNECTION_ID()`; if not, it stops at once and writes nothing more. The cursor saved after the
+  last message lets the next lock holder continue without sending anything twice. The automatic notifications check the
+  same before each member (their «once per period» markers keep them at most once).
+- **The daily cap survives the upgrade:** a site that ran round 12 has no `evc_club_push_starts` yet; until the first
+  new send it is seeded from the «started» entries of the audit.
+
 ## Security notes
 
 - SSRF: only `https://` + exactly `fcm.googleapis.com`, `web.push.apple.com`, `updates.push.services.mozilla.com` or
@@ -175,9 +204,12 @@ Round 13:
    η καθεμία με `true`.
 10. **Διακοπή αποστολής:** αν πατήσετε «Διακοπή αποστολής» ενώ στέλνεται μια ομάδα μηνυμάτων, η σελίδα γράφει «Η διακοπή
     καταχωρήθηκε, η αποστολή σταματά σε λίγα δευτερόλεπτα». Μετά από λίγα δευτερόλεπτα γράφει «Η αποστολή διακόπηκε».
-    Το πολύ ένα μήνυμα, αυτό που έφευγε εκείνη τη στιγμή, φτάνει μετά το πάτημα.
+    Το πολύ ένα μήνυμα, αυτό που έφευγε εκείνη τη στιγμή, φτάνει μετά το πάτημα. Αν η αποστολή είχε μόλις τελειώσει, η
+    σελίδα γράφει «Η αποστολή είχε ήδη ολοκληρωθεί πριν από τη διακοπή».
 11. **Κλείδωμα της βάσης:** αν η σελίδα γράψει ότι η βάση δεδομένων δεν επέτρεψε το κλείδωμα, δεν στάλθηκε τίποτα.
     Ενημερώστε τον τεχνικό: ο διακομιστής της βάσης πρέπει να υποστηρίζει τα «επώνυμα κλειδώματα» της MySQL / MariaDB.
+    Σε αυτή την περίπτωση η σελίδα δεν συνεχίζει μόνη της· όταν ο τεχνικός το διορθώσει, πατήστε «Συνέχεια αποστολής».
+    Η αυτόματη ειδοποίηση «Η συνδρομή σας λήγει σε 3 ημέρες» δεν στέλνεται τις ημέρες που λείπει το κλείδωμα.
 12. **Αποσύνδεση:** μόνο το κουμπί «Αποσύνδεση» της κάρτας μέλους σταματά τις ειδοποιήσεις στο συγκεκριμένο κινητό. Αν η
     σύνδεση λήξει μόνη της ή γίνει αποσύνδεση από άλλη σελίδα, το κινητό συνεχίζει να λαμβάνει τις ειδοποιήσεις του μέλους
     (μόνο τίτλο και κείμενο), μέχρι το μέλος να πατήσει «Διακοπή ειδοποιήσεων» ή να ενεργοποιήσει ειδοποιήσεις άλλος

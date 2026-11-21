@@ -48,6 +48,8 @@ final class PushTest extends EVC_WP_Test_Case {
     private $redirects = array();
     /** @var callable|null round 13: runs inside each push request (a slow push service: other requests act meanwhile) */
     private $on_request = null;
+    /** @var callable|null round 14: runs on each timer read (a failure the batch does not catch) */
+    private $on_timer = null;
 
     public function set_up() {
         parent::set_up();
@@ -60,6 +62,7 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->now_seconds = 1000.0;
         $this->redirects = array();
         $this->on_request = null;
+        $this->on_timer = null;
         $this->club = $this->database();
         $this->env = array(
             'push' => true,
@@ -74,6 +77,7 @@ final class PushTest extends EVC_WP_Test_Case {
         delete_option(EVC_Push_Auto::RUN_OPTION);
         delete_option(EVC_Push_Campaign::CANCEL_OPTION);
         delete_option(EVC_Push_Campaign::STARTS_OPTION);
+        delete_option(EVC_Push_Campaign::AUTO_AUDIT_OPTION);
         unset($_GET['evc_push']);
     }
 
@@ -118,6 +122,9 @@ final class PushTest extends EVC_WP_Test_Case {
                 return $this->memberships[$wp_user_id] ?? array('state' => 'none', 'paid_until_utc' => null);
             },
             'timer' => function (): float {
+                if ($this->on_timer !== null) {
+                    ($this->on_timer)();
+                }
                 $this->now_seconds += $this->tick;
                 return $this->now_seconds;
             },
@@ -712,12 +719,12 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertStringNotContainsString('Η διακοπή καταχωρήθηκε', $html);
         $this->assertSame(array('cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
         // With the lock free the stop ends the job at once.
-        delete_option(EVC_Push_Campaign::STARTS_OPTION);
+        update_option(EVC_Push_Campaign::STARTS_OPTION, array()); // round 14: an EMPTY store (a missing one is seeded from the audit)
         $this->assertSame('started', $this->page_post(array('evc_push_action' => 'send', 'evc_push_title' => 'Καλημέρα', 'evc_push_body' => 'Κείμενο.', 'evc_push_audience' => 'all'))['code']);
         $this->assertSame(array('code' => 'cancelled_ok'), $this->page_post(array('evc_push_action' => 'cancel')));
         $this->assertSame('cancelled', EVC_Push_Campaign::fresh_job()['state']);
         // The job ended by itself before the stop was applied: the page says so, never «stopped».
-        delete_option(EVC_Push_Campaign::STARTS_OPTION);
+        update_option(EVC_Push_Campaign::STARTS_OPTION, array()); // round 14: an EMPTY store (a missing one is seeded from the audit)
         $this->page_post(array('evc_push_action' => 'send', 'evc_push_title' => 'Καλημέρα', 'evc_push_body' => 'Κείμενο.', 'evc_push_audience' => 'all'));
         $this->assertSame('done', $this->parts['campaign']->step());
         $html = $this->parts['page']->html();
@@ -743,7 +750,7 @@ final class PushTest extends EVC_WP_Test_Case {
             $this->assertSame(array(), $this->redirects, 'the page stays on the explanation');
             $this->assertSame('cancel_pending', $c->cancel(get_userdata($admin)), 'a stop without the lock is only recorded');
             $this->assertSame('running', EVC_Push_Campaign::fresh_job()['state']);
-            delete_option(EVC_Push_Campaign::STARTS_OPTION);
+            update_option(EVC_Push_Campaign::STARTS_OPTION, array()); // round 14: an EMPTY store (a missing one is seeded from the audit)
             $this->assertSame('no_lock', $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 2)['result']);
         } finally {
             remove_filter('query', $null_lock);
@@ -850,6 +857,318 @@ final class PushTest extends EVC_WP_Test_Case {
         } catch (WPDieException $e) {
             $this->assertStringContainsString(EVC_Push_Admin_Page::NOT_ALLOWED, $e->getMessage());
         }
+    }
+
+    // ---- round 14: the job never stalls, the audit keeps every entry, the round-13 nits ------------------------------
+
+    /** WP-Cron takes an event off the queue before it calls the hook: the same here. */
+    private function pop_batch_event(string $id): void {
+        wp_clear_scheduled_hook(EVC_Push_Campaign::CRON_HOOK, array($id));
+    }
+
+    /** One member with one subscription and an active membership ending on $until. */
+    private function active_subscriber(string $until): int {
+        $user = $this->customer();
+        $this->member($user);
+        $this->subscribe_as($user, $this->subscription());
+        $this->memberships[$user] = array('state' => 'active', 'paid_until_utc' => $until);
+        return $user;
+    }
+
+    public function test_round14_a_cron_runner_that_finds_the_lock_busy_queues_itself_again(): void {
+        $this->subscribers(3);
+        $c = $this->parts['campaign'];
+        $this->assertSame('ok', $c->start(get_userdata($this->admin()), 'Τ', 'Κ', 'all', 0, 3)['result']);
+        $id = EVC_Push_Campaign::fresh_job()['id'];
+        // Runner 1 (the administrator's page, another PHP process) holds the lock and already looked for a queued event;
+        // runner 2 (WP-Cron) has just taken that event off the queue and finds the lock busy.
+        $other = $this->other_connection();
+        $this->assertSame('1', (string) $other->query("SELECT GET_LOCK('" . EVC_Push_Campaign::lock_name() . "', 0)")->fetchColumn());
+        $this->pop_batch_event($id);
+        $c->cron($id);
+        $this->assertSame(array(), $this->requests);
+        $next = wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($id));
+        $this->assertNotFalse($next, 'the job is never left running with no event queued');
+        $this->assertEqualsWithDelta(time() + EVC_Push_Campaign::RETRY_SECONDS, $next, 2);
+        $this->assertSame('running', EVC_Push_Campaign::fresh_job()['state']);
+        // No lock at all: the same (nothing is sent, the job is not forgotten).
+        $other->query("SELECT RELEASE_LOCK('" . EVC_Push_Campaign::lock_name() . "')");
+        $this->pop_batch_event($id);
+        $null_lock = function ($query) {
+            return stripos($query, 'GET_LOCK(') !== false ? 'SELECT NULL' : $query;
+        };
+        add_filter('query', $null_lock);
+        try {
+            $c->cron($id);
+        } finally {
+            remove_filter('query', $null_lock);
+        }
+        $this->assertNotFalse(wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($id)));
+        $this->assertSame(array(), $this->requests);
+        // Two runners in this process: the page's batch is sending when WP-Cron starts the same job.
+        $this->pop_batch_event($id);
+        $this->on_request = function (int $n) use ($c, $id) {
+            if ($n === 1) {
+                $this->pop_batch_event($id);
+                $c->cron($id);
+            }
+        };
+        $this->assertSame('done', $c->step());
+        $this->assertCount(3, $this->requests, 'every subscription once');
+        $this->assertFalse(wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($id)), 'a finished job leaves no event');
+    }
+
+    public function test_round14_a_running_job_always_has_its_next_event_queued_after_the_lock_is_released(): void {
+        $this->subscribers(4);
+        $c = $this->parts['campaign'];
+        $c->start(get_userdata($this->admin()), 'Τ', 'Κ', 'all', 0, 4);
+        $id = EVC_Push_Campaign::fresh_job()['id'];
+        $this->pop_batch_event($id);
+        $this->tick = 6.0; // the time budget ends the batch after two messages
+        $this->assertSame('running', $c->step());
+        $this->assertCount(2, $this->requests);
+        $next = wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($id));
+        $this->assertNotFalse($next, 'the next batch is queued');
+        $this->assertEqualsWithDelta(time(), $next, 2);
+        // A batch that throws half-way (an error nothing in the batch catches): the lock is released and the job still
+        // has its event.
+        $this->tick = 0.0;
+        $this->pop_batch_event($id);
+        $this->on_timer = function () {
+            if (count($this->requests) === 3) {
+                throw new RuntimeException('push library failure');
+            }
+        };
+        try {
+            $c->step();
+            $this->fail('the batch did not throw');
+        } catch (RuntimeException $e) {
+            $this->assertSame('push library failure', $e->getMessage());
+        }
+        $this->assertSame('running', EVC_Push_Campaign::fresh_job()['state']);
+        $this->assertNotFalse(wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($id)), 'not stalled by an exception');
+        $this->on_timer = null;
+        $this->assertSame('done', $c->step(), 'the lock was released');
+    }
+
+    public function test_round14_concurrent_audit_appends_keep_both_entries(): void {
+        $user = $this->active_subscriber('2026-12-21T08:00:00+00:00');
+        $c = $this->parts['campaign'];
+        $auto = $this->parts['auto'];
+        $c->start(get_userdata($this->admin()), 'Τ', 'Κ', 'all', 0, 1);
+        // While the campaign writes «done» (its store already read), the automatic notification runs in another process
+        // under its own lock and writes its entry.
+        $once = false;
+        $during = function ($value) use ($auto, $user, &$once) {
+            if (!$once) {
+                $once = true;
+                $this->assertSame('sent', $auto->activated($user));
+            }
+            return $value;
+        };
+        add_filter('pre_update_option_' . EVC_Push_Campaign::AUDIT_OPTION, $during);
+        try {
+            $this->assertSame('done', $c->step());
+        } finally {
+            remove_filter('pre_update_option_' . EVC_Push_Campaign::AUDIT_OPTION, $during);
+        }
+        $this->assertTrue($once);
+        $events = array_column(EVC_Push_Campaign::audit(), 'event');
+        sort($events);
+        $this->assertSame(array('auto_activated', 'done', 'started'), $events, 'both entries are kept');
+        // An entry another process wrote a moment ago (this request's cache never saw it) is kept by the next append.
+        $this->assertCount(2, get_option(EVC_Push_Campaign::AUDIT_OPTION), 'this request has the store cached');
+        global $wpdb;
+        $stored = array_merge(array(array('event' => 'cancelled', 'at' => time(), 'job' => 'other', 'user_id' => 9, 'user_login' => 'x', 'audience' => 'all', 'days' => 0, 'planned' => 0, 'sent' => 0, 'failed' => 0, 'removed' => 0, 'skipped' => 0)), get_option(EVC_Push_Campaign::AUDIT_OPTION));
+        $wpdb->update($wpdb->options, array('option_value' => maybe_serialize($stored)), array('option_name' => EVC_Push_Campaign::AUDIT_OPTION));
+        EVC_Push_Campaign::append_audit(array('event' => 'started', 'at' => time(), 'job' => 'mine', 'user_id' => 1, 'user_login' => 'y', 'audience' => 'all', 'days' => 0, 'planned' => 0, 'sent' => 0, 'failed' => 0, 'removed' => 0, 'skipped' => 0));
+        $this->assertSame(array('mine', 'other'), array_slice(array_column(EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::AUDIT_OPTION), 'job'), 0, 2), 'the other process\'s entry survives');
+    }
+
+    public function test_round14_a_stop_arriving_as_the_job_finishes_says_it_had_already_finished(): void {
+        $this->subscribers(1);
+        $admin = $this->admin();
+        wp_set_current_user($admin);
+        $c = $this->parts['campaign'];
+        // The batch finishes the job between the stop's first read and the stop taking the lock.
+        $finish_first = function () use ($c) {
+            $once = false;
+            return function ($query) use ($c, &$once) {
+                if (!$once && stripos($query, 'INSERT INTO') !== false && strpos($query, EVC_Push_Campaign::CANCEL_OPTION) !== false) {
+                    $once = true;
+                    $this->assertSame('done', $c->step());
+                }
+                return $query;
+            };
+        };
+        $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 1);
+        $filter = $finish_first();
+        add_filter('query', $filter);
+        try {
+            $this->assertSame(EVC_Push_Campaign::DONE_BEFORE_CANCEL, $c->cancel(get_userdata($admin)));
+        } finally {
+            remove_filter('query', $filter);
+        }
+        $this->assertNull(EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::CANCEL_OPTION), 'the stale stop request is cleared');
+        $this->assertSame('done', EVC_Push_Campaign::fresh_job()['state']);
+        $this->assertSame(array('done', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
+        // The same through the page.
+        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
+        $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 1);
+        $filter = $finish_first();
+        add_filter('query', $filter);
+        $this->redirects = array();
+        try {
+            $this->page_request(array('evc_push_action' => 'cancel'));
+        } finally {
+            remove_filter('query', $filter);
+        }
+        $this->assertStringContainsString('evc_push=done_before_cancel', $this->redirects[0] ?? '');
+        $_GET['evc_push'] = 'done_before_cancel';
+        $html = $this->parts['page']->html();
+        $this->assertStringContainsString('Η αποστολή είχε ήδη ολοκληρωθεί πριν από τη διακοπή.', $html);
+        $this->assertStringNotContainsString('Η αποστολή διακόπηκε', $html);
+        $this->assertStringNotContainsString('Δεν υπάρχει αποστολή σε εξέλιξη', $html);
+        $this->assertNull(EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::CANCEL_OPTION));
+    }
+
+    public function test_round14_after_a_batch_without_a_lock_the_page_does_not_continue_by_itself(): void {
+        $this->subscribers(30);
+        $admin = $this->admin();
+        wp_set_current_user($admin);
+        $this->parts['campaign']->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 30);
+        $null_lock = function ($query) {
+            return stripos($query, 'GET_LOCK(') !== false ? 'SELECT NULL' : $query;
+        };
+        add_filter('query', $null_lock);
+        try {
+            $html = $this->page_request(array('evc_push_action' => 'step'));
+        } finally {
+            remove_filter('query', $null_lock);
+        }
+        $this->assertStringContainsString('Για ασφάλεια δεν στάλθηκε τίποτα.', $html);
+        $this->assertStringNotContainsString('<script', $html, 'no automatic next batch against a database that refuses the lock');
+        $this->assertStringContainsString('Συνέχεια αποστολής', $html, 'the administrator can still try again');
+        $this->assertStringContainsString('Διακοπή αποστολής', $html);
+        $html = $this->page_request(array('evc_push_action' => 'step'));
+        $this->assertCount(EVC_Push_Campaign::BATCH_SIZE, $this->requests);
+        $this->assertStringContainsString('<script', $html, 'with the lock the page continues by itself');
+    }
+
+    public function test_round14_the_activated_notification_without_a_lock_comes_back_later_a_bounded_number_of_times(): void {
+        $user = $this->active_subscriber('2026-12-21T08:00:00+00:00');
+        $auto = $this->parts['auto'];
+        $null_lock = function ($query) {
+            return stripos($query, 'GET_LOCK(') !== false ? 'SELECT NULL' : $query;
+        };
+        add_filter('query', $null_lock);
+        try {
+            $this->assertSame('no_lock', $auto->activated($user));
+            $next = wp_next_scheduled(EVC_Push_Auto::ACTIVATED_HOOK, array($user, 1));
+            $this->assertNotFalse($next, 'not lost: it comes back');
+            $this->assertEqualsWithDelta(time() + EVC_Push_Auto::NO_LOCK_RETRY_SECONDS, $next, 2);
+            for ($try = 1; $try < EVC_Push_Auto::NO_LOCK_TRIES; $try++) {
+                $this->assertSame('no_lock', $auto->activated($user, $try));
+            }
+            $this->assertNotFalse(wp_next_scheduled(EVC_Push_Auto::ACTIVATED_HOOK, array($user, EVC_Push_Auto::NO_LOCK_TRIES - 1)));
+            $this->assertFalse(wp_next_scheduled(EVC_Push_Auto::ACTIVATED_HOOK, array($user, EVC_Push_Auto::NO_LOCK_TRIES)), 'bounded: no try after the last');
+        } finally {
+            remove_filter('query', $null_lock);
+        }
+        $this->assertSame(array(), $this->requests, 'nothing sent without the lock');
+        $this->assertSame('sent', $auto->activated($user, 2), 'a later try with the lock sends it');
+        $this->assertCount(1, $this->requests);
+        wp_unschedule_hook(EVC_Push_Auto::ACTIVATED_HOOK);
+    }
+
+    public function test_round14_a_run_whose_connection_lost_the_lock_stops_and_another_runner_continues(): void {
+        $this->subscribers(6);
+        $c = $this->parts['campaign'];
+        $c->start(get_userdata($this->admin()), 'Τ', 'Κ', 'all', 0, 6);
+        $id = EVC_Push_Campaign::fresh_job()['id'];
+        global $wpdb;
+        $other = $this->other_connection();
+        $lock = EVC_Push_Campaign::lock_name();
+        $reconnect_at = function (int $at) use ($wpdb, $other, $lock) {
+            return function (int $n) use ($at, $wpdb, $other, $lock) {
+                if ($n === $at) {
+                    // A silent reconnect: this connection no longer holds the lock, and another runner takes it.
+                    $wpdb->query($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $lock));
+                    $this->assertSame('1', (string) $other->query("SELECT GET_LOCK('" . $lock . "', 0)")->fetchColumn());
+                }
+            };
+        };
+        $this->on_request = $reconnect_at(2);
+        $this->assertSame(EVC_Push_Campaign::LOST_LOCK, $c->step());
+        $this->assertCount(2, $this->requests, 'not one message after the lock was lost');
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame('running', $job['state']);
+        $this->assertSame(2, (int) $job['sent'], 'the cursor and counts of the sent messages are kept');
+        $this->assertNotFalse(wp_next_scheduled(EVC_Push_Campaign::CRON_HOOK, array($id)));
+        $this->assertSame('1', (string) $other->query("SELECT IS_USED_LOCK('" . $lock . "') IS NOT NULL")->fetchColumn(), 'the other runner\'s lock was left alone');
+        $other->query("SELECT RELEASE_LOCK('" . $lock . "')");
+        // Lost during the last message: the job is not written as done by a runner without the lock.
+        $this->on_request = $reconnect_at(6);
+        $this->assertSame(EVC_Push_Campaign::LOST_LOCK, $c->step());
+        $this->assertSame('running', EVC_Push_Campaign::fresh_job()['state']);
+        $other->query("SELECT RELEASE_LOCK('" . $lock . "')");
+        $this->on_request = null;
+        $this->assertSame('done', $c->step());
+        $urls = array_column($this->requests, 'url');
+        $this->assertCount(6, $urls);
+        $this->assertSame($urls, array_values(array_unique($urls)), 'nothing sent twice');
+        // The automatic notifications: lost just before sending = nothing sent.
+        $user = $this->active_subscriber('2026-11-24T12:00:00+00:00');
+        $auto_lock = EVC_Push_Campaign::auto_lock_name();
+        $drop = function ($query) use ($wpdb, $auto_lock) {
+            static $inside = false;
+            if (!$inside && stripos($query, 'IS_USED_LOCK(') !== false) {
+                $inside = true;
+                $wpdb->query($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $auto_lock));
+                $inside = false;
+            }
+            return $query;
+        };
+        add_filter('query', $drop);
+        try {
+            $this->assertSame('lost_lock', $this->parts['auto']->activated($user));
+            $this->assertSame('lost_lock', $this->parts['auto']->expiry());
+        } finally {
+            remove_filter('query', $drop);
+        }
+        $this->assertCount(6, $this->requests);
+        $this->assertSame('', (string) get_user_meta($user, EVC_Push_Auto::ACTIVATED_META, true), 'the marker is not written either');
+        $this->assertSame('sent', $this->parts['auto']->activated($user));
+    }
+
+    public function test_round14_the_daily_cap_survives_the_upgrade_seeded_from_the_audit(): void {
+        $this->subscribers(1);
+        $admin = get_userdata($this->admin());
+        $c = $this->parts['campaign'];
+        $this->assertNull(EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::STARTS_OPTION), 'a site upgraded from round 12 has no store');
+        $entry = function (string $event, int $minutes_ago): array {
+            return array('event' => $event, 'at' => time() - $minutes_ago * 60, 'job' => 'j' . $minutes_ago, 'user_id' => 1, 'user_login' => 'a', 'audience' => 'all', 'days' => 0, 'planned' => 1, 'sent' => 1, 'failed' => 0, 'removed' => 0, 'skipped' => 0);
+        };
+        $audit = array($entry('done', 15), $entry('started', 16), $entry('done', 31), $entry('started', 32), $entry('started', 48), $entry('started', 64));
+        update_option(EVC_Push_Campaign::AUDIT_OPTION, $audit, false);
+        $limited = $c->start($admin, 'Τ', 'Κ', 'all', 0, 1);
+        $this->assertSame('rate_limited', $limited['result'], 'four starts in 24 hours, from the audit');
+        $this->assertGreaterThan(80000, $limited['wait']);
+        update_option(EVC_Push_Campaign::AUDIT_OPTION, array_slice($audit, 0, 5), false);
+        $this->assertSame('ok', $c->start($admin, 'Τ', 'Κ', 'all', 0, 1)['result'], 'three: a fourth may start');
+        $this->assertCount(4, EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::STARTS_OPTION), 'the first start stores the seeded times with its own');
+    }
+
+    public function test_round14_the_activated_notification_reads_its_marker_fresh_not_from_a_stale_cache(): void {
+        $user = $this->active_subscriber('2026-12-21T08:00:00+00:00');
+        // This request has the member's meta cached (no marker) ...
+        $this->assertSame('', (string) get_user_meta($user, EVC_Push_Auto::ACTIVATED_META, true));
+        // ... when another WP-Cron runner (another process, its own cache) sends and writes the marker.
+        global $wpdb;
+        $wpdb->insert($wpdb->usermeta, array('user_id' => $user, 'meta_key' => EVC_Push_Auto::ACTIVATED_META, 'meta_value' => '2026-12-21T08:00:00+00:00'));
+        $this->assertSame('', (string) get_user_meta($user, EVC_Push_Auto::ACTIVATED_META, true), 'the cache is stale');
+        $this->assertSame('already', $this->parts['auto']->activated($user));
+        $this->assertSame(array(), $this->requests, 'never twice');
     }
 
     // ---- automatic notifications --------------------------------------------------------------------------------

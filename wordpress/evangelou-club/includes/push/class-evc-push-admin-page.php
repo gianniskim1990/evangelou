@@ -17,6 +17,9 @@ defined('ABSPATH') || exit;
  *      Round 13: when a batch is sending at that moment, the stop is only recorded («Η διακοπή καταχωρήθηκε, η αποστολή
  *      σταματά σε λίγα δευτερόλεπτα») and the batch ends the job before its next message; «Η αποστολή διακόπηκε» is shown
  *      only once the stored job really is 'cancelled'. Without a database named lock nothing is sent (NO_LOCK message).
+ *      Round 14: after a batch that got no named lock the page does NOT submit the next batch by itself (no endless
+ *      reload against a database that refuses the lock); the buttons stay. A stop that arrives just after the job ended
+ *      by itself says «Η αποστολή είχε ήδη ολοκληρωθεί πριν από τη διακοπή.».
  * Every value printed is escaped. No endpoint, key or member is ever shown; only counts.
  */
 final class EVC_Push_Admin_Page {
@@ -106,7 +109,7 @@ final class EVC_Push_Admin_Page {
             return;
         }
         $this->result = $this->process(wp_unslash($_POST));
-        $flash = array('started' => 'ok', 'stepped' => 'ok', 'cancelled_ok' => 'cancelled', 'cancel_pending' => 'cancel_pending');
+        $flash = array('started' => 'ok', 'stepped' => 'ok', 'cancelled_ok' => 'cancelled', 'cancel_pending' => 'cancel_pending', 'done_before_cancel' => 'done_before_cancel');
         if (isset($flash[$this->result['code']])) {
             ($this->redirect)(add_query_arg('evc_push', $flash[$this->result['code']], self::page_url()));
         }
@@ -115,7 +118,7 @@ final class EVC_Push_Admin_Page {
     /**
      * One POST (already unslashed). Nonce first, then capability, then the action.
      * @return array<string,mixed> code: bad_nonce | forbidden | problem | preview | started | refused | stepped | cancelled_ok
-     *         | cancel_pending
+     *         | cancel_pending | done_before_cancel
      */
     public function process(array $post): array {
         $action = isset($post[self::FIELD_ACTION]) && is_string($post[self::FIELD_ACTION]) && in_array($post[self::FIELD_ACTION], self::ACTIONS, true) ? $post[self::FIELD_ACTION] : '';
@@ -135,6 +138,9 @@ final class EVC_Push_Admin_Page {
             $cancelled = $this->campaign->cancel($user);
             if ($cancelled === EVC_Push_Campaign::OK) {
                 return array('code' => 'cancelled_ok');
+            }
+            if ($cancelled === EVC_Push_Campaign::DONE_BEFORE_CANCEL) {
+                return array('code' => 'done_before_cancel');
             }
             return $cancelled === EVC_Push_Campaign::CANCEL_PENDING ? array('code' => 'cancel_pending') : array('code' => 'refused', 'result' => EVC_Push_Campaign::NONE);
         }
@@ -184,7 +190,7 @@ final class EVC_Push_Admin_Page {
             $out .= self::notice(self::RESULTS['cancel_pending'], 'warning');
         } elseif (in_array($flash, array('cancelled', 'cancel_pending'), true) && $state === EVC_Push_Campaign::CANCELLED) {
             $out .= self::notice(self::RESULTS['cancelled'], 'info');
-        } elseif ($flash === 'cancel_pending' && $state === 'done') {
+        } elseif (in_array($flash, array('cancel_pending', 'done_before_cancel'), true) && in_array($state, array('done', 'stopped'), true)) {
             $out .= self::notice(self::RESULTS['done_before_cancel'], 'info');
         }
         if ($r !== null) {
@@ -199,7 +205,9 @@ final class EVC_Push_Admin_Page {
             }
         }
         if ($job !== null) {
-            $out .= $this->job_html($job, $running);
+            // Round 14: no automatic next batch after a batch that got no named lock.
+            $no_lock = $r !== null && $r['code'] === 'refused' && ($r['result'] ?? '') === EVC_Push_Campaign::NO_LOCK;
+            $out .= $this->job_html($job, $running, $running && !$no_lock);
         }
         if (!$running) {
             if ($r !== null && $r['code'] === 'preview') {
@@ -219,7 +227,7 @@ final class EVC_Push_Admin_Page {
         return '<input type="hidden" name="' . esc_attr(self::FIELD_ACTION) . '" value="' . esc_attr($action) . '">' . wp_nonce_field(self::nonce_action($action), '_wpnonce', true, false);
     }
 
-    private function job_html(array $job, bool $running): string {
+    private function job_html(array $job, bool $running, bool $continue): string {
         $out = '<h2>Τελευταία αποστολή</h2><p>' . esc_html(sprintf(
             '%s · κοινό: %s · σχεδιασμένες συσκευές: %d · στάλθηκαν: %d · απέτυχαν: %d · αφαιρέθηκαν (η συσκευή δεν δέχεται πια ειδοποιήσεις): %d · παραλείφθηκαν: %d',
             self::STATES[$job['state'] ?? ''] ?? '—',
@@ -229,6 +237,8 @@ final class EVC_Push_Admin_Page {
         if ($running) {
             $out .= '<form method="post" id="evc-push-step">' . self::hidden('step') . '<p><button type="submit" class="button button-primary">Συνέχεια αποστολής</button></p></form>';
             $out .= '<form method="post">' . self::hidden('cancel') . '<p><button type="submit" class="button">Διακοπή αποστολής</button></p></form>';
+        }
+        if ($continue) {
             // The page sends the next batch by itself while it stays open (WP-Cron continues when it is closed).
             $out .= '<script>window.setTimeout(function () { var f = document.getElementById("evc-push-step"); if (f) { f.submit(); } }, 1500);</script>';
         }

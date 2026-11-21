@@ -925,6 +925,10 @@ Details and the real-phone test steps: `docs/member-pwa.md`.
   error) = nothing sent; the automatic notifications run under their own lock; the rate limit has its own store. The
   packager guards were widened and are documented as accident prevention, not an anti-evasion boundary. Server-side
   sign-outs do not revoke push rows (documented in `docs/member-push.md`).
+- Round 14: a running send always has its next WP-Cron event (a busy WP-Cron batch queues itself again in 60 s; every
+  batch queues the next after releasing the lock); separate audit stores for the administrators' sends and the automatic
+  notifications (no entry lost); a reconnect that drops the lock stops the batch; the daily cap is seeded from the audit
+  on upgrade; no automatic page reload without a lock; «ενεργοποιήθηκε» retried without a lock (5 min, 6 tries).
 
 Details, the owner steps and the real-phone tests: `docs/member-push.md`.
 

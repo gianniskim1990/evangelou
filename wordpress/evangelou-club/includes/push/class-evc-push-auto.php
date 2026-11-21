@@ -22,6 +22,19 @@ defined('ABSPATH') || exit;
  * and both send: the second one answers 'busy' (and comes back a minute later if nothing else is queued). Under the
  * lock the «once per period» markers and the run state are read straight from the database, never from a cache.
  * GET_LOCK answering NULL or failing = nothing is sent ('no_lock', fail closed).
+ *
+ * Round 14:
+ *   - No lock for «ενεργοποιήθηκε»: the event comes back NO_LOCK_RETRY_SECONDS (5 minutes) later, at most
+ *     NO_LOCK_TRIES times (the try number travels as the event's second argument); after the last try nothing is sent
+ *     for that order (fail closed, never twice). The member still sees the active card.
+ *   - No lock for «λήγει σε 3 ημέρες»: that day's run is skipped and the next run is the next day's 10:00 (as before).
+ *     Members whose period ends on the skipped day's target day get no 3-day notice that period: the next day's run looks
+ *     three days ahead of ITS day. Accepted (fail closed: a database without named locks sends nothing at all, and the
+ *     readiness / admin pages say why); documented in docs/member-push.md.
+ *   - Before sending to a member each run checks that its database connection still holds the lock (a silent reconnect
+ *     drops it): if not, it stops at once ('lost_lock') and sends nothing more; the markers keep it «at most once».
+ *   - Audit entries go to their own store (EVC_Push_Campaign::AUTO_AUDIT_OPTION, written only under this lock), so an
+ *     automatic entry and an administrator's entry written at the same moment never overwrite each other.
  */
 final class EVC_Push_Auto {
     const ACTIVATED_HOOK = 'evc_club_push_activated';
@@ -35,6 +48,9 @@ final class EVC_Push_Auto {
     const BATCH = 100;
     const TIME_BUDGET = 20;
     const ZONE = 'Europe/Athens';
+    /** Round 14: «ενεργοποιήθηκε» without a named lock comes back 5 minutes later, at most this many times. */
+    const NO_LOCK_TRIES = 6;
+    const NO_LOCK_RETRY_SECONDS = 300;
     const ACTIVATED_TITLE = 'Η συνδρομή σας ενεργοποιήθηκε';
     const ACTIVATED_BODY = 'Η κάρτα μέλους σας είναι έτοιμη: ο καφές της ημέρας σας περιμένει στο κατάστημα.';
     const EXPIRY_TITLE = 'Η συνδρομή σας λήγει σε 3 ημέρες';
@@ -63,7 +79,7 @@ final class EVC_Push_Auto {
     public function register(): void {
         if (EVC_Push_Feature::auto_activated()) {
             add_action('woocommerce_order_status_completed', array($this, 'on_completed'), self::ORDER_PRIORITY, 1);
-            add_action(self::ACTIVATED_HOOK, array($this, 'activated'), 10, 1);
+            add_action(self::ACTIVATED_HOOK, array($this, 'activated'), 10, 2);
         }
         if (EVC_Push_Feature::auto_expiry()) {
             add_action(self::EXPIRY_HOOK, array($this, 'expiry'), 10, 0);
@@ -103,11 +119,21 @@ final class EVC_Push_Auto {
         }
     }
 
-    /** WP-Cron: «Η συνδρομή σας ενεργοποιήθηκε», only for an active membership, once per paid period. @return string what happened */
-    public function activated($wp_user_id): string {
+    /**
+     * WP-Cron: «Η συνδρομή σας ενεργοποιήθηκε», only for an active membership, once per paid period.
+     * @param int|string $attempt round 14: the how-many-th try after a missing named lock (0 = the first event)
+     * @return string what happened
+     */
+    public function activated($wp_user_id, $attempt = 0): string {
         $wp_user_id = (int) $wp_user_id;
+        $attempt = max(0, (int) $attempt);
         $lock = EVC_Push_Campaign::acquire_lock(EVC_Push_Campaign::auto_lock_name());
         if ($lock === null) {
+            // Round 14: never lose the notification to a passing refusal: try again later, a bounded number of times.
+            $next = array($wp_user_id, $attempt + 1);
+            if ($wp_user_id > 0 && $attempt + 1 < self::NO_LOCK_TRIES && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {
+                wp_schedule_single_event(time() + self::NO_LOCK_RETRY_SECONDS, self::ACTIVATED_HOOK, $next);
+            }
             return 'no_lock';
         }
         if ($lock !== true) {
@@ -137,13 +163,16 @@ final class EVC_Push_Auto {
         if ($sending === null) {
             return 'unavailable';
         }
+        if (!EVC_Push_Campaign::holds_lock(EVC_Push_Campaign::auto_lock_name())) {
+            return 'lost_lock';
+        }
         update_user_meta($wp_user_id, self::ACTIVATED_META, $m['paid_until_utc']);
         $counts = $this->send_member($sending, $wp_user_id, EVC_Push_Message::payload(self::ACTIVATED_TITLE, self::ACTIVATED_BODY));
         $this->audit('auto_activated', $counts);
         return 'sent';
     }
 
-    /** WP-Cron, 10:00 Athens: «Η συνδρομή σας λήγει σε 3 ημέρες». @return string 'done' | 'continued' | 'unavailable' */
+    /** WP-Cron, 10:00 Athens: «Η συνδρομή σας λήγει σε 3 ημέρες». @return string 'done' | 'continued' | 'unavailable' | 'busy' | 'no_lock' | 'lost_lock' */
     public function expiry(): string {
         $lock = EVC_Push_Campaign::acquire_lock(EVC_Push_Campaign::auto_lock_name());
         if ($lock === null) {
@@ -191,6 +220,13 @@ final class EVC_Push_Auto {
             foreach ($members as $member_id => $wp_user_id) {
                 if (($this->timer)() - $started >= self::TIME_BUDGET) {
                     break 2;
+                }
+                if (!EVC_Push_Campaign::holds_lock(EVC_Push_Campaign::auto_lock_name())) {
+                    // Round 14: a reconnect dropped the lock: stop now; the next run continues from the saved position.
+                    if (!wp_next_scheduled(self::EXPIRY_HOOK)) {
+                        wp_schedule_single_event(time() + 60, self::EXPIRY_HOOK);
+                    }
+                    return 'lost_lock';
                 }
                 $run['after'] = $member_id;
                 $m = $this->read($wp_user_id, $now);
@@ -293,6 +329,6 @@ final class EVC_Push_Auto {
             'failed' => (int) $counts['failed'],
             'removed' => (int) $counts['removed'],
             'skipped' => 0,
-        ));
+        ), EVC_Push_Campaign::AUTO_AUDIT_OPTION);
     }
 }
