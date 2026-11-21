@@ -421,8 +421,16 @@ final class EVC_Prepared_Redemption_Service {
             || !EVC_Prep_Catalogue::is_id($body['coffee_code'])) {
             return EVC_Prepared_Redemption_Outcome::failure(EVC_Prepared_Redemption_Outcome::INVALID_REQUEST, array('reason' => 'shape'));
         }
+        // D24: the optional staff note is normalised first (catalogue-independent) and kept OUT of the
+        // canonical preparation; it is bound by the fingerprint and the snapshot instead.
+        $preparation = $body['preparation'];
+        $note = null;
         try {
-            $parsed = EVC_Prep_Canonical::parse($body['preparation']);
+            if (is_array($preparation) && array_key_exists('note', $preparation)) {
+                $note = EVC_Prep_Note::normalise($preparation['note']);
+                unset($preparation['note']);
+            }
+            $parsed = EVC_Prep_Canonical::parse($preparation);
         } catch (EVC_Prep_Rejection $r) {
             return self::rejected($r);
         }
@@ -431,7 +439,7 @@ final class EVC_Prepared_Redemption_Service {
 
         // 2. Canonical preparation and fingerprint v2 (no catalogue involved).
         $canonical = EVC_Prep_Canonical::canonical($body['catalogue_version'], $body['coffee_code'], $parsed['modifiers'], $parsed['quick_notes']);
-        $fingerprint = EVC_Prep_Canonical::fingerprint_v2($member_public_id, $benefit_type, $actor->wp_user_id(), EVC_Prep_Canonical::prep_hash($canonical));
+        $fingerprint = EVC_Prep_Canonical::fingerprint_v2($member_public_id, $benefit_type, $actor->wp_user_id(), EVC_Prep_Canonical::prep_hash($canonical), $note);
 
         // 3. Replay before any catalogue, member, membership, clock or date decision.
         $stored = $this->store->find_by_request_id($request_id);
@@ -452,6 +460,9 @@ final class EVC_Prepared_Redemption_Service {
         } catch (EVC_Prep_Rejection $r) {
             return self::rejected($r);
         }
+        if ($note !== null && !$catalogue->allows_free_text_note()) {
+            return EVC_Prepared_Redemption_Outcome::failure(EVC_Prepared_Redemption_Outcome::INVALID_PREPARATION, array('reason' => 'free_text_not_supported'));
+        }
 
         // 7. Member, time and eligibility are decided on the server only.
         $member = $this->store->find_member_by_public_id($member_public_id);
@@ -471,7 +482,7 @@ final class EVC_Prepared_Redemption_Service {
         }
         $business_date = EVC_Clock::business_date($this->now);
 
-        $snapshot = EVC_Prep_Snapshot::from_order($order);
+        $snapshot = EVC_Prep_Snapshot::from_order($order, $note);
         $ledger = array(
             'member_id' => $member['id'],
             'benefit_type' => $benefit_type,
@@ -708,7 +719,8 @@ final class EVC_Prepared_Redemption_Record {
                 (string) $ledger['member_public_id'],
                 (string) $ledger['benefit_type'],
                 (int) $ledger['staff_wp_user_id'],
-                $snapshot['prep_hash']
+                $snapshot['prep_hash'],
+                EVC_Prep_Snapshot::note_of($snapshot)
             ))) {
             return 'snapshot_conflict';
         }

@@ -71,6 +71,8 @@ final class EVC_Onboarding_Registration {
     private $now;
     /** @var int */
     private $row_ceiling;
+    /** @var bool whether this request (this register() call) already ran the cleanup (STAGE-08: at most once) */
+    private $cleaned = false;
 
     /**
      * @param callable(): int|null $now TEST seam (seconds)
@@ -115,6 +117,7 @@ final class EVC_Onboarding_Registration {
         if ($key === '') {
             return array('outcome' => self::UNAVAILABLE);
         }
+        $this->cleaned = false; // one register() call = one request: the cleanup may run once in it
         $now = ($this->now)();
         $network = self::network_key_of($ip);
         if (EVC_Onboarding_Rules::blocked($this->read('f', $key), $now, self::WINDOW_SECONDS, self::MAX_FAILURES)
@@ -319,10 +322,14 @@ final class EVC_Onboarding_Registration {
     /**
      * Removes expired rows (only a count and a time each): failure rows (f_, m_) as soon as their own 5-minute window
      * is over (round 4, B1), every other row two hours after its window started. A deadlock or lock wait here is
-     * ignored and not logged: the rows are simply removed by a later cleanup.
+     * ignored and not logged: the rows are simply removed by a later cleanup. At most once per request (STAGE-08).
      */
     private function cleanup(int $now): void {
         global $wpdb;
+        if ($this->cleaned) {
+            return;
+        }
+        $this->cleaned = true;
         $was = $wpdb->suppress_errors(true);
         foreach (array('f_', 'm_') as $bucket) {
             $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s AND CAST(SUBSTRING_INDEX(option_value, '|', -1) AS UNSIGNED) <= %d", $wpdb->esc_like(self::COUNTER_PREFIX . $bucket) . '%', $now - self::WINDOW_SECONDS));

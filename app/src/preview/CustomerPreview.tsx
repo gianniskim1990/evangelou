@@ -3,7 +3,7 @@ import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, CUSTOMER, addDays, coffeeName,
 import { cx, type CustomerScreen } from "./screens";
 import { ClubWelcome, MemberPass } from "./CustomerSignature";
 import { historyPreparation, preparationLine } from "./coffeeConfig";
-import { membershipLine, paymentAction, renewalLine, sampleCustomerView, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
+import { PREVIEW_ONLY, joinAction, membershipLine, paymentAction, paymentNote, renewalLine, sampleCustomerView, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
 import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote, StateMark, Steps } from "./ds";
 import { ONBOARDING_COPY, ONBOARDING_STEPS, consentsLine } from "./onboardingCopy";
 
@@ -179,9 +179,13 @@ export function Offer({ go, onPay, secondary, steps, live }: { go: (s: CustomerS
           ))}
         </ul>
         <p className="t-small mt-5 max-w-[52ch] text-[var(--milk)]/60">{ONBOARDING_COPY.offer.terms}</p>
-        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
-          <Btn tone="brass" disabled={!onPay} title={onPay ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"} onClick={onPay} className="px-8">Πληρωμή {CLUB_RULES.monthlyPriceEur} €</Btn>
-          <button type="button" onClick={secondary ? secondary.onClick : () => go("dashboard")} className="t-label -my-1 py-3 text-[var(--milk)]/75 underline decoration-[var(--brass-soft)] underline-offset-[6px] hover:text-[var(--milk)]">{secondary ? secondary.label : "Δείτε τον λογαριασμό μέλους"}</button>
+        {/* STAGE-08 round 4 (owner's staging run on a phone): the payment is THE action of this step, a full-width
+            filled button with a clear edge and a shadow; the account link below it is small and quiet. */}
+        <div className="mt-8 flex flex-col items-stretch gap-y-3 sm:max-w-[420px]">
+          <Btn tone="brass" disabled={!onPay} title={onPay || live ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"} onClick={onPay} className="w-full min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)]" data-evc-action="pay">
+            Πληρωμή {CLUB_RULES.monthlyPriceEur} €
+          </Btn>
+          <button type="button" data-evc-action="secondary" onClick={secondary ? secondary.onClick : () => go("dashboard")} className="t-small self-center py-3 text-[var(--milk)]/60 underline decoration-[var(--brass-soft)] underline-offset-4 hover:text-[var(--milk)]">{secondary ? secondary.label : "Δείτε τον λογαριασμό μέλους"}</button>
         </div>
       </div>
       {live ? (
@@ -206,11 +210,21 @@ function entitlement(state: CustomerMembershipState, used: boolean, clubDataUnav
   return { headline: "Ο σημερινός καφές σας περιμένει", detail: "Δείξτε την κάρτα σας στο ταμείο.", ready: true };
 }
 
+/**
+ * The coffee list is unknown (never «no coffees yet»): the live app has no history answer, or (D23) the Club
+ * figures are unknown and no D24 history arrived either. A D24 history answer is authoritative on its own.
+ */
+function historyUnknown(view: CustomerView): boolean {
+  return view.historyData === "unavailable" || (view.clubData === "unavailable" && view.historyData !== "recent");
+}
+
 export function Dashboard({ view, go, actions }: MemberScreenProps) {
   const { state, today } = view;
   const e = entitlement(state, view.coffeeUsedToday, view.clubData === "unavailable");
   const recent = view.history.slice(0, 3);
   const pay = paymentAction(view, actions);
+  const join = joinAction(view, actions);
+  const note = paymentNote(view, actions);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
       <section>
@@ -221,9 +235,23 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
           <p className={cx("t-headline mt-2", e.ready ? "text-[var(--brass)]" : "text-[var(--milk)]")}>{e.headline}</p>
           <p className="t-body mt-2 text-[var(--milk)]/75">{e.detail}</p>
           <div className="mt-7 flex flex-wrap gap-3">
+            {join && (
+              <Btn tone="brass" onClick={join.run} className="min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)]" data-evc-action="join">
+                {join.label}
+              </Btn>
+            )}
             <Btn tone={state === "active" ? "brass" : "ghost-dark"} onClick={() => go("card")}>Άνοιγμα κάρτας</Btn>
-            {pay && <Btn tone="brass" disabled={!pay.run} title={pay.run ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={pay.run}>{pay.label}</Btn>}
+            {pay && (
+              <Btn tone="brass" disabled={!pay.run} title={pay.run || view.live ? undefined : PREVIEW_ONLY} onClick={pay.run} className={pay.run ? "min-h-14 px-8 text-[17px]" : undefined} data-evc-action={pay.run ? pay.kind : undefined}>
+                {pay.label}
+              </Btn>
+            )}
           </div>
+          {note && (
+            <p role="status" className="t-body mt-6 max-w-[46ch] border-t border-[var(--milk)]/20 pt-5 text-[var(--milk)]/85" data-evc-note="payment">
+              {note}
+            </p>
+          )}
         </div>
       </section>
       <section className="lg:pt-[4.6rem]">
@@ -233,18 +261,18 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
             ["Κατάσταση", <StateMark key="s" state={state} />],
             ["Περίοδος", membershipLine(view)],
             ["Ανανέωση", renewalLine(view, `Χειροκίνητη, ${CLUB_RULES.monthlyPriceEur} € για έναν ημερολογιακό μήνα`)],
-            ["Αυτόν τον μήνα", view.clubData === "unavailable" ? "Δεν είναι ακόμη διαθέσιμο" : `${view.visitsThisMonth} καφέδες`],
+            ["Αυτόν τον μήνα", view.clubData === "unavailable" ? "Δεν είναι ακόμη διαθέσιμο" : view.visitsThisMonth === 1 ? "1 καφές" : `${view.visitsThisMonth} καφέδες`],
           ]}
         />
         <div className="mt-10 flex items-baseline justify-between border-b border-[var(--rule-strong)] pb-3">
           <h2 className="t-title text-[var(--ink)]">Τελευταίοι καφέδες</h2>
           <button type="button" onClick={() => go("history")} className="t-label -my-3 py-3 text-[var(--bronze-deep)] underline-offset-4 hover:underline">Όλο το ιστορικό</button>
         </div>
-        {recent.length === 0 && <p className="t-body py-3.5 text-[var(--ink-2)]">{view.clubData === "unavailable" ? "Το ιστορικό καφέδων δεν είναι ακόμη διαθέσιμο." : "Δεν υπάρχουν ακόμη καφέδες."}</p>}
+        {recent.length === 0 && <p className="t-body py-3.5 text-[var(--ink-2)]">{historyUnknown(view) ? "Το ιστορικό καφέδων δεν είναι ακόμη διαθέσιμο." : "Δεν υπάρχουν ακόμη καφέδες."}</p>}
         <ul className="m-0 list-none p-0">
           {recent.map((r) => (
             <li key={r.date} className="t-body grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-[var(--rule)] py-3.5">
-              <span className="text-[var(--ink)]">{coffeeName(r.coffee)}</span>
+              <span className="text-[var(--ink)]">{r.label ?? coffeeName(r.coffee)}</span>
               <span className="t-small t-num text-[var(--ink-2)]">{greekDate(r.date)}</span>
             </li>
           ))}
@@ -318,7 +346,7 @@ export function Today({ view, go }: MemberScreenProps) {
           <Btn onClick={() => go("card")} className="px-8">Άνοιγμα κάρτας</Btn>
         </div>
 
-        {!clubDataUnavailable && (<>
+        {!clubDataUnavailable && view.historyData === undefined && (<>
         <h2 className="t-title mt-14 border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Οι τελευταίες 7 ημέρες</h2>
         <ol className="m-0 mt-5 grid list-none grid-cols-7 gap-2 p-0">
           {week.map((d) => {
@@ -368,18 +396,18 @@ export function History({ view }: MemberScreenProps) {
   const monthName = (ym: string) => new Date(`${ym}-15T12:00:00Z`).toLocaleDateString("el-GR", { timeZone: "UTC", month: "long", year: "numeric" });
   return (
     <div className="max-w-[720px]">
-      <PageTitle title="Οι καφέδες σας" lede={state === "active" ? "Κάθε καφές Club των τελευταίων τριών εβδομάδων." : "Το ιστορικό μένει διαθέσιμο ακόμη κι όταν η συνδρομή δεν είναι ενεργή."} />
+      <PageTitle title="Οι καφέδες σας" lede={view.historyData === "recent" ? "Οι τελευταίοι σας καφέδες Club, όπως καταχωρήθηκαν στο ταμείο." : state === "active" ? "Κάθε καφές Club των τελευταίων τριών εβδομάδων." : "Το ιστορικό μένει διαθέσιμο ακόμη κι όταν η συνδρομή δεν είναι ενεργή."} />
       {items.length === 0 && (
         <div className="border-y border-[var(--rule)] py-12 text-center">
-          <p className="t-title text-[var(--ink)]">{view.clubData === "unavailable" ? "Το ιστορικό δεν είναι ακόμη διαθέσιμο" : "Δεν υπάρχουν ακόμη καφέδες"}</p>
-          <p className="t-body mt-2 text-[var(--ink-2)]">{view.clubData === "unavailable" ? "Οι καφέδες σας θα εμφανίζονται εδώ μόλις συνδεθεί το ταμείο." : "Ο πρώτος σας καφές θα εμφανιστεί εδώ μόλις τον πάρετε στο ταμείο."}</p>
+          <p className="t-title text-[var(--ink)]">{historyUnknown(view) ? "Το ιστορικό δεν είναι ακόμη διαθέσιμο" : "Δεν υπάρχουν ακόμη καφέδες"}</p>
+          <p className="t-body mt-2 text-[var(--ink-2)]">{historyUnknown(view) ? "Οι καφέδες σας θα εμφανίζονται εδώ μόλις συνδεθεί το ταμείο." : "Ο πρώτος σας καφές θα εμφανιστεί εδώ μόλις τον πάρετε στο ταμείο."}</p>
         </div>
       )}
       {[...months.entries()].map(([ym, rows]) => (
         <section key={ym} className="mb-10">
           <h2 className="flex items-baseline justify-between border-b border-[var(--rule-strong)] pb-3">
             <span className="t-title text-[var(--ink)] first-letter:uppercase">{monthName(ym)}</span>
-            <span className="t-small t-num text-[var(--ink-2)]">{rows.length} καφέδες</span>
+            {view.historyData !== "recent" && <span className="t-small t-num text-[var(--ink-2)]">{rows.length} καφέδες</span>}
           </h2>
           <ol className="relative m-0 list-none p-0 before:absolute before:top-0 before:bottom-0 before:left-[1.45rem] before:w-px before:bg-[var(--rule-strong)]">
             {rows.map((r) => {
@@ -390,8 +418,8 @@ export function History({ view }: MemberScreenProps) {
                     <span className="t-body t-num font-semibold text-[var(--ink)]">{Number(r.date.slice(8))}</span>
                   </span>
                   <span className="min-w-0">
-                    <span className="t-body block font-medium text-[var(--ink)]">{coffeeName(r.coffee)}</span>
-                    <span className="t-small block text-[var(--ink-2)]">{preparationLine(r.preparation ?? historyPreparation(view.member, r.coffee, r.date))}</span>
+                    <span className="t-body block font-medium text-[var(--ink)]">{r.label ?? coffeeName(r.coffee)}</span>
+                    <span className="t-small block text-[var(--ink-2)]">{r.details ? r.details.join(" · ") : preparationLine(r.preparation ?? historyPreparation(view.member, r.coffee, r.date))}</span>
                     <span className="t-small block text-[var(--ink-3)] first-letter:uppercase">{day}</span>
                   </span>
                   <span className="t-small t-num text-[var(--ink-3)]">{r.time}</span>
@@ -408,15 +436,20 @@ export function History({ view }: MemberScreenProps) {
 
 export function Profile({ view, actions }: MemberScreenProps) {
   const { state, member } = view;
-  const renew = state === "active" && !view.pendingRenewal ? actions?.renew : undefined;
+  // Early renewal of an active membership exists only in the design preview: the live app never offers it (D27).
+  const renew = !view.live && state === "active" && !view.pendingRenewal ? actions?.renew : undefined;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
       <section>
         <h1 className="t-headline text-[var(--roast)]">{member.name}</h1>
         {member.memberSince && <p className="t-body mt-2 text-[var(--ink-2)]">Μέλος από τις {greekDate(member.memberSince)}</p>}
         <div className="mt-8 flex flex-wrap gap-3">
-          <Btn tone="line" disabled title="Μη διαθέσιμο στην προεπισκόπηση">Επεξεργασία στοιχείων</Btn>
-          <Btn tone="line" disabled={!actions?.signOut} title={actions?.signOut ? undefined : "Μη διαθέσιμο στην προεπισκόπηση"} onClick={actions?.signOut}>Αποσύνδεση</Btn>
+          {!view.live && (
+            <Btn tone="line" disabled title={PREVIEW_ONLY}>
+              Επεξεργασία στοιχείων
+            </Btn>
+          )}
+          <Btn tone="line" disabled={!actions?.signOut} title={actions?.signOut || view.live ? undefined : PREVIEW_ONLY} onClick={actions?.signOut}>Αποσύνδεση</Btn>
         </div>
       </section>
       <section>

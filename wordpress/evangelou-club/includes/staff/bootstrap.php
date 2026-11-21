@@ -20,6 +20,9 @@ require_once $evc_staff . 'class-evc-rest-redeem-controller.php';
 // STAGE-05C: staff QR scan + administrator QR revocation (routes only with EVC_CLUB_REDEMPTION_SOURCE).
 require_once $evc_staff . 'class-evc-club-lookup-backend.php';
 require_once $evc_staff . 'class-evc-rest-lookup-controller.php';
+// Round 9 (D24): prepared redemption (coffee + preparation + staff note), same opt-in as the v1 route.
+require_once $evc_staff . 'class-evc-club-prepared-redemption-backend.php';
+require_once $evc_staff . 'class-evc-rest-prepared-redeem-controller.php';
 require_once $evc_staff . 'class-evc-rest-session-controller.php';
 require_once $evc_staff . 'class-evc-staff-assets.php';
 require_once $evc_staff . 'class-evc-staff-shell.php';

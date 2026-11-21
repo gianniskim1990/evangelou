@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { MemberPassView } from "../preview/CustomerSignature";
 import { Dashboard, History, MemberChrome, Profile, Today } from "../preview/CustomerPreview";
-import type { CustomerActions } from "../preview/customerView";
+import { liveActions, type CustomerActions } from "../preview/customerView";
 import { Btn, Logo } from "../preview/ds";
 import type { CustomerScreen } from "../preview/screens";
 import type { CustomerConfig } from "./config";
 import type { CustomerApi, MeResult } from "./customerApi";
-import { toLiveView } from "./liveView";
+import type { MemberCoffees } from "./coffeesApi";
+import type { HistoryCoffee } from "./historyApi";
+import { msToNextAthensMidnight, toLiveView } from "./liveView";
+import type { MemberCoffeesFlow } from "./memberCoffees";
+import type { MemberHistoryFlow } from "./memberHistory";
 import type { MemberQrFlow, MemberQrState } from "./memberQr";
 import { MemberQrPanel } from "./MemberQrPanel";
+import { InstallHint } from "./InstallHint";
+import type { InstallHintFlow } from "./pwa/installHint";
 
 /*
  * STAGE-01 REAL customer app (served by WordPress at /club-member/, flag-gated).
@@ -18,6 +24,11 @@ import { MemberQrPanel } from "./MemberQrPanel";
  * (MemberQrPanel / memberQr.ts); otherwise the approved non-redeemable sample.
  * Signed out, not a customer, membership source unavailable and errors get
  * their own plain pages: nothing is ever shown as paid unless /me says so.
+ * D23: with a coffees flow (GET /me/coffees) today's coffee and this month's
+ * count are the member's real figures; without an answer they stay «—».
+ * D24 (round 9): with a history flow (GET /me/history) the «Ιστορικό» lists show the member's own last
+ * coffees. Round 8 LOW-2: the member area re-renders just after each Athens midnight (a timer), so
+ * yesterday's «Τον απολαύσατε σήμερα» never stays on screen; the figures and history are asked again then.
  */
 
 type MemberScreen = "card" | "dashboard" | "today" | "history" | "profile";
@@ -42,6 +53,23 @@ function StatusPage({ title, lede, children }: { title: string; lede: string; ch
 
 const NO_QR: MemberQrState = { phase: "off" };
 const noSubscribe = () => () => {};
+const noCoffees = (): MemberCoffees | null => null;
+const noHistory = (): HistoryCoffee[] | null => null;
+
+/** The timer the midnight re-render uses (injected in tests). */
+export interface MidnightTimers {
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(id: unknown): void;
+}
+const REAL_TIMERS: MidnightTimers = {
+  setTimeout: (fn, ms) => {
+    const id = globalThis.setTimeout(fn, ms);
+    // Never keeps a non-browser host (tests, server rendering) alive for hours.
+    (id as { unref?: () => void }).unref?.();
+    return id;
+  },
+  clearTimeout: (id) => globalThis.clearTimeout(id as ReturnType<typeof setTimeout>),
+};
 
 export function CustomerApp({
   config,
@@ -49,6 +77,10 @@ export function CustomerApp({
   now = () => Date.now(),
   navigate,
   qrFlow,
+  coffeesFlow,
+  historyFlow,
+  timers = REAL_TIMERS,
+  installHint,
 }: {
   config: CustomerConfig;
   api: CustomerApi;
@@ -56,9 +88,21 @@ export function CustomerApp({
   navigate: Navigate;
   /** STAGE-05D: the member's real QR (absent = always the sample code). */
   qrFlow?: MemberQrFlow;
+  /** D23: the member's own coffee figures (absent = «—», as before). */
+  coffeesFlow?: MemberCoffeesFlow;
+  /** D24: the member's own last coffees (absent = «δεν είναι ακόμη διαθέσιμο», as before). */
+  historyFlow?: MemberHistoryFlow;
+  /** LOW-2: the Athens-midnight re-render timer. */
+  timers?: MidnightTimers;
+  /** Round 11 (D26): «Εγκατάσταση στο κινητό», shown below the member area only. */
+  installHint?: InstallHintFlow;
 }) {
   const [result, setResult] = useState<MeResult | null>(null);
   const qrState = useSyncExternalStore(qrFlow?.subscribe ?? noSubscribe, qrFlow?.getState ?? (() => NO_QR));
+  const coffees = useSyncExternalStore(coffeesFlow?.subscribe ?? noSubscribe, coffeesFlow?.getState ?? noCoffees);
+  const history = useSyncExternalStore(historyFlow?.subscribe ?? noSubscribe, historyFlow?.getState ?? noHistory);
+  // LOW-2: bumped just after each Athens midnight, so the view is computed again for the new day.
+  const [day, setDay] = useState(0);
   const [screen, setScreen] = useState<MemberScreen | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const navigated = useRef(false);
@@ -100,9 +144,63 @@ export function CustomerApp({
 
   const account = result?.kind === "ok" ? result.me.email : null;
   const onCard = result?.kind === "ok" && (screen ?? (toLiveView(result.me, now()).state === "active" ? "card" : "dashboard")) === "card";
-  // Each time the card is opened, the QR is resolved again from GET /me/qr (docs/member-qr.md rules).
+  // D23: the figures are asked when the member area opens, and again (throttled, memberCoffees.ts) whenever the
+  // page becomes visible, gets focus or comes back online, and when the card is opened from another screen.
   useEffect(() => {
-    if (onCard && account !== null) void qrFlow?.open(account);
+    if (account === null || !coffeesFlow) return;
+    coffeesFlow.open(account);
+    const doc = globalThis.document;
+    const onVisible = () => {
+      if (!doc || doc.visibilityState !== "hidden") coffeesFlow.wake();
+    };
+    doc?.addEventListener("visibilitychange", onVisible);
+    globalThis.addEventListener?.("focus", onVisible);
+    globalThis.addEventListener?.("online", onVisible);
+    return () => {
+      doc?.removeEventListener("visibilitychange", onVisible);
+      globalThis.removeEventListener?.("focus", onVisible);
+      globalThis.removeEventListener?.("online", onVisible);
+      coffeesFlow.pause();
+    };
+  }, [account, coffeesFlow]);
+  useEffect(() => {
+    if (onCard) coffeesFlow?.wake();
+  }, [onCard, coffeesFlow]);
+  // D24: the member's own last coffees, asked like the figures (memberHistory.ts throttles and caps).
+  useEffect(() => {
+    if (account === null || !historyFlow) return;
+    historyFlow.open(account);
+    const page = globalThis.document;
+    const onShown = () => {
+      if (!page || page.visibilityState !== "hidden") historyFlow.wake();
+    };
+    page?.addEventListener("visibilitychange", onShown);
+    globalThis.addEventListener?.("focus", onShown);
+    globalThis.addEventListener?.("online", onShown);
+    return () => {
+      page?.removeEventListener("visibilitychange", onShown);
+      globalThis.removeEventListener?.("focus", onShown);
+      globalThis.removeEventListener?.("online", onShown);
+      historyFlow.pause();
+    };
+  }, [account, historyFlow]);
+  // LOW-2: re-render just after the next Athens midnight (and ask for the new day's figures and history).
+  useEffect(() => {
+    if (account === null) return;
+    const id = timers.setTimeout(() => {
+      setDay((d) => d + 1);
+      coffeesFlow?.wake();
+      historyFlow?.wake();
+    }, msToNextAthensMidnight(now()));
+    return () => timers.clearTimeout(id);
+  }, [account, day, now, timers, coffeesFlow, historyFlow]);
+  // Each time the card is opened, the QR is resolved again from GET /me/qr (docs/member-qr.md rules).
+  // Round 7: leaving the card (or unmounting) pauses the flow: no retry timer keeps running and no POST is sent
+  // while the member is elsewhere; coming back opens it again.
+  useEffect(() => {
+    if (!onCard || account === null || !qrFlow) return;
+    void qrFlow.open(account);
+    return () => qrFlow.pause();
   }, [onCard, account, qrFlow]);
   // The real panel replaces the sample only once the route is known to exist (never «Φόρτωση…» when it is off).
   const showQr = qrFlow !== undefined && qrState.phase !== "off" && (qrState.phase !== "loading" || qrFlow.seenRoute());
@@ -136,13 +234,15 @@ export function CustomerApp({
       </StatusPage>
     );
   } else {
-    const view = toLiveView(result.me, now());
+    const view = toLiveView(result.me, now(), coffees, history);
     const current: MemberScreen = screen ?? (view.state === "active" ? "card" : "dashboard");
     const go = (s: CustomerScreen) => {
       navigated.current = true;
       setScreen((MEMBER_SCREENS as readonly string[]).includes(s) ? (s as MemberScreen) : "dashboard");
     };
-    const actions: CustomerActions = { signOut };
+    // Round 10: «Γίνετε μέλος» for a customer without a membership; round 11 (D27): «Ανανέωση 20 €» for an expired
+    // membership. Both only when the server sent the join URL (customerView.ts liveActions).
+    const actions: CustomerActions = liveActions(view.state, config.joinUrl ?? "", navigate, signOut);
     body =
       current === "card" ? (
         <MemberPassView
@@ -166,6 +266,22 @@ export function CustomerApp({
   return (
     <div ref={root} className="evc-ds" data-evc-customer="app" data-evc-customer-state={result?.kind === "ok" ? result.me.state : (result?.kind ?? "loading")}>
       {body}
+      {result?.kind === "ok" && installHint && <InstallHint flow={installHint} />}
+    </div>
+  );
+}
+
+/**
+ * Round 11 (D26): the page the service worker builds when the member page cannot be fetched (pwa/swRules.ts
+ * offlineShell). It knows nothing about the member (no nonce, no account), so it shows no card: only that there
+ * is no connection, and a retry.
+ */
+export function OfflineApp({ reload }: { reload: () => void }) {
+  return (
+    <div className="evc-ds" data-evc-customer="app" data-evc-customer-state="offline">
+      <StatusPage title="Δεν υπάρχει σύνδεση" lede="Η κάρτα σας εμφανίζεται μόλις το κινητό συνδεθεί ξανά στο διαδίκτυο.">
+        <Btn onClick={reload} className="px-8">Δοκιμάστε ξανά</Btn>
+      </StatusPage>
     </div>
   );
 }

@@ -34,6 +34,8 @@ require_once $evc_customer . 'class-evc-rest-me-controller.php';
 // STAGE-05C: the customer's own QR (route only with EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1').
 require_once $evc_customer . 'class-evc-customer-qr-backend.php';
 require_once $evc_customer . 'class-evc-rest-me-qr-controller.php';
+// STAGE-08 round 11 (D26): the member page's manifest and service worker (served by the shell only).
+require_once $evc_customer . 'class-evc-customer-pwa.php';
 require_once $evc_customer . 'class-evc-customer-shell.php';
 require_once $evc_customer . 'class-evc-customer-plugin.php';
 unset($evc_customer);

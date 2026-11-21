@@ -1093,12 +1093,28 @@ $mutants = array(
     array('QL14-revocation-by-application-password', 'redemption', 'includes/staff/class-evc-rest-lookup-controller.php',
         "        if (!\$user || !\$user->exists() || did_action('application_password_did_authenticate') > 0) {", "        if (!\$user || !\$user->exists()) {",
         array('StaffQrLookupTest::test_revocation_refuses_a_staff_role_administrator_and_an_application_password_call')),
-    array('QC1-every-request-replaces-the-qr', 'customer', 'includes/customer/class-evc-rest-me-qr-controller.php',
-        "(\$body['replace'] ?? false) === true", 'true',
-        array('CustomerQrTest::test_the_first_qr_is_issued_once_kept_until_a_new_one_is_asked_for_and_never_read_back')),
-    array('QC2-existing-qr-not-reported', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
-        "            if (!\$replace && \$store->active_token_hash(\$member['id']) !== null) {", '            if (false) {',
-        array('CustomerQrTest::test_the_first_qr_is_issued_once_kept_until_a_new_one_is_asked_for_and_never_read_back')),
+    array('QC1-new-token-on-every-call', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        "                        if (!hash_equals(\$active, EVC_Qr_Token::digest(\$token))) {\n                            continue;", "                        if (true) {\n                            continue;",
+        array('CustomerQrTest::test_d22_the_same_token_on_every_device_and_never_read_back_by_get')),
+    array('QC2-revocation-keeps-the-old-generation', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        '                $next = self::next_generation($store, $secret, $member[\'member_public_id\'], $generation);', '                $next = max(1, $generation);',
+        array('CustomerQrTest::test_d22_only_an_administrators_revocation_gives_a_new_token_and_it_then_stays')),
+    array('QD1-secret-not-required', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        '        if ($needs_secret && !EVC_Qr_Token::is_derivation_secret($env[\'qr_secret\'] ?? null, $env[\'lookup_key\'] ?? null)) {', '        if (false) {',
+        array('CustomerQrTest::test_d22_without_a_valid_secret_the_route_fails_closed_before_any_connection')),
+    array('QD2-lookup-key-accepted-as-qr-secret', 'customer', 'includes/class-evc-qr-token.php',
+        '        return !(is_string($lookup_secret) && hash_equals($lookup_secret, $secret));', '        return true;',
+        array('CustomerQrTest::test_d22_without_a_valid_secret_the_route_fails_closed_before_any_connection')),
+    array('QD3-short-qr-secret-accepted', 'customer', 'includes/class-evc-qr-token.php',
+        '        if (!is_string($secret) || strlen($secret) < self::MIN_SECRET_BYTES) {', '        if (!is_string($secret) || strlen($secret) < 1) {',
+        array('CustomerQrTest::test_d22_without_a_valid_secret_the_route_fails_closed_before_any_connection')),
+    array('QD4-token-not-bound-to-the-member', 'customer', 'includes/class-evc-qr-token.php',
+        'self::DERIVATION_CONTEXT . $member_public_id . \'|\' . $generation', 'self::DERIVATION_CONTEXT . \'|\' . $generation',
+        array('CustomerQrTest::test_d22_a_member_never_receives_another_members_token')),
+    array('QD5-older-random-token-kept', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        '                    $store->rotate($member[\'id\'], $active, EVC_Qr_Token::digest($token), $now);', '                    if ($active !== null) { return array(\'result\' => \'concurrent_change\'); }
+                    $store->rotate($member[\'id\'], $active, EVC_Qr_Token::digest($token), $now);',
+        array('CustomerQrTest::test_d22_an_older_random_token_is_replaced_by_the_stable_one_exactly_once')),
     array('QC3-provenance-not-required', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
         "        if ((\$env['provenance'] ?? null) !== self::PROVENANCE) {\n            return \$this->refuse(self::REASON_PROVENANCE);", "        if (false) {\n            return \$this->refuse(self::REASON_PROVENANCE);",
         array('CustomerQrTest::test_every_missing_piece_is_unavailable_without_a_connection')),
@@ -1106,7 +1122,7 @@ $mutants = array(
         "    const MIN_SCHEMA_VERSION = 2;", "    const MIN_SCHEMA_VERSION = 1;",
         array('CustomerQrTest::test_every_missing_piece_is_unavailable_without_a_connection')),
     array('QC5-disabled-member-shown-without-qr', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
-        "            if (\$member['status'] !== 'enabled') {\n                return array('state' => 'member_disabled');", "            if (false) {\n                return array('state' => 'member_disabled');",
+        "            if (\$member['status'] !== 'enabled') {\n                return array('state' => 'member_disabled');\n            }\n            \$hash", "            if (false) {\n                return array('state' => 'member_disabled');\n            }\n            \$hash",
         array('CustomerQrTest::test_only_an_existing_enabled_member_and_only_their_own_qr')),
     array('QC6-replace-not-validated', 'customer', 'includes/customer/class-evc-rest-me-qr-controller.php',
         " || (array_key_exists('replace', \$body) && !is_bool(\$body['replace']))) {", ') {',
@@ -1448,7 +1464,7 @@ $mutants = array(
         '            if (!$creating) {', '            if (false) {',
         array('OnboardingCommerceTest::test_the_checkout_refuses_a_mixed_cart_a_guest_and_a_second_order')),
     array('OG9-second-order-at-the-checkout', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
-        '        if (is_user_logged_in() && $this->handoff->blocks_new_order(get_current_user_id())) {', '        if (false) {',
+        '        if ($this->handoff->blocks_new_order($user)) {', '        if (false) {',
         array('OnboardingCommerceTest::test_the_checkout_refuses_a_mixed_cart_a_guest_and_a_second_order', 'OnboardingCommerceTest::test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account')),
     array('OG10-active-member-may-not-renew', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
         '        return in_array($state, array(EVC_Customer_Membership::PENDING_PAYMENT, EVC_Customer_Membership::UNVERIFIED), true);', '        return true;',
@@ -1475,6 +1491,245 @@ $mutants = array(
     array('OG18-pay-for-order-reads-the-cart', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         '        if ($this->paying !== null) {', '        if (false) {',
         array('OnboardingCommerceTest::test_paying_an_existing_club_order_through_the_store_api_is_bank_transfer_only')),
+    // STAGE-08 (AT1-AT17, modes disabled / admin_tools; ATC1-ATC2, mode commerce_admin_tools): the Club admin pages.
+    array('AT1-flag-accepts-truthy-values', 'disabled', 'includes/admin/class-evc-admin-tools-feature.php',
+        '        return $value === true;', '        return (bool) $value;',
+        array('AdminToolsOffTest::test_off_by_default_nothing_exists')),
+    array('AT2-boot-gate-removed', 'disabled', 'includes/admin/class-evc-admin-tools-plugin.php',
+        '        if (!EVC_Admin_Tools_Feature::enabled()) {
+            return;
+        }
+', '',
+        array('AdminToolsOffTest::test_off_by_default_nothing_exists')),
+    array('AT3-service-constructible-when-off', 'disabled', 'includes/admin/class-evc-staff-account-service.php',
+        '        EVC_Admin_Tools_Feature::assert_constructible(__CLASS__);
+', '',
+        array('AdminToolsOffTest::test_the_classes_refuse_construction_while_off')),
+    array('AT4-club-capability-not-required', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        ' && user_can($user, EVC_Staff_Role::CAP_MANAGE)', '',
+        array('StaffAccountAdminTest::test_nobody_but_a_club_administrator_may_act')),
+    array('AT6-second-shared-account-created', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if ($this->accounts() !== array()) {', '        if (false) {',
+        array('StaffAccountAdminTest::test_the_shared_account_is_created_once_with_the_staff_role_only')),
+    array('AT7-nonce-not-checked', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
+        '        if (wp_verify_nonce($nonce, self::nonce_action($action, $user)) === false) {', '        if (false) {',
+        array('StaffAccountAdminTest::test_a_missing_or_wrong_nonce_changes_nothing')),
+    array('AT8-new-password-keeps-sessions', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        wp_set_password($password, $user_id);
+        WP_Session_Tokens::get_instance($user_id)->destroy_all();
+', '        wp_set_password($password, $user_id);
+',
+        array('StaffAccountAdminTest::test_a_new_password_is_strong_shown_once_and_signs_the_tablet_out')),
+    array('AT9-password-for-any-account', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if (!$this->is_staff($user_id)) {
+            return $this->done(\'password\'', '        if (false) {
+            return $this->done(\'password\'',
+        array('StaffAccountAdminTest::test_only_staff_accounts_can_be_targeted')),
+    array('AT10-over-privileged-account-left-enabled', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '            update_user_meta($user_id, EVC_Staff_Auth::DISABLED_META, \'1\');
+', '',
+        array('StaffAccountAdminTest::test_an_account_given_more_than_the_staff_role_stays_disabled')),
+    array('AT11-refusals-not-audited', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        $this->audit($action, $target, self::FORBIDDEN);
+', '',
+        array('StaffAccountAdminTest::test_nobody_but_a_club_administrator_may_act')),
+    array('AT12-weak-password-accepted', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        'strlen($password) >= 20 && ', '',
+        array('StaffAccountAdminTest::test_the_shared_account_is_created_once_with_the_staff_role_only')),
+    array('AT13-schema-behind-target-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '$applied >= $target ? self::OK : self::WRONG', 'self::OK',
+        array('ReadinessTest::test_the_club_database_missing_unreachable_or_at_the_target_schema')),
+    array('AT14-proxy-header-values-shown', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '                $headers[] = substr($h, 5);', '                $headers[] = substr($h, 5) . \'=\' . $this->server[$h];',
+        array('ReadinessTest::test_the_server_checks_show_names_never_values')),
+    array('AT15-any-timezone-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '\'Ζώνη ώρας του ιστότοπου\', $zone === EVC_Membership_Calendar::ZONE ? self::OK : self::WRONG,', '\'Ζώνη ώρας του ιστότοπου\', self::OK,',
+        array('ReadinessTest::test_the_server_checks_show_names_never_values')),
+    array('AT16-duplicate-accounts-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        if (count($accounts) > 1) {
+            return array(self::row(\'staff_account\'', '        if (false) {
+            return array(self::row(\'staff_account\'',
+        array('StaffAccountAdminTest::test_more_than_one_shared_account_is_a_warning_and_nothing_is_deleted')),
+    array('AT17-last-login-of-anyone', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if (EVC_Staff_Role::has_staff_role($user)) {
+            update_user_meta((int) $user->ID, self::LAST_LOGIN_META', '        if (true) {
+            update_user_meta((int) $user->ID, self::LAST_LOGIN_META',
+        array('StaffAccountAdminTest::test_the_last_sign_in_time_is_recorded_without_any_address')),
+    // STAGE-08 round 2 (AT18-AT30, mode admin_tools): readiness provenance / lookup key / unreadable ledger, the
+    // not-restricted refusals, the bound nonce, the no-store header and the bounded password generator.
+    array('AT18-provenance-any-value-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        return $value === self::PROVENANCE_VALUE ? self::OK : self::WRONG;', '        return self::OK;',
+        array('ReadinessTest::test_the_payment_provenance_reads_ok_only_for_the_exact_value')),
+    array('AT19-provenance-undefined-not-missing', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        if (!$defined) {
+            return self::MISSING;
+        }
+        return $value === self::PROVENANCE_VALUE', '        return $value === self::PROVENANCE_VALUE',
+        array('ReadinessTest::test_the_payment_provenance_reads_ok_only_for_the_exact_value')),
+    array('AT20-short-lookup-key-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        return EVC_Club_Qr_Services::is_lookup_secret($value) ? self::OK : self::WRONG;', '        return is_string($value) && $value !== \'\' ? self::OK : self::WRONG;',
+        array('ReadinessTest::test_the_lookup_key_reads_ok_only_when_valid_and_is_never_shown')),
+    array('AT21-unreadable-ledger-reads-as-nothing-applied', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '            $unreadable = get_class($e);
+', '',
+        array('ReadinessTest::test_an_unreadable_migrations_ledger_is_not_read_as_nothing_applied')),
+    array('AT22-password-for-an-over-privileged-account', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if (!EVC_Staff_Role::is_restricted_staff_account(get_userdata($user_id))) {
+            // More than the staff role', '        if (false) {
+            // More than the staff role',
+        array('StaffAccountAdminTest::test_an_account_with_more_than_the_staff_role_gets_no_password_and_is_not_enabled')),
+    array('AT23-enable-an-over-privileged-account', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if (!$disabled && !EVC_Staff_Role::is_restricted_staff_account(', '        if (false && !EVC_Staff_Role::is_restricted_staff_account(',
+        array('StaffAccountAdminTest::test_an_account_with_more_than_the_staff_role_gets_no_password_and_is_not_enabled')),
+    array('AT24-nonce-not-bound', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
+        '        return self::NONCE_ACTION . \'|\' . $action . \'|\' . $user_id;', '        return self::NONCE_ACTION;',
+        array('StaffAccountAdminTest::test_a_nonce_is_bound_to_its_action_and_its_account', 'StaffAccountAdminTest::test_a_missing_or_wrong_nonce_changes_nothing')),
+    array('AT25-nonce-not-bound-to-the-account', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
+        '        return self::NONCE_ACTION . \'|\' . $action . \'|\' . $user_id;', '        return self::NONCE_ACTION . \'|\' . $action;',
+        array('StaffAccountAdminTest::test_a_nonce_is_bound_to_its_action_and_its_account')),
+    array('AT26-password-answer-without-no-store', 'admin_tools', 'includes/admin/class-evc-staff-account-page.php',
+        '            ($this->header)(self::NO_STORE_HEADER);
+', '',
+        array('StaffAccountAdminTest::test_the_answer_with_a_password_is_sent_no_store')),
+    array('AT27-weak-generated-password-accepted', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '            if (is_string($password) && self::strong($password)) {', '            if (is_string($password)) {',
+        array('StaffAccountAdminTest::test_a_weakened_password_generator_fails_closed_after_ten_attempts')),
+    array('AT28-create-ignores-a-failed-generator', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if ($password === null) {
+            return $this->done(\'create\', 0, self::FAILED);
+        }
+', '',
+        array('StaffAccountAdminTest::test_a_weakened_password_generator_fails_closed_after_ten_attempts')),
+    array('AT29-new-password-ignores-a-failed-generator', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '        if ($password === null) {
+            return $this->done(\'password\', $user_id, self::FAILED);
+        }
+', '',
+        array('StaffAccountAdminTest::test_a_weakened_password_generator_fails_closed_after_ten_attempts')),
+    array('AT30-one-generator-attempt-only', 'admin_tools', 'includes/admin/class-evc-staff-account-service.php',
+        '    const PASSWORD_ATTEMPTS = 10;', '    const PASSWORD_ATTEMPTS = 1;',
+        array('StaffAccountAdminTest::test_a_weakened_password_generator_fails_closed_after_ten_attempts')),
+    // STAGE-08 round 4 (W44-W46, mode enabled; AT31-AT34, mode admin_tools): plain permalinks (staging 2026-11-18) and
+    // the readiness hints.
+    array('W44-staff-shell-url-ignores-plain-permalinks', 'enabled', $staff . 'class-evc-staff-shell.php',
+        "        if ((string) get_option('permalink_structure') === '') {\n            return add_query_arg(self::QUERY_VAR, '1', home_url('/'));\n        }\n        return home_url('/' . self::SLUG . '/');",
+        "        return home_url('/' . self::SLUG . '/');",
+        array('StaffShellTest::test_the_shell_url_follows_the_permalink_setting')),
+    array('W45-admin-guard-targets-the-pretty-path', 'enabled', $staff . 'class-evc-staff-admin-guard.php',
+        "        return EVC_Staff_Shell::shell_url();\n    }\n\n    public static function maybe_redirect",
+        "        return home_url(self::STAFF_PATH);\n    }\n\n    public static function maybe_redirect",
+        array('StaffShellTest::test_the_shell_url_follows_the_permalink_setting')),
+    array('W46-login-redirect-to-the-pretty-path', 'enabled', $staff . 'class-evc-staff-admin-guard.php',
+        'has_staff_role($user) ? EVC_Staff_Shell::shell_url() : $redirect_to;', 'has_staff_role($user) ? home_url(self::STAFF_PATH) : $redirect_to;',
+        array('StaffShellTest::test_the_shell_url_follows_the_permalink_setting')),
+    array('AT31-plain-permalinks-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        if (\$structure === '') {\n            return self::row('permalinks'", "        if (false) {\n            return self::row('permalinks'",
+        array('ReadinessTest::test_plain_permalinks_read_wrong_with_the_greek_fix')),
+    array('AT32-index-php-permalinks-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        if (strpos(\$structure, 'index.php') !== false) {", "        if (false) {",
+        array('ReadinessTest::test_plain_permalinks_read_wrong_with_the_greek_fix')),
+    array('AT33-db-hint-ignores-the-driver-code', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '            $code = $e instanceof EVC_Db_Exception ? $e->driver_code() : null;', '            $code = null;',
+        array('ReadinessTest::test_a_failed_connection_names_what_to_check_without_values')),
+    array('AT34-db-hint-unknown-database-read-as-generic', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "            case 1049:\n                return 'Η βάση δεν υπάρχει: ελέγξτε στο wp-config.php το EVC_CLUB_DB_NAME.' . \$values;\n", '',
+        array('ReadinessTest::test_a_failed_connection_names_what_to_check_without_values')),
+    // STAGE-08 round 7 (D22 readiness row; NIT-5 home path keeps every «%» as the browser does).
+    array('AT35-qr-secret-always-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        return EVC_Qr_Token::is_derivation_secret($value, $lookup_key) ? self::OK : self::WRONG;', '        return self::OK;',
+        array('ReadinessTest::test_the_qr_secret_reads_ok_only_when_valid_distinct_from_the_lookup_key_and_is_never_shown')),
+    array('W47-home-path-re-encodes-percent', 'enabled', 'includes/staff/class-evc-rest-security.php',
+        '    private const PATH_ENCODE = \'/[\\x00-\\x20"#<>?`{}\\x7F-\\xFF]/\';', '    private const PATH_ENCODE = \'/[\\x00-\\x20"#%<>?`{}\\x7F-\\xFF]/\';',
+        array('StaffShellTest::test_the_home_path_of_a_subfolder_install_is_sent_as_a_fixed_value')),
+    // STAGE-08 round 8: LOW-1 (concurrent first issue), LOW-2 (deleted rows), NIT-1 / NIT-2 / NIT-3, owner decision D23.
+    array('QC8-one-stable-try', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        '    const STABLE_TRIES = 2;', '    const STABLE_TRIES = 1;',
+        array('CustomerQrTest::test_round8_a_concurrent_first_issue_by_another_device_gives_this_device_the_same_token')),
+    array('QC9-row-of-another-member-handed-out', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        " && \$row['member_id'] === \$member['id']) {", ') {',
+        array('CustomerQrTest::test_round8_an_active_row_that_is_not_the_members_own_is_never_handed_out')),
+    array('QC10-status-keeps-the-secret', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        "        \$db = \$this->open();\n        // Round 8 (NIT-2): status() never needs the secret; it is not kept a moment longer than issue() keeps it.\n        \$this->secret = null;\n", "        \$db = \$this->open();\n",
+        array('CustomerQrTest::test_round8_the_secret_is_not_kept_after_a_get_or_a_post')),
+    array('QG1-no-probe-above-the-row-count', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        '$g <= $generation + self::GENERATION_PROBE; $g++) {', '$g <= $generation; $g++) {',
+        array('CustomerQrTest::test_round8_deleted_rows_neither_change_the_stable_token_nor_bring_back_a_revoked_code')),
+    array('QG2-revoked-generation-reissued', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        "            if (\$row === null || \$row['status'] === 'active') {\n                return \$g;", "            if (true) {\n                return \$g;",
+        array('CustomerQrTest::test_round8_deleted_rows_neither_change_the_stable_token_nor_bring_back_a_revoked_code')),
+    array('QG3-stuck-state-not-detected', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        "        return null;\n    }\n\n    /**\n     * Owner decision D23", "        return \$generation + 1;\n    }\n\n    /**\n     * Owner decision D23",
+        array('CustomerQrTest::test_round8_too_many_deleted_rows_are_reported_as_the_stuck_state')),
+    array('QD6-docs-placeholder-accepted', 'customer', 'includes/class-evc-qr-token.php',
+        "        if (strpos(\$secret, '...') !== false || count(", '        if (count(',
+        array('CustomerQrTest::test_d22_without_a_valid_secret_the_route_fails_closed_before_any_connection')),
+    array('QD7-repeated-character-accepted', 'customer', 'includes/class-evc-qr-token.php',
+        'count(count_chars($secret, 1)) < self::MIN_DISTINCT_BYTES', 'false',
+        array('CustomerQrTest::test_d22_without_a_valid_secret_the_route_fails_closed_before_any_connection')),
+    array('W48-home-path-backslash-kept', 'enabled', 'includes/staff/class-evc-rest-security.php',
+        "        \$path = str_replace('\\\\', '/', \$path);\n", '',
+        array('StaffShellTest::test_the_home_path_of_a_subfolder_install_is_sent_as_a_fixed_value')),
+    array('CF1-month-not-bounded-below', 'customer', 'includes/class-evc-redemption-store.php',
+        ' AND business_date >= ? AND business_date <= ?', ' AND ? IS NOT NULL AND business_date <= ?',
+        array('CustomerQrTest::test_d23_the_members_own_coffees_of_this_athens_day_and_month')),
+    array('CF2-another-members-coffees', 'customer', 'includes/class-evc-redemption-store.php',
+        ' FROM evc_redemptions WHERE member_id = ? AND benefit_type', ' FROM evc_redemptions WHERE ? > 0 AND benefit_type',
+        array('CustomerQrTest::test_d23_the_members_own_coffees_of_this_athens_day_and_month')),
+    array('CF3-utc-day-not-athens', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        '            $today = EVC_Clock::business_date($this->clock->now());', "            \$today = EVC_Clock::to_utc(\$this->clock->now())->format('Y-m-d');",
+        array('CustomerQrTest::test_d23_the_members_own_coffees_of_this_athens_day_and_month')),
+    array('CF4-taken-today-is-any-coffee-this-month', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        "'taken_today' => \$counts['today'] > 0,", "'taken_today' => \$counts['month'] > 0,",
+        array('CustomerQrTest::test_d23_the_members_own_coffees_of_this_athens_day_and_month')),
+    array('CF5-other-benefits-counted', 'customer', 'includes/class-evc-redemption-store.php',
+        ' AND benefit_type = ? AND business_date >= ?', ' AND ? IS NOT NULL AND business_date >= ?',
+        array('CustomerQrTest::test_d23_the_members_own_coffees_of_this_athens_day_and_month')),
+    array('CF6-coffees-need-the-qr-secret', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        '        if ($needs_secret && !EVC_Qr_Token::', '        if (!EVC_Qr_Token::',
+        array('CustomerQrTest::test_d23_not_a_member_disabled_signed_out_and_fail_soft')),
+    array('CF7-month-not-bounded-above', 'customer', 'includes/class-evc-redemption-store.php',
+        ' AND business_date <= ?', ' AND ? IS NOT NULL',
+        array('CustomerQrTest::test_d23_the_members_own_coffees_of_this_athens_day_and_month')),
+    array('CF8-coffees-of-a-disabled-member', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        "                return array('state' => 'member_disabled');\n            }\n            \$today", "            }\n            \$today",
+        array('CustomerQrTest::test_d23_not_a_member_disabled_signed_out_and_fail_soft')),
+    // Round 9, owner decision D24: prepared redemption route, lookup history, member card history, readiness row.
+    array('PW1-schema-below-4-answers-503', 'redemption', 'includes/staff/class-evc-rest-prepared-redeem-controller.php',
+        '                return $this->backend->last_reason() === EVC_Club_Prepared_Redemption_Backend::REASON_SCHEMA', "                return \$this->backend->last_reason() === 'never'",
+        array('PreparedRedemptionTest::test_below_schema_4_the_route_answers_prepared_unavailable_and_writes_nothing')),
+    array('PW2-schema-3-accepted', 'redemption', 'includes/staff/class-evc-club-prepared-redemption-backend.php',
+        '    const MIN_SCHEMA_VERSION = EVC_Coffee_History::PREPARED_SCHEMA_VERSION;', '    const MIN_SCHEMA_VERSION = 3;',
+        array('PreparedRedemptionTest::test_below_schema_4_the_route_answers_prepared_unavailable_and_writes_nothing')),
+    array('PW4-history-flag-truthy', 'redemption', 'includes/staff/class-evc-rest-lookup-controller.php',
+        "|| (\$history && \$body['history'] !== true)", "|| (\$history && !\$body['history'])",
+        array('PreparedRedemptionTest::test_the_lookup_with_history_shows_only_this_members_coffees_and_the_old_reply_is_unchanged')),
+    array('PW5-old-tills-get-the-new-reply', 'redemption', 'includes/staff/class-evc-rest-lookup-controller.php',
+        "                    if (\$history) {\n                        \$reply['prepared']", "                    if (true) {\n                        \$reply['prepared']",
+        array('PreparedRedemptionTest::test_the_lookup_with_history_shows_only_this_members_coffees_and_the_old_reply_is_unchanged')),
+    array('PW6-prepared-ignores-the-schema', 'redemption', 'includes/staff/class-evc-club-lookup-backend.php',
+        "\$found['prepared'] = \$prepared && EVC_Club_Prep_Catalogue_Authority::is_authorised();", "\$found['prepared'] = EVC_Club_Prep_Catalogue_Authority::is_authorised();",
+        array('PreparedRedemptionTest::test_below_schema_4_the_lookup_says_not_prepared_and_shows_coffee_names_only')),
+    array('PW7-card-history-ignores-the-schema', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        '$this->schema >= EVC_Coffee_History::PREPARED_SCHEMA_VERSION', 'true',
+        array('CustomerQrTest::test_d24_history_states_auth_and_schema_below_4')),
+    array('PW8-card-history-carries-the-staff-view', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        "'items' => EVC_Coffee_History::for_customer(\$items)", "'items' => EVC_Coffee_History::for_staff(\$items)",
+        array('CustomerQrTest::test_d24_the_card_history_is_the_members_own_newest_first_without_the_note_or_staff')),
+    array('PW9-card-history-of-a-disabled-member', 'customer', 'includes/customer/class-evc-customer-qr-backend.php',
+        "                return array('state' => 'member_disabled');\n            }\n            \$items", "            }\n            \$items",
+        array('CustomerQrTest::test_d24_history_states_auth_and_schema_below_4')),
+    array('PW10-readiness-prepared-ok-below-4', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        if ($applied < EVC_Coffee_History::PREPARED_SCHEMA_VERSION) {', '        if (false) {',
+        array('ReadinessTest::test_the_prepared_redemption_row_follows_migration_004')),
+    array('PW11-prepared-routes-without-the-opt-in', 'enabled', 'includes/staff/class-evc-staff-plugin.php',
+        "        if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared_Redeem_Controller", "        if (true) {\n            (new EVC_Rest_Prepared_Redeem_Controller",
+        array('ClubRedemptionBackendTest::test_without_the_constant_no_prepared_redemption_route_is_registered')),
+    array('ATC1-shop-conflicts-ignored', 'commerce_admin_tools', 'includes/admin/class-evc-readiness.php',
+        '$conflicts === array() ? self::OK : self::WRONG', 'self::OK',
+        array('ReadinessCommerceTest::test_a_wrong_price_a_shared_cart_or_no_bank_transfer_read_wrong')),
+    array('ATC2-bank-transfer-off-reads-ok', 'commerce_admin_tools', 'includes/admin/class-evc-readiness.php',
+        '($bacs[\'enabled\'] ?? \'\') === \'yes\'', 'true',
+        array('ReadinessCommerceTest::test_a_wrong_price_a_shared_cart_or_no_bank_transfer_read_wrong')),
     array('OG17-add-to-cart-after-other-validators', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
         'array($this, \'add_to_cart\'), 5, 3);', 'array($this, \'add_to_cart\'), 20, 3);',
         array('OnboardingCommerceTest::test_the_cart_takes_the_club_product_alone_and_never_twice')),
@@ -1482,7 +1737,134 @@ $mutants = array(
         '            if ($this->has_open_club_order($user_id)) {
                 return true;', '            if (false) {
                 return true;',
-        array('OnboardingCommerceTest::test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found')),
+        array('OnboardingCommerceTest::test_a_waiting_renewal_behind_fifty_open_orders_of_other_products_is_found')),    // STAGE-08 round 10: «Γίνετε μέλος» join URL on the member page (A); readiness rights on the table of 004 (LOW-1).
+    array('R10W1-join-url-sent-without-the-join-flow', 'customer', 'includes/customer/class-evc-customer-shell.php',
+        "        if (EVC_Onboarding_Feature::enabled()) {\n            \$config['joinUrl']", "        if (true) {\n            \$config['joinUrl']",
+        array('CustomerShellTest::test_a_customer_gets_the_page_with_the_customer_rest_base_and_a_nonce')),
+    array('R10W2-join-url-never-sent', 'onboarding', 'includes/customer/class-evc-customer-shell.php',
+        "            \$config['joinUrl'] = EVC_Onboarding_Shell::join_url();\n", "",
+        array('OnboardingTest::test_the_member_page_carries_the_join_url_while_the_join_flow_is_on')),
+    array('R10W3-join-url-is-the-member-page', 'onboarding', 'includes/customer/class-evc-customer-shell.php',
+        "            \$config['joinUrl'] = EVC_Onboarding_Shell::join_url();", "            \$config['joinUrl'] = self::shell_url();",
+        array('OnboardingTest::test_the_member_page_carries_the_join_url_while_the_join_flow_is_on')),
+    array('R10W4-join-url-with-the-poster-marker', 'onboarding', 'includes/customer/class-evc-customer-shell.php',
+        "            \$config['joinUrl'] = EVC_Onboarding_Shell::join_url();", "            \$config['joinUrl'] = EVC_Onboarding_Shell::join_url(true);",
+        array('OnboardingTest::test_the_member_page_carries_the_join_url_while_the_join_flow_is_on')),
+    array('AT36-preparation-grants-not-read', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "            \$grants = self::preparation_grants(\$db);", "            \$grants = array('state' => EVC_Db_Grants::OK, 'missing' => array());",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT37-missing-grants-read-as-manual', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        if (\$state === EVC_Db_Grants::MISSING) {", "        if (false) {",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT38-unknown-grants-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        if (\$state !== EVC_Db_Grants::OK) {", "        if (\$state === EVC_Db_Grants::UNKNOWN) {",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT39-unchecked-grants-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        \$state = \$grants['state'] ?? EVC_Db_Grants::UNKNOWN;", "        \$state = \$grants['state'] ?? EVC_Db_Grants::OK;",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT40-grants-read-of-another-table', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        "        return EVC_Db_Grants::table_privileges(\$lines, \$database, self::PREPARATIONS_TABLE, self::PREPARATIONS_PRIVILEGES);", "        return EVC_Db_Grants::table_privileges(\$lines, \$database, 'evc_redemptions', self::PREPARATIONS_PRIVILEGES);",
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    // STAGE-08 round 11: home-screen app (D26: R11W1-W12), checkout race lock (R11W13-W22), SHOW GRANTS failure (C3: AT41-AT42).
+    array('R11W1-worker-on-plain-permalinks', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        if (!self::pretty() || $request_path !== self::scope() . self::WORKER_FILE) {', '        if ($request_path !== self::scope() . self::WORKER_FILE) {',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W2-worker-at-any-path', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        if (!self::pretty() || $request_path !== self::scope() . self::WORKER_FILE) {', '        if (!self::pretty()) {',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W3-worker-offered-with-plain-permalinks', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        return self::pretty() ? home_url(\'/\' . EVC_Customer_Shell::SLUG . \'/\' . self::WORKER_FILE) : null;', '        return home_url(\'/\' . EVC_Customer_Shell::SLUG . \'/\' . self::WORKER_FILE);',
+        array('CustomerShellTest::test_round11_the_service_worker_is_offered_only_with_pretty_permalinks_and_only_for_the_member_path')),
+    array('R11W4-manifest-scope-the-whole-site', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '            \'scope\' => self::pretty() ? self::scope() : EVC_Rest_Security::home_path(),', '            \'scope\' => EVC_Rest_Security::home_path(),',
+        array('CustomerShellTest::test_round11_the_manifest_is_public_and_points_at_the_member_page')),
+    array('R11W5-manifest-starts-elsewhere', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        $start = EVC_Customer_Shell::shell_url();', '        $start = home_url(\'/\');',
+        array('CustomerShellTest::test_round11_the_manifest_is_public_and_points_at_the_member_page')),
+    array('R11W6-pwa-without-the-flag', 'disabled', 'includes/customer/class-evc-customer-shell.php',
+        '        if (!EVC_Customer_Feature::enabled()) {
+            return EVC_Customer_Pwa::not_found();
+        }
+', '',
+        array('CustomerFeatureOffTest::test_the_customer_surface_does_not_exist')),
+    array('R11W7-no-manifest-link', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        return \'<link rel="manifest" href="\' . esc_url(self::manifest_url()) . \'">\' . "\\n"
+            . ', '        return \'\' . ',
+        array('CustomerShellTest::test_round11_the_page_links_the_manifest_and_the_ios_tags_with_both_permalink_forms')),
+    array('R11W8-worker-scope-widened', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        $headers[\'Content-Type\'] = \'text/javascript; charset=utf-8\';', '        $headers[\'Content-Type\'] = \'text/javascript; charset=utf-8\';
+        $headers[\'Service-Worker-Allowed\'] = \'/\';',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W9-worker-precaches-nothing', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '        $precache = array_values(array_unique(array_merge($resolved[\'scripts\'], $resolved[\'preloads\'], $resolved[\'styles\'])));', '        $precache = array();',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W10-new-build-same-cache', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        'implode("\\n", $precache) . "\\n" . hash(\'sha256\', $script)', 'implode("\\n", $precache)',
+        array('CustomerShellTest::test_round11_the_worker_is_served_only_at_its_pretty_path_with_its_configuration')),
+    array('R11W11-rewrite-rules-never-flushed-again', 'customer', 'includes/customer/class-evc-customer-shell.php',
+        '    const REWRITE_STATE_ON = \'on-v2\';', '    const REWRITE_STATE_ON = \'on-v1\';',
+        array('CustomerShellTest::test_round11_the_rewrite_rules_cover_the_manifest_and_the_worker')),
+    array('R11W12-manifest-icons-dropped', 'customer', 'includes/customer/class-evc-customer-pwa.php',
+        '            \'icons\' => $icons,', '            \'icons\' => array(),',
+        array('CustomerShellTest::test_round11_the_manifest_is_public_and_points_at_the_member_page')),
+    array('R11W13-checkout-lock-ignored', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($submitting && $this->hold_lock($user) === false) {', '        if (false) {',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W14-orders-read-before-the-lock', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($submitting && $this->hold_lock($user) === false) {
+            $this->last_message = self::BUSY;
+            $errors->add(\'evc_club_checkout_busy\', self::BUSY);
+            return;
+        }
+        if ($this->handoff->blocks_new_order($user)) {
+            $this->last_message = self::DUPLICATE;
+            $errors->add(\'evc_club_duplicate_order\', self::DUPLICATE);
+        }', '        if ($this->handoff->blocks_new_order($user)) {
+            $this->last_message = self::DUPLICATE;
+            $errors->add(\'evc_club_duplicate_order\', self::DUPLICATE);
+        }
+        if ($submitting && $this->hold_lock($user) === false) {
+            $this->last_message = self::BUSY;
+            $errors->add(\'evc_club_checkout_busy\', self::BUSY);
+            return;
+        }',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W15-classic-checkout-not-locked', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        $this->cart_rules($errors, true);', '        $this->cart_rules($errors);',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W16-cart-reads-locked-too', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '            $this->cart_rules($errors, $this->submitting);', '            $this->cart_rules($errors, true);',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W17-store-api-submission-not-recognised', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        $this->submitting = $request instanceof WP_REST_Request && $request->get_method() === \'POST\' &&', '        $this->submitting = false &&',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W18-lock-taken-on-every-call', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        if ($this->locked_for === $user_id) {
+            return true;
+        }
+', '',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W19-no-named-locks-refuses-the-checkout', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        return $held === true || $held === false ? $held : null;', '        return $held === true;',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('R11W20-one-lock-for-every-account', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        'substr(hash(\'sha256\', $site), 0, 16) . \'_\' . $user_id;', 'substr(hash(\'sha256\', $site), 0, 16) . \'_0\';',
+        array('OnboardingTest::test_round11_the_checkout_lock_is_a_real_per_account_database_lock')),
+    array('R11W21-lock-never-released', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        $wpdb->get_var($wpdb->prepare(\'SELECT RELEASE_LOCK(%s)\', $name));', '        unset($name);',
+        array('OnboardingTest::test_round11_the_checkout_lock_is_a_real_per_account_database_lock')),
+    array('R11W22-submission-outlives-its-request', 'onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
+        '        $this->paying = null;
+        $this->submitting = false;
+        return $response;', '        $this->paying = null;
+        return $response;',
+        array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
+    array('AT41-grants-read-failure-read-as-missing', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => self::PREPARATIONS_PRIVILEGES);', '            return array(\'state\' => EVC_Db_Grants::MISSING, \'missing\' => self::PREPARATIONS_PRIVILEGES);',
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    array('AT42-grants-read-failure-read-as-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => self::PREPARATIONS_PRIVILEGES);', '            return array(\'state\' => EVC_Db_Grants::OK, \'missing\' => array());',
+        array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -1531,6 +1913,14 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
         // STAGE-07: the same over the real commerce site.
         $suite = 'wp-commerce-onboarding';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled'));
+    } elseif ($mode === 'admin_tools') {
+        // STAGE-08: EVC_CLUB_ADMIN_TOOLS_ENABLED = true, no commerce plugins.
+        $suite = 'wp-admin-tools';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'disabled', 'EVC_TEST_ADMIN_TOOLS_FLAG' => 'enabled'));
+    } elseif ($mode === 'commerce_admin_tools') {
+        // STAGE-08: the readiness checks over the real commerce site (customer + onboarding + admin pages ON).
+        $suite = 'wp-commerce-admin-tools';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled', 'EVC_TEST_ADMIN_TOOLS_FLAG' => 'enabled'));
     } elseif ($mode === 'fluentcrm') {
         // STAGE-06: EVC_CLUB_FLUENTCRM_SYNC_ENABLED = true + the six tag constants + the TEST-ONLY fake FluentCRM API.
         $suite = 'wp-fluentcrm';
@@ -1559,7 +1949,7 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
 // commerce mutants, which need the real plugins (EVC_TEST_COMMERCE_PLUGINS) and their own CI job.
 $evc_commerce_only = in_array('--mode=commerce', $argv, true);
 $mutants = array_values(array_filter($mutants, function ($m) use ($evc_commerce_only) {
-    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding'), true) === $evc_commerce_only;
+    return in_array($m[1], array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding', 'commerce_admin_tools'), true) === $evc_commerce_only;
 }));
 if ($evc_commerce_only && (string) getenv('EVC_TEST_COMMERCE_PLUGINS') === '') {
     fwrite(STDERR, "ABORT: --mode=commerce needs EVC_TEST_COMMERCE_PLUGINS.\n");
@@ -1571,7 +1961,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm', 'onboarding') as $mode) {
+foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding', 'commerce_admin_tools') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm', 'onboarding', 'admin_tools') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

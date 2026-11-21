@@ -258,6 +258,23 @@ user-link writer in every shipped file.
 > **Απόφαση ιδιοκτήτη (D11):** Τα μέλη του Club που δεν είναι επαφές στο FluentCRM **δεν**
 > δημιουργούνται ως επαφές, ούτε τώρα ούτε αργότερα. Απλώς μετριούνται («no_contact»).
 
+## Owner decision D20 (2026-11-18): newsletter consent at the checkout
+
+Found on the owner's staging run: FluentCRM's **WooCommerce integration** syncs every buyer with **Default Contact
+Status «Subscribed»**, so every shop buyer (Club joiners included) became a newsletter subscriber. **Decided:** set the
+integration's Default Contact Status to **«Transactional»**, and use FluentCRM's own **«Add a subscription checkbox to
+the WooCommerce checkout page»**, **unticked** by default, for everyone. Pending the shop owner's consent via the
+technician before production.
+
+This sync plugin is unaffected: it only moves the three membership tags on **existing** contacts (D11: it never
+creates a contact) and never touches a contact's subscription status. Whether a Club member is a newsletter subscriber
+is the customer's own choice at the checkout. Readiness shows two manual rows for these settings (the plugin does not
+read FluentCRM's settings: only the gateway may call FluentCRM). FluentCRM shows the checkbox on the **classic**
+checkout only (see [store-onboarding.md](store-onboarding.md#d20-2026-11-18-supersedes-d12s-no-newsletter-checkbox-for-the-shop-checkout)).
+
+> **Απόφαση ιδιοκτήτη (D20):** Κουτάκι newsletter του FluentCRM στο checkout, άδειο εξ ορισμού· «Default Contact
+> Status» της σύνδεσης με το WooCommerce = «Transactional». Ο συγχρονισμός ετικετών δεν αλλάζει.
+
 ## Code
 
 - `includes/class-evc-fluentcrm-tags.php` is the pure core: tag config, mapping, the gateway

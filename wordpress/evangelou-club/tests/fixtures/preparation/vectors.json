@@ -961,11 +961,11 @@
       "reason": "pricing_policy"
     },
     {
-      "name": "free_text_enabled",
+      "name": "free_text_not_boolean",
       "path": [
         "free_text_note"
       ],
-      "value": true,
+      "value": "yes",
       "reason": "free_text_note"
     },
     {

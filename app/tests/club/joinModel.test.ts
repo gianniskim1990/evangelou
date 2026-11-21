@@ -16,6 +16,7 @@ const join = (over: Record<string, unknown> = {}) =>
   JSON.stringify({
     mode: "join",
     restBase: `${BASE}/?rest_route=/evangelou-club-customer/v1`,
+    homePath: "/prometheus/",
     nonce: "0123456789",
     step: "register",
     joinUrl: `${BASE}/?evc_club_join=1`,
@@ -84,6 +85,10 @@ describe("STAGE-07 bootstrap configs", () => {
     assert.ok(!parseJoinConfig(join({ step: "admin" }), ORIGIN).ok);
     assert.ok(!parseJoinConfig(join({ nonce: "x" }), ORIGIN).ok);
     assert.ok(!parseJoinConfig(join({ restBase: `${BASE}/?rest_route=/wp/v2` }), ORIGIN).ok);
+    // STAGE-08 round 5: a plain base needs the shell's home path, and must sit exactly there.
+    assert.ok(!parseJoinConfig(join({ homePath: undefined }), ORIGIN).ok, "plain base without homePath");
+    assert.ok(!parseJoinConfig(join({ homePath: "/" }), ORIGIN).ok, "plain base outside the home path");
+    assert.ok(!parseJoinConfig(join({ restBase: `${BASE}/?rest_route=/evangelou-club-customer/v1&rest.route=/wp/v2/users` }), ORIGIN).ok, "PHP alias of rest_route");
     assert.ok(!parseJoinConfig(join({ mode: "poster" }), ORIGIN).ok);
   });
 

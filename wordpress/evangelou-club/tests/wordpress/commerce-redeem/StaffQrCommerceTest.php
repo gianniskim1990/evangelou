@@ -3,7 +3,7 @@
 /**
  * STAGE-05C end to end on the REAL WooCommerce 11.2.1 / PMPro 3.8.9 / PMPro WooCommerce 1.11 (HPOS
  * and posts in CI), staff flag ON, EVC_CLUB_REDEMPTION_SOURCE = 'club_db_v1', recorded provenance,
- * the disposable Club DB (migrations 001-003) and EVC_CLUB_LOOKUP_KEY: shop staff complete the
+ * the disposable Club DB (migrations 001-004) and EVC_CLUB_LOOKUP_KEY: shop staff complete the
  * Club order → the Club records the payment and creates the member row (STAGE-05B) → the customer
  * gets a QR (STAGE-05C customer backend, real constants) → the tablet scans it and sees the first
  * name + status (D8) → the redeem route records one coffee → the scan shows "used today" → a
@@ -104,7 +104,7 @@ final class StaffQrCommerceTest extends EVC_WP_Test_Case {
         }, null, new EVC_Fixed_Clock($at->format('Y-m-d\TH:i:s\Z')), function (string $line) {
             $this->log[] = $line;
         });
-        $r = $backend->issue($wp_user_id, false);
+        $r = $backend->issue($wp_user_id);
         $this->assertSame('issued', $r['result'], (string) $backend->last_reason());
         return $r['token'];
     }
@@ -179,5 +179,47 @@ final class StaffQrCommerceTest extends EVC_WP_Test_Case {
         $scan = $this->scan_at(new EVC_Fixed_Clock('2030-03-18T10:00:00Z'), $token);
         $this->assertSame(200, $scan->get_status(), wp_json_encode($scan->get_data()));
         $this->assertSame('inactive', $scan->get_data()['status'], 'no recorded payment: never active');
+    }
+
+    /**
+     * Round 9 (owner decision D24): the shipped prepared-redemption backend over the real commerce site and the
+     * Club DB (migrations 001-004): the scan with history says prepared, one prepared coffee is recorded with its
+     * note, the v1 route then refuses a second coffee the same Athens day, and the scan shows it in history.
+     */
+    public function test_a_prepared_coffee_and_the_v1_route_share_one_coffee_per_athens_day(): void {
+        $this->setExpectedDeprecated('pmprommpu_addMembershipLevel');
+        $at = self::utc('2030-04-16 10:00:07');
+        $customer = $this->customer();
+        $this->wire($at);
+        $order = $this->order($customer, $at->modify('-1 hour'));
+        $done = $this->complete_in_admin($order->get_id());
+        $this->assertSame(EVC_Wc_Completion_Result::RECORDED, $done->outcome, (string) $done->reason);
+        $member = $this->club->fetch_one('SELECT member_public_id FROM evc_members WHERE wp_user_id = ?', array($customer))['member_public_id'];
+        $token = $this->issue_qr($customer, $at->modify('+1 minute'));
+        $this->login_as($this->create_staff_user());
+        $clock = new EVC_Fixed_Clock('2030-04-16T10:05:00Z');
+
+        (new EVC_Rest_Lookup_Controller(new EVC_Club_Lookup_Backend(null, null, $clock)))->register_routes(true);
+        $scan = $this->rest('POST', self::LOOKUP, array('method' => 'qr', 'qr_token' => $token, 'history' => true), $this->nonce())->get_data();
+        $this->assertTrue($scan['prepared'], wp_json_encode($scan));
+        $this->assertSame(array(), $scan['recent_coffees']);
+
+        (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend(null, null, $clock)))->register_routes(true);
+        $body = array('request_id' => self::uuid4(), 'catalogue_version' => 2, 'coffee_code' => 'freddo_cappuccino', 'preparation' => array(
+            'modifiers' => array(array('group' => 'size', 'option' => 'large'), array('group' => 'shots', 'option' => 'double'), array('group' => 'sweetness', 'option' => 'none'), array('group' => 'milk', 'option' => 'regular')),
+            'quick_notes' => array('no_straw'),
+            'note' => 'με λίγο κακάο',
+        ));
+        $redeemed = $this->rest('POST', '/evangelou-club/v1/members/' . $member . '/benefits/free_coffee/prepared-redeem', $body, $this->nonce());
+        $this->assertSame(200, $redeemed->get_status());
+        $this->assertSame('redeemed', $redeemed->get_data()['outcome'], wp_json_encode($redeemed->get_data()));
+        $this->assertSame('prepare', $redeemed->get_data()['instruction']);
+        $this->assertEnvelope($this->redeem_at($clock, $member), 409, 'benefit_already_redeemed');
+
+        $after = $this->rest('POST', self::LOOKUP, array('method' => 'qr', 'qr_token' => $token, 'history' => true), $this->nonce())->get_data();
+        $this->assertSame('used_today', $after['status']);
+        $this->assertSame('Freddo Cappuccino', $after['recent_coffees'][0]['coffee_label']);
+        $this->assertSame('με λίγο κακάο', $after['recent_coffees'][0]['note']);
+        $this->assertSame(array('Μεγάλο μέγεθος', 'Διπλός', 'Σκέτος', 'Κανονικό γάλα', 'Χωρίς καλαμάκι'), $after['recent_coffees'][0]['details']);
     }
 }

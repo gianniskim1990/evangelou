@@ -116,6 +116,46 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         }
         $this->assertStringContainsString(rawurlencode(EVC_Onboarding_Shell::join_url()), $config['loginUrl'], 'sign-in returns to the join page');
         $this->assertSame(EVC_Customer_Shell::shell_url(), $config['memberUrl']);
+        $this->assertSame('/', $config['homePath'], 'round 5: the home path for a plain REST base (fixed value: the test site sits at the root)');
+    }
+
+    /** STAGE-08 round 11 (D26): the home-screen app is the member page's only; the join and poster pages get none of it. */
+    public function test_the_join_and_poster_pages_have_no_manifest_and_no_service_worker(): void {
+        update_option('permalink_structure', '/%postname%/');
+        $pages = array($this->parts()['shell']->join(new WP_User(0)));
+        $this->login_as($this->create_user_with_role('administrator'));
+        $pages[] = $this->parts()['shell']->poster(wp_get_current_user());
+        foreach ($pages as $page) {
+            $this->assertSame(200, $page['status']);
+            foreach (array('rel="manifest"', 'apple-touch-icon', 'apple-mobile-web-app', 'serviceWorker', 'sw.js', 'manifest.webmanifest') as $needle) {
+                $this->assertStringNotContainsString($needle, $page['body'], $needle);
+            }
+        }
+    }
+
+    /**
+     * STAGE-08 round 10 (owner's staging run): with the join flow on, the member page tells the app where to join, so
+     * a signed-in customer without a membership gets «Γίνετε μέλος». Pretty and plain permalinks; built here, never
+     * from the request.
+     */
+    public function test_the_member_page_carries_the_join_url_while_the_join_flow_is_on(): void {
+        $id = (int) self::factory()->user->create(array('role' => 'subscriber'));
+        wp_set_current_user($id);
+        $_GET['redirect_to'] = 'https://evil.example/';
+        $assets = new EVC_Staff_Assets($this->asset_dir, self::ASSET_URL, EVC_Customer_Shell::ASSET_ENTRY);
+        foreach (array('/%postname%/' => '/club/join/', '' => 'evc_club_join=1') as $structure => $needle) {
+            update_option('permalink_structure', $structure);
+            $config = $this->config(EVC_Customer_Shell::respond(wp_get_current_user(), $assets));
+            // Round 11: with pretty permalinks the page also names its service worker (EVC_Customer_Pwa).
+            $keys = $structure === '' ? array('restBase', 'homePath', 'nonce', 'loginUrl', 'logoutUrl', 'joinUrl', 'appVersion') : array('restBase', 'homePath', 'nonce', 'loginUrl', 'logoutUrl', 'joinUrl', 'serviceWorkerUrl', 'serviceWorkerScope', 'appVersion');
+            $this->assertSame($keys, array_keys($config));
+            $this->assertSame(EVC_Onboarding_Shell::join_url(), $config['joinUrl'], $structure);
+            $this->assertStringContainsString($needle, $config['joinUrl'], $structure);
+            $this->assertNotSame(EVC_Customer_Shell::shell_url(), $config['joinUrl'], 'the join page, not the member page');
+            $this->assertStringNotContainsString('src=store', $config['joinUrl'], 'not the poster marker');
+            $this->assertSame(wp_parse_url(home_url('/'), PHP_URL_HOST), wp_parse_url($config['joinUrl'], PHP_URL_HOST));
+        }
+        unset($_GET['redirect_to']);
     }
 
     public function test_redirect_parameters_are_never_used(): void {
@@ -268,8 +308,20 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         wp_set_current_user(0);
         $_SERVER['REMOTE_ADDR'] = $other;
         $clock += EVC_Onboarding_Registration::WINDOW_SECONDS;
+        global $wpdb;
+        $failure_rows = $wpdb->get_results($wpdb->prepare("SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like(EVC_Onboarding_Registration::COUNTER_PREFIX . 'f_') . '%'), ARRAY_A);
+        $this->assertNotEmpty($failure_rows);
         $this->assertSame(array('result' => 'ok'), $this->post('/join/account', $form)->get_data(), 'after the window');
         wp_set_current_user(0);
+        // STAGE-08 round 8: the expired failure row must still be there for the next failure, so that this test checks
+        // the window-end rule of the counter itself. The shipped cleanup removes expired rows at random (1 in 50
+        // counter writes) and could remove it during the request above (mutant OB23 then survived in CI run
+        // 44523385067): put it back when it did.
+        foreach ($failure_rows as $row) {
+            if ($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name = %s", $row['option_name'])) === '0') {
+                $wpdb->insert($wpdb->options, array('option_name' => $row['option_name'], 'option_value' => $row['option_value'], 'autoload' => 'no'));
+            }
+        }
         $this->post('/join/account', self::form(array('phone' => '')));
         $this->assertSame(1, $this->parts()['registration']->failures($other), 'a failure after the window starts a new window');
         $clock += 60;
@@ -535,5 +587,158 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         $r = $this->post('/join/checkout', array());
         $this->assertSame(503, $r->get_status());
         $this->assertSame(array('result' => 'unavailable'), $r->get_data(), 'no Club product configured: never a checkout');
+    }
+
+    /**
+     * STAGE-08 round 4, D20 (2026-11-18): consent to the newsletter comes from FluentCRM's own «subscription checkbox»
+     * on the WooCommerce checkout. The Club's checkout guard must never strip, rename or block a checkout field (classic
+     * or Store API): it only adds the Club's refusals and narrows the gateways. Nothing of it is hooked where fields,
+     * posted data or the Store API request body are shaped.
+     */
+    public function test_the_checkout_guard_leaves_every_checkout_field_alone(): void {
+        $guard = $this->parts()['guard'];
+        $field_hooks = array(
+            'woocommerce_checkout_fields', 'woocommerce_billing_fields', 'woocommerce_shipping_fields', 'woocommerce_form_field',
+            'woocommerce_form_field_checkbox', 'woocommerce_form_field_args', 'woocommerce_checkout_posted_data',
+            'woocommerce_checkout_process', 'woocommerce_checkout_update_order_meta', 'woocommerce_checkout_order_processed',
+            'woocommerce_checkout_create_order', 'woocommerce_review_order_before_submit', 'woocommerce_checkout_after_terms_and_conditions',
+            'woocommerce_store_api_checkout_update_customer_from_request', 'woocommerce_store_api_checkout_order_processed',
+            'woocommerce_blocks_loaded', 'woocommerce_init', 'rest_pre_dispatch', 'rest_request_before_callbacks',
+        );
+        foreach ($field_hooks as $hook) {
+            global $wp_filter;
+            foreach (isset($wp_filter[$hook]) ? $wp_filter[$hook]->callbacks : array() as $callbacks) {
+                foreach ($callbacks as $cb) {
+                    $owner = is_array($cb['function']) ? $cb['function'][0] : null;
+                    if ($hook === 'rest_request_before_callbacks' && $owner === $guard) {
+                        $this->assertSame('start_of_request', $cb['function'][1], 'only remembers the order being paid');
+                        continue;
+                    }
+                    $this->assertNotSame($guard, $owner, $hook . ': the guard is not hooked here');
+                }
+            }
+        }
+        // The one Store API hook it reads a request on returns it untouched (it only reads route, method and id).
+        $request = new WP_REST_Request('POST', '/wc/store/v1/checkout');
+        $request->set_param('extensions', array('fluentcrm' => array('subscribe' => true)));
+        $this->assertSame('kept', $guard->start_of_request('kept', null, $request));
+        $this->assertSame(array('fluentcrm' => array('subscribe' => true)), $request->get_param('extensions'), 'the request body is never changed');
+        $source = (string) file_get_contents(EVC_CLUB_PATH . 'includes/onboarding/class-evc-onboarding-checkout-guard.php');
+        foreach (array('checkout_fields', 'posted_data', 'set_param', 'remove_param', 'unset($_POST', '$_POST[', 'extensions') as $needle) {
+            $this->assertStringNotContainsString($needle, $source, 'the guard never touches ' . $needle);
+        }
+    }
+
+    // ---- STAGE-08 round 11 (review): two checkouts of one account at the same moment ---------------------------
+
+    public function test_round11_the_checkout_lock_is_a_real_per_account_database_lock(): void {
+        $a = EVC_Onboarding_Checkout_Guard::lock_name(7);
+        $b = EVC_Onboarding_Checkout_Guard::lock_name(8);
+        $this->assertMatchesRegularExpression('/^evc_club_checkout_[0-9a-f]{16}_7$/', $a);
+        $this->assertNotSame($a, $b, 'one lock per account');
+        $this->assertLessThanOrEqual(64, strlen(EVC_Onboarding_Checkout_Guard::lock_name(PHP_INT_MAX)), 'MySQL lock names are at most 64 characters');
+        $other = new wpdb(DB_USER, DB_PASSWORD, DB_NAME, DB_HOST);
+        try {
+            $this->assertTrue(EVC_Onboarding_Checkout_Guard::checkout_lock(7));
+            $this->assertSame('0', $other->get_var($other->prepare('SELECT GET_LOCK(%s, 0)', $a)), 'a second request cannot take it');
+            $this->assertSame('1', $other->get_var($other->prepare('SELECT GET_LOCK(%s, 0)', $b)), 'another account is free');
+            $this->assertFalse(EVC_Onboarding_Checkout_Guard::checkout_lock(8, 0), 'held by the other request: busy');
+            $other->get_var($other->prepare('SELECT RELEASE_LOCK(%s)', $b));
+            EVC_Onboarding_Checkout_Guard::release_lock($a);
+            $this->assertSame('1', $other->get_var($other->prepare('SELECT GET_LOCK(%s, 0)', $a)), 'released at the end of the request');
+            $other->get_var($other->prepare('SELECT RELEASE_LOCK(%s)', $a));
+        } finally {
+            $other->close();
+        }
+    }
+
+    /** @return array{0:EVC_Onboarding_Checkout_Guard,1:array} */
+    private function locking_guard(&$answer, array &$calls): array {
+        $config = EVC_Commerce_Source_Config::parse(EVC_Commerce_Source_Config::SOURCE_VALUE, 3, 4242, str_repeat('k', 64));
+        $this->assertNotNull($config);
+        $handoff = new EVC_Onboarding_Handoff($config, new EVC_Unavailable_Membership_Adapter(), new EVC_System_Clock());
+        $guard = new EVC_Onboarding_Checkout_Guard($handoff, static function (): array {
+            return array(4242);
+        }, function (int $user) use (&$answer, &$calls) {
+            $calls[] = $user;
+            return $answer;
+        });
+        return array($guard, $calls);
+    }
+
+    private static function codes(callable $run): array {
+        $errors = new WP_Error();
+        $run($errors);
+        return $errors->get_error_codes();
+    }
+
+    public function test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders(): void {
+        $user = (int) self::factory()->user->create(array('role' => 'subscriber'));
+        wp_set_current_user($user);
+        // Without WooCommerce the hand-off reads "an open order" for everyone (fail closed): DUPLICATE marks that the
+        // order check ran; BUSY alone marks that it did not run because another checkout holds the lock.
+        $calls = array();
+        $answer = false;
+        list($guard) = $this->locking_guard($answer, $calls);
+        $this->assertSame(array('evc_club_checkout_busy'), self::codes(function ($e) use ($guard) {
+            $guard->checkout(array(), $e);
+        }), 'busy: refused before the orders are read');
+        $this->assertSame(EVC_Onboarding_Checkout_Guard::BUSY, $guard->last_message);
+        $this->assertSame(array($user), $calls);
+
+        $answer = true;
+        $calls = array();
+        list($guard) = $this->locking_guard($answer, $calls);
+        $this->assertSame(array('evc_club_duplicate_order'), self::codes(function ($e) use ($guard) {
+            $guard->checkout(array(), $e);
+        }), 'held: the order check runs under the lock');
+        self::codes(function ($e) use ($guard) {
+            $guard->checkout(array(), $e);
+        });
+        $this->assertSame(array($user), $calls, 'taken once per request');
+
+        $answer = null;
+        $calls = array();
+        list($guard) = $this->locking_guard($answer, $calls);
+        $this->assertSame(array('evc_club_duplicate_order'), self::codes(function ($e) use ($guard) {
+            $guard->checkout(array(), $e);
+        }), 'a server without named locks: the check runs as before (documented risk), never a refusal');
+
+        // Block Checkout: only the submission (POST /wc/store/v1/checkout) takes the lock, never a cart read.
+        $answer = false;
+        $calls = array();
+        list($guard) = $this->locking_guard($answer, $calls);
+        $this->assertSame(array('evc_club_duplicate_order'), self::codes(function ($e) use ($guard) {
+            $guard->store_api_cart_errors($e);
+        }));
+        foreach (array(array('GET', '/wc/store/v1/cart'), array('GET', '/wc/store/v1/checkout'), array('POST', '/wc/store/v1/cart/add-item')) as $route) {
+            $guard->start_of_request(null, null, new WP_REST_Request($route[0], $route[1]));
+            self::codes(function ($e) use ($guard) {
+                $guard->store_api_cart_errors($e);
+            });
+            $guard->end_of_request(null);
+        }
+        $this->assertSame(array(), $calls, 'no lock outside the submission');
+        foreach (array('/wc/store/v1/checkout', '/wc/store/checkout') as $route) {
+            $guard->start_of_request(null, null, new WP_REST_Request('POST', $route));
+            $this->assertSame(array('evc_club_checkout_busy'), self::codes(function ($e) use ($guard) {
+                $guard->store_api_cart_errors($e);
+            }), $route);
+            $guard->end_of_request(null);
+        }
+        $this->assertSame(array($user, $user), $calls);
+        self::codes(function ($e) use ($guard) {
+            $guard->store_api_cart_errors($e);
+        });
+        $this->assertCount(2, $calls, 'the submission ends with its request');
+
+        // A guest has no account to lock (and no earlier order): no lock.
+        wp_set_current_user(0);
+        $calls = array();
+        list($guard) = $this->locking_guard($answer, $calls);
+        self::codes(function ($e) use ($guard) {
+            $guard->checkout(array('createaccount' => 1), $e);
+        });
+        $this->assertSame(array(), $calls);
     }
 }

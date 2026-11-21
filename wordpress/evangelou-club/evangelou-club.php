@@ -63,3 +63,8 @@ add_action('plugins_loaded', array('EVC_Fluentcrm_Plugin', 'boot'));
 // It never touches FluentCRM (owner decision D12) and adds nothing about payments (the existing WooCommerce checkout).
 register_deactivation_hook(__FILE__, array('EVC_Onboarding_Plugin', 'deactivate'));
 add_action('plugins_loaded', array('EVC_Onboarding_Plugin', 'boot'));
+
+// STAGE-08: the Club admin pages for administrators: the ONE shared till account (owner decision D18: create, new
+// password, disable / enable, sign out everywhere; audited without secrets) and the read-only «Ετοιμότητα» page. ONLY
+// when wp-config.php defines EVC_CLUB_ADMIN_TOOLS_ENABLED as boolean true (default: OFF = no menu, nothing hooked).
+add_action('plugins_loaded', array('EVC_Admin_Tools_Plugin', 'boot'));

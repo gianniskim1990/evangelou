@@ -19,6 +19,9 @@ defined('ABSPATH') || exit;
  *   answers 503 until every other piece is configured and builds nothing
  *   before a redeem request arrives. register_routes() is the ONLY place that
  *   constructs it (packager-enforced).
+ * Round 9 (owner decision D24): with the same opt-in, the prepared-redemption route and the coffee catalogue
+ *   (EVC_Rest_Prepared_Redeem_Controller). The v1 redeem route stays for older tablets; both share one ledger
+ *   and its unique keys (one free coffee per member per Athens day across both).
  */
 final class EVC_Staff_Plugin {
     public static function boot(): void {
@@ -43,6 +46,10 @@ final class EVC_Staff_Plugin {
         // STAGE-05C: QR scan + administrator QR revocation exist ONLY with the same opt-in (packager-enforced).
         if (EVC_Club_Redemption_Feature::enabled()) {
             (new EVC_Rest_Lookup_Controller(new EVC_Club_Lookup_Backend()))->register_routes();
+        }
+        // Round 9 (D24): prepared redemption + the coffee catalogue, ONLY with the same opt-in (packager-enforced).
+        if (EVC_Club_Redemption_Feature::enabled()) {
+            (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes();
         }
     }
 

@@ -114,6 +114,23 @@ final class EVC_Sql_Qr_Token_Store implements EVC_Qr_Token_Store {
         ));
     }
 
+    /**
+     * D22: the member's QR generation = how many QR rows the member has (active and revoked). Rows are only
+     * ever added (rotate() inserts one, nothing deletes), so the active row, if any, is always the newest
+     * one and its generation is this count. Not part of the UI-04C interface; used by the customer backend.
+     */
+    public function generation(int $member_id): int {
+        if ($member_id < 1) {
+            throw new InvalidArgumentException('Invalid member id.');
+        }
+        $row = $this->db->fetch_one('SELECT COUNT(*) AS n FROM evc_qr_tokens WHERE member_id = ?', array($member_id));
+        $n = filter_var($row['n'] ?? null, FILTER_VALIDATE_INT);
+        if ($n === false || $n < 0) {
+            throw new UnexpectedValueException('Stored Club QR token count is malformed.');
+        }
+        return $n;
+    }
+
     public function rotate(int $member_id, ?string $expected_active_hash, string $new_hash, string $now_utc): void {
         if ($member_id < 1 || ($expected_active_hash !== null && !preg_match(self::HASH_PATTERN, $expected_active_hash))
             || !preg_match(self::HASH_PATTERN, $new_hash) || !preg_match(self::INSTANT_PATTERN, $now_utc)) {

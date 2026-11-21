@@ -560,6 +560,153 @@ function memberSyncSelfTest() {
   return bad;
 }
 
+// ---- Round 9 rule set: prepared redemption (owner decision D24) ---------------------------------------------------
+// Lifts the packager's blanket string bans on `new EVC_Prepared_Redemption_Service`, `implements EVC_Prep_Redemption_Store`
+// and `implements EVC_Prep_Catalogue_Authority` for ONE approved site each (as STAGE-05B / 05C did for their pieces):
+// 1. CONSTRUCTION: EVC_Prepared_Redemption_Service, EVC_Sql_Prep_Redemption_Store and EVC_Club_Prep_Catalogue_Authority
+//    are constructed only in the backend file, inside EVC_Club_Prepared_Redemption_Backend::build() (defined exactly
+//    once), each exactly once. The backend and the controller are constructed only in EVC_Staff_Plugin::register_routes()
+//    (whose staff gate the redemption rules already require) as the exact standalone statement
+//    `if (EVC_Club_Redemption_Feature::enabled()) { (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes(); }`
+//    (no test-seam arguments), exactly once.
+// 2. IMPLEMENTS: EVC_Prep_Redemption_Store only by `class EVC_Sql_Prep_Redemption_Store` in the store file;
+//    EVC_Prep_Catalogue_Authority only by `class EVC_Club_Prep_Catalogue_Authority` in the catalogue file; neither is
+//    extended. EVC_Prep_Request_Lookup / the precheck stay banned (packager string bans), as do the test fakes.
+// 3. NAMES: the SQL store, the backend and the controller are named (identifier or string) only in their allowlisted
+//    files (the service's name stays free: the handoff contract reads its REQUEST_ID_PATTERN constant).
+// 4. NO DYNAMIC CONSTRUCTION (`new $x`, `new (…)`, `new self|static|parent|class`, class_alias, Reflection*,
+//    newInstance*, unserialize) in the store, catalogue, backend and controller files.
+// Not covered statically (documented): a class name assembled at run time from pieces in a file outside those four.
+export const PREPARED_RULES = Object.freeze({
+  plugin: STAFF_PLUGIN,
+  coreFile: "includes/class-evc-prepared-redemption.php",
+  storeFile: "includes/class-evc-sql-prep-redemption-store.php",
+  catalogueFile: "includes/class-evc-club-prep-catalogue.php",
+  historyFile: "includes/class-evc-coffee-history.php",
+  backendFile: "includes/staff/class-evc-club-prepared-redemption-backend.php",
+  controllerFile: "includes/staff/class-evc-rest-prepared-redeem-controller.php",
+});
+const PR = PREPARED_RULES;
+const PREPARED_SITES = [
+  ["EVC_Prepared_Redemption_Service", PR.backendFile, "build"],
+  ["EVC_Sql_Prep_Redemption_Store", PR.backendFile, "build"],
+  ["EVC_Club_Prep_Catalogue_Authority", PR.backendFile, "build"],
+  ["EVC_Club_Prepared_Redemption_Backend", PR.plugin, "register_routes"],
+  ["EVC_Rest_Prepared_Redeem_Controller", PR.plugin, "register_routes"],
+];
+const PREPARED_NAMES = [
+  ["evc_sql_prep_redemption_store", [PR.storeFile, PR.backendFile, PR.historyFile]],
+  ["evc_club_prepared_redemption_backend", [PR.backendFile, PR.controllerFile, PR.plugin]],
+  ["evc_rest_prepared_redeem_controller", [PR.controllerFile, PR.plugin]],
+];
+const PREPARED_IMPLEMENTS = [
+  ["EVC_Prep_Redemption_Store", "EVC_Sql_Prep_Redemption_Store", PR.storeFile],
+  ["EVC_Prep_Catalogue_Authority", "EVC_Club_Prep_Catalogue_Authority", PR.catalogueFile],
+];
+const PREPARED_FILES = [PR.storeFile, PR.catalogueFile, PR.backendFile, PR.controllerFile];
+const PREPARED_STATEMENT = ["if", "(", "EVC_Club_Redemption_Feature", "::", "enabled", "(", ")", ")", "{", "(", "new", "EVC_Rest_Prepared_Redeem_Controller", "(", "new", "EVC_Club_Prepared_Redemption_Backend", "(", ")", ")", ")", "->", "register_routes", "(", ")", ";", "}"];
+
+export function preparedProblemsFor(path, src) {
+  const tokens = tokenize(src);
+  const bodies = functionBodies(tokens);
+  const problems = [];
+  const guardedFile = PREPARED_FILES.includes(path);
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id" || tk.t === "str") {
+      const v = bare(tk.v).toLowerCase();
+      for (const [name, files] of PREPARED_NAMES) {
+        const hit = tk.t === "id" ? v === name || v.endsWith("\\" + name) : v.includes(name);
+        if (hit && !files.includes(path)) problems.push(`${path}: names ${name} (prepared-redemption allowlist)`);
+      }
+    }
+    if (tk.t === "id" && ["implements", "extends"].includes(tk.v.toLowerCase())) {
+      for (let j = k + 1; j < tokens.length && tokens[j].v !== "{"; j++) {
+        if (tokens[j].t !== "id") continue;
+        for (const [iface, cls, file] of PREPARED_IMPLEMENTS) {
+          if (!same(tokens[j].v, iface)) continue;
+          if (tk.v.toLowerCase() === "extends") { problems.push(`${path}: extends ${iface}`); continue; }
+          const d = declarationBefore(tokens, k);
+          if (!(d.kind === "class" && !d.anonymous && path === file && same(d.name, cls))) problems.push(`${path}: ${d.anonymous ? "anonymous class" : d.kind + " " + d.name} implements ${iface}`);
+        }
+      }
+    }
+    if (guardedFile && tk.t === "id" && DANGEROUS.includes(tk.v.toLowerCase())) problems.push(`${path}: ${tk.v} in a prepared-redemption file`);
+    if (guardedFile && tk.t === "id" && tk.v.toLowerCase() === "new") {
+      const next = tokens[k + 1];
+      if (!next || next.t !== "id" || ["self", "static", "parent", "class"].includes(next.v.toLowerCase())) problems.push(`${path}: dynamic or self construction (new ${next ? next.v : ""}) in a prepared-redemption file`);
+    }
+  });
+  const counts = {};
+  for (const c of constructions(tokens)) {
+    for (const [cls, file, fn] of PREPARED_SITES) {
+      if (!same(c.name, cls)) continue;
+      counts[cls] = (counts[cls] ?? 0) + 1;
+      if (!(path === file && inside(bodies, fn, c.at))) problems.push(`${path}: ${cls} constructed outside ${file} ${fn}()`);
+    }
+  }
+  for (const [cls, n] of Object.entries(counts)) if (n > 1) problems.push(`${path}: ${cls} constructed more than once`);
+  if (path === PR.backendFile && (bodies.__count.build ?? 0) !== 1) problems.push(`${path}: build() must be defined exactly once`);
+  if (path === PR.plugin) {
+    const b = bodies.register_routes;
+    let found = 0;
+    if (b) {
+      for (let k = b.start; k < b.end; k++) if (matchAt(tokens, k, PREPARED_STATEMENT) && [";", "{", "}"].includes(tokens[k - 1]?.v)) found++;
+    }
+    if (found !== 1) problems.push(`${path}: register_routes() must hold exactly one \`if (EVC_Club_Redemption_Feature::enabled()) { (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes(); }\``);
+  }
+  return problems;
+}
+
+const GOOD_PREPARED_PLUGIN = GOOD_STAFF_PLUGIN.replace("(new EVC_Rest_Redeem_Controller($backend))->register_routes();", "(new EVC_Rest_Redeem_Controller($backend))->register_routes();\n        if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes();\n        }");
+const GOOD_PREPARED_BACKEND = `<?php
+final class EVC_Club_Prepared_Redemption_Backend {
+    private function build(): ?EVC_Prepared_Redemption_Service {
+        return new EVC_Prepared_Redemption_Service(new EVC_Sql_Prep_Redemption_Store($db), new EVC_Club_Prep_Catalogue_Authority(), $m, $this->clock, null, function (array $d) { return 1; });
+    }
+}`;
+
+function preparedSelfTest() {
+  const bad = [];
+  const expect = (label, path, src, want) => {
+    const got = preparedProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`prepared ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good staff plugin", PR.plugin, GOOD_PREPARED_PLUGIN, false);
+  expect("good backend", PR.backendFile, GOOD_PREPARED_BACKEND, false);
+  expect("good store", PR.storeFile, "<?php\nfinal class EVC_Sql_Prep_Redemption_Store implements EVC_Prep_Redemption_Store { }", false);
+  expect("good catalogue", PR.catalogueFile, "<?php\nfinal class EVC_Club_Prep_Catalogue_Authority implements EVC_Prep_Catalogue_Authority { }", false);
+  expect("good controller", PR.controllerFile, "<?php\nfinal class EVC_Rest_Prepared_Redeem_Controller { public function __construct(EVC_Club_Prepared_Redemption_Backend $b) { } }", false);
+  expect("history may read the store's static helper", PR.historyFile, "<?php\n$s = EVC_Sql_Prep_Redemption_Store::snapshot($row);", false);
+  expect("registration missing", PR.plugin, GOOD_STAFF_PLUGIN, true);
+  expect("registration without the opt-in", PR.plugin, GOOD_PREPARED_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared", "if (true) {\n            (new EVC_Rest_Prepared"), true);
+  expect("opt-in widened", PR.plugin, GOOD_PREPARED_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared", "if (EVC_Club_Redemption_Feature::enabled() || true) {\n            (new EVC_Rest_Prepared"), true);
+  expect("opt-in negated", PR.plugin, GOOD_PREPARED_PLUGIN.replace("if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared", "if (!EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared"), true);
+  expect("test seam passed", PR.plugin, GOOD_PREPARED_PLUGIN.replace("new EVC_Club_Prepared_Redemption_Backend()", "new EVC_Club_Prepared_Redemption_Backend($env)"), true);
+  expect("registered twice", PR.plugin, GOOD_PREPARED_PLUGIN.replace("    }\n}", "        if (EVC_Club_Redemption_Feature::enabled()) {\n            (new EVC_Rest_Prepared_Redeem_Controller(new EVC_Club_Prepared_Redemption_Backend()))->register_routes();\n        }\n    }\n}"), true);
+  expect("backend constructed in boot()", PR.plugin, GOOD_PREPARED_PLUGIN.replace("final class EVC_Staff_Plugin {", "final class EVC_Staff_Plugin {\n    public static function boot() { $b = new EVC_Club_Prepared_Redemption_Backend(); }"), true);
+  expect("backend constructed elsewhere", "includes/x.php", "<?php\n$b = new EVC_Club_Prepared_Redemption_Backend();", true);
+  expect("backend named in a string elsewhere", "includes/x.php", "<?php\n$c = 'EVC_Club_Prepared_Redemption_Backend';", true);
+  expect("service constructed elsewhere", "includes/x.php", "<?php\n$s = new \\EVC_Prepared_Redemption_Service($a, $b, $c, $d);", true);
+  expect("service constructed outside build()", PR.backendFile, GOOD_PREPARED_BACKEND.replace("    private function build()", "    public function other() { return new EVC_Prepared_Redemption_Service($a, $b, $c, $d); }\n    private function build()"), true);
+  expect("service constructed twice", PR.backendFile, GOOD_PREPARED_BACKEND.replace("        return new EVC_Prepared_Redemption_Service(", "        $x = new EVC_Prepared_Redemption_Service($a, $b, $c, $d);\n        return new EVC_Prepared_Redemption_Service("), true);
+  expect("build() defined twice", PR.backendFile, GOOD_PREPARED_BACKEND.replace("final class EVC_Club_Prepared_Redemption_Backend {", "final class Y { private function build() { return 1; } }\nfinal class EVC_Club_Prepared_Redemption_Backend {"), true);
+  expect("store constructed elsewhere", "includes/x.php", "<?php\n$s = new EVC_Sql_Prep_Redemption_Store($db);", true);
+  expect("store constructed in its own file", PR.storeFile, "<?php\nfinal class EVC_Sql_Prep_Redemption_Store implements EVC_Prep_Redemption_Store { public static function make($db) { return new EVC_Sql_Prep_Redemption_Store($db); } }", true);
+  expect("store named elsewhere", "includes/x.php", "<?php\nfunction f(EVC_Sql_Prep_Redemption_Store $s) { return $s; }", true);
+  expect("catalogue authority constructed elsewhere", "includes/x.php", "<?php\n$a = new EVC_Club_Prep_Catalogue_Authority();", true);
+  expect("another store implementation", "includes/x.php", "<?php\nfinal class X implements EVC_Prep_Redemption_Store { }", true);
+  expect("store implementation listed second", "includes/x.php", "<?php\nfinal class X implements Countable, \\EVC_Prep_Redemption_Store { }", true);
+  expect("anonymous store implementation", PR.storeFile, "<?php\n$x = new class() implements EVC_Prep_Redemption_Store { };", true);
+  expect("store interface extended", "includes/x.php", "<?php\ninterface X extends EVC_Prep_Redemption_Store { }", true);
+  expect("another catalogue authority", "includes/x.php", "<?php\nfinal class X implements EVC_Prep_Catalogue_Authority { }", true);
+  expect("catalogue authority in the store file", PR.storeFile, "<?php\nfinal class EVC_Sql_Prep_Redemption_Store implements EVC_Prep_Catalogue_Authority { }", true);
+  expect("new $x in the backend", PR.backendFile, GOOD_PREPARED_BACKEND + "\n$o = new $cls();", true);
+  expect("new self in the store", PR.storeFile, "<?php\nfinal class EVC_Sql_Prep_Redemption_Store implements EVC_Prep_Redemption_Store { public static function make() { return new self(); } }", true);
+  expect("reflection in the controller", PR.controllerFile, "<?php\n$r = new ReflectionClass($c);", true);
+  expect("comment mention is fine", "includes/x.php", "<?php\n// new EVC_Prepared_Redemption_Service(new EVC_Sql_Prep_Redemption_Store($db))\n$x = 1;", false);
+  return bad;
+}
+
 // ---- STAGE-05C rule set: Club member QR (token store, customer QR, staff lookup) -------------------------------
 // Lifts the packager's blanket string bans on `new EVC_Qr_Token_Service`, `new EVC_Member_Lookup_Service`,
 // `new EVC_Lookup_Key_Ring`, `implements EVC_Qr_Token_Store`, `implements EVC_Member_Phone_Directory`,
@@ -597,6 +744,8 @@ export const QR_RULES = Object.freeze({
   customerController: "includes/customer/class-evc-rest-me-qr-controller.php",
   // STAGE-05D: GET /session asks EVC_Rest_Lookup_Controller::lookup_ready() for features.qr_lookup.
   sessionController: "includes/staff/class-evc-rest-session-controller.php",
+  // STAGE-08 round 7, owner decision D22: the stable member token is derived here (EVC_Qr_Token::derive).
+  tokenFile: "includes/class-evc-qr-token.php",
 });
 
 const R5C = QR_RULES;
@@ -618,7 +767,9 @@ const QR_SITES = [
 const QR_NAMES = [
   ["evc_sql_qr_token_store", [R5C.storeFile, R5C.servicesFile]],
   ["evc_sql_lookup_rate_limiter", [R5C.limiterFile, R5C.servicesFile]],
-  ["evc_club_qr_services", [R5C.servicesFile, R5C.lookupBackend, R5C.customerBackend]],
+  // STAGE-08 round 2: the read-only readiness checks reuse EVC_Club_Qr_Services::is_lookup_secret() (the lookup
+  // backend's own >= 32-byte rule); adminToolsProblemsFor() allows ONLY that static call there.
+  ["evc_club_qr_services", [R5C.servicesFile, R5C.lookupBackend, R5C.customerBackend, "includes/admin/class-evc-readiness.php"]],
   ["evc_wp_club_staff_authorizer", [R5C.servicesFile]],
   ["evc_no_member_phone_directory", [R5C.servicesFile]],
   ["evc_first_issue_only_qr_store", [R5C.servicesFile]],
@@ -741,6 +892,49 @@ export function qrProblemsFor(path, src) {
     const at = tokens.findIndex((tk, k) => tk.t === "id" && tk.v.toLowerCase() === "const" && tokens[k + 1]?.v === "PROVENANCE");
     if (at < 0 || tokens[at + 3]?.t !== "str" || tokens[at + 3].v !== "club_db_v1") problems.push(`${path}: const PROVENANCE must be 'club_db_v1'`);
   }
+  return problems.concat(qrSecretProblemsFor(path, tokens));
+}
+
+// STAGE-08 round 7, owner decision D22: the member-QR derivation secret and the derived token.
+//  1. No shipped file defines a Club secret (define('EVC_CLUB_QR_SECRET', ...) or a class constant of that name):
+//     the secrets live only in each site's wp-config.php.
+//  2. The token file may not call any output / logging / storage function at all.
+//  3. The customer backend may not pass the secret or a token to one: no logging-type call, and no dynamic call
+//     (the injected `($this->log)(...)` / `$log(...)` callables), whose arguments name a secret or a token.
+const CLUB_SECRET_CONSTANTS = ["evc_club_qr_secret", "evc_club_lookup_key", "evc_club_evidence_key"];
+const SECRET_SINKS = ["error_log", "print_r", "var_export", "var_dump", "debug_zval_dump", "printf", "vprintf", "trigger_error", "user_error", "syslog",
+  "file_put_contents", "fwrite", "fputs", "wp_mail", "header", "setcookie", "set_transient", "set_site_transient", "update_option", "add_option",
+  "update_site_option", "update_user_meta", "add_user_meta", "wp_cache_set", "wp_cache_add", "do_action", "apply_filters", "call_user_func",
+  "call_user_func_array", "json_encode", "wp_json_encode", "serialize", "echo", "print"];
+function carriesSecret(args) {
+  return args.some((a, i) => {
+    if (a.t === "var" && /secret|token/i.test(a.v)) return true;
+    if (a.t === "id" && /secret|token/i.test(a.v) && args[i - 1]?.v === "->") return true;
+    return a.t === "str" && /qr_secret|evc_club_qr_secret/i.test(a.v);
+  });
+}
+export function qrSecretProblemsFor(path, tokens) {
+  const problems = [];
+  tokens.forEach((tk, k) => {
+    if (tk.t === "id" && tk.v.toLowerCase() === "define" && tokens[k + 1]?.v === "(" && tokens[k + 2]?.t === "str" && CLUB_SECRET_CONSTANTS.includes(tokens[k + 2].v.toLowerCase())) {
+      problems.push(`${path}: defines the Club secret ${tokens[k + 2].v} (secrets belong in wp-config.php only)`);
+    }
+    if (tk.t === "id" && tk.v.toLowerCase() === "const" && tokens[k + 1]?.t === "id" && CLUB_SECRET_CONSTANTS.includes(tokens[k + 1].v.toLowerCase())) {
+      problems.push(`${path}: declares a constant named like the Club secret ${tokens[k + 1].v}`);
+    }
+  });
+  if (path !== R5C.tokenFile && path !== R5C.customerBackend) return problems;
+  tokens.forEach((tk, k) => {
+    const member = ["->", "::"].includes(tokens[k - 1]?.v);
+    if (tk.t === "id" && !member && SECRET_SINKS.includes(bare(tk.v).toLowerCase())) {
+      const args = tokens[k + 1]?.v === "(" ? argumentTokens(tokens, k + 1) : tokens.slice(k + 1, tokens.findIndex((x, j) => j > k && x.v === ";"));
+      if (path === R5C.tokenFile) problems.push(`${path}: ${tk.v} in the QR token file (D22: the token and the secret are never output)`);
+      else if (carriesSecret(args)) problems.push(`${path}: ${tk.v}() with the QR secret or a token`);
+    }
+    if (tk.v === "(" && tk.t === "op" && (tokens[k - 1]?.v === ")" || tokens[k - 1]?.t === "var") && carriesSecret(argumentTokens(tokens, k))) {
+      problems.push(`${path}: a dynamic call with the QR secret or a token (logging callables never receive them)`);
+    }
+  });
   return problems;
 }
 
@@ -854,6 +1048,19 @@ function qrSelfTest() {
   expect("another file asks lookup_ready()", "includes/staff/class-evc-staff-shell.php", "<?php\n$qr = EVC_Rest_Lookup_Controller::lookup_ready();", true);
   expect("session controller builds the lookup backend", Q.sessionController, "<?php\n$b = new EVC_Club_Lookup_Backend();", true);
   expect("customer provenance value changed", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("const PROVENANCE = 'club_db_v1';", "const PROVENANCE = 'CLUB_DB_V1';"), true);
+  // STAGE-08 round 7 (D22): no secret in a shipped file; the token / secret never reach a log or output.
+  expect("a secret defined in a shipped file", "includes/x.php", "<?php\ndefine('EVC_CLUB_QR_SECRET', 'abcdefabcdefabcdefabcdefabcdefabcdef');", true);
+  expect("a secret defined upper / lower case", "includes/x.php", "<?php\nDEFINE(\"evc_club_lookup_key\", 'x');", true);
+  expect("a class constant named like the secret", "includes/x.php", "<?php\nclass X { const EVC_CLUB_QR_SECRET = 'x'; }", true);
+  expect("reading the secret constant is fine", "includes/x.php", "<?php\n$s = defined('EVC_CLUB_QR_SECRET') ? constant('EVC_CLUB_QR_SECRET') : null;", false);
+  expect("logging in the token file", Q.tokenFile, "<?php\nerror_log('x');", true);
+  expect("printing in the token file", Q.tokenFile, "<?php\nprint_r($a);", true);
+  expect("a pure token file", Q.tokenFile, "<?php\nfinal class EVC_Qr_Token { public static function derive($s, $m, $g) { return 'evc_' . substr(hash_hmac('sha256', $m, $s), 0, 48); } }", false);
+  expect("the backend logs the token", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f($token) { error_log('t=' . $token); }\n    public function issue"), true);
+  expect("the backend logs the secret by property", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f() { error_log($this->secret); }\n    public function issue"), true);
+  expect("the backend passes the token to its log callable", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f($token) { ($this->log)('t=' . $token); }\n    public function issue"), true);
+  expect("the backend passes the secret to a variable callable", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f($log, $secret) { $log($secret); }\n    public function issue"), true);
+  expect("the backend logs a fixed line", Q.customerBackend, GOOD_QR_CUSTOMER_BACKEND.replace("    public function issue", "    public function f() { ($this->log)('Evangelou Club: customer QR unavailable (x).'); }\n    public function issue"), false);
   return bad;
 }
 
@@ -910,7 +1117,8 @@ export const FLUENTCRM_RULES = Object.freeze({
   featureClass: "EVC_Fluentcrm_Feature",
   guarded: ["EVC_Fluentcrm_Api_Gateway", "EVC_Fluentcrm_Tag_Sync"],
   forbidden: [],
-  allowlist: ["evangelou-club.php", FLUENTCRM_BOOTSTRAP, FLUENTCRM_GATEWAY, "includes/class-evc-fluentcrm-tags.php"],
+  // STAGE-08: the read-only readiness checks may NAME the plugin (EVC_Fluentcrm_Plugin::problem(), read-only), never build it.
+  allowlist: ["evangelou-club.php", FLUENTCRM_BOOTSTRAP, FLUENTCRM_GATEWAY, "includes/class-evc-fluentcrm-tags.php", "includes/admin/class-evc-readiness.php"],
   guardedFiles: [FLUENTCRM_BOOTSTRAP, FLUENTCRM_GATEWAY],
   memberLockFiles: null,
   forbiddenDefines: [
@@ -1137,6 +1345,11 @@ export const ONBOARDING_RULES = Object.freeze({
     "includes/onboarding/class-evc-onboarding-shell.php",
     "includes/onboarding/class-evc-rest-join-controller.php",
     "includes/onboarding/class-evc-onboarding-checkout-guard.php",
+    // STAGE-08: the readiness checks reuse EVC_Onboarding_Shell::same_site_url() (D13 terms URL); they construct nothing.
+    "includes/admin/class-evc-readiness.php",
+    // STAGE-08 round 10: the member page sends EVC_Onboarding_Shell::join_url() (static, behind
+    // EVC_Onboarding_Feature::enabled()) so a customer without a membership can join; it constructs nothing.
+    "includes/customer/class-evc-customer-shell.php",
   ],
   guardedFiles: [
     ONBOARDING_BOOTSTRAP,
@@ -1148,6 +1361,12 @@ export const ONBOARDING_RULES = Object.freeze({
   ],
   memberLockFiles: null,
   forbiddenDefines: ["EVC_CLUB_ONBOARDING_ENABLED"],
+  // STAGE-08 round 11 (C4 of the round-10 review): an allowlisted file outside the onboarding path may name the
+  // onboarding classes ONLY through these exact static calls (class::method followed by "("), nothing else: no other
+  // method (accept_terms, poster_url, …), no ::class, no string, no type hint.
+  pinnedCalls: {
+    "includes/customer/class-evc-customer-shell.php": ["evc_onboarding_shell::join_url"],
+  },
   registrationFile: "includes/onboarding/class-evc-onboarding-registration.php",
   handoffFile: "includes/onboarding/class-evc-onboarding-handoff.php",
   checkoutGuardFile: "includes/onboarding/class-evc-onboarding-checkout-guard.php",
@@ -1164,13 +1383,26 @@ const CHECKOUT_HOOKS = [
   "woocommerce_store_api_validate_add_to_cart",
 ];
 const USER_WRITERS = ["wp_insert_user", "wp_create_user", "wp_update_user", "register_new_user", "wp_set_auth_cookie", "wp_signon", "wp_set_current_user"];
+// STAGE-08: the shared till account service may CREATE that one account (wp_insert_user) and nothing else of the list.
+const STAFF_ACCOUNT_SERVICE = "includes/admin/class-evc-staff-account-service.php";
 
 export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
   const problems = [];
+  const pinned = rules.pinnedCalls?.[path];
+  if (pinned) {
+    const names = [...rules.guarded, rules.pluginClass].map((n) => n.toLowerCase());
+    const tokens = tokenize(src);
+    tokens.forEach((tk, k) => {
+      if (tk.t === "str" && names.some((n) => tk.v.toLowerCase().includes(n))) problems.push(`${path}: a string names an onboarding class (only ${pinned.join(", ")}( is allowed here)`);
+      if (tk.t !== "id" || !names.includes(bare(tk.v).toLowerCase())) return;
+      const method = tokens[k + 1]?.v === "::" && tokens[k + 2]?.t === "id" ? `${bare(tk.v).toLowerCase()}::${tokens[k + 2].v.toLowerCase()}` : null;
+      if (method === null || !pinned.includes(method) || tokens[k + 3]?.v !== "(") problems.push(`${path}: names ${bare(tk.v)} other than through ${pinned.join(", ")}(`);
+    });
+  }
   for (const tk of tokenize(src)) {
     if (tk.t !== "id" && tk.t !== "str") continue;
     const v = bare(tk.v).toLowerCase();
-    if (path !== rules.registrationFile && USER_WRITERS.some((w) => (tk.t === "id" ? v === w : v.includes(w)))) problems.push(`${path}: creates or signs in a user (${tk.v}) outside the onboarding registration`);
+    if (path !== rules.registrationFile && USER_WRITERS.some((w) => (tk.t === "id" ? v === w : v.includes(w)) && !(path === STAFF_ACCOUNT_SERVICE && w === "wp_insert_user"))) problems.push(`${path}: creates or signs in a user (${tk.v}) outside the onboarding registration`);
     if (path !== rules.handoffFile && v.includes("add-to-cart")) problems.push(`${path}: builds an add-to-cart URL outside the onboarding hand-off`);
     if (path !== rules.checkoutGuardFile && CHECKOUT_HOOKS.some((h) => v.includes(h))) problems.push(`${path}: hooks the WooCommerce cart / checkout / gateways (${tk.v}) outside the onboarding checkout guard`);
   }
@@ -1206,6 +1438,18 @@ function onboardingSelfTest() {
   expect("registration constructed elsewhere", "includes/x.php", "<?php\n$r = new EVC_Onboarding_Registration();", true);
   expect("controller constructed outside wire()", O.bootstrap, GOOD_ONBOARDING.replace("public static function build() {", "public static function build() { new EVC_Rest_Join_Controller(1, 2);"), true);
   expect("hand-off named outside the allowlist", "includes/x.php", "<?php\nfunction f(EVC_Onboarding_Handoff $h) { return $h; }", true);
+  expect("round 10: the member page reads the static join URL", "includes/customer/class-evc-customer-shell.php", "<?php\nif (EVC_Onboarding_Feature::enabled()) { $c['joinUrl'] = EVC_Onboarding_Shell::join_url(); }", false);
+  expect("round 10: the member page never constructs the join shell", "includes/customer/class-evc-customer-shell.php", "<?php\n$s = new EVC_Onboarding_Shell($h, $a);", true);
+  // Round 11 (C4): the member page is pinned to the one static call.
+  const SHELL = "includes/customer/class-evc-customer-shell.php";
+  expect("round 11: the member page may not accept the terms", SHELL, "<?php\nEVC_Onboarding_Handoff::accept_terms($id);", true);
+  expect("round 11: the member page may not send the poster URL", SHELL, "<?php\n$c['joinUrl'] = EVC_Onboarding_Shell::poster_url();", true);
+  expect("round 11: nor read the terms", SHELL, "<?php\n$t = EVC_Onboarding_Handoff::terms_accepted($id);", true);
+  expect("round 11: nor name the class", SHELL, "<?php\n$c = EVC_Onboarding_Shell::class;", true);
+  expect("round 11: nor take the method as a callable", SHELL, "<?php\n$f = array('EVC_Onboarding_Shell', 'join_url');", true);
+  expect("round 11: nor a type hint", SHELL, "<?php\nfunction f(EVC_Onboarding_Shell $s) { return 1; }", true);
+  expect("round 11: nor the plugin's parts", SHELL, "<?php\n$p = EVC_Onboarding_Plugin::parts();", true);
+  expect("round 11: the pinned call with a leading backslash and spaces", SHELL, "<?php\n$u = \\EVC_Onboarding_Shell :: join_url ();", false);
   expect("build() from another file", "includes/x.php", "<?php\nEVC_Onboarding_Plugin::build();", true);
   expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_ONBOARDING_ENABLED', true);", true);
   expect("a user created elsewhere", "includes/customer/x.php", "<?php\n$id = wp_insert_user(array());", true);
@@ -1225,6 +1469,75 @@ function onboardingSelfTest() {
   expect("an add-to-cart URL in the registration", O.registrationFile, "<?php\n$u = 'ADD-TO-CART';", true);
   expect("the hand-off builds it", O.handoffFile, "<?php\n$u = add_query_arg('add-to-cart', 5, $c);", false);
   expect("a comment mention is fine", "includes/x.php", "<?php\n// wp_insert_user() add-to-cart\n$x = 1;", false);
+  return bad;
+}
+
+// ---- STAGE-08 round 11 (owner decision D26 part 1): the member app's home-screen files ---------------------------
+// PHP: only EVC_Customer_Pwa (and the member page that calls it) may name it; the manifest link, the iOS tags and
+// the worker exist in that one file (so the staff app, the join pages and every other page get none of them); no
+// shipped file may send Service-Worker-Allowed (the worker's scope can never be wider than /club-member/).
+export const PWA_RULES = Object.freeze({
+  pwaFile: "includes/customer/class-evc-customer-pwa.php",
+  allowlist: ["includes/customer/class-evc-customer-pwa.php", "includes/customer/class-evc-customer-shell.php"],
+  pwaStrings: ['rel="manifest"', "manifest+json", "apple-touch-icon", "apple-mobile-web-app", "serviceworker", "sw.js", "__evc_sw__", "webmanifest"],
+});
+
+export function pwaProblemsFor(path, src, rules = PWA_RULES) {
+  const problems = [];
+  for (const tk of tokenize(src)) {
+    if (tk.t === "id" && bare(tk.v).toLowerCase() === "evc_customer_pwa" && !rules.allowlist.includes(path)) problems.push(`${path}: names EVC_Customer_Pwa (only the member page may)`);
+    if (tk.t !== "str") continue;
+    const v = tk.v.toLowerCase();
+    if (v.includes("service-worker-allowed")) problems.push(`${path}: sends Service-Worker-Allowed (the worker's scope stays /club-member/)`);
+    if (v.includes("evc_customer_pwa") && !rules.allowlist.includes(path)) problems.push(`${path}: a string names EVC_Customer_Pwa`);
+    if (path !== rules.pwaFile) {
+      for (const needle of rules.pwaStrings) if (v.includes(needle)) problems.push(`${path}: home-screen app text "${needle}" outside ${rules.pwaFile}`);
+    }
+  }
+  return problems;
+}
+
+// The BUILT worker (customer-app/pwa/sw.js, esbuild, not minified). It may store nothing but its versioned cache,
+// may never load other code, and keeps the REST network-only rule and exactly its two cache writes / answers.
+export const WORKER_FORBIDDEN = ["localStorage", "sessionStorage", "indexedDB", "document.cookie", "cookieStore", "importScripts", "eval(", "new Function", "XMLHttpRequest", "club-admin", "pushManager", "showNotification", '"push"', '"sync"', "BroadcastChannel", "postMessage"];
+export function workerProblems(text) {
+  const problems = [];
+  for (const word of WORKER_FORBIDDEN) if (text.includes(word)) problems.push(`service worker: uses ${word}`);
+  for (const word of ["rest_route", "evc-club-member-", "__EVC_SW__", "no-store"]) if (!text.includes(word)) problems.push(`service worker: ${word} missing`);
+  const count = (needle) => text.split(needle).length - 1;
+  if (count("cache.put(") !== 2) problems.push(`service worker: ${count("cache.put(")} cache writes (expected 2: install and the asset rule)`);
+  if (count(".respondWith(") !== 2) problems.push(`service worker: ${count(".respondWith(")} answers (expected 2: the member page and the asset rule)`);
+  return problems;
+}
+
+function pwaSelfTest() {
+  const bad = [];
+  const expect = (label, path, src, want) => {
+    if ((pwaProblemsFor(path, src).length > 0) !== want) bad.push(`pwa ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  const P = PWA_RULES.pwaFile;
+  const SHELL = "includes/customer/class-evc-customer-shell.php";
+  expect("the PWA file writes the manifest link", P, "<?php\n$h = '<link rel=\"manifest\" href=\"' . $u . '\">';", false);
+  expect("the member page calls the PWA class", SHELL, "<?php\n$c = EVC_Customer_Pwa::config();", false);
+  expect("the staff page names the PWA class", "includes/staff/class-evc-staff-shell.php", "<?php\n$c = EVC_Customer_Pwa::config();", true);
+  expect("the join page writes a manifest link", "includes/onboarding/class-evc-onboarding-shell.php", "<?php\n$h = '<link rel=\"manifest\" href=\"x\">';", true);
+  expect("the staff page names a worker", "includes/staff/class-evc-staff-shell.php", "<?php\n$c['serviceWorkerUrl'] = home_url('/club-admin/sw.js');", true);
+  expect("an apple tag elsewhere", "includes/x.php", "<?php\necho '<link rel=\"apple-touch-icon\" href=\"x\">';", true);
+  expect("Service-Worker-Allowed even in the PWA file", P, "<?php\n$h['Service-Worker-Allowed'] = '/';", true);
+  expect("a string naming the class elsewhere", "includes/x.php", "<?php\ncall_user_func(array('EVC_Customer_Pwa', 'config'));", true);
+  const W = "self.__EVC_SW__; const p = 'evc-club-member-'; u.searchParams.has('rest_route'); h = 'no-store'; await cache.put(a, b); await cache.put(c, d); e.respondWith(x); e.respondWith(y);";
+  const wexpect = (label, text, want) => {
+    if ((workerProblems(text).length > 0) !== want) bad.push(`worker ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  wexpect("a good worker", W, false);
+  wexpect("REST rule removed", W.replace("rest_route", "rest"), true);
+  wexpect("a third cache write", W + " await cache.put(e, f);", true);
+  wexpect("a third answer", W + " e.respondWith(z);", true);
+  wexpect("only one answer", W.replace(" e.respondWith(y);", ""), true);
+  wexpect("localStorage", W + " localStorage.x = 1;", true);
+  wexpect("importScripts", W + " importScripts('/x.js');", true);
+  wexpect("push", W + ' self.addEventListener("push", f);', true);
+  wexpect("the staff app", W + " fetch('/club-admin/');", true);
   return bad;
 }
 
@@ -1275,5 +1588,380 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), preparedSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest(), adminToolsSelfTest(), pwaSelfTest());
+}
+
+// ---- STAGE-08 rule set: the Club admin pages, only behind EVC_CLUB_ADMIN_TOOLS_ENABLED --------------------------------
+// A. The STAGE-03D construction rules with their own bootstrap and gate: the till-account service and page and the
+//    readiness checks and page are constructed only inside EVC_Admin_Tools_Plugin::wire() (reached only via build() <-
+//    boot() after `if (!EVC_Admin_Tools_Feature::enabled()) { return; }`); their names appear only in the allowlisted
+//    files; no shipped file defines EVC_CLUB_ADMIN_TOOLS_ENABLED.
+// B. adminToolsProblemsFor(), the READ-ONLY files (the readiness checks and page, and the till-account reader):
+//    - no call of a WordPress writer or hook (READ_ONLY_FORBIDDEN: options, user options, meta, transients, cache,
+//      users, posts (also wp_trash_post), sign-out (wp_logout, wp_clear_auth_cookie, wp_destroy_*_sessions), cron,
+//      hooks, rewrite rules, error_log) and no string naming one (so no callable string reaches it through
+//      call_user_func / a variable function);
+//    - no call_user_func*, forward_static_call*, no `$var::` (also refused in every file by problemsFor()), and no
+//      variable method name ($o->$m(), $o->{$m}(), $c::$m());
+//    - no call of a WRITER as a method or static method, whatever the receiver (READ_ONLY_METHODS: ->query / insert /
+//      update / delete / replace / execute / exec_raw / transactional / save / migrate / apply, and create,
+//      set_password, set_disabled, revoke_all, revoke_current, record_login, process, handle_load, prune_activity,
+//      on_logout, handle_admin_revoke, delete_all_activity, revoke_all_staff_sessions, destroy, destroy_all,
+//      destroy_others, destroy_all_for_all_users, register, unregister, the role/capability writers), nor a string
+//      naming one;
+//    - ALLOWLIST of EVC_* static calls: EVC_X::m(…), the string callable 'EVC_X::m' and the pair array('EVC_X', 'm')
+//      only for READ_ONLY_STATIC_ALLOW (the read-only helpers the files actually use); a pair whose method is not a
+//      string literal, EVC_X::class and `new EVC_X` are refused; so are static::m() / parent::m(). EVC_X::CONSTANT and
+//      self::m() stay allowed (self:: is the file's own class, itself under these rules);
+//    - no string carrying an SQL write (INSERT / REPLACE in any form, UPDATE … SET (also multi-table and
+//      {$wpdb->options}), DELETE … FROM, ALTER / DROP / CREATE / TRUNCATE / RENAME TABLE …, GRANT, REVOKE,
+//      INTO OUTFILE / DUMPFILE, LOAD DATA, LOCK TABLES, SET GLOBAL / PASSWORD, CALL), whatever method receives it
+//      (e.g. $wpdb->get_var("DELETE …")).
+//    Not covered statically (documented): a writer name, a class or method name or an SQL statement assembled at run
+//    time from pieces; a callable handed in from outside the file (the constructor seams).
+// C. The till-account files (service and page) never let a generated password out: no error_log / print_r /
+//    var_export / var_dump / trigger_error / syslog / file_put_contents / fwrite / fputs / wp_mail / set_transient /
+//    set_site_transient / setcookie / wp_cache_set / add_query_arg / wp_redirect / wp_safe_redirect at all, and no
+//    update_option / add_option / update_user_meta / add_user_meta / update_user_option / wp_cache_add /
+//    wp_cache_replace / header / wp_die / do_action / apply_filters, and no call of a variable or expression
+//    ($f(…), ($this->header)(…)), whose arguments carry the password: a variable whose name contains "pass", a
+//    'password' string such as $result['password'], or the result array itself ($result / $this->result, unless
+//    indexed by a string key other than 'password', e.g. $result['code']).
+// D. Only the service file writes a password (wp_set_password).
+const ADMIN_TOOLS_BOOTSTRAP = "includes/admin/class-evc-admin-tools-plugin.php";
+const STAFF_ACCOUNT_READER = "includes/admin/class-evc-staff-account-reader.php";
+export const ADMIN_TOOLS_RULES = Object.freeze({
+  bootstrap: ADMIN_TOOLS_BOOTSTRAP,
+  pluginClass: "EVC_Admin_Tools_Plugin",
+  featureClass: "EVC_Admin_Tools_Feature",
+  guarded: ["EVC_Staff_Account_Service", "EVC_Staff_Account_Page", "EVC_Readiness", "EVC_Readiness_Page"],
+  forbidden: [],
+  allowlist: [
+    "evangelou-club.php",
+    ADMIN_TOOLS_BOOTSTRAP,
+    "includes/admin/class-evc-staff-account-service.php",
+    "includes/admin/class-evc-staff-account-page.php",
+    "includes/admin/class-evc-readiness.php",
+    "includes/admin/class-evc-readiness-page.php",
+  ],
+  guardedFiles: [
+    ADMIN_TOOLS_BOOTSTRAP,
+    STAFF_ACCOUNT_READER,
+    "includes/admin/class-evc-staff-account-service.php",
+    "includes/admin/class-evc-staff-account-page.php",
+    "includes/admin/class-evc-readiness.php",
+    "includes/admin/class-evc-readiness-page.php",
+  ],
+  memberLockFiles: null,
+  forbiddenDefines: ["EVC_CLUB_ADMIN_TOOLS_ENABLED"],
+  readOnlyFiles: ["includes/admin/class-evc-readiness.php", "includes/admin/class-evc-readiness-page.php", STAFF_ACCOUNT_READER],
+  secretFiles: ["includes/admin/class-evc-staff-account-service.php", "includes/admin/class-evc-staff-account-page.php"],
+  passwordFile: "includes/admin/class-evc-staff-account-service.php",
+});
+const READ_ONLY_FORBIDDEN = ["update_option", "add_option", "delete_option", "update_site_option", "add_site_option", "delete_site_option",
+  "update_user_option", "delete_user_option", "update_user_meta", "add_user_meta", "delete_user_meta", "update_post_meta", "add_post_meta",
+  "delete_post_meta", "update_term_meta", "add_term_meta", "delete_term_meta", "update_metadata", "add_metadata", "delete_metadata",
+  "set_transient", "delete_transient", "set_site_transient", "delete_site_transient", "wp_cache_set", "wp_cache_add", "wp_cache_replace",
+  "wp_cache_delete", "wp_cache_incr", "wp_cache_decr", "wp_cache_flush", "wp_insert_user", "wp_update_user", "wp_delete_user", "wp_create_user",
+  "wp_set_password", "wp_set_current_user", "wp_set_auth_cookie", "wp_clear_auth_cookie", "wp_logout", "wp_destroy_current_session",
+  "wp_destroy_other_sessions", "wp_destroy_all_sessions", "wp_insert_post", "wp_update_post", "wp_delete_post", "wp_trash_post",
+  "wp_untrash_post", "add_action", "add_filter", "remove_action", "remove_filter", "do_action", "do_action_ref_array", "wp_schedule_event",
+  "wp_schedule_single_event", "wp_clear_scheduled_hook", "wp_unschedule_event", "flush_rewrite_rules", "error_log", "call_user_func",
+  "call_user_func_array", "forward_static_call", "forward_static_call_array"];
+// Writers of a database handle (also EVC_Migrator->migrate / a migration's apply), of the till account
+// (EVC_Staff_Account_Service, EVC_Staff_Account_Page, EVC_Staff_Session::delete_all_activity / revoke_all_staff_sessions /
+// revoke_current / prune_activity / on_logout / handle_admin_revoke, EVC_Staff_Auth::set_disabled, EVC_Staff_Role
+// register / unregister) and of WordPress session tokens: refused as ->method() and ::method() in the read-only files,
+// whatever the receiver.
+const READ_ONLY_METHODS = ["query", "insert", "update", "delete", "replace", "execute", "exec_raw", "transactional", "save", "migrate", "apply",
+  "create", "set_password", "set_disabled", "revoke_all", "revoke_current", "record_login", "process", "handle_load", "prune_activity",
+  "on_logout", "handle_admin_revoke", "delete_all_activity", "revoke_all_staff_sessions", "destroy", "destroy_all", "destroy_others",
+  "destroy_all_for_all_users", "register", "unregister", "add_cap", "remove_cap", "set_role", "add_role", "remove_role"];
+// The ONLY EVC_* static methods the read-only files may call or name as a callable (lower case "class::method"):
+// read-only helpers (feature flags, configuration readers, environment probes, the lookup-key check, the till-account
+// reader and access check) and the Club DB connection the readiness checks use for SELECTs.
+export const READ_ONLY_STATIC_ALLOW = Object.freeze([
+  "evc_admin_tools_feature::assert_constructible", "evc_admin_tools_feature::is_enabled_value",
+  "evc_customer_feature::is_enabled_value", "evc_staff_feature::is_enabled_value", "evc_club_redemption_feature::is_enabled_value",
+  "evc_onboarding_feature::is_enabled_value", "evc_onboarding_feature::enabled", "evc_fluentcrm_feature::is_enabled_value",
+  "evc_fluentcrm_feature::enabled", "evc_fluentcrm_feature::tag_config", "evc_wc_completion_feature::is_enabled_value",
+  "evc_club_migrations_feature::is_enabled_value", "evc_club_migrations_feature::target_version",
+  "evc_db_config::from_constants", "evc_club_db::connect", "evc_commerce_source_config::from_constants",
+  "evc_wp_commerce_pmpro_reader::commerce_plugins_loaded", "evc_wp_commerce_pmpro_reader::environment_conflicts",
+  "evc_bacs_payment_issuer::site_problem", "evc_onboarding_shell::same_site_url", "evc_fluentcrm_plugin::problem",
+  "evc_club_qr_services::is_lookup_secret", "evc_qr_token::is_derivation_secret", "evc_staff_account_reader::accounts", "evc_staff_account_service::may_manage",
+  "evc_staff_auth::is_disabled", "evc_staff_role::is_restricted_staff_account",
+  // Round 9 (D24): the readiness row «Καταγραφή προετοιμασίας καφέ» (pure catalogue check, reads nothing).
+  "evc_club_prep_catalogue_authority::is_authorised",
+  // Round 10 (LOW-1): the pure reader of the SHOW GRANTS lines the readiness row read (runs nothing itself).
+  "evc_db_grants::table_privileges",
+]);
+const SQL_WRITE = new RegExp([
+  String.raw`\binsert\b`, // INSERT INTO, INSERT t VALUES, INSERT LOW_PRIORITY / DELAYED / IGNORE …
+  String.raw`\breplace\s+(low_priority\s+|delayed\s+)*(into\s+)?[\w\`{$]`, // REPLACE INTO t, REPLACE t …
+  String.raw`\bupdate\b[^;]*?\bset\b`, // UPDATE t SET, UPDATE {$wpdb->options} SET, UPDATE t1, t2 SET, UPDATE LOW_PRIORITY …
+  String.raw`\bdelete\b[^;]*?\bfrom\b`,
+  String.raw`\b(alter|drop|create|truncate|rename)\s+(temporary\s+|definer\s*=\s*\S+\s+)*(table|tables|database|schema|index|unique|fulltext|view|trigger|procedure|function|event|user|role)\b`,
+  String.raw`\bgrant\s`, String.raw`\brevoke\s+\w`, String.raw`\binto\s+(outfile|dumpfile)\b`, String.raw`\bload\s+(data|xml)\b`,
+  String.raw`\block\s+tables?\b`, String.raw`\bset\s+(global|persist|persist_only|password)\b`, String.raw`\bcall\s+[\w\`]+\s*\(`,
+].join("|"), "i");
+const SECRET_FORBIDDEN = ["error_log", "print_r", "var_export", "var_dump", "trigger_error", "user_error", "syslog", "file_put_contents", "fwrite",
+  "fputs", "wp_mail", "set_transient", "set_site_transient", "setcookie", "wp_cache_set", "add_query_arg", "wp_redirect", "wp_safe_redirect"];
+const SECRET_WITH_PASSWORD = ["update_option", "add_option", "update_site_option", "update_user_meta", "add_user_meta", "update_user_option",
+  "wp_cache_add", "wp_cache_replace", "header", "wp_die", "do_action", "do_action_ref_array", "apply_filters", "apply_filters_ref_array"];
+/** The tokens of the argument list that starts at tokens[open] === "(" (to its matching ")"). */
+function argumentTokens(tokens, open) {
+  const out = [];
+  let depth = 0;
+  for (let j = open; j < tokens.length; j++) {
+    if (tokens[j].v === "(") depth++;
+    else if (tokens[j].v === ")") { depth--; if (depth === 0) break; }
+    if (j > open) out.push(tokens[j]);
+  }
+  return out;
+}
+/**
+ * Whether an argument list carries the generated password: a variable whose name contains "pass", a 'password'
+ * string (e.g. $result['password']), or the result array that holds it ($result / $this->result / $x->result) unless
+ * it is indexed by a string key other than 'password' (e.g. $result['code']).
+ */
+function carriesPassword(args) {
+  return args.some((a, i) => {
+    if (a.t === "var" && a.v.toLowerCase().includes("pass")) return true;
+    if (a.t === "str" && a.v.toLowerCase().includes("password")) return true;
+    const isResult = (a.t === "var" && a.v.toLowerCase() === "$result") || (a.t === "id" && a.v.toLowerCase() === "result" && args[i - 1]?.v === "->");
+    if (!isResult) return false;
+    const indexedSafely = args[i + 1]?.v === "[" && args[i + 2]?.t === "str" && args[i + 3]?.v === "]" && !args[i + 2].v.toLowerCase().includes("password");
+    return !indexedSafely;
+  });
+}
+
+export function adminToolsProblemsFor(path, src, rules = ADMIN_TOOLS_RULES) {
+  const problems = [];
+  const tokens = tokenize(src);
+  const readOnly = rules.readOnlyFiles.includes(path);
+  const allowed = (cls, m) => READ_ONLY_STATIC_ALLOW.includes(`${cls}::${m}`.toLowerCase());
+  tokens.forEach((tk, k) => {
+    if (readOnly && tk.t === "str") {
+      const sv = bare(tk.v).toLowerCase();
+      if (READ_ONLY_FORBIDDEN.includes(sv) || READ_ONLY_METHODS.includes(sv)) problems.push(`${path}: a string names the writer '${tk.v}' in a read-only file`);
+      if (SQL_WRITE.test(tk.v)) problems.push(`${path}: an SQL write in a string in a read-only file`);
+      // String callables of an EVC_* class: 'EVC_X::m' and array('EVC_X', 'm') only for READ_ONLY_STATIC_ALLOW.
+      const dc = /^(evc_\w+)\s*::\s*(\w+)$/i.exec(bare(tk.v));
+      if (dc && !allowed(dc[1], dc[2])) problems.push(`${path}: the string callable '${tk.v}' is not an allowed read-only helper`);
+      if (/^evc_\w+$/i.test(bare(tk.v)) && /[a-z]/.test(bare(tk.v)) && tokens[k + 1]?.v === ",") {
+        const m = tokens[k + 2];
+        if (m?.t !== "str" || !allowed(bare(tk.v), m.v)) problems.push(`${path}: the callable array('${tk.v}', ${m?.t === "str" ? `'${m.v}'` : "…"}) is not an allowed read-only helper`);
+      }
+    }
+    if (readOnly && tk.t === "var" && tokens[k + 1]?.v === "::") problems.push(`${path}: dynamic static call ${tk.v}:: in a read-only file`);
+    if (readOnly && (tk.v === "->" || tk.v === "::" || tk.v === "?->") && (tokens[k + 1]?.t === "var" || tokens[k + 1]?.v === "{")) {
+      problems.push(`${path}: variable method name ${tk.v}${tokens[k + 1].v} in a read-only file`);
+    }
+    // Password leaks through a call of a variable or an expression: $f($password), ($this->header)($result['password']).
+    if (rules.secretFiles.includes(path) && (tk.t === "var" || tk.v === ")") && tokens[k + 1]?.v === "(" && tokens[k - 1]?.v !== "->" && tokens[k - 1]?.v !== "::") {
+      if (tk.t === "var" ? true : !["if", "elseif", "while", "for", "foreach", "switch", "match", "catch", "array", "isset", "empty", "list", "function", "fn", "use"].includes((tokens[openOf(tokens, k) - 1]?.v ?? "").toLowerCase())) {
+        if (carriesPassword(argumentTokens(tokens, k + 1))) problems.push(`${path}: a callable is called with the password`);
+      }
+    }
+    if (tk.t !== "id") return;
+    const v = bare(tk.v).toLowerCase();
+    const call = tokens[k + 1]?.v === "(";
+    const member = tokens[k - 1]?.v === "->" || tokens[k - 1]?.v === "::" || tokens[k - 1]?.v === "?->";
+    if (readOnly) {
+      if (call && !member && READ_ONLY_FORBIDDEN.includes(v)) problems.push(`${path}: writes or hooks (${tk.v}) in a read-only file`);
+      if (call && member && READ_ONLY_METHODS.includes(v)) problems.push(`${path}: calls ${tokens[k - 1].v}${tk.v}() in a read-only file`);
+      const staticCall = (name) => tokens[k + 1]?.v === "::" && tokens[k + 2]?.t === "id" && tokens[k + 2].v.toLowerCase() === name && tokens[k + 3]?.v === "(";
+      if (v === "evc_staff_account_service" && !staticCall("may_manage")) problems.push(`${path}: names EVC_Staff_Account_Service other than ::may_manage() in a read-only file`);
+      if (v === "evc_admin_tools_plugin") problems.push(`${path}: names EVC_Admin_Tools_Plugin (its parts hold the service) in a read-only file`);
+      if (v === "evc_club_qr_services" && !staticCall("is_lookup_secret")) problems.push(`${path}: names EVC_Club_Qr_Services other than ::is_lookup_secret() in a read-only file`);
+      // The allowlist of EVC_* static calls (class names have a lower-case letter; EVC_CLUB_* constants do not).
+      if (/^evc_/.test(v) && /[a-z]/.test(bare(tk.v)) && tokens[k + 1]?.v === "::" && !member) {
+        const m = tokens[k + 2];
+        if (m?.t === "id" && m.v.toLowerCase() === "class") problems.push(`${path}: ${tk.v}::class in a read-only file`);
+        else if (m?.t === "id" && tokens[k + 3]?.v === "(" && !allowed(v, m.v)) problems.push(`${path}: ${tk.v}::${m.v}() is not an allowed read-only helper`);
+      }
+      if (/^evc_/.test(v) && /[a-z]/.test(bare(tk.v)) && tokens[k - 1]?.v.toLowerCase() === "new") problems.push(`${path}: new ${tk.v} in a read-only file`);
+      if ((v === "static" || v === "parent") && tokens[k + 1]?.v === "::" && tokens[k + 3]?.v === "(") problems.push(`${path}: ${tk.v}::${tokens[k + 2]?.v}() in a read-only file (only self:: is allowed)`);
+    }
+    if (rules.secretFiles.includes(path) && call && !member) {
+      if (SECRET_FORBIDDEN.includes(v)) problems.push(`${path}: ${tk.v}() could leak a generated password`);
+      if (SECRET_WITH_PASSWORD.includes(v) && carriesPassword(argumentTokens(tokens, k + 1))) problems.push(`${path}: ${tk.v}() with the password`);
+    }
+    if (path !== rules.passwordFile && call && !member && v === "wp_set_password") problems.push(`${path}: sets a password outside the till-account service`);
+  });
+  return problems;
+}
+/** The index of the "(" matching tokens[close] === ")". */
+function openOf(tokens, close) {
+  let depth = 0;
+  for (let j = close; j >= 0; j--) {
+    if (tokens[j].v === ")") depth++;
+    else if (tokens[j].v === "(") { depth--; if (depth === 0) return j; }
+  }
+  return -1;
+}
+
+const GOOD_ADMIN_TOOLS = `<?php
+final class EVC_Admin_Tools_Plugin {
+    public static function boot($seams = null): void {
+        if (!EVC_Admin_Tools_Feature::enabled()) {
+            return;
+        }
+        $p = self::build();
+    }
+    public static function build() { return self::wire(); }
+    private static function wire() {
+        $s = new EVC_Staff_Account_Service();
+        $r = new EVC_Readiness();
+        return array(new EVC_Staff_Account_Page($s), new EVC_Readiness_Page($r));
+    }
+}`;
+
+function adminToolsSelfTest() {
+  const bad = [];
+  const A = ADMIN_TOOLS_RULES;
+  const expect = (label, path, src, want) => {
+    const got = problemsFor(path, src, A).length + adminToolsProblemsFor(path, src).length + onboardingProblemsFor(path, src).length + qrProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`admin tools ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  // Only adminToolsProblemsFor(): a rule of the read-only / password lists, so deleting it fails its self-test even
+  // when a general rule of problemsFor() would also catch the fixture.
+  const expectOwn = (label, path, src, want) => {
+    const got = adminToolsProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`admin tools (own rule) ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  // The fixtures name the files by path (not by their index in the rule lists) and check that the lists hold them.
+  const R = "includes/admin/class-evc-readiness.php";
+  const RP = "includes/admin/class-evc-readiness-page.php";
+  const READER = STAFF_ACCOUNT_READER;
+  const PAGE = "includes/admin/class-evc-staff-account-page.php";
+  for (const f of [R, RP, READER]) if (!A.readOnlyFiles.includes(f)) bad.push(`admin tools: ${f} is not a read-only file`);
+  for (const f of [A.passwordFile, PAGE]) if (!A.secretFiles.includes(f)) bad.push(`admin tools: ${f} is not a password file`);
+  expect("good bootstrap", A.bootstrap, GOOD_ADMIN_TOOLS, false);
+  expect("gate missing", A.bootstrap, GOOD_ADMIN_TOOLS.replace("if (!EVC_Admin_Tools_Feature::enabled()) {\n            return;\n        }", ""), true);
+  expect("service built elsewhere", "includes/x.php", "<?php\n$s = new EVC_Staff_Account_Service();", true);
+  expect("readiness named outside the allowlist", "includes/x.php", "<?php\nfunction f(EVC_Readiness $r) { return $r; }", true);
+  expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_ADMIN_TOOLS_ENABLED', true);", true);
+  expect("readiness writes an option", R, "<?php\nupdate_option('x', 1);", true);
+  expect("readiness writes the Club DB", R, "<?php\n$db->execute('DELETE FROM t');", true);
+  expect("readiness hooks something", RP, "<?php\nadd_action('init', 'f');", true);
+  expect("readiness reads", R, "<?php\n$v = get_option('x'); $r = $db->fetch_one('SELECT 1');", false);
+  expect("password logged", A.passwordFile, "<?php\nerror_log($password);", true);
+  expect("password cached", PAGE, "<?php\nset_transient('p', $password, 60);", true);
+  expect("password set elsewhere", "includes/x.php", "<?php\nwp_set_password('x', 1);", true);
+  expect("the service may set a password", A.passwordFile, "<?php\nwp_set_password($p, $id);", false);
+  expect("the service may create the account", A.passwordFile, "<?php\n$id = wp_insert_user(array());", false);
+  expect("the service may not sign anyone in", A.passwordFile, "<?php\nwp_set_auth_cookie($id);", true);
+  expect("a user created elsewhere still refused", "includes/admin/class-evc-readiness-page.php", "<?php\n$id = wp_insert_user(array());", true);
+  // Round 2: the read-only files cannot reach a till-account writer, an SQL write or a callable writer.
+  for (const m of ["create", "set_password", "set_disabled", "revoke_all", "record_login", "process", "handle_load", "destroy_all"]) {
+    expect(`readiness calls ->${m}()`, R, `<?php\n$this->staff->${m}(1);`, true);
+  }
+  expect("readiness calls EVC_Staff_Session::delete_all_activity()", R, "<?php\nEVC_Staff_Session::delete_all_activity(1);", true);
+  expect("readiness calls EVC_Staff_Auth::set_disabled()", R, "<?php\nEVC_Staff_Auth::set_disabled(1, true);", true);
+  expect("readiness calls EVC_Staff_Session::revoke_all_staff_sessions()", R, "<?php\nEVC_Staff_Session::revoke_all_staff_sessions();", true);
+  expect("the reader destroys sessions", READER, "<?php\nWP_Session_Tokens::get_instance(1)->destroy_all();", true);
+  expect("the reader may read sessions", READER, "<?php\n$s = WP_Session_Tokens::get_instance(1)->get_all(); $m = get_user_meta(1, 'k', true);", false);
+  expect("readiness takes the service", R, "<?php\nfunction f(EVC_Staff_Account_Service $s) { return $s; }", true);
+  expect("readiness reaches the service through the plugin", R, "<?php\n$s = EVC_Admin_Tools_Plugin::parts()['service'];", true);
+  expect("readiness page may check access", RP, "<?php\nif (!EVC_Staff_Account_Service::may_manage(wp_get_current_user())) { return; }", false);
+  expect("readiness page names the service other than ::may_manage()", RP, "<?php\nEVC_Staff_Account_Service::audit_entries(1);", true);
+  expectOwn("readiness page calls a static writer (EVC_Staff_Session::revoke_current)", RP, "<?php\nEVC_Staff_Session::revoke_current();", true);
+  for (const sql of ["UPDATE wp_options SET option_value = 1", "delete from wp_users where ID = 1", "INSERT INTO evc_x VALUES (1)", "REPLACE INTO t VALUES (1)", "ALTER TABLE t ADD c INT", "DROP TABLE evc_x", "CREATE TABLE t (id INT)", "TRUNCATE TABLE t", "SELECT 1 INTO OUTFILE '/tmp/x'", "GRANT ALL ON *.* TO x"]) {
+    expect(`readiness SQL write via get_var: ${sql}`, R, `<?php\n$v = $wpdb->get_var("${sql}");`, true);
+  }
+  expect("readiness SQL write via a Club DB read", R, "<?php\n$db->fetch_one('DELETE FROM evc_members');", true);
+  expect("readiness SELECT stays allowed", R, "<?php\n$db->fetch_one('SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_NAME = ?', array('t')); $u = 'create new FluentCRM contacts on WP user registration';", false);
+  expect("readiness call_user_func", R, "<?php\ncall_user_func('get_option', 'x');", true);
+  expect("readiness call_user_func_array", R, "<?php\ncall_user_func_array(array($s, 'accounts'), array());", true);
+  expect("readiness callable string of a writer", R, "<?php\n$f = 'update_option'; $f('x', 1);", true);
+  expect("readiness callable array of a till writer", R, "<?php\n$f = array($s, 'set_password'); $f(1);", true);
+  expect("readiness update_user_option", R, "<?php\nupdate_user_option(1, 'x', 1);", true);
+  expect("readiness dynamic static call", R, "<?php\n$c::accounts();", true);
+  expectOwn("readiness dynamic static call (read-only rule)", R, "<?php\n$n = $c::LIMIT;", true);
+  expect("readiness names the QR services other than is_lookup_secret", R, "<?php\n$s = EVC_Club_Qr_Services::store($db);", true);
+  expect("readiness checks the lookup key", R, "<?php\n$ok = EVC_Club_Qr_Services::is_lookup_secret($v);", false);
+  expect("the QR services named in the readiness page", RP, "<?php\n$ok = EVC_Club_Qr_Services::is_lookup_secret($v);", true);
+  // Round 2: the password-leak list.
+  for (const [label, path, src] of [
+    ["update_option", A.passwordFile, "<?php\nupdate_option('x', $password);"],
+    ["add_option", A.passwordFile, "<?php\nadd_option('x', array('p' => $password));"],
+    ["update_user_meta", A.passwordFile, "<?php\nupdate_user_meta($id, 'x', $password);"],
+    ["update_user_option", A.passwordFile, "<?php\nupdate_user_option($id, 'x', $password);"],
+    ["wp_cache_add", PAGE, "<?php\nwp_cache_add('p', $result['password']);"],
+    ["wp_cache_replace", PAGE, "<?php\nwp_cache_replace('p', $result['password']);"],
+    ["header", PAGE, "<?php\nheader('X-P: ' . $result['password']);"],
+    ["do_action", A.passwordFile, "<?php\ndo_action('evc_password', $password);"],
+    ["apply_filters", A.passwordFile, "<?php\n$x = apply_filters('evc_x', $password);"],
+    ["add_query_arg", PAGE, "<?php\n$u = add_query_arg('p', 'x', $url);"],
+    ["wp_redirect", PAGE, "<?php\nwp_redirect($url);"],
+    ["wp_safe_redirect", PAGE, "<?php\nwp_safe_redirect($url);"],
+  ]) {
+    expect(`password leak via ${label}`, path, src, true);
+  }
+  // Round 3: the widened SQL-write patterns.
+  for (const sql of ["UPDATE {$wpdb->options} SET option_value = 1", "INSERT evc_x VALUES (1)", "INSERT LOW_PRIORITY INTO t VALUES (1)", "insert ignore t set a = 1",
+    "REPLACE evc_x VALUES (1)", "REPLACE LOW_PRIORITY INTO t VALUES (1)", "UPDATE t1, t2 SET t1.a = t2.a", "UPDATE LOW_PRIORITY t SET a = 1",
+    "DELETE t1 FROM t1 JOIN t2", "DELETE LOW_PRIORITY QUICK FROM t", "LOAD DATA INFILE '/tmp/x' INTO TABLE t", "LOCK TABLES t WRITE",
+    "CREATE OR REPLACE VIEW v AS SELECT 1", "CREATE DEFINER=root@localhost PROCEDURE p() SELECT 1", "SET GLOBAL general_log = 1", "CALL evc_proc(1)", "REVOKE ALL ON *.* FROM x", "SELECT 1 INTO DUMPFILE '/tmp/x'"]) {
+    expectOwn(`readiness SQL write in a string: ${sql}`, R, `<?php\n$v = $wpdb->get_var("${sql}");`, true);
+  }
+  expectOwn("readiness SQL reads stay allowed", R, "<?php\n$a = $db->fetch_one('SELECT COALESCE(MAX(version), 0) AS v FROM evc_schema_migrations'); $b = $db->fetch_one('SELECT VERSION() AS v'); $c = 'Ορίστηκε, αλλά όχι με την ακριβή τιμή';", false);
+  // Round 3: the allowlist of EVC_* static calls in the read-only files.
+  for (const [label, src] of [
+    ["EVC_Staff_Session::prune_activity()", "<?php\nEVC_Staff_Session::prune_activity(1, 2);"],
+    ["EVC_Staff_Session::on_logout()", "<?php\nEVC_Staff_Session::on_logout(1);"],
+    ["EVC_Staff_Session::handle_admin_revoke()", "<?php\nEVC_Staff_Session::handle_admin_revoke();"],
+    ["EVC_Staff_Session::verify_current() (it touches the activity)", "<?php\n$s = EVC_Staff_Session::verify_current(1);"],
+    ["EVC_Staff_Role::register()", "<?php\nEVC_Staff_Role::register();"],
+    ["EVC_Staff_Role::unregister()", "<?php\nEVC_Staff_Role::unregister();"],
+    ["an unknown EVC_* static", "<?php\n$x = EVC_Club_Members::anything(1);"],
+    ["a string callable 'EVC_X::m'", "<?php\n$f = 'EVC_Staff_Role::register'; $f();"],
+    ["a callable pair of a writer", "<?php\n$f = array('EVC_Staff_Session', 'revoke_current'); $f();"],
+    ["a callable pair of a helper outside the allowlist", "<?php\n$f = array('EVC_Staff_Session', 'verify_current'); $f(1);"],
+    ["a callable pair with a variable method", "<?php\n$f = array('EVC_Staff_Auth', $m); $f(1);"],
+    ["EVC_X::class", "<?php\n$f = array(EVC_Staff_Session::class, 'evaluate');"],
+    ["new EVC_X", "<?php\n$m = new EVC_Migrator($db, $dir);"],
+    ["static::m()", "<?php\nstatic::reset();"],
+    ["parent::m()", "<?php\nparent::reset();"],
+  ]) {
+    expectOwn(`readiness ${label}`, R, src, true);
+  }
+  expectOwn("readiness allowed helpers, constants and self::", R, "<?php\n$a = EVC_Fluentcrm_Plugin::problem(); $b = EVC_Customer_Feature::CONSTANT; $c = self::row('k', 'l', self::OK); $d = array('EVC_Club_Db', 'connect'); $e = EVC_Staff_Auth::is_disabled(1);", false);
+  expectOwn("the reader may use the role check", READER, "<?php\n$r = EVC_Staff_Role::is_restricted_staff_account($u); $x = EVC_Staff_Role::ROLE;", false);
+  // Round 3: variable method names and more WordPress writers.
+  expectOwn("readiness variable method ->$m()", R, "<?php\n$this->staff->$m(1);", true);
+  expectOwn("readiness variable method ->{$m}()", R, "<?php\n$this->staff->{$m}(1);", true);
+  expectOwn("readiness variable static method $c::$m()", R, "<?php\nEVC_Staff_Auth::$m(1);", true);
+  for (const fn of ["wp_logout", "wp_clear_auth_cookie", "wp_trash_post", "wp_untrash_post", "wp_destroy_current_session", "wp_destroy_other_sessions", "wp_destroy_all_sessions", "forward_static_call"]) {
+    expectOwn(`readiness calls ${fn}()`, R, `<?php\n${fn}(1);`, true);
+  }
+  for (const m of ["migrate", "apply", "destroy_all_for_all_users", "revoke_current", "prune_activity", "on_logout", "handle_admin_revoke", "register", "unregister"]) {
+    expectOwn(`the reader calls ->${m}()`, READER, `<?php\n$o->${m}(1);`, true);
+  }
+  expectOwn("the reader calls WP_Session_Tokens::destroy_all_for_all_users()", READER, "<?php\nWP_Session_Tokens::destroy_all_for_all_users();", true);
+  // Round 3: the password-leak rules.
+  for (const [label, path, src] of [
+    ["trigger_error", A.passwordFile, "<?php\ntrigger_error('x');"],
+    ["syslog", PAGE, "<?php\nsyslog(LOG_INFO, 'x');"],
+    ["file_put_contents", PAGE, "<?php\nfile_put_contents('/tmp/x', 'y');"],
+    ["fwrite", PAGE, "<?php\nfwrite($fh, 'y');"],
+    ["fputs", PAGE, "<?php\nfputs($fh, 'y');"],
+    ["user_error", A.passwordFile, "<?php\nuser_error('x');"],
+    ["wp_mail", A.passwordFile, "<?php\nwp_mail('a@b.c', 's', 'm');"],
+    ["wp_die with the result", PAGE, "<?php\nwp_die(print_r_safe($result));"],
+    ["wp_die with the password", PAGE, "<?php\nwp_die(esc_html($result['password']));"],
+    ["do_action with the result", A.passwordFile, "<?php\ndo_action('evc_done', $result);"],
+    ["apply_filters with $this->result", PAGE, "<?php\n$x = apply_filters('evc_x', $this->result);"],
+    ["the injected header callable with the password", PAGE, "<?php\n($this->header)('X-P: ' . $result['password']);"],
+    ["a variable callable with the password", PAGE, "<?php\n$f($password);"],
+  ]) {
+    expectOwn(`password leak via ${label}`, path, src, true);
+  }
+  expectOwn("wp_die with a result code only", PAGE, "<?php\nwp_die(esc_html(self::MESSAGES[$result['code']]), '', array('response' => 403));", false);
+  expectOwn("the injected header callable without the password", PAGE, "<?php\n($this->header)(self::NO_STORE_HEADER);", false);
+  expect("the audit option without the password", A.passwordFile, "<?php\nupdate_option(self::AUDIT_OPTION, array_slice($all, -100), false);", false);
+  expect("the no-store header without the password", PAGE, "<?php\nheader($line, true);", false);
+  return bad;
 }

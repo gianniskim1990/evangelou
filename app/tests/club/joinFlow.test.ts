@@ -13,7 +13,7 @@ import { createDom, type DomHarness } from "../staff/support/dom";
  * STAGE-07 — DOM tests (jsdom) of the in-store join flow over a fake join-v1 client: register (browser checks,
  * server field codes, the "may already have an account" answer, rate limit, try_later, honeypot), the terms step WITHOUT any
  * marketing choice (owner decision D12), the offer's hand-off, the member / not-a-customer / unavailable pages, and
- * the tablet poster. No network, no browser storage. Round 2: the honeypot is named evc_extra (autocomplete off); round 3 changed only the server caps and the checkout guard (Store API, rounds 3-4).
+ * the tablet poster. No network, no browser storage. Round 2: the honeypot is named evc_extra (autocomplete off); round 3 changed only the server caps and the checkout guard (Store API, rounds 3-4); STAGE-08 changed no join UI.
  */
 
 let dom: DomHarness;
@@ -294,5 +294,24 @@ describe("STAGE-07 tablet poster", () => {
     await dom.click([...poster.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Ανανέωση")!);
     assert.equal(reloads, 1);
     assert.equal(dom.network.fetch.length, 0, "no network");
+  });
+});
+
+describe("STAGE-08 round 4: the offer's payment is the obvious main action (owner's staging run on a phone)", () => {
+  it("«Πληρωμή 20 €» is a full-width filled button; the account link is a quiet secondary link after it", async () => {
+    await mount("offer", fakeApi({}));
+    const pay = app().querySelector('[data-evc-action="pay"]') as HTMLButtonElement;
+    const secondary = app().querySelector('[data-evc-action="secondary"]') as HTMLButtonElement;
+    assert.ok(pay && secondary);
+    assert.equal(pay.tagName, "BUTTON");
+    assert.equal(pay.textContent?.trim(), "Πληρωμή 20 €");
+    assert.equal(pay.disabled, false);
+    const payClass = pay.className.split(/\s+/);
+    for (const c of ["w-full", "bg-[var(--brass)]", "rounded-full", "min-h-14"]) assert.ok(payClass.includes(c), `pay button: ${c}`);
+    const secondaryClass = secondary.className.split(/\s+/);
+    assert.ok(secondaryClass.includes("t-small") && secondaryClass.includes("underline"), "the account action reads as a small link");
+    for (const c of ["w-full", "rounded-full"]) assert.ok(!secondaryClass.some((x) => x === c || x.startsWith("bg-")), `not a filled button: ${c}`);
+    assert.ok(pay.compareDocumentPosition(secondary) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, "payment first, account link after");
+    assert.equal(app().querySelectorAll('[data-evc-action="pay"]').length, 1, "one main action");
   });
 });

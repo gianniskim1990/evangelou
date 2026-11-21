@@ -39,7 +39,13 @@ $commands = array(
     // STAGE-05C: mutants with 'command' => 'qr' run the QR token store tests instead.
     'qr' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
         '--filter', '/(SqlQrTokenStoreTest|SqlLookupRateLimiterTest)/', '--exclude-group', 'concurrency'),
+    // Round 9 (owner decision D24): mutants with 'command' => 'prepared' run migration 004 + the prepared store + history tests.
+    'prepared' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
+        '--filter', '/(SqlPrepRedemptionStoreTest|ClubPrepCatalogueTest)/'),
 );
+$sql004 = 'database/004_prepared_redemptions.sql';
+$prep_store = 'includes/class-evc-sql-prep-redemption-store.php';
+$history = 'includes/class-evc-coffee-history.php';
 $qr = 'includes/class-evc-sql-qr-token-store.php';
 $limiter = 'includes/class-evc-sql-lookup-rate-limiter.php';
 $services = 'includes/class-evc-club-qr-services.php';
@@ -176,6 +182,38 @@ $mutants = array(
         'replace' => "            \$this->report(\$e);\n        }\n        return EVC_Member_Lookup_Result::of(\$kind);"),
     array('id' => 'LR7-raw-session-ref-stored', 'file' => $limiter, 'command' => 'qr',
         'search' => "                \$out[] = hash('sha256', self::DOMAIN . \$action . '|' . \$key);", 'replace' => "                \$out[] = substr(str_pad(\$key, 64, '0'), 0, 64);"),
+    // ---- Round 9, owner decision D24: migration 004, the prepared store, the coffee history (SqlPrepRedemptionStoreTest).
+    array('id' => 'PS1-half-prepared-row-allowed', 'file' => $sql004, 'command' => 'prepared',
+        'search' => "  ADD CONSTRAINT ck_redemptions_prepared CHECK (\n    (fingerprint_version IS NULL AND catalogue_version IS NULL AND prep_hash IS NULL AND snapshot_hash IS NULL)\n    OR (fingerprint_version = 'evc-redeem-v2' AND catalogue_version > 0 AND prep_hash IS NOT NULL AND snapshot_hash IS NOT NULL)\n  );",
+        'replace' => "  ADD CONSTRAINT ck_redemptions_prepared CHECK (catalogue_version IS NULL OR catalogue_version > 0);"),
+    array('id' => 'PS2-two-snapshots-per-redemption', 'file' => $sql004, 'command' => 'prepared',
+        'search' => "  PRIMARY KEY (redemption_id),\n", 'replace' => "  KEY ix_preparations_redemption (redemption_id),\n"),
+    array('id' => 'PS3-snapshot-not-written', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "            \$db->execute(\n                'INSERT INTO evc_redemption_preparations", 'replace' => "            0 && \$db->execute(\n                'INSERT INTO evc_redemption_preparations"),
+    array('id' => 'PS4-note-not-stored', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "                    EVC_Prep_Snapshot::note_of(\$snapshot),\n", 'replace' => "                    null,\n"),
+    array('id' => 'PS5-note-dropped-on-read', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "        if (\$record['schema'] === EVC_Prep_Snapshot::SCHEMA_V2 || \$s['note_text'] !== null) {", 'replace' => '        if (false) {'),
+    array('id' => 'PS6-success-audit-not-written', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "            \$this->audit->record(\$db, \$event);\n", 'replace' => ''),
+    array('id' => 'PS7-ledger-without-the-v2-fingerprint-version', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "                    (string) \$ledger['fingerprint_version'],", 'replace' => '                    null,'),
+    array('id' => 'HS1-another-members-history', 'file' => $history, 'command' => 'prepared',
+        'search' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {",
+        'replace' => "                . ' WHERE (r.member_id = ? OR 1 = 1) AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {"),
+    array('id' => 'HS2-another-members-history-below-schema-4', 'file' => $history, 'command' => 'prepared',
+        'search' => "                'SELECT r.business_date, r.coffee_code FROM evc_redemptions r'\n                . ' WHERE r.member_id = ?",
+        'replace' => "                'SELECT r.business_date, r.coffee_code FROM evc_redemptions r'\n                . ' WHERE ? > 0"),
+    array('id' => 'HS3-oldest-first', 'file' => $history, 'command' => 'prepared',
+        'search' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {",
+        'replace' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date ASC, r.id ASC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {"),
+    array('id' => 'HS4-limit-ignored', 'file' => $history, 'command' => 'prepared',
+        'search' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {",
+        'replace' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT 10',\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {"),
+    array('id' => 'HS5-damaged-snapshot-shown', 'file' => $history, 'command' => 'prepared',
+        'search' => "        } catch (EVC_Prep_Snapshot_Invalid \$e) {\n            return null;\n        }", 'replace' => "        } catch (EVC_Prep_Snapshot_Invalid \$e) {\n        }"),
+    array('id' => 'HS6-details-in-stored-order', 'file' => $history, 'command' => 'prepared',
+        'search' => "        foreach (self::in_step_order(\$snapshot['modifiers'], \$current, \$code) as \$m) {", 'replace' => "        foreach (\$snapshot['modifiers'] as \$m) {"),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -210,6 +248,10 @@ if ($baseline === 0) {
 if ($baseline === 0) {
     echo "Baseline (unmutated) QR token store run...\n";
     $baseline = evc_run_suite($commands['qr']);
+}
+if ($baseline === 0) {
+    echo "Baseline (unmutated) prepared redemption store run...\n";
+    $baseline = evc_run_suite($commands['prepared']);
 }
 if ($baseline !== 0) {
     fwrite(STDERR, "ABORT: baseline suite is not green (exit $baseline); mutation results would be meaningless.\n");

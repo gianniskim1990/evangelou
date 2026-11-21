@@ -815,22 +815,141 @@ final class PreparedRedemptionTransactionTest extends TestCase {
         $this->assertNull((new EVC_Staff_Actor(7))->session_ref());
     }
 
-    // ---- 8. structured only --------------------------------------------------------------------
+    // ---- 8. staff note (owner decision D24 reverses D-NOTES for one short note) -----------------
 
-    /** @return array<string,array{mixed}> */
-    public static function free_text(): array {
-        return array('text' => array('χωρίς ζάχαρη'), 'empty' => array(''), 'zero' => array(0), 'false' => array(false), 'list' => array(array('x')));
+    /** @return array<string,array{mixed}> a note that is not text at all: refused before any read */
+    public static function malformed_notes(): array {
+        return array('zero' => array(0), 'false' => array(false), 'list' => array(array('x')), 'object' => array(array('a' => 'b')), 'not utf-8' => array("\xC3\x28"));
     }
 
-    /** @dataProvider free_text */
-    public function test_any_free_text_note_is_rejected_before_any_read($note): void {
+    /** @dataProvider malformed_notes */
+    public function test_a_note_that_is_not_text_is_refused_before_any_read($note): void {
         $body = self::body();
         $body['preparation']['note'] = $note;
         $outcome = $this->redeem($body);
-        $this->assertSame(EVC_Prepared_Redemption_Outcome::INVALID_PREPARATION, $outcome->kind());
-        $this->assertSame(array('reason' => 'free_text_not_supported'), $outcome->details());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::INVALID_REQUEST, $outcome->kind());
+        $this->assertSame(array('reason' => 'note_shape'), $outcome->details());
         $this->assertSame(0, $this->store->reads);
         $this->assertNothingWritten();
+    }
+
+    /** The illustrative catalogue says free_text_note: false, so a real note is refused (after the replay check). */
+    public function test_a_note_is_refused_when_the_catalogue_does_not_allow_it(): void {
+        $body = self::body();
+        $body['preparation']['note'] = 'χωρίς ζάχαρη';
+        $outcome = $this->redeem($body);
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::INVALID_PREPARATION, $outcome->kind());
+        $this->assertSame(array('reason' => 'free_text_not_supported'), $outcome->details());
+        $this->assertNothingWritten();
+    }
+
+    /** @return array<string,array{mixed}> */
+    public static function empty_notes(): array {
+        return array('null' => array(null), 'empty' => array(''), 'spaces' => array("  \t\n "), 'nbsp' => array("\u{00A0}"));
+    }
+
+    /** @dataProvider empty_notes */
+    public function test_an_empty_note_is_no_note_and_keeps_the_original_fingerprint($note): void {
+        $body = self::body();
+        $body['preparation']['note'] = $note;
+        $outcome = $this->redeem($body);
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::REDEEMED, $outcome->kind());
+        $this->assertSame(EVC_Prep_Snapshot::SCHEMA, $outcome->redemption()['preparation']['schema']);
+        $this->assertArrayNotHasKey('note', $outcome->redemption()['preparation']);
+        $replay = $this->redeem(self::body());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::REPLAYED, $replay->kind(), 'no note at all is the same request');
+        $this->assertConsistent(1);
+    }
+
+    private function allow_notes(): void {
+        $data = self::catalogue_data();
+        $data['free_text_note'] = true;
+        $this->authority->data = $data;
+    }
+
+    private static function with_note($note, array $overrides = array()): array {
+        $body = self::body($overrides);
+        $body['preparation']['note'] = $note;
+        return $body;
+    }
+
+    public function test_a_note_is_normalised_stored_in_the_snapshot_and_never_audited(): void {
+        $this->allow_notes();
+        $outcome = $this->redeem(self::with_note("  λίγο\t\n πιο  ζεστό\u{200B}  "));
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::REDEEMED, $outcome->kind());
+        $snapshot = $outcome->redemption()['preparation'];
+        $this->assertSame(EVC_Prep_Snapshot::SCHEMA_V2, $snapshot['schema']);
+        $this->assertSame('λίγο πιο ζεστό', $snapshot['note']);
+        $this->assertSame(array($snapshot), array_values($this->store->snapshots())[0]);
+        $this->assertStringNotContainsString('ζεστό', json_encode($this->store->audit_events(), JSON_UNESCAPED_UNICODE));
+        $this->assertConsistent(1);
+        // The note never enters prep_hash: the same codes without a note hash the same.
+        $this->assertSame($snapshot['prep_hash'], EVC_Prep_Canonical::prep_hash(EVC_Prep_Snapshot::verify($snapshot)));
+    }
+
+    public function test_eighty_characters_pass_and_eighty_one_are_refused_without_cutting(): void {
+        $this->allow_notes();
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::INVALID_PREPARATION, $this->redeem(self::with_note(str_repeat('α', 81)))->kind());
+        $this->assertSame(array('reason' => 'note_too_long'), $this->redeem(self::with_note(str_repeat('α', 81)))->details());
+        $this->assertNothingWritten();
+        $ok = $this->redeem(self::with_note('  ' . str_repeat('α', 80) . '  '));
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::REDEEMED, $ok->kind());
+        $this->assertSame(str_repeat('α', 80), $ok->redemption()['preparation']['note']);
+    }
+
+    public function test_html_in_a_note_is_refused_never_stripped(): void {
+        $this->allow_notes();
+        foreach (array('<b>γλυκός</b>', 'a > b', '<script>') as $note) {
+            $outcome = $this->redeem(self::with_note($note));
+            $this->assertSame(EVC_Prepared_Redemption_Outcome::INVALID_PREPARATION, $outcome->kind(), $note);
+            $this->assertSame(array('reason' => 'note_html'), $outcome->details());
+        }
+        $this->assertNothingWritten();
+    }
+
+    public function test_the_same_request_id_with_another_note_is_a_conflict_and_the_same_note_a_replay(): void {
+        $this->allow_notes();
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::REDEEMED, $this->redeem(self::with_note('με κανέλα'))->kind());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::REPLAYED, $this->redeem(self::with_note(' με   κανέλα '))->kind(), 'the normalised note is the same');
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::IDEMPOTENCY_CONFLICT, $this->redeem(self::with_note('χωρίς κανέλα'))->kind());
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::IDEMPOTENCY_CONFLICT, $this->redeem(self::body())->kind(), 'dropping the note is another request');
+        $this->assertConsistent(1);
+    }
+
+    public function test_a_stored_note_that_was_altered_is_an_integrity_failure(): void {
+        $this->allow_notes();
+        $this->redeem(self::with_note('με κανέλα'));
+        $snapshot = array_values($this->store->snapshots())[0][0];
+        $snapshot['note'] = 'με ζάχαρη';
+        $this->store->tamper_snapshots(self::R1, array($snapshot));
+        $outcome = $this->redeem(self::with_note('με κανέλα'));
+        $this->assertSame(EVC_Prepared_Redemption_Outcome::RECORD_INTEGRITY_FAILURE, $outcome->kind());
+        $this->assertSame(array('reason' => 'snapshot_corrupt'), $outcome->details());
+    }
+
+    public function test_the_note_rules(): void {
+        $this->assertNull(EVC_Prep_Note::normalise(null));
+        $this->assertNull(EVC_Prep_Note::normalise(" \r\n\t\u{2028}\u{FEFF}"));
+        $this->assertSame('α β', EVC_Prep_Note::normalise("α\u{0007}\u{00A0}β"));
+        $this->assertSame(str_repeat('ά', 80), EVC_Prep_Note::normalise(str_repeat('ά', 80)));
+        $this->assertTrue(EVC_Prep_Note::is_normal('α β'));
+        $this->assertFalse(EVC_Prep_Note::is_normal(' α'));
+        $this->assertFalse(EVC_Prep_Note::is_normal(''));
+        $this->assertFalse(EVC_Prep_Note::is_normal(null));
+        $this->assertNotSame(
+            EVC_Prep_Canonical::fingerprint_v2(self::MEMBER_A, 'free_coffee', 7, str_repeat('a', 64), 'α'),
+            EVC_Prep_Canonical::fingerprint_v2(self::MEMBER_A, 'free_coffee', 7, str_repeat('a', 64))
+        );
+        $this->assertSame(
+            hash('sha256', implode("\n", array('evc-redeem-v2', self::MEMBER_A, 'free_coffee', '7', str_repeat('a', 64), 'note=' . hash('sha256', "evc-prep-note-v1\nα")))),
+            EVC_Prep_Canonical::fingerprint_v2(self::MEMBER_A, 'free_coffee', 7, str_repeat('a', 64), 'α')
+        );
+        try {
+            EVC_Prep_Note::normalise(str_repeat('x', 4097));
+            $this->fail('oversized input');
+        } catch (EVC_Prep_Rejection $e) {
+            $this->assertSame('note_shape', $e->reason());
+        }
     }
 
     public function test_unknown_preparation_fields_are_rejected(): void {
@@ -921,7 +1040,7 @@ final class PreparedRedemptionTransactionTest extends TestCase {
 
     public function test_an_invalid_active_catalogue_is_never_authorised(): void {
         $data = self::catalogue_data();
-        $data['free_text_note'] = true;
+        $data['free_text_note'] = 'yes';
         $this->authority->data = $data;
         $this->assertSame(EVC_Prepared_Redemption_Outcome::CATALOGUE_NOT_AUTHORISED, $this->redeem(self::body())->kind());
         $this->assertSame('catalogue_invalid', $this->reports[0]['stage']);
@@ -979,6 +1098,10 @@ final class PreparedRedemptionTransactionTest extends TestCase {
     public static function shared_vectors(): array {
         $out = array();
         foreach (self::vectors()['cases'] as $case) {
+            // D24: the service now accepts a staff note (the UI-03C precheck, unused, does not); notes have their own tests above.
+            if (is_array($case['preparation']) && array_key_exists('note', $case['preparation']) && $case['preparation']['note'] !== null) {
+                continue;
+            }
             $out[$case['name']] = array($case);
         }
         return $out;

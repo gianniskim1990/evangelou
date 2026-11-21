@@ -7,8 +7,12 @@ import { clubError } from "../../src/club/errors";
 import type { RedeemBenefitRequest, RedemptionOutcome } from "../../src/club/types";
 import type { StaffConfig } from "../../src/staff/config";
 import { COFFEE_CATALOGUE_VERSION, COUNTER_COFFEES } from "../../src/staff/member/coffeeCatalogue";
-import { CounterFlow, countdown, RETRY_MESSAGE } from "../../src/staff/member/counterFlow";
-import { createMemberApi, mapLookupReply, normalizeScannedCode, parseLookupFound, retryAfterOf, type LookupOutcome, type MemberApi } from "../../src/staff/member/memberApi";
+import { ALREADY_MESSAGE, CATALOGUE_CHANGED_MESSAGE, CounterFlow, countdown, INTEGRITY_MESSAGE, PREPARED_OFF_MESSAGE, REPLAYED_MESSAGE, RETRY_MESSAGE } from "../../src/staff/member/counterFlow";
+import { EMPTY_ORDER, NOTE_MAX, acceptNoteEdit, choose, clearOptional, fromPrefill, isComplete, missingSteps, noteToSend, preparedBody, sanitizeNote, selectCoffee, setNote, summaryLine, toggleQuickNote, visibleOrderGroups } from "../../src/staff/member/preparedOrder";
+import { createMemberApi, mapLookupReply, normalizeScannedCode, parseCatalogueReply, parseLookupFound, parseRecentCoffees, retryAfterOf, type LookupOutcome, type MemberApi, type PreparedRedeemResult, type RecentCoffee } from "../../src/staff/member/memberApi";
+import { parsePreparedReply } from "../../src/staff/member/preparedReply";
+import { parseCatalogue, type Catalogue } from "../../src/club/preparationContract";
+import type { PreparedBody } from "../../src/staff/member/preparedOrder";
 import { browserCameraEnv, cameraSupported, DECODE_MAX_SIDE, startQrCamera, type CameraEnv, type FrameCanvas } from "../../src/staff/member/qrCamera";
 import { encodeQr } from "../../src/customer/qrEncode";
 import { StaffApp } from "../../src/staff/StaffApp";
@@ -83,6 +87,20 @@ class FakeMemberApi implements MemberApi {
       return f ? f(r) : Promise.reject(clubError("server_error"));
     },
   };
+  /** D24: no catalogue unless a test gives one (the v1 flow is unchanged). */
+  catalogueReply: Catalogue | null = null;
+  catalogueCalls = 0;
+  async catalogue() {
+    this.catalogueCalls++;
+    return this.catalogueReply;
+  }
+  prepared: { memberId: string; body: PreparedBody }[] = [];
+  preparedReplies: ((body: PreparedBody) => Promise<PreparedRedeemResult>)[] = [];
+  redeemPrepared(memberId: string, body: PreparedBody) {
+    this.prepared.push({ memberId, body: JSON.parse(JSON.stringify(body)) as PreparedBody });
+    const f = this.preparedReplies.shift();
+    return f ? f(body) : Promise.resolve<PreparedRedeemResult>({ kind: "unresolved" });
+  }
 }
 
 /** What a hand scanner types into a tablet set to the Greek layout (the same keys). */
@@ -169,7 +187,7 @@ describe("STAGE-05D lookup reply (POST /members/lookup)", () => {
     assert.equal(retryAfterOf("999999", null), 3600);
   });
 
-  it("transport: the staff fetch (nonce), POST with exactly {method, qr_token}; empty or overlong codes are never sent", async () => {
+  it("transport: the staff fetch (nonce), POST with exactly {method, qr_token, history: true} (D24); empty or overlong codes are never sent", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const api = new FakeStaffApi();
     api.staffFetch = (async (url: string, init: RequestInit) => {
@@ -181,10 +199,10 @@ describe("STAGE-05D lookup reply (POST /members/lookup)", () => {
     assert.deepEqual(await m.lookupQr(`  ${TOKEN}\n`, signal), found("active"));
     assert.equal(calls[0].url, `${CONFIG.restBase}/members/lookup`);
     assert.equal(calls[0].init.method, "POST");
-    assert.equal(calls[0].init.body, JSON.stringify({ method: "qr", qr_token: TOKEN }), "trimmed (hand scanners add a newline)");
+    assert.equal(calls[0].init.body, JSON.stringify({ method: "qr", qr_token: TOKEN, history: true }), "trimmed (hand scanners add a newline)");
     for (const typed of [TOKEN.toUpperCase(), toGreekLayout(TOKEN), toGreekLayout(TOKEN).toLocaleUpperCase("el-GR")]) {
       assert.deepEqual(await m.lookupQr(typed, signal), found("active"), typed);
-      assert.equal(calls.at(-1)!.init.body, JSON.stringify({ method: "qr", qr_token: TOKEN }), `sent as the Latin token: ${typed}`);
+      assert.equal(calls.at(-1)!.init.body, JSON.stringify({ method: "qr", qr_token: TOKEN, history: true }), `sent as the Latin token: ${typed}`);
     }
     const sent = calls.length;
     for (const bad of [`${TOKEN}0`, TOKEN.slice(0, -1), `evc_${"g".repeat(48)}`, "https://example.org/x", "ΕΥΑΓΓΕΛΟΥ", `mem_${"a".repeat(32)}`]) {
@@ -227,7 +245,7 @@ describe("STAGE-05D counter flow", () => {
     members.redeemReplies = [redeemed];
     flow.openScan();
     await flow.submitScan(TOKEN);
-    assert.deepEqual(flow.getState(), { screen: "member", member: { memberId: MEMBER_ID, firstName: "Μαρία" }, status: "active", coffee: null, redeem: "idle", message: null });
+    assert.deepEqual(flow.getState(), { screen: "member", member: { memberId: MEMBER_ID, firstName: "Μαρία" }, status: "active", coffee: null, redeem: "idle", message: null, prepared: false, recent: null, order: EMPTY_ORDER, editing: null });
     await flow.redeem();
     assert.equal(members.redeems.length, 0, "no coffee chosen: nothing sent");
     flow.chooseCoffee("not_a_coffee");
@@ -859,5 +877,467 @@ describe("STAGE-05D round 2: scan screen (DOM)", () => {
     await act(async () => {});
     assert.equal(tracks[0].stopped, true);
     button("Άνοιγμα κάμερας");
+  });
+});
+
+// ---- Owner decision D24 (round 9): step-by-step order, history, «Το ίδιο», prepared redemption ----------------
+
+const APPROVED_DOC = JSON.parse(readFileSync(join(appDir, "..", "wordpress", "evangelou-club", "tests", "fixtures", "preparation", "catalogue-approved-v2.json"), "utf8")) as unknown;
+const approved = (): Catalogue => parseCatalogue(APPROVED_DOC);
+const prefillOf = (coffeeCode: string, modifiers: [string, string][], quickNotes: string[] = [], note: string | null = null) => ({ catalogueVersion: 2, coffeeCode, modifiers: modifiers.map(([group, option]) => ({ group, option })), quickNotes, note });
+const recentOf = (overrides: Partial<RecentCoffee> = {}): RecentCoffee => ({
+  businessDate: "2026-11-19",
+  coffeeLabel: "Freddo Espresso",
+  details: ["Μεγάλο μέγεθος", "Τριπλός", "Σκέτος", "Χωρίς γάλα"],
+  note: "λίγο πάγο",
+  prefill: prefillOf("freddo_espresso", [["size", "large"], ["shots", "triple"], ["sweetness", "none"], ["milk", "none"]], ["no_straw"], "λίγο πάγο"),
+  prefillPartial: false,
+  ...overrides,
+});
+const foundPrepared = (recent: RecentCoffee[] | null = [recentOf()], prepared = true): LookupOutcome => ({ kind: "found", member: { memberId: MEMBER_ID, firstName: "Μαρία" }, status: "active", history: { prepared, recent } });
+const preparedOk = (day = "2026-11-20"): PreparedRedeemResult => ({ kind: "redeemed", businessDate: day });
+const memberState = (flow: CounterFlow) => flow.getState() as Extract<ReturnType<CounterFlow["getState"]>, { screen: "member" }>;
+
+async function preparedCounter(recent: RecentCoffee[] | null = [recentOf()]) {
+  const ctx = await readyCounter();
+  ctx.members.catalogueReply = approved();
+  let n = 0;
+  const ids = () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+  const flow = new CounterFlow({ controller: ctx.controller, api: ctx.members, now: () => 1_000_000, timers: fakeTimers(), makeId: ids });
+  ctx.members.lookupReplies = [foundPrepared(recent)];
+  flow.openScan();
+  await flow.submitScan(TOKEN);
+  return { ...ctx, flow };
+}
+
+describe("D24 the order model (preparedOrder.ts) over the approved catalogue", () => {
+  it("steps follow the coffee: Greek coffee = dose (with triple) → sugar → sweetener; no size step", () => {
+    const c = approved();
+    let o = selectCoffee(c, EMPTY_ORDER, "greek_coffee");
+    assert.deepEqual(missingSteps(c, o).map((g) => g.id), ["shots", "sweetness"], "the sweetener is hidden until there is sugar");
+    assert.deepEqual(missingSteps(c, o)[0].options.map((x) => x.label), ["Μονός", "Διπλός", "Τριπλός"]);
+    o = choose(c, o, "shots", "triple");
+    o = choose(c, o, "sweetness", "medium");
+    assert.deepEqual(missingSteps(c, o).map((g) => g.id), ["sweetener"]);
+    o = choose(c, o, "sweetener", "brown");
+    assert.ok(isComplete(c, o));
+    assert.equal(visibleOrderGroups(c, o).some((g) => g.id === "size"), false);
+    // Sugar back to none hides (and drops) the sweetener.
+    o = choose(c, o, "sweetness", "none");
+    assert.equal(o.choices.sweetener, undefined);
+    assert.ok(isComplete(c, o));
+  });
+
+  it("freddo espresso: size, dose, sugar, milk are steps; ice / decaf / quick notes are extras on the review", () => {
+    const c = approved();
+    let o = selectCoffee(c, EMPTY_ORDER, "freddo_espresso");
+    assert.deepEqual(missingSteps(c, o).map((g) => g.id), ["size", "shots", "sweetness", "milk"]);
+    assert.deepEqual(c.coffees.get("freddo_espresso")!.groups.find((g) => g.id === "milk")!.options.map((x) => x.id), ["none", "regular", "lactose_free", "plant"]);
+    for (const [g, v] of [["size", "large"], ["shots", "double"], ["sweetness", "none"], ["milk", "plant"]] as const) o = choose(c, o, g, v);
+    assert.ok(isComplete(c, o));
+    o = choose(c, o, "ice", "extra");
+    o = toggleQuickNote(c, o, "no_straw");
+    o = toggleQuickNote(c, o, "very_hot");
+    assert.deepEqual(o.quickNotes, ["no_straw"], "a hot note is never offered on a cold coffee");
+    assert.equal(clearOptional(c, o, "ice").choices.ice, undefined);
+    assert.equal(clearOptional(c, o, "milk").choices.milk, "plant", "a required step is changed, never cleared");
+  });
+
+  it("exclusive quick notes: the newest wins; choices of another coffee are dropped when the coffee changes", () => {
+    const c = approved();
+    let o = selectCoffee(c, EMPTY_ORDER, "espresso");
+    o = toggleQuickNote(c, toggleQuickNote(c, o, "very_hot"), "lukewarm");
+    assert.deepEqual(o.quickNotes, ["lukewarm"]);
+    o = choose(c, choose(c, o, "shots", "triple"), "sweetness", "little");
+    const cap = selectCoffee(c, o, "filter_coffee");
+    assert.equal(cap.choices.shots, undefined, "filter coffee has no dose");
+    assert.equal(cap.choices.sweetness, "little", "what still applies is kept");
+    assert.deepEqual(cap.quickNotes, ["lukewarm"]);
+  });
+
+  it("round 11 (C1): an edit past 80 code points is refused as a whole (the previous note stays), never cut", () => {
+    const c = approved();
+    const o = setNote(c, selectCoffee(c, EMPTY_ORDER, "other_coffee"), "λίγο πάγο");
+    assert.equal(o.note, "λίγο πάγο");
+    assert.equal(setNote(c, o, "α".repeat(81)).note, "λίγο πάγο", "too long: unchanged, not the first 80");
+    assert.equal(setNote(c, o, "α".repeat(80)).note, "α".repeat(80), "exactly 80: accepted");
+    assert.deepEqual(acceptNoteEdit("πριν", "🍰".repeat(81)), { note: "πριν", refused: true });
+    assert.deepEqual(acceptNoteEdit("πριν", "🍰".repeat(80)), { note: "🍰".repeat(80), refused: false }, "code points, not UTF-16 units");
+    assert.deepEqual(acceptNoteEdit("", "<b>x</b>"), { note: "bx/b", refused: false }, "the typing filter still applies");
+    assert.deepEqual(acceptNoteEdit("", "α\u0007β"), { note: "α β", refused: false });
+    assert.deepEqual(acceptNoteEdit("x", "<".repeat(200) + "α"), { note: "α", refused: false }, "counted after the filter, like the server");
+  });
+
+  it("the note: no HTML, at most 80 characters while typing; collapsed and trimmed when sent; empty = none", () => {
+    const c = approved();
+    assert.equal(sanitizeNote("<b>λίγο</b> γλυκό"), "bλίγο/b γλυκό");
+    assert.equal([...sanitizeNote("α".repeat(120))].length, NOTE_MAX);
+    // A pre-filled note (sanitizeNote) is cut in code points like the server, never in UTF-16 units (40 emoji).
+    assert.equal(sanitizeNote("🍰".repeat(90)), "🍰".repeat(80));
+    assert.equal(noteToSend("  πιο \n  ζεστό  "), "πιο ζεστό");
+    assert.equal(noteToSend("   "), null);
+    // Round 10 NIT-4 (mutant X2): control and format characters become spaces while typing, as EVC_Prep_Note does.
+    assert.equal(sanitizeNote("α\u0007β\u200Bγ\u0000δ\u202Eε"), "α β γ δ ε");
+    assert.equal(noteToSend("λίγο\u0007\u200Bπάγο"), "λίγο πάγο");
+    assert.equal(noteToSend("\u200B\u0001\u2060"), null, "only invisible characters = no note");
+    let o = selectCoffee(c, EMPTY_ORDER, "other_coffee");
+    o = setNote(c, choose(c, o, "sweetness", "none"), "  μεγάλο ποτήρι \n  με καπάκι ");
+    const body = preparedBody(c, o, "11111111-1111-4111-8111-111111111111")!;
+    assert.deepEqual(body, { request_id: "11111111-1111-4111-8111-111111111111", catalogue_version: 2, coffee_code: "other_coffee", preparation: { modifiers: [{ group: "sweetness", option: "none" }], quick_notes: [], note: "μεγάλο ποτήρι με καπάκι" } });
+    assert.equal(preparedBody(c, selectCoffee(c, EMPTY_ORDER, "espresso"), "x"), null, "an incomplete order is never sent");
+    const noNotes = { ...c, freeTextNote: false };
+    assert.equal(setNote(noNotes, o, "x").note, o.note);
+    assert.equal(fromPrefill(noNotes, prefillOf("espresso", [["shots", "single"], ["sweetness", "none"]], [], "παλιά σημείωση")).note, "", "a catalogue without notes never carries one over");
+    assert.equal(preparedBody(noNotes, o, "x")!.preparation.note, null);
+  });
+
+  it("a pre-fill takes over only what the catalogue still offers", () => {
+    const c = approved();
+    const o = fromPrefill(c, prefillOf("espresso", [["shots", "quadruple"], ["sweetness", "sweet"], ["sweetener", "stevia"], ["caffeine", "decaf"]], ["cinnamon", "very_hot"], "όπως πάντα"));
+    assert.deepEqual(o.choices, { sweetness: "sweet", sweetener: "stevia", caffeine: "decaf" });
+    assert.deepEqual(o.quickNotes, ["very_hot"]);
+    assert.equal(o.note, "όπως πάντα");
+    assert.deepEqual(missingSteps(c, o).map((g) => g.id), ["shots"], "the retired dose is chosen again");
+    assert.deepEqual(fromPrefill(c, prefillOf("latte", [])), EMPTY_ORDER);
+    assert.equal(summaryLine(c, choose(c, o, "shots", "double")), "Espresso · Διπλός · Γλυκός · Στέβια · Χωρίς καφεΐνη · Πολύ ζεστός");
+  });
+});
+
+describe("D24 lookup history and the catalogue / prepared replies", () => {
+  const LOOKUP_NEW = { member: { member_id: MEMBER_ID, first_name: "Μαρία" }, status: "active", prepared: true, recent_coffees: [{ business_date: "2026-11-19", coffee_label: "Ελληνικός", details: ["Διπλός", "Σκέτος"], note: null, prefill: { catalogue_version: 2, coffee_code: "greek_coffee", modifiers: [{ group: "shots", option: "double" }, { group: "sweetness", option: "none" }], quick_notes: [], note: null }, prefill_partial: false }] };
+
+  it("the extended reply: prepared + recent coffees; an older server's reply stays exactly as before", () => {
+    const parsed = parseLookupFound(LOOKUP_NEW)!;
+    assert.equal(parsed.history!.prepared, true);
+    assert.deepEqual(parsed.history!.recent, [{ businessDate: "2026-11-19", coffeeLabel: "Ελληνικός", details: ["Διπλός", "Σκέτος"], note: null, prefill: prefillOf("greek_coffee", [["shots", "double"], ["sweetness", "none"]]), prefillPartial: false }]);
+    assert.equal(parseLookupFound({ member: LOOKUP_NEW.member, status: "active" })!.history, undefined);
+    assert.equal(parseLookupFound({ ...LOOKUP_NEW, prepared: "yes" }), null);
+    assert.equal(parseLookupFound({ ...LOOKUP_NEW, staff: 1 }), null);
+  });
+
+  it("a malformed history never blocks the coffee: only the history is dropped", () => {
+    const bad: unknown[] = [
+      "x",
+      [{ ...LOOKUP_NEW.recent_coffees[0], staff_name: "Γιώργος" }],
+      [{ ...LOOKUP_NEW.recent_coffees[0], note: "α".repeat(81) }],
+      [{ ...LOOKUP_NEW.recent_coffees[0], business_date: "19/11" }],
+      [{ ...LOOKUP_NEW.recent_coffees[0], prefill: { ...LOOKUP_NEW.recent_coffees[0].prefill, coffee_code: "Greek-Coffee" } }],
+      [LOOKUP_NEW.recent_coffees[0], LOOKUP_NEW.recent_coffees[0], LOOKUP_NEW.recent_coffees[0], LOOKUP_NEW.recent_coffees[0]],
+    ];
+    for (const b of bad) {
+      const parsed = parseLookupFound({ ...LOOKUP_NEW, recent_coffees: b });
+      assert.ok(parsed, JSON.stringify(b));
+      assert.equal(parsed.history!.recent, null, JSON.stringify(b));
+      assert.equal(parsed.status, "active");
+    }
+    assert.deepEqual(parseRecentCoffees([]), []);
+  });
+
+  it("the catalogue reply must be the approved document of its own version", () => {
+    assert.equal(parseCatalogueReply({ catalogue_version: 2, version_label: "evc-coffee-v2-2026-11-20", catalogue: APPROVED_DOC })!.version, 2);
+    assert.equal(parseCatalogueReply({ catalogue_version: 3, version_label: "x", catalogue: APPROVED_DOC }), null);
+    assert.equal(parseCatalogueReply({ catalogue_version: 2, version_label: "x", catalogue: { ...(APPROVED_DOC as object), status: "illustrative" } }), null);
+    assert.equal(parseCatalogueReply({ catalogue_version: 2, catalogue: APPROVED_DOC }), null);
+  });
+
+  const SENT = { requestId: "11111111-1111-4111-8111-111111111111", memberId: MEMBER_ID };
+  const reply = (o: Record<string, unknown>) => ({ outcome: "redeemed", request_id: SENT.requestId, recording: "recorded_now", fulfillment: "unconfirmed", instruction: "prepare", entitlement_consumed: true, server_business_date: "2026-11-20", redemption: { request_id: SENT.requestId, member_id: MEMBER_ID, business_date: "2026-11-20", redeemed_at_utc: "2026-11-20 08:00:00.000000" }, handoff: null, ...o });
+  const refusal = (outcome: string) => reply({ outcome, recording: null, fulfillment: null, instruction: "do_not_prepare", entitlement_consumed: false, redemption: null });
+
+  it("prepared replies: only a fresh commit says prepare; replays, refusals and unknown outcomes follow the contract", () => {
+    assert.deepEqual(parsePreparedReply(reply({}), SENT), { kind: "redeemed", businessDate: "2026-11-20" });
+    assert.deepEqual(parsePreparedReply(reply({ outcome: "replayed", recording: "previously_recorded", instruction: "verify_handoff" }), SENT), { kind: "replayed", businessDate: "2026-11-20", instruction: "verify_handoff" });
+    assert.equal(parsePreparedReply(reply({ outcome: "replayed", recording: "previously_recorded", instruction: "prepare" }), SENT), null, "a replay never says prepare");
+    assert.deepEqual(parsePreparedReply(reply({ outcome: "replayed", recording: "previously_recorded", instruction: "do_not_prepare_for_today", server_business_date: "2026-11-21" }), SENT), { kind: "replayed", businessDate: "2026-11-20", instruction: "do_not_prepare_for_today" });
+    assert.deepEqual(parsePreparedReply(refusal("benefit_already_redeemed"), SENT), { kind: "refused", code: "benefit_already_redeemed" });
+    assert.deepEqual(parsePreparedReply({ ...refusal("outcome_unknown"), entitlement_consumed: null, retry_request_id: SENT.requestId }, SENT), { kind: "unresolved" });
+    assert.equal(parsePreparedReply({ ...refusal("outcome_unknown"), entitlement_consumed: null, retry_request_id: "22222222-2222-4222-8222-222222222222" }, SENT), null, "only the sent id recovers");
+    assert.deepEqual(parsePreparedReply({ ...refusal("record_integrity_failure"), entitlement_consumed: null }, SENT), { kind: "integrity_failure" });
+    assert.equal(parsePreparedReply(reply({ request_id: "22222222-2222-4222-8222-222222222222" }), SENT), null, "another request's reply");
+    assert.equal(parsePreparedReply(reply({ redemption: { request_id: SENT.requestId, member_id: `mem_${"cd".repeat(16)}`, business_date: "2026-11-20", redeemed_at_utc: "2026-11-20 08:00:00.000000" } }), SENT), null, "another member");
+    assert.equal(parsePreparedReply(reply({ redemption: { request_id: SENT.requestId, member_id: MEMBER_ID, business_date: "2026-11-20", redeemed_at_utc: "2026-11-20 22:30:00.000000" } }), SENT), null, "a time that is not on the stated Athens day");
+    assert.equal(parsePreparedReply(reply({ note: "x" }), SENT), null);
+  });
+
+  it("transport: GET /coffee-catalogue and POST …/prepared-redeem on the staff fetch; 409 prepared_unavailable; 401 ends the session", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const replies: Response[] = [];
+    const api = new FakeStaffApi();
+    api.staffFetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return replies.shift() ?? new Response("", { status: 500 });
+    }) as unknown as typeof fetch;
+    const m = createMemberApi(api, CONFIG.restBase);
+    const signal = new AbortController().signal;
+    replies.push(new Response(JSON.stringify({ catalogue_version: 2, version_label: "evc-coffee-v2-2026-11-20", catalogue: APPROVED_DOC }), { status: 200 }));
+    assert.equal((await m.catalogue(signal))!.version, 2);
+    assert.equal(calls[0].url, `${CONFIG.restBase}/coffee-catalogue`);
+    assert.equal(calls[0].init.method, "GET");
+    replies.push(new Response("", { status: 404 }));
+    assert.equal(await m.catalogue(signal), null, "an older server: v1");
+    const body = preparedBody(approved(), choose(approved(), selectCoffee(approved(), EMPTY_ORDER, "other_coffee"), "sweetness", "none"), SENT.requestId)!;
+    replies.push(new Response(JSON.stringify(reply({})), { status: 200 }));
+    assert.deepEqual(await m.redeemPrepared(MEMBER_ID, body, signal), { kind: "redeemed", businessDate: "2026-11-20" });
+    assert.equal(calls.at(-1)!.url, `${CONFIG.restBase}/members/${MEMBER_ID}/benefits/free_coffee/prepared-redeem`);
+    assert.equal(calls.at(-1)!.init.method, "POST");
+    assert.deepEqual(JSON.parse(calls.at(-1)!.init.body as string), body);
+    replies.push(new Response(JSON.stringify({ error: { code: "prepared_unavailable", message: "…" } }), { status: 409 }));
+    assert.deepEqual(await m.redeemPrepared(MEMBER_ID, body, signal), { kind: "prepared_unavailable" });
+    replies.push(new Response("<html>proxy error</html>", { status: 502 }));
+    assert.deepEqual(await m.redeemPrepared(MEMBER_ID, body, signal), { kind: "unresolved" }, "a replaced body is an unknown outcome");
+    replies.push(new Response(JSON.stringify({ error: { code: "unauthorized" } }), { status: 401 }));
+    await assert.rejects(m.redeemPrepared(MEMBER_ID, body, signal), (e: unknown) => e instanceof StaffApiError && e.kind === "unauthorized");
+    replies.push(new Response(JSON.stringify({ error: { code: "forbidden" } }), { status: 403 }));
+    await assert.rejects(m.catalogue(signal), (e: unknown) => e instanceof StaffApiError && e.kind === "forbidden");
+  });
+});
+
+describe("D24 the prepared counter flow", () => {
+  it("scan with history: the catalogue is loaded once, the member is prepared, the coffee comes step by step", async () => {
+    const { flow, members } = await preparedCounter();
+    assert.equal(members.catalogueCalls, 1);
+    const s = memberState(flow);
+    assert.equal(s.prepared, true);
+    assert.equal(s.recent!.length, 1);
+    assert.deepEqual(flow.stage(), { kind: "coffee" });
+    flow.chooseCoffee("greek_coffee");
+    assert.deepEqual(flow.stage(), { kind: "step", group: "shots" });
+    flow.choose("shots", "triple");
+    assert.deepEqual(flow.stage(), { kind: "step", group: "sweetness" });
+    flow.choose("sweetness", "sweet");
+    assert.deepEqual(flow.stage(), { kind: "step", group: "sweetener" });
+    flow.back();
+    assert.deepEqual(flow.stage(), { kind: "step", group: "sweetness" }, "«Πίσω» undoes the last step");
+    flow.choose("sweetness", "sweet");
+    flow.choose("sweetener", "white");
+    assert.deepEqual(flow.stage(), { kind: "review" });
+    flow.edit("shots");
+    assert.deepEqual(flow.stage(), { kind: "step", group: "shots" });
+    flow.choose("shots", "double");
+    assert.deepEqual(flow.stage(), { kind: "review" }, "after a change, back to the review");
+    flow.toggleQuickNote("very_hot");
+    flow.setNote("στο τραπέζι <3>");
+    members.preparedReplies = [async () => preparedOk()];
+    await flow.redeem();
+    assert.equal(members.prepared.length, 1);
+    assert.deepEqual(members.prepared[0].body, { request_id: "00000000-0000-4000-8000-000000000001", catalogue_version: 2, coffee_code: "greek_coffee", preparation: { modifiers: [{ group: "shots", option: "double" }, { group: "sweetness", option: "sweet" }, { group: "sweetener", option: "white" }], quick_notes: ["very_hot"], note: "στο τραπέζι 3" } });
+    assert.deepEqual(flow.getState(), { screen: "scan", busy: false, notice: { kind: "recorded", firstName: "Μαρία", coffeeLabel: "Ελληνικός · Διπλός · Γλυκός · Λευκή ζάχαρη · Πολύ ζεστός" }, blockedUntil: null });
+    assert.equal(members.redeems.length, 0, "the v1 route is not used");
+  });
+
+  it("«Το ίδιο με την τελευταία φορά» pre-fills the whole order and lands on the review: nothing is sent until confirmed", async () => {
+    const { flow, members } = await preparedCounter();
+    flow.sameAsLast();
+    assert.deepEqual(flow.stage(), { kind: "review" });
+    const s = memberState(flow);
+    assert.deepEqual(s.order.choices, { size: "large", shots: "triple", sweetness: "none", milk: "none" });
+    assert.deepEqual(s.order.quickNotes, ["no_straw"]);
+    assert.equal(s.order.note, "λίγο πάγο");
+    assert.equal(members.prepared.length, 0, "a suggestion is never a confirmed order");
+    members.preparedReplies = [async () => preparedOk()];
+    await flow.redeem();
+    assert.equal(members.prepared[0].body.coffee_code, "freddo_espresso");
+    assert.equal(members.prepared[0].body.preparation.note, "λίγο πάγο");
+  });
+
+  it("a retired option is shown but not pre-filled: staff choose it on its step", async () => {
+    const partial = recentOf({ prefill: prefillOf("freddo_espresso", [["size", "large"], ["sweetness", "none"], ["milk", "none"]]), prefillPartial: true });
+    const { flow } = await preparedCounter([partial]);
+    flow.sameAsLast();
+    assert.deepEqual(flow.stage(), { kind: "step", group: "shots" });
+    const none = await preparedCounter([recentOf({ prefill: null, prefillPartial: true })]);
+    none.flow.sameAsLast();
+    assert.deepEqual(none.flow.stage(), { kind: "coffee" }, "a coffee no longer offered: nothing pre-filled");
+  });
+
+  it("an unknown outcome keeps the SAME request id and locks the order; any change after a refusal gets a new id", async () => {
+    const { flow, members } = await preparedCounter();
+    flow.sameAsLast();
+    members.preparedReplies = [async () => ({ kind: "unresolved" }), async () => ({ kind: "unresolved" })];
+    await flow.redeem();
+    assert.equal(memberState(flow).redeem, "retry");
+    assert.equal(memberState(flow).message, RETRY_MESSAGE);
+    flow.choose("shots", "single");
+    flow.setNote("άλλο");
+    flow.startOver();
+    assert.equal(memberState(flow).order.choices.shots, "triple", "nothing changes while the outcome is unknown");
+    await flow.redeem();
+    assert.equal(members.prepared[1].body.request_id, members.prepared[0].body.request_id, "«Δοκιμή ξανά» = the same id");
+    members.preparedReplies = [async () => ({ kind: "replayed", businessDate: "2026-11-20", instruction: "verify_handoff" })];
+    await flow.redeem();
+    assert.equal(members.prepared[2].body.request_id, members.prepared[0].body.request_id);
+    assert.equal(memberState(flow).status, "used_today");
+    assert.equal(memberState(flow).message, REPLAYED_MESSAGE);
+  });
+
+  it("refusals: already redeemed, inactive, not found, stale catalogue (reloaded), integrity, and 409 → v1 for this member", async () => {
+    const a = await preparedCounter();
+    a.flow.sameAsLast();
+    a.members.preparedReplies = [async () => ({ kind: "refused", code: "benefit_already_redeemed" })];
+    await a.flow.redeem();
+    assert.equal(memberState(a.flow).status, "used_today");
+    assert.equal(memberState(a.flow).message, ALREADY_MESSAGE);
+
+    const b = await preparedCounter();
+    b.flow.sameAsLast();
+    b.members.preparedReplies = [async () => ({ kind: "refused", code: "catalogue_version_stale" })];
+    await b.flow.redeem();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(b.members.catalogueCalls, 2, "the catalogue is asked again");
+    assert.equal(memberState(b.flow).message, CATALOGUE_CHANGED_MESSAGE);
+    assert.equal(memberState(b.flow).redeem, "idle");
+    b.members.preparedReplies = [async () => preparedOk()];
+    await b.flow.redeem();
+    assert.notEqual(b.members.prepared[1].body.request_id, b.members.prepared[0].body.request_id, "a definitive answer closes the intent");
+
+    const c = await preparedCounter();
+    c.flow.sameAsLast();
+    c.members.preparedReplies = [async () => ({ kind: "integrity_failure" })];
+    await c.flow.redeem();
+    assert.equal(memberState(c.flow).message, INTEGRITY_MESSAGE);
+    assert.equal(memberState(c.flow).status, "used_today", "never a second coffee after a damaged record");
+
+    const d = await preparedCounter();
+    d.flow.sameAsLast();
+    d.members.preparedReplies = [async () => ({ kind: "prepared_unavailable" })];
+    await d.flow.redeem();
+    assert.equal(memberState(d.flow).prepared, false);
+    assert.equal(memberState(d.flow).coffee, "freddo_espresso", "the v1 coffee is kept");
+    assert.equal(memberState(d.flow).message, PREPARED_OFF_MESSAGE);
+    d.members.redeemReplies = [redeemed];
+    await d.flow.redeem();
+    assert.equal(d.members.redeems.length, 1, "the coffee type goes through v1");
+  });
+
+  it("without prepared (schema below 4, older server or no catalogue): the v1 flow; «Το ίδιο» picks the coffee only", async () => {
+    const ctx = await readyCounter();
+    ctx.members.catalogueReply = approved();
+    ctx.members.lookupReplies = [foundPrepared([recentOf()], false)];
+    ctx.flow.openScan();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(ctx.flow.getCatalogue(), "the catalogue is loaded on the scan screen");
+    await ctx.flow.submitScan(TOKEN);
+    assert.equal(memberState(ctx.flow).prepared, false, "the server said not prepared (schema below 4): v1, whatever the catalogue");
+    ctx.flow.sameAsLast();
+    assert.equal(memberState(ctx.flow).coffee, "freddo_espresso");
+    ctx.flow.choose("shots", "single");
+    assert.deepEqual(memberState(ctx.flow).order, EMPTY_ORDER, "no step choices in v1");
+    const noCatalogue = await readyCounter();
+    noCatalogue.members.lookupReplies = [foundPrepared()];
+    noCatalogue.flow.openScan();
+    await noCatalogue.flow.submitScan(TOKEN);
+    assert.equal(memberState(noCatalogue.flow).prepared, false, "prepared, but the catalogue could not be read: v1");
+    assert.equal(noCatalogue.members.catalogueCalls, 2, "asked once on the scan screen and once more because the lookup said prepared");
+  });
+});
+
+describe("D24 the till screens (DOM)", () => {
+  async function mountPrepared(recent: RecentCoffee[] | null = [recentOf()]) {
+    const ctx = await preparedCounter(recent);
+    await dom.render(createElement(StaffApp, { controller: ctx.controller, counter: ctx.flow, camera: NO_CAMERA }));
+    return ctx;
+  }
+
+  it("the member's last coffees with date, preparation and note; «Το ίδιο» goes to the review; confirm records", async () => {
+    const { members } = await mountPrepared([recentOf(), recentOf({ businessDate: "2026-11-18", coffeeLabel: "Ελληνικός", details: [], note: null, prefill: null })]);
+    const recent = dom.document.querySelector("[data-evc-recent]")!;
+    assert.match(recent.textContent ?? "", /19\/11.*Freddo Espresso · Μεγάλο μέγεθος · Τριπλός · Σκέτος · Χωρίς γάλα/);
+    assert.match(recent.textContent ?? "", /Σημείωση: λίγο πάγο/);
+    assert.match(recent.textContent ?? "", /18\/11Ελληνικός/);
+    await dom.click(button("Το ίδιο με την τελευταία φορά"));
+    assert.ok(dom.document.querySelector('[data-evc-stage="review"]'));
+    assert.match(text(), /Έλεγχος παραγγελίας/);
+    assert.equal((dom.document.getElementById("evc-order-note") as HTMLInputElement).value, "λίγο πάγο");
+    members.preparedReplies = [async () => preparedOk()];
+    await dom.click(button("Καταχώρηση καφέ"));
+    assert.equal(members.prepared.length, 1);
+    assert.match(text(), /Ο καφές καταχωρήθηκε: Freddo Espresso · Μεγάλο μέγεθος/);
+  });
+
+  it("a member who already had today's coffee: the history is shown, «Το ίδιο» is not offered", async () => {
+    const ctx = await readyCounter();
+    ctx.members.catalogueReply = approved();
+    ctx.members.lookupReplies = [{ ...(foundPrepared() as Extract<LookupOutcome, { kind: "found" }>), status: "used_today" }];
+    ctx.flow.openScan();
+    await ctx.flow.submitScan(TOKEN);
+    await dom.render(createElement(StaffApp, { controller: ctx.controller, counter: ctx.flow, camera: NO_CAMERA }));
+    assert.ok(dom.document.querySelector("[data-evc-recent]"));
+    // assert.ok(x === null) and never assert.equal(element, null): a failing equal would inspect the whole jsdom
+    // tree for its message (gigabytes; it took the CI runner down in round 9b, mutant D24-S1).
+    assert.ok(dom.document.querySelector('[data-evc-action="same-as-last"]') === null, "«Το ίδιο» is not offered");
+    assert.ok(dom.document.querySelector("[data-evc-stage]") === null, "no order for a member who cannot redeem");
+  });
+
+  it("one large button per option; each tap moves to the next step; the note field is limited to 80 code points", async () => {
+    await mountPrepared(null);
+    assert.ok(dom.document.querySelector("[data-evc-recent]") === null, "no history panel without history");
+    const coffees = [...dom.document.querySelectorAll("[data-evc-coffee]")];
+    assert.equal(coffees.length, 7, "the seven coffees");
+    for (const b of coffees) assert.match(b.className, /min-h-14/, "large touch targets");
+    await dom.click(dom.document.querySelector('[data-evc-coffee="cappuccino"]')!);
+    assert.equal(dom.document.querySelector("[data-evc-stage]")!.getAttribute("data-evc-group"), "size");
+    const options = [...dom.document.querySelectorAll("[data-evc-option]")];
+    assert.equal(options.length, 2);
+    for (const b of options) assert.match(b.className, /min-h-14/, "large touch targets");
+    for (const opt of ["regular", "triple", "none", "plant"]) await dom.click(dom.document.querySelector(`[data-evc-option="${opt}"]`)!);
+    assert.ok(dom.document.querySelector('[data-evc-stage="review"]'));
+    const note = dom.document.getElementById("evc-order-note") as HTMLInputElement;
+    const notice = () => dom.document.querySelector('[data-evc-note-notice="too-long"]');
+    // Round 10 NIT-3: 80 Unicode code points like the server, never maxLength (UTF-16 units: it would stop at 40 emoji).
+    assert.equal(note.hasAttribute("maxlength"), false, "no maxLength on the note field");
+    await type(note, "☕🍰".repeat(40));
+    assert.equal([...note.value].length, NOTE_MAX, "80 code points accepted, even when each one is two UTF-16 units");
+    assert.match(dom.document.getElementById("evc-order-note-help")!.textContent ?? "", /80\/80$/, "the counter counts code points");
+    assert.ok(notice() === null);
+    // Round 11 (C1): one more character is refused as a whole edit: the previous note stays, nothing is cut.
+    await type(note, "☕🍰".repeat(40) + "x");
+    assert.equal(note.value, "☕🍰".repeat(40), "the previous value stays");
+    assert.equal(notice()?.textContent, "Η σημείωση χωράει έως 80 χαρακτήρες· η αλλαγή δεν έγινε.");
+    assert.equal(notice()?.getAttribute("role"), "alert");
+    await type(note, "🍰".repeat(30));
+    assert.match(dom.document.getElementById("evc-order-note-help")!.textContent ?? "", /30\/80$/);
+    assert.ok(notice() === null, "an accepted edit clears the notice");
+    await type(note, "<i>με κανέλα</i>");
+    assert.equal(note.value, "iμε κανέλα/i");
+    await dom.click(dom.document.querySelector('[data-evc-extra="foam:extra"]')!);
+    assert.equal(dom.document.querySelector('[data-evc-extra="foam:extra"]')!.getAttribute("aria-pressed"), "true");
+    await dom.click(dom.document.querySelector('[aria-label="Αλλαγή: Δόση"]')!);
+    assert.equal(dom.document.querySelector("[data-evc-stage]")!.getAttribute("data-evc-group"), "shots");
+  });
+
+  it("round 11 (C1): an IME composition is never rewritten while it runs; the rule applies at its end; a long paste is refused", async () => {
+    await mountPrepared(null);
+    await dom.click(dom.document.querySelector('[data-evc-coffee="cappuccino"]')!);
+    for (const opt of ["regular", "triple", "none", "plant"]) await dom.click(dom.document.querySelector(`[data-evc-option="${opt}"]`)!);
+    const note = dom.document.getElementById("evc-order-note") as HTMLInputElement;
+    const notice = () => dom.document.querySelector('[data-evc-note-notice="too-long"]');
+    const help = () => dom.document.getElementById("evc-order-note-help")!.textContent ?? "";
+    const compose = async (type: "compositionstart" | "compositionend") => {
+      await act(async () => {
+        note.dispatchEvent(new dom.window.CompositionEvent(type, { bubbles: true }));
+      });
+    };
+    await type(note, "λίγο");
+    await compose("compositionstart");
+    const composing = "λίγο " + "ά".repeat(90);
+    await type(note, composing);
+    assert.equal(note.value, composing, "while composing the field shows exactly what is being typed");
+    assert.ok(notice() === null, "and says nothing yet");
+    await type(note, "λίγο γάλα");
+    await compose("compositionend");
+    assert.equal(note.value, "λίγο γάλα", "committed at compositionend");
+    assert.match(help(), /9\/80$/);
+    await compose("compositionstart");
+    await type(note, "λίγο γάλα " + "ά".repeat(80));
+    await compose("compositionend");
+    assert.equal(note.value, "λίγο γάλα", "a composition that ends too long is refused as a whole");
+    assert.ok(notice(), "with the notice");
+    // A paste is one edit: too long = refused, the previous note stays (never its first 80 characters).
+    await type(note, "λίγο γάλα" + "π".repeat(120));
+    assert.equal(note.value, "λίγο γάλα");
+    assert.ok(notice());
+    await type(note, "πολύ ζεστό");
+    assert.equal(note.value, "πολύ ζεστό");
+    assert.ok(notice() === null);
   });
 });
