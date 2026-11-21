@@ -40,3 +40,37 @@ export async function registerMemberWorker(setting: ServiceWorkerSetting | null,
     return false;
   }
 }
+
+interface RegistrationSource {
+  getRegistration(scope?: string): Promise<{ pushManager?: unknown } | undefined>;
+  ready?: Promise<{ pushManager?: unknown; scope?: string }>;
+}
+
+/** How long a first visit waits for the worker the page has just registered. */
+export const WORKER_READY_WAIT_MS = 5000;
+
+/**
+ * Round 12 (D26 part 2): the push manager of the member app's OWN worker registration (the round-11 worker, scope
+ * /club-member/), or null (no worker setting, no service worker support, not registered, no Push). Never registers a
+ * worker itself and never asks for permission.
+ */
+export async function pushManagerOf(setting: ServiceWorkerSetting | null, nav: { serviceWorker?: RegistrationSource } | undefined): Promise<import("./push").PushManagerLike | null> {
+  if (!setting || !nav?.serviceWorker) return null;
+  try {
+    let registration: { pushManager?: unknown; scope?: string } | undefined = await nav.serviceWorker.getRegistration(setting.scope);
+    if (!registration && nav.serviceWorker.ready) {
+      // A first visit: the page registered the worker a moment ago (main.tsx); wait for it, never for ever.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      registration = await Promise.race([
+        nav.serviceWorker.ready.then((r) => (typeof r.scope !== "string" || new URL(r.scope).pathname === setting.scope ? r : undefined)),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), WORKER_READY_WAIT_MS);
+        }),
+      ]).finally(() => clearTimeout(timer));
+    }
+    const manager = registration?.pushManager as import("./push").PushManagerLike | undefined;
+    return manager && typeof manager.subscribe === "function" && typeof manager.getSubscription === "function" ? manager : null;
+  } catch {
+    return null;
+  }
+}

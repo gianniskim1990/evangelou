@@ -21,6 +21,9 @@ final class EVC_Db_Grants {
     /** What the till needs for a prepared redemption (migration 004): it writes and reads this table. */
     const PREPARATIONS_TABLE = 'evc_redemption_preparations';
     const PREPARATIONS_PRIVILEGES = array('INSERT', 'SELECT');
+    /** Round 12 (D26 part 2): what push needs on the subscriptions table of migration 005 (never DELETE). */
+    const PUSH_TABLE = 'evc_push_subscriptions';
+    const PUSH_PRIVILEGES = array('SELECT', 'INSERT', 'UPDATE');
 
     /**
      * @param string[] $lines    the rows of SHOW GRANTS, one statement each

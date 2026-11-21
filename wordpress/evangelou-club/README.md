@@ -904,6 +904,25 @@ Greek operator note and developer notes: `docs/member-qr.md`.
 
 Details and the real-phone test steps: `docs/member-pwa.md`.
 
+## Member push notifications (STAGE-08 round 12, owner decision D26 part 2 — behind EVC_CLUB_PUSH_ENABLED, default OFF)
+
+- Sent from this server to the browsers' push services (FCM, Apple, Mozilla, Windows), no third-party sender:
+  RFC 8291 encryption (`EVC_Push_Crypto`) and RFC 8292 VAPID (`EVC_Push_Vapid`) written on PHP's openssl, tested
+  against the RFC 8291 example byte for byte. Keys only in wp-config.php (`EVC_CLUB_PUSH_VAPID_PUBLIC`,
+  `EVC_CLUB_PUSH_VAPID_PRIVATE`, `EVC_CLUB_PUSH_SUBJECT`), made with the one-line command of `docs/member-push.md`;
+  any problem = push hidden and nothing sent (fail closed).
+- Migration **005** (`evc_push_subscriptions`): written, **NOT applied anywhere**; needs the owner's approval per
+  database. Runtime grants: SELECT, INSERT, UPDATE. Below schema 5 push is simply hidden.
+- Member app: «Θέλω ειδοποιήσεις» (the tap is the consent; only it asks for permission), «Διακοπή ειδοποιήσεων»,
+  iPhone only when installed, no push with plain permalinks. Routes: GET / POST / DELETE `/me/push`.
+- Administrators: «Evangelou Club → Ειδοποιήσεις» (preview, confirmation, batches, rate limit, audit with counts only).
+  Automatic notifications, each with its own constant (default OFF): `EVC_CLUB_PUSH_AUTO_ACTIVATED`,
+  `EVC_CLUB_PUSH_AUTO_EXPIRY`.
+- Packager guards: `PUSH_RULES` / `pushProblemsFor` (construction only in `EVC_Push_Plugin::wire()`, HTTP only in the
+  sender, no endpoint / key / payload in a log, the private key constant only in `EVC_Push_Vapid`), `workerProblems`.
+
+Details, the owner steps and the real-phone tests: `docs/member-push.md`.
+
 ## Known deployment blockers
 
 - Hosting PHP version, MySQL/MariaDB version and pdo_mysql availability.

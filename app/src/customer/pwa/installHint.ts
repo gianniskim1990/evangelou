@@ -42,6 +42,14 @@ export function isIosSafari(userAgent: string, maxTouchPoints: number): boolean 
   return /\bSafari\//.test(userAgent) && /\bVersion\//.test(userAgent);
 }
 
+/**
+ * Round 12 (D26 part 2): an iPhone, iPod or iPad in ANY browser (iPadOS presents itself as a Mac with a touch screen).
+ * On these, web push works only for an app opened from the home screen.
+ */
+export function isIosDevice(userAgent: string, maxTouchPoints: number): boolean {
+  return /\b(iPhone|iPod|iPad)\b/.test(userAgent) || (/\bMacintosh\b/.test(userAgent) && maxTouchPoints > 1);
+}
+
 /** Running from the home screen: display-mode standalone (Android, desktop) or navigator.standalone (iOS). */
 export function isStandalone(win: { matchMedia?: (q: string) => { matches: boolean }; navigator?: { standalone?: unknown } }): boolean {
   try {

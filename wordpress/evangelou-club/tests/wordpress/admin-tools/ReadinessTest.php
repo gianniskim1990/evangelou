@@ -101,7 +101,9 @@ final class ReadinessTest extends EVC_WP_Test_Case {
         $this->assertStringContainsString('data-check="club_db_schema" data-status="unreadable"', $html);
         // Round 9: the prepared-redemption row depends on the same version, so it cannot be read either.
         $this->assertSame('unreadable', $rows['prepared_redemption']['status']);
-        $this->assertStringContainsString('Δεν διαβάζεται: 2', $html);
+        // Round 12: and so does the push table row of migration 005.
+        $this->assertSame('unreadable', $rows['push_schema']['status']);
+        $this->assertStringContainsString('Δεν διαβάζεται: 3', $html);
     }
 
     /** Round 9 (owner decision D24): the schema level and the prepared redemption are shown plainly. */
@@ -457,11 +459,108 @@ final class ReadinessTest extends EVC_WP_Test_Case {
                 $this->assertStringNotContainsString($secret, $html);
             }
         }
-        foreach (array('club_db', 'club_db_schema', 'flag_admin_tools', 'commerce_config', 'payment_provenance', 'lookup_key', 'qr_secret', 'bacs', 'terms_url', 'crm_tags', 'crm_woocommerce', 'crm_checkout_checkbox', 'remote_addr', 'page_cache', 'permalinks', 'timezone', 'php_version', 'wp_db_server', 'staff_account') as $key) {
+        foreach (array('club_db', 'club_db_schema', 'flag_admin_tools', 'commerce_config', 'payment_provenance', 'lookup_key', 'qr_secret', 'bacs', 'terms_url', 'crm_tags', 'crm_woocommerce', 'crm_checkout_checkbox', 'remote_addr', 'page_cache', 'permalinks', 'timezone', 'php_version', 'wp_db_server', 'staff_account', 'push_schema', 'flag_push', 'push_vapid', 'push_worker', 'push_outbound') as $key) {
             $this->assertStringContainsString('data-check="' . $key . '"', $html, $key);
         }
         wp_set_current_user((int) self::factory()->user->create(array('role' => 'editor')));
         $this->expectException(WPDieException::class);
         $page->render();
+    }
+
+    // ---- round 12 (owner decision D26 part 2): member push notifications ----------------------------------------
+
+    public function test_round12_push_rows_without_configuration(): void {
+        $club = $this->migrated_club();
+        $rows = self::by_key($this->readiness(array('db_config' => function () use ($club) {
+            return $club->config();
+        })));
+        foreach (array('flag_push', 'flag_push_auto_activated', 'flag_push_auto_expiry') as $key) {
+            $this->assertSame('off', $rows[$key]['status'], $key);
+        }
+        $this->assertSame('off', $rows['push_vapid']['status'], 'push off and no keys: nothing to fix');
+        $this->assertSame('push', $rows['push_vapid']['section']);
+        $this->assertStringContainsString('member-push.md', $rows['push_vapid']['detail']);
+        $this->assertSame('manual', $rows['push_schema']['status'], 'below 5 is not an error');
+        $this->assertStringContainsString('μετάβασης 005', $rows['push_schema']['detail']);
+        $this->assertStringContainsString('EVC_CLUB_MIGRATIONS_TARGET 5', $rows['push_schema']['detail']);
+        $this->assertSame('manual', $rows['push_worker']['status']);
+        $this->assertSame('manual', $rows['push_outbound']['status']);
+        $this->assertStringContainsString('notify.windows.com', $rows['push_outbound']['detail']);
+        $this->assertSame('unreadable', EVC_Readiness::push_schema_row(0, true)['status']);
+    }
+
+    public function test_round12_the_vapid_keys_read_ok_only_as_a_matching_pair_and_are_never_shown(): void {
+        $public = 'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8';
+        $private = 'yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw';
+        $other = 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4';
+        $subject = 'mailto:club@evangelou-tests.gr';
+        $cases = array(
+            array(array('EVC_CLUB_PUSH_VAPID_PUBLIC' => $public, 'EVC_CLUB_PUSH_VAPID_PRIVATE' => $private, 'EVC_CLUB_PUSH_SUBJECT' => $subject), 'ok', 'ταιριάζει'),
+            array(array('EVC_CLUB_PUSH_VAPID_PUBLIC' => $other, 'EVC_CLUB_PUSH_VAPID_PRIVATE' => $private, 'EVC_CLUB_PUSH_SUBJECT' => $subject), 'wrong', 'δεν ανήκουν στο ίδιο ζεύγος'),
+            array(array('EVC_CLUB_PUSH_VAPID_PUBLIC' => $public, 'EVC_CLUB_PUSH_SUBJECT' => $subject), 'wrong', 'Λείπει το EVC_CLUB_PUSH_VAPID_PRIVATE'),
+            array(array('EVC_CLUB_PUSH_VAPID_PUBLIC' => $public, 'EVC_CLUB_PUSH_VAPID_PRIVATE' => $private, 'EVC_CLUB_PUSH_SUBJECT' => 'mailto:x@example.com'), 'wrong', 'mailto:'),
+            array(array('EVC_CLUB_PUSH_VAPID_PUBLIC' => 'abc', 'EVC_CLUB_PUSH_VAPID_PRIVATE' => $private, 'EVC_CLUB_PUSH_SUBJECT' => $subject), 'wrong', 'δεν είναι έγκυρο δημόσιο κλειδί'),
+        );
+        foreach ($cases as $i => $case) {
+            $readiness = $this->readiness(array('db_config' => function () {
+                return null;
+            }, 'constants' => $case[0]));
+            $row = self::by_key($readiness)['push_vapid'];
+            $this->assertSame($case[1], $row['status'], 'case ' . $i);
+            $this->assertStringContainsString($case[2], $row['detail'], 'case ' . $i);
+            $html = EVC_Admin_Tools_Plugin::parts()['readiness_page']->html();
+            foreach (array($private, $public, $other) as $value) {
+                $this->assertStringNotContainsString($value, $html, 'a key value on the page');
+            }
+        }
+        $this->assertSame('missing', EVC_Readiness::vapid_row(false, null, true)['status'], 'push on without keys');
+    }
+
+    public function test_round12_the_push_table_row_reads_the_users_rights_without_writing(): void {
+        $club = $this->migrated_club(false);
+        (new EVC_Migrator($club->connect(), EVC_Test_Database::migrations_dir()))->migrate(5);
+        $user = 'evcpu_' . bin2hex(random_bytes(4));
+        $password = 'Pw-' . bin2hex(random_bytes(10));
+        $admin = EVC_Test_Database::admin_pdo();
+        $hosts = array('%', 'localhost', '127.0.0.1');
+        try {
+            foreach ($hosts as $host) {
+                $admin->exec(sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s'", $user, $host, $password));
+                $admin->exec(sprintf("GRANT SELECT ON `%s`.* TO '%s'@'%s'", $club->name(), $user, $host));
+            }
+            $config = new EVC_Db_Config(EVC_Test_Database::host(), EVC_Test_Database::port(), $club->name(), $user, $password);
+            $read = function () use ($config) {
+                return self::by_key($this->readiness(array('db_config' => function () use ($config) {
+                    return $config;
+                })))['push_schema'];
+            };
+            $row = $read();
+            $this->assertSame('wrong', $row['status'], 'SELECT only');
+            $this->assertStringContainsString('δεν έχει δικαίωμα INSERT, UPDATE στον πίνακα evc_push_subscriptions', $row['detail']);
+            $this->assertStringContainsString('EVC_CLUB_DB_USER', $row['detail']);
+            foreach (array($user, $password, $club->name()) as $secret) {
+                $this->assertStringNotContainsString($secret, $row['detail']);
+            }
+            foreach ($hosts as $host) {
+                $admin->exec(sprintf("GRANT INSERT ON `%s`.`evc_push_subscriptions` TO '%s'@'%s'", $club->name(), $user, $host));
+            }
+            $this->assertStringContainsString('UPDATE', $read()['detail'], 'still missing UPDATE');
+            $this->assertSame('wrong', $read()['status']);
+            foreach ($hosts as $host) {
+                $admin->exec(sprintf("GRANT UPDATE ON `%s`.`evc_push_subscriptions` TO '%s'@'%s'", $club->name(), $user, $host));
+            }
+            $row = $read();
+            $this->assertSame('ok', $row['status'], 'SELECT, INSERT, UPDATE');
+            $this->assertStringContainsString('SELECT, INSERT, UPDATE', $row['detail']);
+            $this->assertSame(0, (int) $club->connect()->fetch_one('SELECT COUNT(*) AS n FROM evc_push_subscriptions')['n'], 'no test row was written');
+        } finally {
+            foreach ($hosts as $host) {
+                $admin->exec(sprintf("DROP USER IF EXISTS '%s'@'%s'", $user, $host));
+            }
+        }
+        foreach (array(null, array('state' => EVC_Db_Grants::UNKNOWN, 'missing' => array('UPDATE'))) as $grants) {
+            $this->assertSame('manual', EVC_Readiness::push_schema_row(5, false, $grants)['status']);
+        }
+        $this->assertSame(array('SELECT', 'INSERT', 'UPDATE'), EVC_Readiness::PUSH_PRIVILEGES);
     }
 }

@@ -168,3 +168,25 @@ and a callable handed in through the constructor seams (the tests' doubles). The
   short lookup key still reads «wrong» (never an all-green page).
 - Mutants AT1–AT30 (no AT5) in the WordPress runner (modes disabled / admin_tools), ATC1–ATC2 (commerce, CI only), and
   the packager self-tests (a negative case for every rule above).
+
+## Round 12 (owner decision D26 part 2): «Ειδοποιήσεις» and the push readiness rows
+
+- **«Evangelou Club → Ειδοποιήσεις»** (`EVC_Push_Admin_Page`, only with `EVC_CLUB_PUSH_ENABLED`; under Tools when the
+  Club menu is off): administrators with `evc_manage_club` only (`may_send()`; the shared till account never sees it).
+  Title ≤ 50 and text ≤ 150 characters, audience (all subscribed / active / expiring within N days), preview with the
+  recipient count, confirmation, batches (25 or 15 s each, database lock, WP-Cron continues), sent / failed / removed,
+  «Διακοπή αποστολής». One send per 15 minutes, at most 4 per 24 hours. Audit option `evc_club_push_audit` (newest 100):
+  who, when, audience, counts; never an endpoint, key, member or the text. Every POST: nonce bound to its action, then
+  the capability. Details: [member-push.md](member-push.md).
+- **Readiness**, section «Ειδοποιήσεις μελών» and the flags: `flag_push`, `flag_push_auto_activated`,
+  `flag_push_auto_expiry` (exact `true`; push without the member page = «Λάθος»); `push_vapid` (the three constants by
+  `EVC_Push_Vapid::keys_problem()`: the public key is the private key's, the subject a real `mailto:`; values never
+  shown); `push_schema` in the database section (below 5 = «Έλεγχος με το χέρι» with the owner steps; at 5 the user's
+  own SHOW GRANTS must cover SELECT, INSERT, UPDATE on `evc_push_subscriptions`, read only); `push_worker` (plain
+  permalinks = «Λάθος»; otherwise a manual check that `/club-member/sw.js` and the manifest load); `push_outbound`
+  (manual: which push hosts the technician confirmed).
+- **Packager guard N2 (round-11 review):** in a file whose onboarding names are pinned to exact static calls (the member
+  page), a run-time-assembled class name is refused too: `$x::`, `new $x`, a call of a variable, and `call_user_func*`,
+  `forward_static_call*`, `constant()`, `class_exists()`, `is_callable()`, `method_exists()`, `get_class_methods()`,
+  `is_a()`, `is_subclass_of()`. Still not covered statically (lint-only, as before): a name built and used through a
+  path none of these see (e.g. `ReflectionClass` is refused elsewhere by the general rules).

@@ -1398,6 +1398,16 @@ export function onboardingProblemsFor(path, src, rules = ONBOARDING_RULES) {
       const method = tokens[k + 1]?.v === "::" && tokens[k + 2]?.t === "id" ? `${bare(tk.v).toLowerCase()}::${tokens[k + 2].v.toLowerCase()}` : null;
       if (method === null || !pinned.includes(method) || tokens[k + 3]?.v !== "(") problems.push(`${path}: names ${bare(tk.v)} other than through ${pinned.join(", ")}(`);
     });
+    // Round 12 (N2 of the round-11 review): a class name assembled at run time cannot reach the onboarding classes from
+    // the pinned file: no `$x::`, no `new $x`, no call of a variable or an expression, no call_user_func* /
+    // forward_static_call* / constant() / class_exists() / is_callable() / method_exists() / get_class_methods().
+    const DYNAMIC = ["call_user_func", "call_user_func_array", "forward_static_call", "forward_static_call_array", "constant", "class_exists", "is_callable", "method_exists", "get_class_methods", "is_subclass_of", "is_a"];
+    tokens.forEach((tk, k) => {
+      if (tk.t === "var" && tokens[k + 1]?.v === "::") problems.push(`${path}: dynamic static call ${tk.v}:: in a pinned file`);
+      if (tk.t === "id" && tk.v.toLowerCase() === "new" && (tokens[k + 1]?.t === "var" || tokens[k + 1]?.v === "(")) problems.push(`${path}: dynamic construction in a pinned file`);
+      if (tk.t === "var" && tokens[k + 1]?.v === "(" && tokens[k - 1]?.v !== "->" && tokens[k - 1]?.v !== "::") problems.push(`${path}: call of a variable ${tk.v}( in a pinned file`);
+      if (tk.t === "id" && DYNAMIC.includes(bare(tk.v).toLowerCase()) && tokens[k + 1]?.v === "(" && tokens[k - 1]?.v !== "->" && tokens[k - 1]?.v !== "::") problems.push(`${path}: ${tk.v}() in a pinned file`);
+    });
   }
   for (const tk of tokenize(src)) {
     if (tk.t !== "id" && tk.t !== "str") continue;
@@ -1450,6 +1460,14 @@ function onboardingSelfTest() {
   expect("round 11: nor a type hint", SHELL, "<?php\nfunction f(EVC_Onboarding_Shell $s) { return 1; }", true);
   expect("round 11: nor the plugin's parts", SHELL, "<?php\n$p = EVC_Onboarding_Plugin::parts();", true);
   expect("round 11: the pinned call with a leading backslash and spaces", SHELL, "<?php\n$u = \\EVC_Onboarding_Shell :: join_url ();", false);
+  // Round 12 (N2): a class name assembled at run time.
+  expect("round 12: a variable static call", SHELL, "<?php\n$c = 'EVC_Onboarding_' . 'Shell';\n$u = $c::poster_url();", true);
+  expect("round 12: call_user_func with an assembled name", SHELL, "<?php\n$u = call_user_func(array('EVC_Onboarding_' . 'Shell', 'poster_url'));", true);
+  expect("round 12: forward_static_call", SHELL, "<?php\n$u = forward_static_call(array($c, 'poster_url'));", true);
+  expect("round 12: a variable callable", SHELL, "<?php\n$f = 'x';\n$u = $f();", true);
+  expect("round 12: new of an assembled name", SHELL, "<?php\n$o = new $c();", true);
+  expect("round 12: constant() of an assembled name", SHELL, "<?php\n$v = constant($c . '::SLUG');", true);
+  expect("round 12: a method call on an object is fine", SHELL, "<?php\n$u = $this->assets->resolve();", false);
   expect("build() from another file", "includes/x.php", "<?php\nEVC_Onboarding_Plugin::build();", true);
   expect("defines the opt-in constant", "includes/x.php", "<?php\ndefine('EVC_CLUB_ONBOARDING_ENABLED', true);", true);
   expect("a user created elsewhere", "includes/customer/x.php", "<?php\n$id = wp_insert_user(array());", true);
@@ -1499,14 +1517,19 @@ export function pwaProblemsFor(path, src, rules = PWA_RULES) {
 
 // The BUILT worker (customer-app/pwa/sw.js, esbuild, not minified). It may store nothing but its versioned cache,
 // may never load other code, and keeps the REST network-only rule and exactly its two cache writes / answers.
-export const WORKER_FORBIDDEN = ["localStorage", "sessionStorage", "indexedDB", "document.cookie", "cookieStore", "importScripts", "eval(", "new Function", "XMLHttpRequest", "club-admin", "pushManager", "showNotification", '"push"', '"sync"', "BroadcastChannel", "postMessage"];
+// Round 12 (D26 part 2): the worker now shows push notifications and opens the member page on a tap; it still never
+// subscribes (pushManager is the page's), never syncs, never messages, and never reads data from a notification (so a
+// tap can only ever open the registration's own scope).
+export const WORKER_FORBIDDEN = ["localStorage", "sessionStorage", "indexedDB", "document.cookie", "cookieStore", "importScripts", "eval(", "new Function", "XMLHttpRequest", "club-admin", "pushManager", '"sync"', "BroadcastChannel", "postMessage", "notification.data", ".data.url", "periodicsync", "pushsubscriptionchange"];
 export function workerProblems(text) {
   const problems = [];
   for (const word of WORKER_FORBIDDEN) if (text.includes(word)) problems.push(`service worker: uses ${word}`);
-  for (const word of ["rest_route", "evc-club-member-", "__EVC_SW__", "no-store"]) if (!text.includes(word)) problems.push(`service worker: ${word} missing`);
+  for (const word of ["rest_route", "evc-club-member-", "__EVC_SW__", "no-store", '"push"', '"notificationclick"', "registration.scope"]) if (!text.includes(word)) problems.push(`service worker: ${word} missing`);
   const count = (needle) => text.split(needle).length - 1;
   if (count("cache.put(") !== 2) problems.push(`service worker: ${count("cache.put(")} cache writes (expected 2: install and the asset rule)`);
   if (count(".respondWith(") !== 2) problems.push(`service worker: ${count(".respondWith(")} answers (expected 2: the member page and the asset rule)`);
+  if (count(".showNotification(") !== 1) problems.push(`service worker: ${count(".showNotification(")} notifications (expected 1: the push handler)`);
+  if (count(".openWindow(") !== 1) problems.push(`service worker: ${count(".openWindow(")} window openings (expected 1: the notification tap)`);
   return problems;
 }
 
@@ -1525,7 +1548,7 @@ function pwaSelfTest() {
   expect("an apple tag elsewhere", "includes/x.php", "<?php\necho '<link rel=\"apple-touch-icon\" href=\"x\">';", true);
   expect("Service-Worker-Allowed even in the PWA file", P, "<?php\n$h['Service-Worker-Allowed'] = '/';", true);
   expect("a string naming the class elsewhere", "includes/x.php", "<?php\ncall_user_func(array('EVC_Customer_Pwa', 'config'));", true);
-  const W = "self.__EVC_SW__; const p = 'evc-club-member-'; u.searchParams.has('rest_route'); h = 'no-store'; await cache.put(a, b); await cache.put(c, d); e.respondWith(x); e.respondWith(y);";
+  const W = "self.__EVC_SW__; const p = 'evc-club-member-'; u.searchParams.has('rest_route'); h = 'no-store'; await cache.put(a, b); await cache.put(c, d); e.respondWith(x); e.respondWith(y); sw.addEventListener(\"push\", f); sw.registration.showNotification(t, o); sw.addEventListener(\"notificationclick\", g); clickTarget(w, sw.registration.scope); sw.clients.openWindow(t.open);";
   const wexpect = (label, text, want) => {
     if ((workerProblems(text).length > 0) !== want) bad.push(`worker ${label}: expected ${want ? "a problem" : "no problem"}`);
   };
@@ -1536,8 +1559,144 @@ function pwaSelfTest() {
   wexpect("only one answer", W.replace(" e.respondWith(y);", ""), true);
   wexpect("localStorage", W + " localStorage.x = 1;", true);
   wexpect("importScripts", W + " importScripts('/x.js');", true);
-  wexpect("push", W + ' self.addEventListener("push", f);', true);
+  wexpect("round 12: the worker subscribes itself", W + " self.registration.pushManager.subscribe(o);", true);
+  wexpect("round 12: no push handler", W.replace('\"push\"', '\"pull\"'), true);
+  wexpect("round 12: no click handler", W.replace('\"notificationclick\"', '\"x\"'), true);
+  wexpect("round 12: a second notification", W + " sw.registration.showNotification(a, b);", true);
+  wexpect("round 12: a second window opening", W + " sw.clients.openWindow('/');", true);
+  wexpect("round 12: a tap opens an address from the message", W + " u = event.notification.data.url;", true);
+  wexpect("round 12: the scope is not the registration's", W.replace("sw.registration.scope", "cfg.scope"), true);
+  wexpect("round 12: background sync", W + ' self.addEventListener("sync", f);', true);
   wexpect("the staff app", W + " fetch('/club-admin/');", true);
+  return bad;
+}
+
+// ---- STAGE-08 round 12 (owner decision D26 part 2): member web push notifications ---------------------------------
+// A. problemsFor(PUSH_RULES): the push pieces (backend, sender, campaign, admin page, automatic notifications, the /me/push
+//    controller) are constructed ONLY in EVC_Push_Plugin::wire(), reached only through build() <- boot() after
+//    `if (!EVC_Push_Feature::enabled()) { return; }`; their names appear only in the push files; no shipped file
+//    defines a push constant.
+// B. pushProblemsFor():
+//    - outgoing HTTP (wp_remote_*, wp_safe_remote_*, curl_*, fsockopen, stream_socket_client, the Requests / WP_Http
+//      classes) only in the sender (the one place that re-checks the endpoint allowlist before calling);
+//    - EVC_Sql_Push_Subscription_Store constructed only in the backend and named only by the store, the backend and the
+//      controller (its result constants);
+//    - the private key's constant name only in EVC_Push_Vapid (and the read-only readiness page that checks it);
+//    - in every push file: no log / output call (error_log, print_r, var_export, var_dump, trigger_error, syslog,
+//      file_put_contents, …) whose arguments carry an endpoint, a key, a subscription row, the payload or the keys;
+//    - the campaign, the automatic notifications and the admin page never name 'endpoint', 'p256dh' or 'auth' in a
+//      string (their audit entries and pages hold counts only).
+const PUSH_BOOTSTRAP = "includes/push/class-evc-push-plugin.php";
+const PUSH_FILES = [
+  PUSH_BOOTSTRAP,
+  "includes/push/class-evc-push-backend.php",
+  "includes/push/class-evc-push-sender.php",
+  "includes/push/class-evc-push-campaign.php",
+  "includes/push/class-evc-push-admin-page.php",
+  "includes/push/class-evc-push-auto.php",
+  "includes/push/class-evc-rest-me-push-controller.php",
+];
+export const PUSH_RULES = Object.freeze({
+  bootstrap: PUSH_BOOTSTRAP,
+  pluginClass: "EVC_Push_Plugin",
+  featureClass: "EVC_Push_Feature",
+  guarded: ["EVC_Push_Backend", "EVC_Push_Sender", "EVC_Push_Campaign", "EVC_Push_Admin_Page", "EVC_Push_Auto", "EVC_Rest_Me_Push_Controller"],
+  forbidden: [],
+  allowlist: ["evangelou-club.php", ...PUSH_FILES],
+  guardedFiles: PUSH_FILES,
+  memberLockFiles: null,
+  forbiddenDefines: ["EVC_CLUB_PUSH_ENABLED", "EVC_CLUB_PUSH_AUTO_ACTIVATED", "EVC_CLUB_PUSH_AUTO_EXPIRY", "EVC_CLUB_PUSH_VAPID_PUBLIC", "EVC_CLUB_PUSH_VAPID_PRIVATE", "EVC_CLUB_PUSH_SUBJECT"],
+  senderFile: "includes/push/class-evc-push-sender.php",
+  backendFile: "includes/push/class-evc-push-backend.php",
+  controllerFile: "includes/push/class-evc-rest-me-push-controller.php",
+  storeFile: "includes/class-evc-sql-push-subscription-store.php",
+  vapidFile: "includes/class-evc-push-vapid.php",
+  readinessFile: "includes/admin/class-evc-readiness.php",
+  pureFiles: ["includes/class-evc-push-crypto.php", "includes/class-evc-push-vapid.php", "includes/class-evc-push-endpoint.php", "includes/class-evc-push-message.php", "includes/class-evc-sql-push-subscription-store.php"],
+  countsOnlyFiles: ["includes/push/class-evc-push-campaign.php", "includes/push/class-evc-push-auto.php", "includes/push/class-evc-push-admin-page.php"],
+});
+const PUSH_HTTP = ["wp_remote_post", "wp_remote_get", "wp_remote_request", "wp_remote_head", "wp_safe_remote_post", "wp_safe_remote_get", "wp_safe_remote_request", "wp_safe_remote_head", "curl_init", "curl_exec", "curl_multi_exec", "fsockopen", "pfsockopen", "stream_socket_client", "wp_http", "requests", "_wp_http_get_object", "download_url"];
+const PUSH_LOG = ["error_log", "print_r", "var_export", "var_dump", "trigger_error", "user_error", "syslog", "file_put_contents", "fwrite", "fputs", "printf", "vprintf", "wp_die", "wp_mail", "set_transient", "update_option", "add_option", "update_user_meta", "do_action", "apply_filters"];
+const PUSH_SECRET_VAR = /endpoint|p256dh|auth|private|secret|subscription|^\$row$|payload|^\$keys?$|sending|^\$body$|^\$json$/i;
+function carriesPushSecret(args) {
+  return args.some((t, i) => (t.t === "var" && PUSH_SECRET_VAR.test(t.v)) || (t.t === "str" && ["endpoint", "p256dh", "auth", "private", "keys"].includes(t.v.toLowerCase()) && args[i - 1]?.v === "["));
+}
+
+export function pushProblemsFor(path, src, rules = PUSH_RULES) {
+  const problems = [];
+  const tokens = tokenize(src);
+  const pushFile = rules.guardedFiles.includes(path) || rules.pureFiles.includes(path);
+  tokens.forEach((tk, k) => {
+    const v = tk.t === "id" || tk.t === "str" ? bare(tk.v).toLowerCase() : "";
+    const call = tokens[k + 1]?.v === "(";
+    const member = tokens[k - 1]?.v === "->" || tokens[k - 1]?.v === "::" || tokens[k - 1]?.v === "?->";
+    if (tk.t === "id" && path !== rules.senderFile && (PUSH_HTTP.includes(v) || v.startsWith("curl_")) && !member && (call || v === "wp_http" || v === "requests" || tokens[k - 1]?.v.toLowerCase() === "new" || tokens[k + 1]?.v === "::")) {
+      problems.push(`${path}: outgoing HTTP (${tk.v}) outside the push sender`);
+    }
+    if (tk.t === "str" && path !== rules.senderFile && PUSH_HTTP.some((h) => v === h || v.startsWith(h + "("))) problems.push(`${path}: a string names the HTTP function ${tk.v} outside the push sender`);
+    if ((tk.t === "id" || tk.t === "str") && v.includes("evc_sql_push_subscription_store") && ![rules.storeFile, rules.backendFile, rules.controllerFile].includes(path)) problems.push(`${path}: names EVC_Sql_Push_Subscription_Store (only the store, the backend and the controller may)`);
+    if (tk.t === "id" && v === "new" && bare(tokens[k + 1]?.v ?? "").toLowerCase() === "evc_sql_push_subscription_store" && path !== rules.backendFile) problems.push(`${path}: constructs EVC_Sql_Push_Subscription_Store outside the push backend`);
+    if (tk.t === "str" && v.includes("evc_club_push_vapid_private") && path !== rules.vapidFile && path !== rules.readinessFile) problems.push(`${path}: names the VAPID private key constant (only EVC_Push_Vapid may read it)`);
+    if (pushFile && tk.t === "id" && call && !member && PUSH_LOG.includes(v) && carriesPushSecret(argumentTokens(tokens, k + 1))) problems.push(`${path}: ${tk.v}() with an endpoint, a key or a payload`);
+    if (pushFile && (tk.v === "echo" || tk.v === "print") && carriesPushSecret(tokens.slice(k + 1, tokens.findIndex((t, j) => j > k && t.v === ";")))) problems.push(`${path}: prints an endpoint, a key or a payload`);
+    if (rules.countsOnlyFiles.includes(path) && tk.t === "str" && ["endpoint", "p256dh", "auth", "endpoint_hash"].includes(tk.v.toLowerCase())) problems.push(`${path}: names '${tk.v}' (audit entries and pages hold counts only)`);
+  });
+  return problems;
+}
+
+const GOOD_PUSH = `<?php
+final class EVC_Push_Plugin {
+    public static function boot($seams = null): void {
+        if (!EVC_Push_Feature::enabled()) {
+            return;
+        }
+        self::$parts = self::build(array());
+    }
+    public static function build(array $seams = array()): array { return self::wire($seams); }
+    private static function wire(array $seams): array {
+        $backend = new EVC_Push_Backend();
+        $sender = new EVC_Push_Sender();
+        $campaign = new EVC_Push_Campaign($backend, $sender);
+        return array(new EVC_Push_Admin_Page($campaign), new EVC_Push_Auto($backend, $sender), new EVC_Rest_Me_Push_Controller($backend));
+    }
+}`;
+
+function pushSelfTest() {
+  const bad = [];
+  const R = PUSH_RULES;
+  const expect = (label, path, src, want) => {
+    const got = problemsFor(path, src, R).length + pushProblemsFor(path, src).length > 0;
+    if (got !== want) bad.push(`push ${label}: expected ${want ? "a problem" : "no problem"}`);
+  };
+  expect("good bootstrap", R.bootstrap, GOOD_PUSH, false);
+  expect("gate missing", R.bootstrap, GOOD_PUSH.replace("if (!EVC_Push_Feature::enabled()) {\n            return;\n        }", ""), true);
+  expect("gate of another feature", R.bootstrap, GOOD_PUSH.replace("EVC_Push_Feature::enabled", "EVC_Customer_Feature::enabled"), true);
+  expect("sender constructed elsewhere", "includes/customer/x.php", "<?php\n$s = new EVC_Push_Sender();", true);
+  expect("campaign constructed outside wire()", R.bootstrap, GOOD_PUSH.replace("public static function build(array $seams = array()): array {", "public static function build(array $seams = array()): array { new EVC_Push_Campaign(1, 2);"), true);
+  expect("the backend named outside the push files", "includes/staff/x.php", "<?php\nfunction f(EVC_Push_Backend $b) { return $b; }", true);
+  expect("build() from another file", "includes/x.php", "<?php\nEVC_Push_Plugin::build();", true);
+  expect("defines the flag", "includes/x.php", "<?php\ndefine('EVC_CLUB_PUSH_ENABLED', true);", true);
+  expect("defines the private key", "includes/x.php", "<?php\ndefine('EVC_CLUB_PUSH_VAPID_PRIVATE', 'x');", true);
+  expect("the sender may post", R.senderFile, "<?php\n$r = wp_remote_post($url, $args);", false);
+  expect("HTTP from the campaign", "includes/push/class-evc-push-campaign.php", "<?php\n$r = wp_remote_post($url, $args);", true);
+  expect("HTTP from anywhere else", "includes/customer/x.php", "<?php\n$r = wp_safe_remote_get($u);", true);
+  expect("curl elsewhere", "includes/x.php", "<?php\n$c = curl_init($u);", true);
+  expect("WP_Http elsewhere", "includes/x.php", "<?php\n$h = new WP_Http();", true);
+  expect("Requests elsewhere", "includes/x.php", "<?php\n$r = Requests::post($u);", true);
+  expect("HTTP through a string callable", "includes/x.php", "<?php\ncall_user_func('wp_remote_post', $u);", true);
+  expect("the store built by the backend", R.backendFile, "<?php\n$s = new EVC_Sql_Push_Subscription_Store($db);", false);
+  expect("the store built by the campaign", "includes/push/class-evc-push-campaign.php", "<?php\n$s = new EVC_Sql_Push_Subscription_Store($db);", true);
+  expect("the controller reads the store's constants", R.controllerFile, "<?php\n$x = EVC_Sql_Push_Subscription_Store::CREATED;", false);
+  expect("the store named elsewhere", "includes/admin/x.php", "<?php\n$x = EVC_Sql_Push_Subscription_Store::CREATED;", true);
+  expect("the private key read elsewhere", "includes/push/class-evc-push-backend.php", "<?php\n$k = constant('EVC_CLUB_PUSH_VAPID_PRIVATE');", true);
+  expect("the VAPID class reads it", R.vapidFile, "<?php\nconst PRIVATE_CONSTANT = 'EVC_CLUB_PUSH_VAPID_PRIVATE';", false);
+  expect("an endpoint logged", "includes/push/class-evc-push-sender.php", "<?php\nerror_log('push ' . $endpoint);", true);
+  expect("a row logged", "includes/push/class-evc-push-campaign.php", "<?php\nerror_log(print_r($row, true));", true);
+  expect("a key in a log array", "includes/push/class-evc-push-auto.php", "<?php\nerror_log('x' . $sub['auth']);", true);
+  expect("the payload printed", "includes/push/class-evc-push-admin-page.php", "<?php\necho $payload;", true);
+  expect("a fixed reason logged", "includes/push/class-evc-push-backend.php", "<?php\nerror_log('Evangelou Club: push unavailable (' . $reason . ').');", false);
+  expect("an endpoint in the audit", "includes/push/class-evc-push-campaign.php", "<?php\n$entry = array('endpoint' => $x);", true);
+  expect("auth in the admin page", "includes/push/class-evc-push-admin-page.php", "<?php\n$x = $r['auth'];", true);
   return bad;
 }
 
@@ -1588,7 +1747,7 @@ export function selfTest() {
   expect("array callable to build() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', array('EVC_Wc_Completion_Plugin', 'build'));", true);
   expect("string callable to wire() in an allowlisted file", "includes/allowed.php", "<?php\nadd_action('init', 'EVC_Wc_Completion_Plugin::wire');", true);
   expect("entrypoint may hook boot() and deactivate()", "includes/allowed.php", "<?php\nadd_action('plugins_loaded', array('EVC_Wc_Completion_Plugin', 'boot'));\nregister_deactivation_hook(__FILE__, array('EVC_Wc_Completion_Plugin', 'deactivate'));", false);
-  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), preparedSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest(), adminToolsSelfTest(), pwaSelfTest());
+  return bad.concat(migrationsSelfTest(), redemptionSelfTest(), memberSyncSelfTest(), preparedSelfTest(), qrSelfTest(), fluentcrmSelfTest(), onboardingSelfTest(), adminToolsSelfTest(), pwaSelfTest(), pushSelfTest());
 }
 
 // ---- STAGE-08 rule set: the Club admin pages, only behind EVC_CLUB_ADMIN_TOOLS_ENABLED --------------------------------
@@ -1695,6 +1854,8 @@ export const READ_ONLY_STATIC_ALLOW = Object.freeze([
   "evc_club_prep_catalogue_authority::is_authorised",
   // Round 10 (LOW-1): the pure reader of the SHOW GRANTS lines the readiness row read (runs nothing itself).
   "evc_db_grants::table_privileges",
+  // Round 12 (D26 part 2): the push rows (the VAPID key check reads and signs nothing; the flag parser).
+  "evc_push_vapid::keys_problem", "evc_push_feature::is_enabled_value",
 ]);
 const SQL_WRITE = new RegExp([
   String.raw`\binsert\b`, // INSERT INTO, INSERT t VALUES, INSERT LOW_PRIORITY / DELAYED / IGNORE …

@@ -15,6 +15,7 @@ approval: first on **staging**, and on **production** only after the owner appro
 | In-store QR onboarding | [store-onboarding.md](store-onboarding.md) |
 | FluentCRM tags | [fluentcrm-tags.md](fluentcrm-tags.md) |
 | Admin pages (till account, readiness) | [admin-tools.md](admin-tools.md) |
+| Home-screen app and member push notifications | [member-pwa.md](member-pwa.md), [member-push.md](member-push.md) |
 
 ## 1. Before anything: the open technician blockers
 
@@ -150,6 +151,16 @@ approval: first on **staging**, and on **production** only after the owner appro
   per-account database lock (K5). **Staging check:** an expired test member taps «Ανανέωση 20 €» → the join page →
   terms (if not accepted yet) → the checkout with the Club product → bank transfer; the order is «Σε αναμονή»; back
   on the card the text about the bank transfer, no button.
+- **Owner decision D26 part 2** (STAGE-08 round 12): **member push notifications**, sent from the shop's own server
+  (no third-party service). Everything OFF by default (`EVC_CLUB_PUSH_ENABLED`, exact `true`, plus the member page);
+  needs VAPID keys in wp-config.php (made with the one-line command of [member-push.md](member-push.md), never sent to
+  anyone) and **migration 005, which is NOT approved for any database yet** (the owner approves staging first; then
+  `EVC_CLUB_MIGRATIONS_TARGET` 5 and the migrations page; the Club DB user needs SELECT, INSERT, UPDATE on
+  `evc_push_subscriptions`). Until then push is simply hidden. Administrators send from «Evangelou Club →
+  Ειδοποιήσεις»; two automatic notifications have their own constants (default OFF). **Staging check:** readiness rows
+  «Ειδοποιήσεις μελών», «Κλειδιά ειδοποιήσεων», «πίνακας συνδρομών (μετάβαση 005)» «Εντάξει»; `/club-member/sw.js` and
+  `/club-member/manifest.webmanifest` load in a browser (not a 404: [member-pwa.md](member-pwa.md)); then the Android
+  and installed-iPhone tests of [member-push.md](member-push.md). K21.
 - **On a phone, the offer's «Πληρωμή 20 €» did not look like a button** (the owner only noticed the account link).
   Round 4: a full-width filled button; the account link below it is small.
 
@@ -160,7 +171,7 @@ read «Εντάξει» (or the «manual» items are confirmed).
 
 | Step | wp-config.php | Then check |
 |---|---|---|
-| 0 | Backups of both databases (on a WP Staging clone the WordPress database is shared with live). Settings → Permalinks = «Post name» (T9). On staging: the «Disable Emails» plugin active. | Restore tested. Readiness «Μόνιμοι σύνδεσμοι»: «Εντάξει». |
+| 0 | Backups of both databases (on a WP Staging clone the WordPress database is shared with live). Settings → Permalinks = «Post name» (T9). On staging: the «Disable Emails» plugin active. | Restore tested. Readiness «Μόνιμοι σύνδεσμοι»: «Εντάξει». Round 12 (N3): open `/club-member/sw.js` and `/club-member/manifest.webmanifest` in a browser once the member page is on (step 5): both must show text, not a 404 (an nginx `location ~* \.(js\|webmanifest)$` rule can 404 them: [member-pwa.md](member-pwa.md)). |
 | 1 | `define('EVC_CLUB_ADMIN_TOOLS_ENABLED', true);` | The «Evangelou Club» menu appears for administrators only. Readiness shows the current state. |
 | 2 | The `EVC_CLUB_DB_*` constants; `define('EVC_CLUB_MIGRATIONS_ENABLED', true);`; on **staging** also `define('EVC_CLUB_MIGRATIONS_TARGET', 3);` (D19) | Tools → «Evangelou Club — Βάση δεδομένων»: all checks green (this also verifies T1); apply 001 + 002 (approved for staging on 2026-10-27) and, on staging, 003 (D19, 2026-11-10). **004 (D24, round 9) is approved for staging only (D25, 2026-11-20):** the technician sets `EVC_CLUB_MIGRATIONS_TARGET` to 4 and applies it the same way. **Production:** 001, 002, 003 and 004 each need the owner's own approval. Then remove `EVC_CLUB_MIGRATIONS_ENABLED`. Readiness: «Βάση δεδομένων του Club» and «Έκδοση σχήματος» «Εντάξει» (a «Δεν διαβάζεται» schema row means the migrations table could not be read: go back to the migrations page checks). |
 | 3 | `EVC_CLUB_MEMBERSHIP_SOURCE`, `EVC_CLUB_PMPRO_LEVEL_ID`, `EVC_CLUB_WC_PRODUCT_ID`, `EVC_CLUB_EVIDENCE_KEY`, `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` | Readiness «Κατάστημα»: all «Εντάξει» (pinned versions, product 20.00 €, sold individually, one-month level, Athens clock, BACS on), **including «Καταγραφή πληρωμών στη βάση του Club (EVC_CLUB_PAYMENT_PROVENANCE)»**: «Εντάξει» only for the exact `'club_db_v1'`; «Λάθος» or «Λείπει» means payment confirmation, the member QR and redemption stay closed. |
@@ -169,6 +180,7 @@ read «Εντάξει» (or the «manual» items are confirmed).
 | 6 | `define('EVC_CLUB_STAFF_ENABLED', true);` `define('EVC_CLUB_REDEMPTION_SOURCE', 'club_db_v1');` | Create the shared till account (Evangelou Club → Λογαριασμός ταμείου, D18); sign the tablet in at `/club-admin/`; redeem one coffee for the test member; a second one the same day is refused. |
 | 7 | `EVC_CLUB_TERMS_URL`; `define('EVC_CLUB_ONBOARDING_ENABLED', true);` | Record the checkout type: edit the WooCommerce checkout page; a «Checkout» block = Block Checkout, `[woocommerce_checkout]` or «Classic Checkout» = classic. Then the staging checks of [store-onboarding.md](store-onboarding.md) (REMOTE_ADDR, FluentCRM settings of D20, page cache, BACS-only checkout). With D20 in place: the Club join checkout shows FluentCRM's newsletter box **unticked**; a test order with the box unticked leaves the contact «Transactional», ticked makes it subscribed (classic checkout only, T6). |
 | 8 | The six tag constants; `define('EVC_CLUB_FLUENTCRM_SYNC_ENABLED', true);` | Readiness «Ετικέτες FluentCRM: Εντάξει» (verified); Tools → «Evangelou Club — FluentCRM» shows counts only. |
+| 9 | Only after the owner approved migration 005 for this database: backup, `EVC_CLUB_MIGRATIONS_TARGET` 5 and apply; SELECT, INSERT, UPDATE on `evc_push_subscriptions`; the three VAPID / subject lines (one-line command of [member-push.md](member-push.md)); `define('EVC_CLUB_PUSH_ENABLED', true);`. Later, optionally, `EVC_CLUB_PUSH_AUTO_ACTIVATED` / `EVC_CLUB_PUSH_AUTO_EXPIRY`. | Readiness «Ειδοποιήσεις μελών»: all «Εντάξει» (keys never shown). Android test and installed-iPhone test of [member-push.md](member-push.md): opt in, send from «Ειδοποιήσεις», tap opens the card, «Διακοπή ειδοποιήσεων» stops them. |
 
 ## 3. Pilot plan
 
@@ -198,6 +210,7 @@ read «Εντάξει» (or the «manual» items are confirmed).
 | Commerce source constants | Memberships read «unavailable»: no redemption, no confirmation. | Everything stored. |
 | Migrations page | The page is gone. | The tables (never dropped automatically). |
 | Admin pages | The «Evangelou Club» menu is gone. | The till account, its audit and last-sign-in time. |
+| Push notifications | No control on the card, `/me/push` answers 404, the «Ειδοποιήσεις» page and every scheduled push event stop (a leftover event finds no handler). The automatic ones stop with their own line too. | The subscriptions in the Club DB (members can stop them later; a dead one is revoked on the next send), the send audit. |
 
 Turning a flag back on resumes from the stored state; nothing is lost by turning a flag off.
 
@@ -226,6 +239,7 @@ Each with the owner decision that accepted it or the mitigation in place.
 | K18 | **The staff note (D24) is free text linked to a member's redemption, kept with no retention limit.** Staff could write personal data in it (e.g. a health remark). Owner decision **D9 (retention / access / erasure of member-linked history) is still open**; there is no purge mechanism. | Limited to 80 characters, plain text (HTML refused), never logged, never in the audit trail, never shown to the customer (only to the till, in the last 3 coffees). **Owner decision needed:** how long notes are kept (e.g. 12 months), and an instruction to staff: only preparation wishes, never health or personal remarks. Until then, every note stays in the Club DB. |
 | K19 | **Older tablets keep the v1 route** (coffee type only). | Deliberate (round 9a): v1 and the prepared route share one ledger and its unique keys, so one coffee per member per Athens day holds across both. The new till app (round 9b) uses the prepared route only when the scan reply says `prepared` (004 applied and the approved catalogue loaded); otherwise, and after a `409 prepared_unavailable`, it records the coffee type through v1 exactly as before. A tablet keeps an old app until its page is reloaded: reload the till page once after installing a new package. The v1 route can be retired later by a separate decision. |
 | K20 | **The home-screen app (D26, round 11).** (a) A cold start without any network shows only «Δεν υπάρχει σύνδεση» (the offline page knows nothing about the member, so no card or QR; the «unchecked» QR needs `/me` first). (b) With plain permalinks there is no service worker (no offline page); the app can still be installed. (c) iOS keeps an installed web app's sign-in apart from Safari: the member may have to sign in again inside the app; the sign-in page (`wp-login.php`) is outside the manifest's scope `/club-member/` and has not been tested on a real iPhone. (d) Nothing was tested on real phones. | (a) Showing the kept QR without `/me` would be a new owner decision (shared phones). (b) Use «Post name» (T9). (c) Owner test step on an iPhone ([member-pwa.md](member-pwa.md)); if the sign-in loops, the fix is a wider manifest scope for navigation only (not the worker's), a decision. |
+| K21 | **Member push (D26 part 2, round 12).** (a) Outbound HTTPS to the Windows push service (`*.notify.windows.com`, Edge on Windows) was not confirmed by the technician (FCM, Apple, Mozilla were). (b) A push service may delay or drop messages (no delivery guarantee; TTL 24 h). (c) iOS delivers web push only to an app installed on the home screen (iOS 16.4+), and its separate sign-in (K20c) applies. (d) Changing the VAPID keys makes every member opt in again (their old subscriptions fail with 403 and stay counted as failures until the browser re-subscribes). (e) The endpoint is stored (it is needed to send); it is a capability URL, never logged or shown. (f) Nothing was tested on a real phone or against a real push service. | (a) Technician to allow it, or Edge users simply get no push. (b) Accepted: notifications are a convenience, never the only channel. (c) Owner test on an installed iPhone. (d) Keys are made once per site and never changed without reason. (e) Least-privilege grants, no DELETE, revoked on 404 / 410. (f) Owner tests on Android and iPhone (member-push.md). |
 | K14 | **A page cache** could serve the join page to the wrong visitor. | `DONOTCACHEPAGE` + no-cache headers; readiness lists page-cache plugins; exclude `/club/join/` and `/club-member/` by hand if the host cache ignores them. |
 
 ## 6. Shipped-code TODO / FIXME
@@ -261,7 +275,21 @@ A search of the shipped plugin (`includes/`, `evangelou-club.php`) and the app s
 **Η σειρά ενεργοποίησης** (μία αλλαγή τη φορά, και μετά από κάθε μία ανοίγουμε **Evangelou Club → Ετοιμότητα**):
 σελίδες διαχείρισης → βάση του Club → ρυθμίσεις καταστήματος → επιβεβαίωση πληρωμής από το WooCommerce → σελίδα
 μέλους → ταμείο και εξαργύρωση (και δημιουργία του κοινού λογαριασμού ταμείου) → εγγραφή με QR στο κατάστημα →
-ετικέτες FluentCRM.
+ετικέτες FluentCRM → (αφού εγκρίνετε τη μετάβαση 005) ειδοποιήσεις μελών.
+
+**Ειδοποιήσεις μελών (απόφαση D26 μέρος 2, γύρος 12).** Μικρά μηνύματα στο κινητό των μελών, που στέλνει ο δικός μας
+διακομιστής (χωρίς ξένη υπηρεσία). Όλα είναι κλειστά μέχρι να τα ανοίξετε. Χρειάζονται:
+1. **τη δική σας έγκριση της μετάβασης 005**, πρώτα μόνο για το staging·
+2. **κλειδιά**: ο τεχνικός τα φτιάχνει με την εντολή μίας γραμμής του οδηγού member-push.md, στον διακομιστή ή στον
+   υπολογιστή του, και τα βάζει κατευθείαν στο wp-config.php. **Δεν στέλνονται ποτέ σε κανέναν**, ούτε σε εμάς·
+3. την εφαρμογή της 005 από τη σελίδα μεταβάσεων (με αντίγραφο ασφαλείας πρώτα) και δικαιώματα ανάγνωσης,
+   καταχώρησης και ενημέρωσης του χρήστη της βάσης στον νέο πίνακα·
+4. τη γραμμή `define('EVC_CLUB_PUSH_ENABLED', true);`·
+5. η «Ετοιμότητα» να δείχνει «Εντάξει» στις γραμμές των ειδοποιήσεων, και οι διευθύνσεις `/club-member/sw.js` και
+   `/club-member/manifest.webmanifest` να ανοίγουν στον περιηγητή (όχι σφάλμα 404).
+Μετά: δοκιμή σε κινητό Android και σε iPhone με την κάρτα εγκατεστημένη στην οθόνη Αφετηρίας (βήματα στο
+member-push.md). Οι δύο αυτόματες ειδοποιήσεις («Η συνδρομή σας ενεργοποιήθηκε», «Η συνδρομή σας λήγει σε 3 ημέρες»)
+ανοίγουν η καθεμία με δική της γραμμή, όποτε το αποφασίσετε.
 
 **Πιλοτικά.** Πρώτα staging. Μετά, με την έγκρισή σας, το κανονικό site με λίγα μέλη (10–20 τακτικούς) για 1–2
 εβδομάδες. Κάθε μέρα κοιτάμε: τη σελίδα «Ετοιμότητα», τις ειδοποιήσεις στο WordPress, αν πελάτες είδαν «Η εγγραφή

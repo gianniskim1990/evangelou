@@ -123,4 +123,11 @@ require_once $evc_includes . 'class-evc-fluentcrm-tags.php';
 require_once $evc_includes . 'class-evc-onboarding-rules.php';
 // STAGE-08 round 10: pure reader of SHOW GRANTS lines (the readiness row of migration 004; runs nothing itself).
 require_once $evc_includes . 'class-evc-db-grants.php';
+// STAGE-08 round 12 (D26 part 2): web push, pure pieces (RFC 8291 encryption, RFC 8292 VAPID, endpoint allowlist,
+// notification text) and the SQL store of migration 005 (constructed only by EVC_Push_Backend).
+require_once $evc_includes . 'class-evc-push-crypto.php';
+require_once $evc_includes . 'class-evc-push-vapid.php';
+require_once $evc_includes . 'class-evc-push-endpoint.php';
+require_once $evc_includes . 'class-evc-push-message.php';
+require_once $evc_includes . 'class-evc-sql-push-subscription-store.php';
 unset($evc_includes);

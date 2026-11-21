@@ -14,7 +14,7 @@ import { execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, PREPARED_RULES, PWA_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, preparedProblemsFor, problemsFor, pwaProblemsFor, qrProblemsFor, redemptionProblemsFor, selfTest, workerProblems } from "./php-guards.mjs";
+import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, PREPARED_RULES, PUSH_RULES, PWA_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, preparedProblemsFor, problemsFor, pushProblemsFor, pwaProblemsFor, qrProblemsFor, redemptionProblemsFor, selfTest, workerProblems } from "./php-guards.mjs";
 import { storageProblems, storageSelfTest } from "./storage-guard.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -31,6 +31,8 @@ const FORBIDDEN_BUNDLE_STRINGS = [
   "evc-club-design-preview", "ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ", "ΠΡΟΕΠΙΣΚΟΠΗΣΗ ΣΧΕΔΙΑΣΜΟΥ", "example.invalid",
   // STAGE-08 round 11 (D26): the member app's home-screen pieces never reach the staff app.
   "serviceWorker", "beforeinstallprompt", "webmanifest", "Εγκατάσταση στο κινητό",
+  // Round 12 (D26 part 2): nor its notifications.
+  "requestPermission", "pushManager", "Θέλω ειδοποιήσεις", "/me/push",
 ];
 // STAGE-01 customer app: the approved screens with the non-redeemable sample QR stamp are expected,
 // but never the synthetic roster, the local journey simulation, the staff app or a mock service.
@@ -259,6 +261,7 @@ const sawOnboarding = new Set();
 const sawAdminTools = new Set();
 const sawPrepared = new Set();
 let sawPwa = false;
+const sawPush = new Set();
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
   const path = f.replace(/\\/g, "/");
@@ -309,6 +312,11 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   for (const problem of pwaProblemsFor(path, text)) {
     fail(problem);
   }
+  // Round 12 (D26 part 2): the push pieces only behind EVC_CLUB_PUSH_ENABLED; HTTP only in the sender; no secret in logs.
+  if (PUSH_RULES.guardedFiles.includes(path) || PUSH_RULES.pureFiles.includes(path)) sawPush.add(path);
+  for (const problem of problemsFor(path, text, PUSH_RULES).concat(pushProblemsFor(path, text))) {
+    fail(problem);
+  }
   // STAGE-05C: the QR pieces only at their one construction site, behind the customer / staff opt-ins.
   if (Object.values(QR_RULES).includes(path)) sawQr.add(path);
   for (const problem of qrProblemsFor(path, text)) {
@@ -317,6 +325,7 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
 }
 if (sawQr.size !== Object.values(QR_RULES).length) fail("a STAGE-05C QR file is missing from the package");
 if (!sawPwa) fail("the round-11 home-screen app file (EVC_Customer_Pwa) is missing from the package");
+if (sawPush.size !== PUSH_RULES.guardedFiles.length + PUSH_RULES.pureFiles.length) fail("a round-12 push file is missing from the package");
 if (sawPrepared.size !== new Set(Object.values(PREPARED_RULES)).size) fail("a round-9 prepared-redemption file is missing from the package");
 if (sawFluentcrm.size !== 2) fail("a STAGE-06 FluentCRM file (plugin or gateway) is missing from the package");
 if (sawOnboarding.size !== ONBOARDING_RULES.guardedFiles.length) fail("a STAGE-07 onboarding file is missing from the package");

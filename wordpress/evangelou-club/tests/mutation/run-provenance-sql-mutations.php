@@ -42,6 +42,9 @@ $commands = array(
     // Round 9 (owner decision D24): mutants with 'command' => 'prepared' run migration 004 + the prepared store + history tests.
     'prepared' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
         '--filter', '/(SqlPrepRedemptionStoreTest|ClubPrepCatalogueTest)/'),
+    // STAGE-08 round 12 (D26 part 2): the push subscription store and migration 005.
+    'push' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
+        '--filter', '/SqlPushSubscriptionStoreTest/'),
 );
 $sql004 = 'database/004_prepared_redemptions.sql';
 $prep_store = 'includes/class-evc-sql-prep-redemption-store.php';
@@ -214,6 +217,42 @@ $mutants = array(
         'search' => "        } catch (EVC_Prep_Snapshot_Invalid \$e) {\n            return null;\n        }", 'replace' => "        } catch (EVC_Prep_Snapshot_Invalid \$e) {\n        }"),
     array('id' => 'HS6-details-in-stored-order', 'file' => $history, 'command' => 'prepared',
         'search' => "        foreach (self::in_step_order(\$snapshot['modifiers'], \$current, \$code) as \$m) {", 'replace' => "        foreach (\$snapshot['modifiers'] as \$m) {"),
+    // STAGE-08 round 12 (owner decision D26 part 2): the push subscription store and migration 005 (PU1-PU15).
+    array('id' => 'PU1-another-members-active-row-taken', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '                    if (!$mine && !$revoked) {
+                        return self::TAKEN;
+                    }
+', 'replace' => ''),
+    array('id' => 'PU2-stop-without-the-member', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'WHERE endpoint_hash = ? AND member_id = ? AND revoked_at_utc IS NULL\',
+            array($now_utc, self::REASON_MEMBER, $now_utc, EVC_Push_Endpoint::hash($endpoint), $member_id)', 'replace' => 'WHERE endpoint_hash = ? AND ? > 0 AND revoked_at_utc IS NULL\',
+            array($now_utc, self::REASON_MEMBER, $now_utc, EVC_Push_Endpoint::hash($endpoint), $member_id)'),
+    array('id' => 'PU3-revoked-rows-sent-to', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '\' JOIN evc_members m ON m.id = s.member_id WHERE s.revoked_at_utc IS NULL AND s.id > ?\'', 'replace' => '\' JOIN evc_members m ON m.id = s.member_id WHERE s.id > ?\''),
+    array('id' => 'PU4-cursor-row-sent-again', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'WHERE s.revoked_at_utc IS NULL AND s.id > ?\'', 'replace' => 'WHERE s.revoked_at_utc IS NULL AND s.id >= ?\''),
+    array('id' => 'PU5-gone-recorded-as-stopped', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '            array($now_utc, self::REASON_GONE, $now_utc, $id)', 'replace' => '            array($now_utc, self::REASON_MEMBER, $now_utc, $id)'),
+    array('id' => 'PU6-success-keeps-the-failure-count', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'success_count = success_count + 1, failure_count = 0 WHERE', 'replace' => 'success_count = success_count + 1 WHERE'),
+    array('id' => 'PU7-revoked-row-counted-as-success', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'failure_count = 0 WHERE id = ? AND revoked_at_utc IS NULL\',', 'replace' => 'failure_count = 0 WHERE id = ?\','),
+    array('id' => 'PU8-disabled-members-subscribed', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '" WHERE s.revoked_at_utc IS NULL AND m.status = \'enabled\' AND s.member_id > ? ORDER BY s.member_id LIMIT "', 'replace' => '" WHERE s.revoked_at_utc IS NULL AND s.member_id > ? ORDER BY s.member_id LIMIT "'),
+    array('id' => 'PU9-disabled-members-counted', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '" s JOIN evc_members m ON m.id = s.member_id WHERE s.revoked_at_utc IS NULL AND m.status = \'enabled\'"', 'replace' => '" s JOIN evc_members m ON m.id = s.member_id WHERE s.revoked_at_utc IS NULL"'),
+    array('id' => 'PU10-resync-resets-the-consent', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '\'UPDATE \' . self::TABLE . \' SET p256dh = ?, auth = ?, agent_family = ?, updated_at_utc = ? WHERE id = ? AND member_id = ? AND revoked_at_utc IS NULL\',', 'replace' => '\'UPDATE \' . self::TABLE . \' SET p256dh = ?, auth = ?, agent_family = ?, updated_at_utc = ?, consent_at_utc = updated_at_utc WHERE id = ? AND member_id = ? AND revoked_at_utc IS NULL\','),
+    array('id' => 'PU11-renewal-keeps-the-old-consent', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'array($member_id, $p256dh, $auth, $service, $agent, $now_utc, $now_utc, (int) $row[\'id\'])', 'replace' => 'array($member_id, $p256dh, $auth, $service, $agent, \'2026-01-01 00:00:00.000000\', $now_utc, (int) $row[\'id\'])'),
+    array('id' => 'PU12-bad-agent-stored', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => ' || !in_array($agent, EVC_Push_Endpoint::AGENTS, true)', 'replace' => ''),
+    array('id' => 'PU13-revoked-without-a-reason', 'file' => 'database/005_push_subscriptions.sql', 'command' => 'push',
+        'search' => 'revoked_reason IS NOT NULL AND revoked_reason IN (\'member\', \'gone\')', 'replace' => 'revoked_reason IN (\'member\', \'gone\')'),
+    array('id' => 'PU14-endpoint-not-unique', 'file' => 'database/005_push_subscriptions.sql', 'command' => 'push',
+        'search' => '  UNIQUE KEY uq_push_endpoint (endpoint_hash),', 'replace' => '  KEY uq_push_endpoint (endpoint_hash),'),
+    array('id' => 'PU15-plain-http-endpoint-stored', 'file' => 'database/005_push_subscriptions.sql', 'command' => 'push',
+        'search' => 'CHECK (endpoint LIKE \'https://%\' AND', 'replace' => 'CHECK ('),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */

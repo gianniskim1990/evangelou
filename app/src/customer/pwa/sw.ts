@@ -3,17 +3,26 @@
  * scripts/package-club-plugin.mjs (esbuild, one classic script, not minified) into customer-app/pwa/sw.js; the
  * plugin serves it at <home>/club-member/sw.js with its configuration in front (self.__EVC_SW__,
  * EVC_Customer_Shell::service_worker()). The rules are in swRules.ts (tested there); this file only applies them.
- * No push, no background sync, no storage other than the versioned cache of the app's own build files.
+ * Round 12 (D26 part 2): push and notificationclick (swPush.ts): show the message, open the member page. No background
+ * sync, no storage other than the versioned cache of the app's own build files.
  */
+import { clickTarget, notificationFor, parsePushPayload } from "./swPush";
 import { cacheName, decide, offlineShell, OFFLINE_CSP, parseSwConfig, staleCaches, storable, type SwConfig } from "./swRules";
 
 type FetchEventLike = Event & { request: Request; respondWith(r: Promise<Response>): void };
 type ExtendableEventLike = Event & { waitUntil(p: Promise<unknown>): void };
+type PushEventLike = ExtendableEventLike & { data?: { text(): string } | null };
+type NotificationEventLike = ExtendableEventLike & { notification: { close(): void } };
+interface WindowClientLike {
+  url: string;
+  focus(): Promise<unknown>;
+}
 interface WorkerScope {
   __EVC_SW__?: unknown;
   location: { origin: string };
   caches: CacheStorage;
-  clients: { claim(): Promise<void> };
+  clients: { claim(): Promise<void>; matchAll(o: { type: "window"; includeUncontrolled: boolean }): Promise<WindowClientLike[]>; openWindow(url: string): Promise<unknown> };
+  registration: { scope: string; showNotification(title: string, options: object): Promise<void> };
   skipWaiting(): Promise<void>;
   addEventListener(type: string, fn: (e: Event) => void): void;
 }
@@ -79,4 +88,34 @@ sw.addEventListener("fetch", (e) => {
   // "network" and "ignore": no answer from the worker at all; the browser fetches the request itself.
   if (decision === "asset") event.respondWith(asset(cfg, event.request));
   else if (decision === "page") event.respondWith(page(cfg, event.request));
+});
+
+// Round 12 (D26 part 2): a push message always shows a notification (the payload's text, else a fixed Greek line).
+sw.addEventListener("push", (e) => {
+  const event = e as PushEventLike;
+  let text: string | null = null;
+  try {
+    text = event.data ? event.data.text() : null;
+  } catch {
+    text = null;
+  }
+  const plan = notificationFor(parsePushPayload(text), cfg ? cfg.icon : "");
+  event.waitUntil(sw.registration.showNotification(plan.title, plan.options));
+});
+
+// A tap opens (or brings forward) the member page: the registration's own scope, never an address from a message.
+sw.addEventListener("notificationclick", (e) => {
+  const event = e as NotificationEventLike;
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      const windows = await sw.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const target = clickTarget(
+        windows.map((w) => w.url),
+        sw.registration.scope,
+      );
+      if ("focus" in target) return windows[target.focus].focus();
+      return sw.clients.openWindow(target.open);
+    })(),
+  );
 });

@@ -10,6 +10,7 @@
  */
 
 import { restRouteUrl, sameOriginRestBase } from "../lib/restRoute";
+import { keyBytes } from "./pwa/push";
 import { parseServiceWorker, type ServiceWorkerSetting } from "./pwa/register";
 
 export const CONFIG_ELEMENT_ID = "evc-customer-config";
@@ -35,6 +36,12 @@ export interface CustomerConfig {
    * Optional like joinUrl: a bad value is dropped, never a reason to refuse the page.
    */
   serviceWorker?: ServiceWorkerSetting | null;
+  /**
+   * STAGE-08 round 12 (D26 part 2): the shop's VAPID public key (base64url of a 65-byte P-256 point), sent only while
+   * push is switched on with usable keys; "" = no push. A malformed value is dropped (no push), never a reason to
+   * refuse the page.
+   */
+  pushPublicKey?: string;
   appVersion: string;
 }
 
@@ -90,6 +97,7 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
       logoutUrl: logoutUrl.href,
       joinUrl,
       serviceWorker: parseServiceWorker(d.serviceWorkerUrl, d.serviceWorkerScope, origin),
+      pushPublicKey: typeof d.pushPublicKey === "string" && keyBytes(d.pushPublicKey) !== null ? d.pushPublicKey : "",
       appVersion: typeof d.appVersion === "string" ? d.appVersion : "",
     },
   };

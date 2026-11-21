@@ -38,6 +38,8 @@ export interface SwConfig {
   restPrefixes: string[];
   /** The offline page: the entry script and styles (from precache). */
   offline: { scripts: string[]; styles: string[]; appVersion: string };
+  /** Round 12 (D26 part 2): the app icon a notification shows (same origin, customer-app/pwa/); "" = none. */
+  icon: string;
 }
 
 export type SwDecision = "network" | "page" | "asset" | "ignore";
@@ -49,6 +51,11 @@ const NETWORK_PARAMS = ["rest_route", "_wpnonce", "_wp_http_referer", "nonce"];
 
 export function cacheName(cfg: Pick<SwConfig, "version">): string {
   return CACHE_PREFIX + cfg.version;
+}
+
+/** Round 11 review (N5): a URL that carries one of NETWORK_PARAMS (checked on its own, apart from isRest()). */
+export function hasNetworkParam(url: URL): boolean {
+  return NETWORK_PARAMS.some((p) => url.searchParams.has(p));
 }
 
 /** True for a REST request, in the pretty (/wp-json/…) and the plain (?rest_route=…) form alike. */
@@ -69,7 +76,7 @@ export function decide(request: { url: string; method: string; mode: string }, o
   if (isRest(url, cfg)) return "network";
   if (request.method !== "GET") return "network";
   if (url.origin !== origin) return "network";
-  if (NETWORK_PARAMS.some((p) => url.searchParams.has(p))) return "network";
+  if (hasNetworkParam(url)) return "network";
   if (request.mode === "navigate") {
     return url.pathname === cfg.scope && url.search === "" ? "page" : "ignore";
   }
@@ -77,9 +84,18 @@ export function decide(request: { url: string; method: string; mode: string }, o
   return "ignore";
 }
 
-/** May this response be stored for an asset request? Only a complete, same-origin, successful answer. */
-export function storable(response: { ok: boolean; status: number; type: string; headers: { get(name: string): string | null } }): boolean {
-  if (!response.ok || response.status !== 200 || response.type !== "basic") return false;
+/** Round 11 review (N1): the only content types an app build file may be stored with (JS, CSS, images). */
+export const STORABLE_TYPES = ["text/javascript", "application/javascript", "text/css", "image/png", "image/svg+xml", "image/webp"];
+
+/**
+ * May this response be stored for an asset request? Only a complete, same-origin, successful answer that was NOT
+ * redirected (round 11 review N1: a login page or an error page reached through a redirect is never kept as an app
+ * file) and whose content type is one of STORABLE_TYPES.
+ */
+export function storable(response: { ok: boolean; status: number; type: string; redirected?: boolean; headers: { get(name: string): string | null } }): boolean {
+  if (!response.ok || response.status !== 200 || response.type !== "basic" || response.redirected !== false) return false;
+  const type = (response.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
+  if (!STORABLE_TYPES.includes(type)) return false;
   const control = (response.headers.get("Cache-Control") ?? "").toLowerCase();
   return !control.includes("no-store") && !control.includes("private");
 }
@@ -135,6 +151,8 @@ export function parseSwConfig(raw: unknown, origin: string): SwConfig | null {
   const scripts = urls(off.scripts);
   const styles = urls(off.styles);
   if (!scripts || scripts.length !== 1 || !styles || ![...scripts, ...styles].every((u) => precache.includes(u))) return null;
+  // Round 12: the notification icon is optional; a bad one is dropped (a notification without an icon), never the config.
+  const icon = str(d.icon) && sameOrigin(d.icon, origin) && /\/customer-app\/pwa\/[a-z0-9-]+\.png$/.test(new URL(d.icon).pathname) && new URL(d.icon).search === "" ? d.icon : "";
   return {
     version: d.version,
     scope: d.scope,
@@ -142,6 +160,7 @@ export function parseSwConfig(raw: unknown, origin: string): SwConfig | null {
     precache,
     restPrefixes: d.restPrefixes as string[],
     offline: { scripts, styles, appVersion: typeof off.appVersion === "string" ? off.appVersion : "" },
+    icon,
   };
 }
 

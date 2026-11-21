@@ -1754,16 +1754,16 @@ $mutants = array(
         "            \$grants = self::preparation_grants(\$db);", "            \$grants = array('state' => EVC_Db_Grants::OK, 'missing' => array());",
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
     array('AT37-missing-grants-read-as-manual', 'admin_tools', 'includes/admin/class-evc-readiness.php',
-        "        if (\$state === EVC_Db_Grants::MISSING) {", "        if (false) {",
+        "        if (\$state === EVC_Db_Grants::MISSING) {\n            return self::row('prepared_redemption'", "        if (false) {\n            return self::row('prepared_redemption'",
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
     array('AT38-unknown-grants-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
-        "        if (\$state !== EVC_Db_Grants::OK) {", "        if (\$state === EVC_Db_Grants::UNKNOWN) {",
+        "        if (\$state !== EVC_Db_Grants::OK) {\n            return self::row('prepared_redemption'", "        if (\$state === EVC_Db_Grants::UNKNOWN) {\n            return self::row('prepared_redemption'",
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
     array('AT39-unchecked-grants-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
-        "        \$state = \$grants['state'] ?? EVC_Db_Grants::UNKNOWN;", "        \$state = \$grants['state'] ?? EVC_Db_Grants::OK;",
+        "        \$state = \$grants['state'] ?? EVC_Db_Grants::UNKNOWN;\n        \$names = implode(', ', self::PREPARATIONS_PRIVILEGES);", "        \$state = \$grants['state'] ?? EVC_Db_Grants::OK;\n        \$names = implode(', ', self::PREPARATIONS_PRIVILEGES);",
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
     array('AT40-grants-read-of-another-table', 'admin_tools', 'includes/admin/class-evc-readiness.php',
-        "        return EVC_Db_Grants::table_privileges(\$lines, \$database, self::PREPARATIONS_TABLE, self::PREPARATIONS_PRIVILEGES);", "        return EVC_Db_Grants::table_privileges(\$lines, \$database, 'evc_redemptions', self::PREPARATIONS_PRIVILEGES);",
+        "        return self::table_grants(\$db, self::PREPARATIONS_TABLE, self::PREPARATIONS_PRIVILEGES);", "        return self::table_grants(\$db, 'evc_redemptions', self::PREPARATIONS_PRIVILEGES);",
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
     // STAGE-08 round 11: home-screen app (D26: R11W1-W12), checkout race lock (R11W13-W22), SHOW GRANTS failure (C3: AT41-AT42).
     array('R11W1-worker-on-plain-permalinks', 'customer', 'includes/customer/class-evc-customer-pwa.php',
@@ -1860,11 +1860,176 @@ $mutants = array(
         return $response;',
         array('OnboardingTest::test_round11_a_submitted_club_checkout_takes_the_account_lock_before_it_reads_the_orders')),
     array('AT41-grants-read-failure-read-as-missing', 'admin_tools', 'includes/admin/class-evc-readiness.php',
-        '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => self::PREPARATIONS_PRIVILEGES);', '            return array(\'state\' => EVC_Db_Grants::MISSING, \'missing\' => self::PREPARATIONS_PRIVILEGES);',
+        '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => $privileges);', '            return array(\'state\' => EVC_Db_Grants::MISSING, \'missing\' => $privileges);',
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
     array('AT42-grants-read-failure-read-as-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
-        '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => self::PREPARATIONS_PRIVILEGES);', '            return array(\'state\' => EVC_Db_Grants::OK, \'missing\' => array());',
+        '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => $privileges);', '            return array(\'state\' => EVC_Db_Grants::OK, \'missing\' => array());',
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
+    // STAGE-08 round 12 (owner decision D26 part 2): member web push (PN*, mode push; PN8 in customer mode) and its
+    // readiness rows (AT43-AT46). Not a mutant: dropping the staff-role exclusion of may_send() (the till role never holds
+    // manage_options, as AT5), and dropping the controller's own authorize() call (the permission callback runs it too).
+    array('PN1-endpoint-allowlist-skipped-at-subscribe', 'push', 'includes/push/class-evc-rest-me-push-controller.php',
+        '            || EVC_Push_Endpoint::problem($body[\'endpoint\']) !== null) {
+            return EVC_Rest_Security::error_response(\'invalid_request\', 400);
+        }
+        $p256dh', '            ) {
+            return EVC_Rest_Security::error_response(\'invalid_request\', 400);
+        }
+        $p256dh',
+        array('PushTest::test_only_https_endpoints_of_the_push_services_and_valid_keys_are_accepted')),
+    array('PN2-consent-not-required', 'push', 'includes/push/class-evc-rest-me-push-controller.php',
+        ' || $body[\'consent\'] !== true', '',
+        array('PushTest::test_only_https_endpoints_of_the_push_services_and_valid_keys_are_accepted')),
+    array('PN3-sender-calls-a-stored-endpoint-outside-the-allowlist', 'push', 'includes/push/class-evc-push-sender.php',
+        '        if (EVC_Push_Endpoint::problem($endpoint) !== null) {
+            return self::REFUSED;
+        }
+', '',
+        array('PushTest::test_a_stored_endpoint_outside_the_allowlist_is_never_called')),
+    array('PN4-404-not-revoked', 'push', 'includes/push/class-evc-push-sender.php',
+        '        return $status === 404 || $status === 410 ? self::GONE : self::FAILED;', '        return $status === 410 ? self::GONE : self::FAILED;',
+        array('PushTest::test_404_and_410_revoke_and_other_failures_only_count')),
+    array('PN5-schema-below-5-accepted', 'push', 'includes/push/class-evc-push-backend.php',
+        '(int) $row[\'v\'] < EVC_Push_Feature::SCHEMA_VERSION', '(int) $row[\'v\'] < 4',
+        array('PushTest::test_schema_below_5_hides_push_without_any_error')),
+    array('PN6-unusable-keys-accepted', 'push', 'includes/push/class-evc-push-backend.php',
+        '        if ($needs_keys && !$keys_ok) {', '        if (false) {',
+        array('PushTest::test_unusable_keys_fail_closed_and_are_never_logged')),
+    array('PN7-push-flag-not-checked-per-request', 'push', 'includes/push/class-evc-push-backend.php',
+        '        if (!EVC_Push_Feature::is_enabled_value($env[\'push\'] ?? null) || !EVC_Customer_Feature', '        if (!EVC_Customer_Feature',
+        array('PushTest::test_unusable_keys_fail_closed_and_are_never_logged')),
+    array('PN8-flag-accepts-truthy-values', 'customer', 'includes/push/class-evc-push-feature.php',
+        '        return $value === true;', '        return (bool) $value;',
+        array('PushOffTest::test_the_flag_parsers_take_only_the_boolean_true')),
+    array('PN9-club-capability-not-required', 'push', 'includes/push/class-evc-push-admin-page.php',
+        'user_can($user, \'manage_options\') && user_can($user, EVC_Staff_Role::CAP_MANAGE)', 'user_can($user, \'manage_options\')',
+        array('PushTest::test_only_administrators_with_the_club_capability_may_send_never_the_till_account')),
+    array('PN10-nonce-not-bound-to-the-action', 'push', 'includes/push/class-evc-push-admin-page.php',
+        '!wp_verify_nonce($nonce, self::nonce_action($action))', '!wp_verify_nonce($nonce, self::nonce_action(\'preview\'))',
+        array('PushTest::test_only_administrators_with_the_club_capability_may_send_never_the_till_account')),
+    array('PN11-batch-size-ignored', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            $rows = $sending[\'store\']->batch((int) $job[\'cursor\'], self::BATCH_SIZE);', '            $rows = $sending[\'store\']->batch((int) $job[\'cursor\'], 500);',
+        array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
+    array('PN12-time-budget-ignored', 'push', 'includes/push/class-evc-push-campaign.php',
+        '                if (($this->timer)() - $started >= self::TIME_BUDGET) {
+                    break;
+                }
+                $job[\'cursor\'] = $row[\'id\'];', '                $job[\'cursor\'] = $row[\'id\'];',
+        array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
+    array('PN13-cursor-not-saved', 'push', 'includes/push/class-evc-push-campaign.php',
+        '                $job[\'cursor\'] = $row[\'id\'];
+', '',
+        array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
+    array('PN14-second-runner-not-refused', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        $lock = $this->lock();
+        if ($lock === false) {
+            return self::BUSY;
+        }
+        try {
+            $job = self::job();
+            if ($job === null || ($job[\'state\'] ?? \'\') !== \'running\') {
+                return self::NONE;', '        $lock = $this->lock();
+        try {
+            $job = self::job();
+            if ($job === null || ($job[\'state\'] ?? \'\') !== \'running\') {
+                return self::NONE;',
+        array('PushTest::test_a_second_runner_never_sends_the_same_batch')),
+    array('PN15-no-interval-between-sends', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            if ($wait > 0) {', '            if (false) {',
+        array('PushTest::test_one_job_at_a_time_and_at_most_one_send_per_15_minutes_and_4_a_day')),
+    array('PN16-no-daily-limit', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if (count($recent) >= self::MAX_PER_DAY) {', '        if (false) {',
+        array('PushTest::test_one_job_at_a_time_and_at_most_one_send_per_15_minutes_and_4_a_day')),
+    array('PN17-endpoint-kept-in-the-job', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        $outcome = $this->sender->send($row, $payload, $sending[\'keys\']);
+        $at = $this->backend->now_utc();
+        try {', '        $outcome = $this->sender->send($row, $payload, $sending[\'keys\']);
+        $job[\'last\'] = $row[\'endpoint\'];
+        $at = $this->backend->now_utc();
+        try {',
+        array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
+    array('PN18-audience-membership-ignored', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if (!is_array($m) || ($m[\'state\'] ?? null) !== EVC_Customer_Membership::ACTIVE) {
+            return false;
+        }
+', '',
+        array('PushTest::test_preview_counts_by_audience_and_sends_nothing')),
+    array('PN19-expiry-window-too-wide', 'push', 'includes/push/class-evc-push-campaign.php',
+        '$until <= $now->getTimestamp() + $days * 86400', '$until <= $now->getTimestamp() + ($days + 30) * 86400',
+        array('PushTest::test_preview_counts_by_audience_and_sends_nothing')),
+    array('PN20-message-text-kept-after-the-job', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        $job[\'title\'] = \'\';
+', '',
+        array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
+    array('PN21-activated-sent-again-in-the-same-period', 'push', 'includes/push/class-evc-push-auto.php',
+        '        if ((string) get_user_meta($wp_user_id, self::ACTIVATED_META, true) === $m[\'paid_until_utc\']) {
+            return \'already\';
+        }
+', '',
+        array('PushTest::test_the_activated_notification_goes_once_per_paid_period_to_an_active_member_only')),
+    array('PN22-activated-for-a-period-that-is-not-active', 'push', 'includes/push/class-evc-push-auto.php',
+        '        if ($m === null || $m[\'state\'] !== EVC_Customer_Membership::ACTIVE || !is_string($m[\'paid_until_utc\'])) {
+            return \'not_active\';', '        if ($m === null || !is_string($m[\'paid_until_utc\'])) {
+            return \'not_active\';',
+        array('PushTest::test_the_activated_notification_goes_once_per_paid_period_to_an_active_member_only')),
+    array('PN23-expiry-one-day-late', 'push', 'includes/push/class-evc-push-auto.php',
+        '->modify(\'+\' . self::DAYS_AHEAD . \' days\')', '->modify(\'+\' . (self::DAYS_AHEAD + 1) . \' days\')',
+        array('PushTest::test_the_expiry_notification_goes_to_members_ending_in_3_athens_days_once')),
+    array('PN24-expiry-day-read-in-utc', 'push', 'includes/push/class-evc-push-auto.php',
+        '        return $at === false ? \'\' : (new DateTimeImmutable(\'@\' . $at))->setTimezone(new DateTimeZone(self::ZONE))->format(\'Y-m-d\');', '        return $at === false ? \'\' : (new DateTimeImmutable(\'@\' . $at))->format(\'Y-m-d\');',
+        array('PushTest::test_the_expiry_notification_goes_to_members_ending_in_3_athens_days_once')),
+    array('PN25-expiry-sent-twice-in-a-period', 'push', 'includes/push/class-evc-push-auto.php',
+        '
+                    && (string) get_user_meta($wp_user_id, self::EXPIRY_META, true) !== $m[\'paid_until_utc\']) {', ') {',
+        array('PushTest::test_the_expiry_notification_goes_to_members_ending_in_3_athens_days_once')),
+    array('PN26-daily-run-at-9', 'push', 'includes/push/class-evc-push-auto.php',
+        '    const EXPIRY_HOUR = 10;', '    const EXPIRY_HOUR = 9;',
+        array('PushTest::test_the_daily_run_is_at_10_athens_time_in_summer_and_winter')),
+    array('PN27-daily-run-in-utc', 'push', 'includes/push/class-evc-push-auto.php',
+        '        $zone = new DateTimeZone(self::ZONE);
+', '        $zone = new DateTimeZone(\'UTC\');
+',
+        array('PushTest::test_the_daily_run_is_at_10_athens_time_in_summer_and_winter')),
+    array('PN28-activated-hooked-without-its-constant', 'push', 'includes/push/class-evc-push-auto.php',
+        '        if (EVC_Push_Feature::auto_activated()) {', '        if (true) {',
+        array('PushTest::test_the_automatic_notifications_are_hooked_only_by_their_own_constants')),
+    array('PN29-old-expiry-event-kept-when-off', 'push', 'includes/push/class-evc-push-auto.php',
+        '        } elseif (wp_next_scheduled(self::EXPIRY_HOOK)) {
+            wp_clear_scheduled_hook(self::EXPIRY_HOOK);
+        }', '        }',
+        array('PushTest::test_the_automatic_notifications_are_hooked_only_by_their_own_constants')),
+    array('PN30-member-page-gets-the-private-key', 'push', 'includes/push/class-evc-push-feature.php',
+        '        return array(\'pushPublicKey\' => (string) constant(EVC_Push_Vapid::PUBLIC_CONSTANT));', '        return array(\'pushPublicKey\' => (string) constant(EVC_Push_Vapid::PRIVATE_CONSTANT));',
+        array('PushTest::test_the_member_page_sends_the_public_key_and_never_the_private_one')),
+    array('PN31-redirects-followed', 'push', 'includes/push/class-evc-push-sender.php',
+        '            \'redirection\' => 0,', '            \'redirection\' => 5,',
+        array('PushTest::test_the_real_request_follows_no_redirect_verifies_tls_and_refuses_unsafe_addresses')),
+    array('PN32-unsafe-addresses-allowed', 'push', 'includes/push/class-evc-push-sender.php',
+        '            \'reject_unsafe_urls\' => true,', '            \'reject_unsafe_urls\' => false,',
+        array('PushTest::test_the_real_request_follows_no_redirect_verifies_tls_and_refuses_unsafe_addresses')),
+    array('PN33-tls-not-verified', 'push', 'includes/push/class-evc-push-sender.php',
+        '            \'sslverify\' => true,', '            \'sslverify\' => false,',
+        array('PushTest::test_the_real_request_follows_no_redirect_verifies_tls_and_refuses_unsafe_addresses')),
+    array('PN34-routes-get-the-server-as-override', 'push', 'includes/push/class-evc-push-plugin.php',
+        '\'register_routes\'), 10, 0);', '\'register_routes\'));',
+        array()), // no named killer: the TypeError breaks the set_up of every push test (any failure kills it)
+    array('PN35-member-from-the-delete-body', 'push', 'includes/push/class-evc-push-backend.php',
+        '            (new EVC_Sql_Push_Subscription_Store($db))->unsubscribe($member[\'id\'], $endpoint, $this->now_utc());', '            $db->execute(\'UPDATE evc_push_subscriptions SET revoked_at_utc = ?, revoked_reason = ? WHERE endpoint_hash = ? AND revoked_at_utc IS NULL\', array($this->now_utc(), \'member\', EVC_Push_Endpoint::hash($endpoint)));',
+        array('PushTest::test_member_a_cannot_take_or_stop_member_bs_subscription')),
+    array('AT43-mismatched-vapid-pair-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        if ($problem !== null) {
+            return self::row(\'push_vapid\'', '        if (false) {
+            return self::row(\'push_vapid\'',
+        array('ReadinessTest::test_round12_the_vapid_keys_read_ok_only_as_a_matching_pair_and_are_never_shown')),
+    array('AT44-missing-push-rights-read-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '            return self::row(\'push_schema\', $label, self::WRONG,', '            return self::row(\'push_schema\', $label, self::OK,',
+        array('ReadinessTest::test_round12_the_push_table_row_reads_the_users_rights_without_writing')),
+    array('AT45-push-rights-without-update', 'admin_tools', 'includes/class-evc-db-grants.php',
+        '    const PUSH_PRIVILEGES = array(\'SELECT\', \'INSERT\', \'UPDATE\');', '    const PUSH_PRIVILEGES = array(\'SELECT\', \'INSERT\');',
+        array('ReadinessTest::test_round12_the_push_table_row_reads_the_users_rights_without_writing')),
+    array('AT46-push-table-below-5-not-explained', 'admin_tools', 'includes/admin/class-evc-readiness.php',
+        '        if ($applied < self::PUSH_SCHEMA_VERSION) {', '        if ($applied < 2) {',
+        array('ReadinessTest::test_round12_push_rows_without_configuration')),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -1921,6 +2086,10 @@ function evc_wp_suite(string $root, string $mode, ?string $junit = null, ?string
         // STAGE-08: the readiness checks over the real commerce site (customer + onboarding + admin pages ON).
         $suite = 'wp-commerce-admin-tools';
         $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_ONBOARDING_FLAG' => 'enabled', 'EVC_TEST_ADMIN_TOOLS_FLAG' => 'enabled'));
+    } elseif ($mode === 'push') {
+        // STAGE-08 round 12: customer flag ON + EVC_CLUB_PUSH_ENABLED = true with the TEST-ONLY VAPID keys, no commerce plugins.
+        $suite = 'wp-push';
+        $env = array_merge(getenv(), array('EVC_TEST_STAFF_FLAG' => 'disabled', 'EVC_TEST_CUSTOMER_FLAG' => 'enabled', 'EVC_TEST_PUSH_FLAG' => 'enabled'));
     } elseif ($mode === 'fluentcrm') {
         // STAGE-06: EVC_CLUB_FLUENTCRM_SYNC_ENABLED = true + the six tag constants + the TEST-ONLY fake FluentCRM API.
         $suite = 'wp-fluentcrm';
@@ -1961,7 +2130,7 @@ foreach ($mutants as $m) {
     $touched[$root . '/' . $m[2]] = hash_file('sha256', $root . '/' . $m[2]);
 }
 
-foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding', 'commerce_admin_tools') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm', 'onboarding', 'admin_tools') as $mode) {
+foreach ($evc_commerce_only ? array('commerce', 'commerce_on', 'commerce_redeem', 'commerce_fluentcrm', 'commerce_onboarding', 'commerce_admin_tools') : array('disabled', 'enabled', 'customer', 'migrations', 'redemption', 'fluentcrm', 'onboarding', 'admin_tools', 'push') as $mode) {
     echo "Baseline ($mode)...\n";
     if (evc_wp_suite($root, $mode) !== 0) {
         fwrite(STDERR, "ABORT: baseline WordPress suite ($mode) is not green.\n");

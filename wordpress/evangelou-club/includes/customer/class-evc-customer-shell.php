@@ -18,7 +18,8 @@ defined('ABSPATH') || exit;
  *   assets missing or inconsistent  503, no bootstrap
  *   customer ...................... 200 page + bootstrap JSON (REST base + wp_rest nonce; the join URL only while
  *                                   EVC_CLUB_ONBOARDING_ENABLED is on, STAGE-08 round 10; the service worker's URL
- *                                   and scope only with pretty permalinks, round 11)
+ *                                   and scope only with pretty permalinks, round 11; the push public key only while
+ *                                   EVC_CLUB_PUSH_ENABLED is on with usable VAPID keys, round 12)
  *
  * STAGE-08 round 11 (owner decision D26 part 1, EVC_Customer_Pwa): the same query variable also serves the web app
  * manifest (=manifest; pretty /club-member/manifest.webmanifest) and the service worker (=sw; ONLY at the pretty
@@ -158,6 +159,8 @@ final class EVC_Customer_Shell {
         }
         // Round 11 (D26): the home-screen app's service worker, only with pretty permalinks (EVC_Customer_Pwa).
         $config = array_merge($config, EVC_Customer_Pwa::config());
+        // Round 12 (D26 part 2): the VAPID public key while push is on and its keys are usable (EVC_Push_Feature::ready()).
+        $config = array_merge($config, EVC_Push_Feature::page_config());
         $config['appVersion'] = EVC_CLUB_VERSION;
         return array(
             'status' => 200,

@@ -34,6 +34,7 @@
  * And STAGE-06 (FT1-FT40: FluentCRM membership tags).
  * And STAGE-07 (OR1-OR10: in-store onboarding rules).
  * And STAGE-08 round 10 (DG1-DG10: the SHOW GRANTS reader of the migration-004 readiness row); round 11 DG11-DG13.
+ * And STAGE-08 round 12 (PC1-PC9, PV1-PV6, PE1-PE7, PM1-PM3: web push encryption, VAPID, endpoint allowlist, text).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -3024,6 +3025,161 @@ $mutants = array(
         'file' => 'includes/class-evc-db-grants.php',
         'search' => "                \$regex .= preg_quote(\$pattern[++\$i], '/');",
         'replace' => "                \$regex .= \$pattern[++\$i] === '_' ? '.' : preg_quote(\$pattern[\$i], '/');",
+    ),
+    // STAGE-08 round 12 (owner decision D26 part 2): RFC 8291 encryption (PC*), RFC 8292 VAPID (PV*), the endpoint allowlist (PE*)
+    // and the notification text (PM*).
+    array(
+        'id' => 'PC1-key-info-order-swapped',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '"WebPush: info\\0" . $ua_public . $as_public',
+        'replace' => '"WebPush: info\\0" . $as_public . $ua_public',
+    ),
+    array(
+        'id' => 'PC2-no-padding-delimiter',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => 'openssl_encrypt($plaintext . "\\x02",',
+        'replace' => 'openssl_encrypt($plaintext,',
+    ),
+    array(
+        'id' => 'PC3-wrong-record-size',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => 'pack(\'N\', self::RECORD_SIZE)',
+        'replace' => 'pack(\'N\', 4095)',
+    ),
+    array(
+        'id' => 'PC4-wrong-cek-info',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '"Content-Encoding: aes128gcm\\0"',
+        'replace' => '"Content-Encoding: aesgcm\\0"',
+    ),
+    array(
+        'id' => 'PC5-nonce-salted-with-the-auth-secret',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '$nonce = hash_hkdf(\'sha256\', $ikm, 12, "Content-Encoding: nonce\\0", $salt);',
+        'replace' => '$nonce = hash_hkdf(\'sha256\', $ikm, 12, "Content-Encoding: nonce\\0", $auth_secret);',
+    ),
+    array(
+        'id' => 'PC6-oversized-payload-accepted',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '        if (strlen($plaintext) > self::MAX_PLAINTEXT) {',
+        'replace' => '        if (strlen($plaintext) > 4096) {',
+    ),
+    array(
+        'id' => 'PC7-non-canonical-base64url-accepted',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => ' || self::b64u_encode($bytes) !== $text) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'PC8-short-auth-secret-accepted',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '        if (strlen($auth_secret) !== self::AUTH_LENGTH) {',
+        'replace' => '        if (strlen($auth_secret) < 8) {',
+    ),
+    array(
+        'id' => 'PC9-scalar-not-below-the-order',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => ' || strcmp($scalar, hex2bin(self::CURVE_ORDER)) >= 0) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'PV1-pair-not-checked',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => '        if ($derived === null || !hash_equals($derived, $point)) {',
+        'replace' => '        if ($derived === null) {',
+    ),
+    array(
+        'id' => 'PV2-example-domain-accepted',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => '            if ($domain === $reserved || substr($domain, -strlen(\'.\' . $reserved)) === \'.\' . $reserved) {
+                return false;',
+        'replace' => '            if ($domain === $reserved || substr($domain, -strlen(\'.\' . $reserved)) === \'.\' . $reserved) {
+                continue;',
+    ),
+    array(
+        'id' => 'PV3-token-lives-two-days',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => '    const LIFETIME_SECONDS = 43200;',
+        'replace' => '    const LIFETIME_SECONDS = 172800;',
+    ),
+    array(
+        'id' => 'PV4-trailing-der-bytes-accepted',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => '        return $at === $n ? $out : null;',
+        'replace' => '        return $out;',
+    ),
+    array(
+        'id' => 'PV5-audience-fixed',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => 'array(\'aud\' => $audience,',
+        'replace' => 'array(\'aud\' => \'https://fcm.googleapis.com\',',
+    ),
+    array(
+        'id' => 'PV6-subject-not-mailto',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => 'preg_match(\'/^mailto:[A-Za-z0-9._%+-]+@',
+        'replace' => 'preg_match(\'/^(?:mailto:|https:\\/\\/)?[A-Za-z0-9._%+-]*@?',
+    ),
+    array(
+        'id' => 'PE1-windows-sub-domains-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => '
+            && preg_match(\'/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/D\', substr($host, 0, -$suffix)) === 1) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'PE2-plain-http-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => 'if (preg_match(\'#^https://([a-z0-9.-]+)(?::443)?',
+        'replace' => 'if (preg_match(\'#^https?://([a-z0-9.-]+)(?::443)?',
+    ),
+    array(
+        'id' => 'PE3-any-port-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => 'if (preg_match(\'#^https://([a-z0-9.-]+)(?::443)?',
+        'replace' => 'if (preg_match(\'#^https://([a-z0-9.-]+)(?::\\d+)?',
+    ),
+    array(
+        'id' => 'PE4-fragment-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => ' || strpbrk($url, "#\\\\") !== false) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'PE5-longer-endpoints-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => '        if ($length < 12 || $length > self::MAX_LENGTH) {',
+        'replace' => '        if ($length < 12 || $length > 2048) {',
+    ),
+    array(
+        'id' => 'PE6-any-auth-length-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => '        return $raw !== null && strlen($raw) === EVC_Push_Crypto::AUTH_LENGTH ? $raw : null;',
+        'replace' => '        return $raw !== null && strlen($raw) >= 12 ? $raw : null;',
+    ),
+    array(
+        'id' => 'PE7-any-host-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => '        return self::service_of_host($m[1]) === null ? self::PROBLEM_HOST : null;',
+        'replace' => '        return null;',
+    ),
+    array(
+        'id' => 'PM1-title-limit-60',
+        'file' => 'includes/class-evc-push-message.php',
+        'search' => '        if (self::length($t) > self::MAX_TITLE) {',
+        'replace' => '        if (self::length($t) > 60) {',
+    ),
+    array(
+        'id' => 'PM2-hidden-characters-accepted',
+        'file' => 'includes/class-evc-push-message.php',
+        'search' => '        if (preg_match(\'/[\\p{Cc}\\p{Cf}\\p{Co}\\p{Cs}]/u\', $text) === 1) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'PM3-body-limit-200',
+        'file' => 'includes/class-evc-push-message.php',
+        'search' => '        return self::length($b) > self::MAX_BODY ? self::PROBLEM_BODY_LONG : null;',
+        'replace' => '        return self::length($b) > 200 ? self::PROBLEM_BODY_LONG : null;',
     ),
 );
 

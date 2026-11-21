@@ -96,6 +96,25 @@ if ($evc_admin_tools_mode === 'enabled') {
     exit(1);
 }
 
+// STAGE-08 round 12 (D26 part 2): the push constants, fixed per PHPUnit process: EVC_TEST_PUSH_FLAG=enabled defines
+// EVC_CLUB_PUSH_ENABLED as boolean true with TEST-ONLY VAPID keys (the published key pair of the RFC 8291 example, never a
+// real site's) and a test subject (the wp-push suite, which also sets the customer flag); EVC_TEST_PUSH_FLAG=auto also
+// defines the two automatic-notification constants. Unset/disabled leaves all of it undefined (every other suite).
+$evc_push_mode = getenv('EVC_TEST_PUSH_FLAG');
+if ($evc_push_mode === 'enabled' || $evc_push_mode === 'auto') {
+    define('EVC_CLUB_PUSH_ENABLED', true);
+    define('EVC_CLUB_PUSH_VAPID_PUBLIC', 'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8');
+    define('EVC_CLUB_PUSH_VAPID_PRIVATE', 'yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw');
+    define('EVC_CLUB_PUSH_SUBJECT', 'mailto:club@evangelou-tests.gr');
+    if ($evc_push_mode === 'auto') {
+        define('EVC_CLUB_PUSH_AUTO_ACTIVATED', true);
+        define('EVC_CLUB_PUSH_AUTO_EXPIRY', true);
+    }
+} elseif ($evc_push_mode !== false && $evc_push_mode !== '' && $evc_push_mode !== 'disabled') {
+    fwrite(STDERR, "EVC_TEST_PUSH_FLAG must be enabled, auto or disabled.\n");
+    exit(1);
+}
+
 // STAGE-03D review: TEST-ONLY hook so the suites may construct the WooCommerce-completion classes with the
 // feature constant OFF (EVC_Wc_Completion_Feature::assert_constructible; the packager refuses it in shipped files).
 define('EVC_TEST_WC_COMPLETION_CONSTRUCTION', true);

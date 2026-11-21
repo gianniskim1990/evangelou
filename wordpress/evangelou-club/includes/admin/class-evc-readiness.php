@@ -44,6 +44,22 @@ final class EVC_Readiness {
     /** Round 10 (LOW-1): the table of migration 004 the till writes the preparation into, and what it needs on it. */
     const PREPARATIONS_TABLE = EVC_Db_Grants::PREPARATIONS_TABLE;
     const PREPARATIONS_PRIVILEGES = EVC_Db_Grants::PREPARATIONS_PRIVILEGES;
+    /** Round 12 (D26 part 2): the push subscriptions table of migration 005 and what the Club database user needs on it. */
+    const PUSH_TABLE = EVC_Db_Grants::PUSH_TABLE;
+    const PUSH_PRIVILEGES = EVC_Db_Grants::PUSH_PRIVILEGES;
+    /** Migration 005. */
+    const PUSH_SCHEMA_VERSION = 5;
+    /** Greek text of each EVC_Push_Vapid problem code (never a value). */
+    const VAPID_PROBLEMS = array(
+        'openssl_missing' => 'Η PHP του διακομιστή δεν έχει όσα χρειάζονται για την κρυπτογράφηση των ειδοποιήσεων (επέκταση openssl).',
+        'public_missing' => 'Λείπει το EVC_CLUB_PUSH_VAPID_PUBLIC.',
+        'public_invalid' => 'Το EVC_CLUB_PUSH_VAPID_PUBLIC δεν είναι έγκυρο δημόσιο κλειδί.',
+        'private_missing' => 'Λείπει το EVC_CLUB_PUSH_VAPID_PRIVATE.',
+        'private_invalid' => 'Το EVC_CLUB_PUSH_VAPID_PRIVATE δεν είναι έγκυρο ιδιωτικό κλειδί.',
+        'pair_mismatch' => 'Τα δύο κλειδιά δεν ανήκουν στο ίδιο ζεύγος: φτιάξτε νέο ζεύγος και αντιγράψτε και τα δύο μαζί.',
+        'subject_missing' => 'Λείπει το EVC_CLUB_PUSH_SUBJECT (mailto: με τη διεύθυνση του καταστήματος).',
+        'subject_invalid' => 'Το EVC_CLUB_PUSH_SUBJECT πρέπει να είναι mailto: με πραγματική διεύθυνση του καταστήματος.',
+    );
 
     /** The tested matrix (CI): PHP 7.4 / 8.2 / 8.4; MySQL 8.0 / 8.4, MariaDB 10.11. */
     const SUPPORTED_PHP = array('7.4', '8.2', '8.4');
@@ -96,6 +112,7 @@ final class EVC_Readiness {
             'flags' => $this->flags(),
             'shop' => $this->shop(),
             'crm' => $this->crm(),
+            'push' => $this->push(),
             'server' => $this->server(),
             'staff' => $this->staff(),
         );
@@ -155,6 +172,12 @@ final class EVC_Readiness {
             $grants = self::preparation_grants($db);
         }
         $rows[] = self::prepared_row($applied, $unreadable !== null, $grants);
+        // Round 12 (D26 part 2): migration 005 and the rights on its table.
+        $push_grants = null;
+        if ($unreadable === null && $applied >= self::PUSH_SCHEMA_VERSION) {
+            $push_grants = self::table_grants($db, self::PUSH_TABLE, self::PUSH_PRIVILEGES);
+        }
+        $rows[] = self::push_schema_row($applied, $unreadable !== null, $push_grants);
         try {
             $version = (string) ($db->fetch_one('SELECT VERSION() AS v')['v'] ?? '');
         } catch (Throwable $e) {
@@ -171,6 +194,15 @@ final class EVC_Readiness {
      * @return array{state:string,missing:string[]}
      */
     private static function preparation_grants(EVC_Club_Db $db): array {
+        return self::table_grants($db, self::PREPARATIONS_TABLE, self::PREPARATIONS_PRIVILEGES);
+    }
+
+    /**
+     * The user's own rights on one table of the Club database, from SHOW GRANTS (a read only; EVC_Db_Grants decides).
+     * @param string[] $privileges
+     * @return array{state:string,missing:string[]}
+     */
+    private static function table_grants(EVC_Club_Db $db, string $table, array $privileges): array {
         try {
             $database = (string) ($db->fetch_one('SELECT DATABASE() AS d')['d'] ?? '');
             $lines = array();
@@ -178,9 +210,33 @@ final class EVC_Readiness {
                 $lines[] = is_array($row) ? reset($row) : null;
             }
         } catch (Throwable $e) {
-            return array('state' => EVC_Db_Grants::UNKNOWN, 'missing' => self::PREPARATIONS_PRIVILEGES);
+            return array('state' => EVC_Db_Grants::UNKNOWN, 'missing' => $privileges);
         }
-        return EVC_Db_Grants::table_privileges($lines, $database, self::PREPARATIONS_TABLE, self::PREPARATIONS_PRIVILEGES);
+        return EVC_Db_Grants::table_privileges($lines, $database, $table, $privileges);
+    }
+
+    /**
+     * Round 12 (owner decision D26 part 2): can member push notifications be stored (migration 005 + the rights SELECT,
+     * INSERT and UPDATE on its table)? Pure. Below 5 this is not an error: push simply stays hidden.
+     * @param array{state:string,missing:string[]}|null $grants
+     */
+    public static function push_schema_row(int $applied, bool $unreadable, ?array $grants = null): array {
+        $label = 'Ειδοποιήσεις μελών: πίνακας συνδρομών (μετάβαση 005)';
+        if ($unreadable) {
+            return self::row('push_schema', $label, self::UNREADABLE, 'Η έκδοση σχήματος δεν διαβάστηκε· δείτε τη γραμμή «Έκδοση σχήματος».');
+        }
+        if ($applied < self::PUSH_SCHEMA_VERSION) {
+            return self::row('push_schema', $label, self::MANUAL, sprintf('Δεν υπάρχει ακόμη: εφαρμοσμένη έκδοση %d. Οι ειδοποιήσεις μένουν κρυφές στην κάρτα μέλους και δεν στέλνεται τίποτα. Για να ενεργοποιηθούν: έγκριση της μετάβασης 005 από τον ιδιοκτήτη, EVC_CLUB_MIGRATIONS_TARGET 5 στο wp-config.php και εφαρμογή από τη σελίδα μεταβάσεων.', $applied));
+        }
+        $state = $grants['state'] ?? EVC_Db_Grants::UNKNOWN;
+        $names = implode(', ', self::PUSH_PRIVILEGES);
+        if ($state === EVC_Db_Grants::MISSING) {
+            return self::row('push_schema', $label, self::WRONG, sprintf('Η μετάβαση 005 έχει εφαρμοστεί, αλλά ο χρήστης της βάσης του Club (EVC_CLUB_DB_USER) δεν έχει δικαίωμα %s στον πίνακα %s: οι ειδοποιήσεις δεν θα αποθηκεύονται. Ζητήστε από τον τεχνικό να δώσει στον χρήστη τα δικαιώματα %s σε αυτόν τον πίνακα (ποτέ διαγραφή). Ο έλεγχος διαβάζει μόνο τα δικαιώματα· δεν γράφει τίποτα στη βάση.', implode(', ', $grants['missing'] ?? self::PUSH_PRIVILEGES), self::PUSH_TABLE, $names));
+        }
+        if ($state !== EVC_Db_Grants::OK) {
+            return self::row('push_schema', $label, self::MANUAL, sprintf('Η μετάβαση 005 έχει εφαρμοστεί, αλλά από εδώ δεν μπορεί να επιβεβαιωθεί ότι ο χρήστης της βάσης του Club (EVC_CLUB_DB_USER) έχει τα δικαιώματα %s στον πίνακα %s (π.χ. επειδή δίνονται μέσω ρόλου ή η λίστα δικαιωμάτων δεν διαβάστηκε). Ζητήστε από τον τεχνικό να το επιβεβαιώσει. Ο έλεγχος διαβάζει μόνο τα δικαιώματα· δεν γράφει τίποτα στη βάση.', $names, self::PUSH_TABLE));
+        }
+        return self::row('push_schema', $label, self::OK, sprintf('Υπάρχει, και ο χρήστης της βάσης έχει τα δικαιώματα %s στον πίνακα %s.', $names, self::PUSH_TABLE));
     }
 
     /**
@@ -249,7 +305,13 @@ final class EVC_Readiness {
             self::flag('flag_wc_completion', 'Επιβεβαίωση πληρωμής από το WooCommerce (EVC_CLUB_WC_COMPLETION_ENABLED)', EVC_Wc_Completion_Feature::CONSTANT, array('EVC_Wc_Completion_Feature', 'is_enabled_value')),
             self::flag('flag_migrations', 'Σελίδα μεταβάσεων βάσης (EVC_CLUB_MIGRATIONS_ENABLED)', EVC_Club_Migrations_Feature::CONSTANT, array('EVC_Club_Migrations_Feature', 'is_enabled_value')),
             self::flag('flag_admin_tools', 'Σελίδες διαχείρισης Club (EVC_CLUB_ADMIN_TOOLS_ENABLED)', EVC_Admin_Tools_Feature::CONSTANT, array('EVC_Admin_Tools_Feature', 'is_enabled_value')),
+            self::flag('flag_push', 'Ειδοποιήσεις μελών (EVC_CLUB_PUSH_ENABLED)', EVC_Push_Feature::CONSTANT, array('EVC_Push_Feature', 'is_enabled_value')),
+            self::flag('flag_push_auto_activated', 'Αυτόματη ειδοποίηση «Η συνδρομή σας ενεργοποιήθηκε» (EVC_CLUB_PUSH_AUTO_ACTIVATED)', EVC_Push_Feature::AUTO_ACTIVATED_CONSTANT, array('EVC_Push_Feature', 'is_enabled_value')),
+            self::flag('flag_push_auto_expiry', 'Αυτόματη ειδοποίηση «Η συνδρομή σας λήγει σε 3 ημέρες» (EVC_CLUB_PUSH_AUTO_EXPIRY)', EVC_Push_Feature::AUTO_EXPIRY_CONSTANT, array('EVC_Push_Feature', 'is_enabled_value')),
         );
+        if (defined(EVC_Push_Feature::CONSTANT) && EVC_Push_Feature::is_enabled_value(constant(EVC_Push_Feature::CONSTANT)) && !EVC_Customer_Feature::is_enabled_value(defined(EVC_Customer_Feature::CONSTANT) ? constant(EVC_Customer_Feature::CONSTANT) : null)) {
+            $rows[8] = self::row('flag_push', $rows[8]['label'], self::WRONG, 'Ενεργή, αλλά χρειάζεται και τη σελίδα μέλους (EVC_CLUB_CUSTOMER_ENABLED).');
+        }
         if (defined(EVC_Onboarding_Feature::CONSTANT) && EVC_Onboarding_Feature::is_enabled_value(constant(EVC_Onboarding_Feature::CONSTANT)) && !EVC_Onboarding_Feature::enabled()) {
             $rows[3] = self::row('flag_onboarding', $rows[3]['label'], self::WRONG, 'Ενεργή, αλλά χρειάζεται και τη σελίδα μέλους (EVC_CLUB_CUSTOMER_ENABLED).');
         }
@@ -371,6 +433,39 @@ final class EVC_Readiness {
             self::WRONG => 'Ορίστηκε, αλλά δεν είναι έγκυρο (χρειάζεται τυχαίο κείμενο τουλάχιστον 32 χαρακτήρων: όχι το παράδειγμα των οδηγιών, ούτε έναν χαρακτήρα που επαναλαμβάνεται, και διαφορετικό από το κλειδί σκαναρίσματος): η κάρτα μέλους δεν δείχνει κωδικό QR.',
         );
         return self::row('qr_secret', 'Μυστικό κλειδί του κωδικού QR μέλους (EVC_CLUB_QR_SECRET)', $status, $details[$status]);
+    }
+
+    // ---- member push notifications (round 12, owner decision D26 part 2) ------------------------------------------
+
+    /** Pure: the status of the three VAPID constants by EVC_Push_Vapid's own rule. No value, no length is ever shown. */
+    public static function vapid_row(bool $any_defined, ?string $problem, bool $push_on): array {
+        $label = 'Κλειδιά ειδοποιήσεων (EVC_CLUB_PUSH_VAPID_PUBLIC, EVC_CLUB_PUSH_VAPID_PRIVATE, EVC_CLUB_PUSH_SUBJECT)';
+        if (!$any_defined) {
+            return self::row('push_vapid', $label, $push_on ? self::MISSING : self::OFF, 'Δεν έχουν οριστεί. Φτιάχνονται με την εντολή μίας γραμμής του οδηγού (member-push.md) στον υπολογιστή του τεχνικού ή στον διακομιστή, και μπαίνουν κατευθείαν στο wp-config.php: δεν στέλνονται ποτέ σε κανέναν. Χωρίς αυτά οι ειδοποιήσεις μένουν κρυφές.');
+        }
+        if ($problem !== null) {
+            return self::row('push_vapid', $label, self::WRONG, (self::VAPID_PROBLEMS[$problem] ?? 'Δεν είναι έγκυρα.') . ' Οι ειδοποιήσεις μένουν κρυφές και δεν στέλνεται τίποτα μέχρι να διορθωθούν. Οι τιμές δεν εμφανίζονται εδώ.');
+        }
+        return self::row('push_vapid', $label, self::OK, 'Ορίστηκαν και είναι έγκυρα: το δημόσιο κλειδί ταιριάζει με το ιδιωτικό. Οι τιμές δεν εμφανίζονται εδώ.');
+    }
+
+    private function push(): array {
+        $push_on = defined(EVC_Push_Feature::CONSTANT) && EVC_Push_Feature::is_enabled_value(constant(EVC_Push_Feature::CONSTANT));
+        $values = array();
+        $any = false;
+        foreach (array('public' => 'EVC_CLUB_PUSH_VAPID_PUBLIC', 'private' => 'EVC_CLUB_PUSH_VAPID_PRIVATE', 'subject' => 'EVC_CLUB_PUSH_SUBJECT') as $k => $name) {
+            list($defined, $value) = $this->constant_value($name);
+            $any = $any || $defined;
+            $values[$k] = $defined ? $value : null;
+        }
+        $rows = array(self::vapid_row($any, $any ? EVC_Push_Vapid::keys_problem($values['public'], $values['private'], $values['subject']) : null, $push_on));
+        if ($push_on && (string) get_option('permalink_structure', '') === '') {
+            $rows[] = self::row('push_worker', 'Ειδοποιήσεις: εφαρμογή παρασκηνίου της κάρτας', self::WRONG, 'Οι μόνιμοι σύνδεσμοι είναι «Απλοί»: η κάρτα δεν έχει εφαρμογή παρασκηνίου, οπότε δεν μπορεί να δεχτεί ειδοποιήσεις (το μέλος βλέπει μόνο μια εξήγηση). Ρυθμίσεις → Μόνιμοι σύνδεσμοι → Όνομα άρθρου.');
+        } else {
+            $rows[] = self::row('push_worker', 'Ειδοποιήσεις: εφαρμογή παρασκηνίου της κάρτας', self::MANUAL, 'Ανοίξτε στον περιηγητή τις δύο διευθύνσεις της κάρτας που γράφει ο οδηγός member-pwa.md (η εφαρμογή παρασκηνίου και η περιγραφή της εφαρμογής, κάτω από το /club-member/): πρέπει να φορτώνουν, όχι σφάλμα 404. Ένας κανόνας του διακομιστή για αρχεία σεναρίων μπορεί να τις κόβει.');
+        }
+        $rows[] = self::row('push_outbound', 'Ειδοποιήσεις: έξοδος του διακομιστή προς τις υπηρεσίες ειδοποιήσεων', self::MANUAL, 'Ο τεχνικός επιβεβαίωσε (2026-11-20) έξοδο HTTPS προς fcm.googleapis.com, web.push.apple.com και updates.push.services.mozilla.com. Για τον Microsoft Edge στα Windows χρειάζεται επίσης έξοδος προς *.notify.windows.com (δεν έχει επιβεβαιωθεί). Η σελίδα αυτή δεν κάνει δοκιμαστική αποστολή.');
+        return $rows;
     }
 
     // ---- CRM ----------------------------------------------------------------------------------------------

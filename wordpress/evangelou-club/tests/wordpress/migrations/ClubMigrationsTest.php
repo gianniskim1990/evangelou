@@ -199,7 +199,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
     }
 
     private function migrate_all(): void {
-        $this->assertSame(array(1, 2, 3, 4), (new EVC_Migrator($this->club->connect(), EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX));
+        $this->assertSame(array(1, 2, 3, 4, 5), (new EVC_Migrator($this->club->connect(), EVC_Test_Database::migrations_dir()))->migrate(PHP_INT_MAX));
     }
 
     /** The tables of the APPROVED target (default EVC_CLUB_MIGRATIONS_TARGET = 2: 001 + 002). */
@@ -313,7 +313,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertStringContainsString(EVC_Club_Migrations_Service::CONFIRM_WORD, $html);
         $status = $parts['service']->status();
         $this->assertTrue($status['can_apply']);
-        $this->assertSame(array(array('version' => 1, 'name' => 'initial'), array('version' => 2, 'name' => 'payment_provenance'), array('version' => 3, 'name' => 'lookup_failures'), array('version' => 4, 'name' => 'prepared_redemptions')), $status['pending']);
+        $this->assertSame(array(array('version' => 1, 'name' => 'initial'), array('version' => 2, 'name' => 'payment_provenance'), array('version' => 3, 'name' => 'lookup_failures'), array('version' => 4, 'name' => 'prepared_redemptions'), array('version' => 5, 'name' => 'push_subscriptions')), $status['pending']);
         $this->assertNotNull($status['server_version']);
         $this->assert_no_secrets($html, 'status page');
         $this->assertSame(array(), $this->log, 'status writes no log line');
@@ -419,8 +419,8 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $parts = $this->parts();
         $status = $parts['service']->status();
         $this->assertSame(array(), $status['refusals']);
-        $this->assertSame(array(array('version' => 2, 'name' => 'payment_provenance'), array('version' => 3, 'name' => 'lookup_failures'), array('version' => 4, 'name' => 'prepared_redemptions')), $status['pending']);
-        $this->assertSame(array(3, 4), $status['not_approved']);
+        $this->assertSame(array(array('version' => 2, 'name' => 'payment_provenance'), array('version' => 3, 'name' => 'lookup_failures'), array('version' => 4, 'name' => 'prepared_redemptions'), array('version' => 5, 'name' => 'push_subscriptions')), $status['pending']);
+        $this->assertSame(array(3, 4, 5), $status['not_approved']);
         $html = $this->render($parts['page'], $this->apply_post());
         $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 002.', $html);
         $this->assertSame(self::ALL_TABLES, $this->tables());
@@ -454,8 +454,8 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $status = $parts['service']->status();
         $this->assertSame(array(), $status['refusals']);
         $this->assertSame(2, $status['target']);
-        $this->assertSame(array(array('version' => 3, 'name' => 'lookup_failures'), array('version' => 4, 'name' => 'prepared_redemptions')), $status['pending']);
-        $this->assertSame(array(3, 4), $status['not_approved']);
+        $this->assertSame(array(array('version' => 3, 'name' => 'lookup_failures'), array('version' => 4, 'name' => 'prepared_redemptions'), array('version' => 5, 'name' => 'push_subscriptions')), $status['pending']);
+        $this->assertSame(array(3, 4, 5), $status['not_approved']);
         $this->assertFalse($status['can_apply']);
         $html = $this->render($parts['page']);
         $this->assertStringContainsString('003 — lookup_failures — <strong>ΕΚΚΡΕΜΕΙ, ΔΕΝ ΕΧΕΙ ΕΓΚΡΙΘΕΙ (δεν θα εφαρμοστεί)</strong>', $html);
@@ -483,7 +483,7 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
             return 3;
         });
         $status = $parts['service']->status();
-        $this->assertSame(array(4), $status['not_approved'], 'round 9: 004 stays unapproved at target 3');
+        $this->assertSame(array(4, 5), $status['not_approved'], 'round 9: 004 stays unapproved at target 3 (round 12: and 005)');
         $this->assertTrue($status['can_apply']);
         $html = $this->render($parts['page'], $this->apply_post());
         $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 003.', $html);
@@ -520,8 +520,8 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
             return 4;
         });
         $status = $parts['service']->status();
-        $this->assertSame(array(array('version' => 4, 'name' => 'prepared_redemptions')), $status['pending']);
-        $this->assertSame(array(), $status['not_approved']);
+        $this->assertSame(array(array('version' => 4, 'name' => 'prepared_redemptions'), array('version' => 5, 'name' => 'push_subscriptions')), $status['pending']);
+        $this->assertSame(array(5), $status['not_approved'], 'round 12: 005 needs its own approval');
         $html = $this->render($parts['page'], $this->apply_post());
         $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 004.', $html);
         $this->assertContains('evc_redemption_preparations', $this->tables());
@@ -530,6 +530,32 @@ final class ClubMigrationsTest extends EVC_WP_Test_Case {
         $this->assertSame(EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/004_prepared_redemptions.sql'), $after[3]['checksum']);
         $row = $db->fetch_one('SELECT coffee_code, fingerprint_version, catalogue_version FROM evc_redemptions');
         $this->assertSame(array('coffee_code' => 'espresso', 'fingerprint_version' => null, 'catalogue_version' => null), $row);
+    }
+
+    /**
+     * Round 12 (owner decision D26 part 2): 005 only at target 5 (its own owner approval); a database with 001-004 then
+     * gets exactly 005, and nothing of 001-004 changes.
+     */
+    public function test_with_target_5_a_database_with_001_to_004_gets_only_005(): void {
+        $db = $this->club->connect();
+        $this->assertSame(array(1, 2, 3, 4), (new EVC_Migrator($db, EVC_Test_Database::migrations_dir()))->migrate(4));
+        $before = $this->recorded();
+        $this->admin();
+        $at4 = $this->parts(null, null, null, null, null, function () {
+            return 4;
+        })['service']->status();
+        $this->assertSame(array(array('version' => 5, 'name' => 'push_subscriptions')), $at4['pending']);
+        $this->assertSame(array(5), $at4['not_approved'], 'target 4: 005 is shown and never applied');
+        $parts = $this->parts(null, null, null, null, null, function () {
+            return 5;
+        });
+        $this->assertSame(array(), $parts['service']->status()['not_approved']);
+        $html = $this->render($parts['page'], $this->apply_post());
+        $this->assertStringContainsString('Εφαρμόστηκαν οι μεταβάσεις: 005.', $html);
+        $this->assertContains('evc_push_subscriptions', $this->tables());
+        $after = $this->recorded();
+        $this->assertSame($before, array_slice($after, 0, 4), '001-004 untouched');
+        $this->assertSame(EVC_Migrator::checksum_file(EVC_Test_Database::migrations_dir() . '/005_push_subscriptions.sql'), $after[4]['checksum']);
     }
 
     public function test_a_fresh_database_with_target_3_gets_all_three_and_target_1_only_001(): void {

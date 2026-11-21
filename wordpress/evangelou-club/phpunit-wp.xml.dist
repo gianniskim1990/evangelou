@@ -75,5 +75,9 @@
         <testsuite name="wp-commerce-admin-tools">
             <directory>tests/wordpress/commerce-admin-tools</directory>
         </testsuite>
+        <!-- STAGE-08 round 12: member push ON (EVC_TEST_PUSH_FLAG=enabled|auto + EVC_TEST_CUSTOMER_FLAG=enabled), test VAPID keys. -->
+        <testsuite name="wp-push">
+            <directory>tests/wordpress/push</directory>
+        </testsuite>
     </testsuites>
 </phpunit>

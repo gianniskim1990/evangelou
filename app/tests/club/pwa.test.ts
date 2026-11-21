@@ -6,7 +6,7 @@ import { parseCustomerConfig } from "../../src/customer/config";
 import { bootMode } from "../../src/customer/joinConfig";
 import { INSTALL_COPY, InstallHintFlow, installHintKind, isIosSafari, isStandalone, type DeferredPrompt } from "../../src/customer/pwa/installHint";
 import { parseServiceWorker, registerMemberWorker } from "../../src/customer/pwa/register";
-import { CACHE_PREFIX, OFFLINE_CSP, cacheName, decide, offlineShell, parseSwConfig, staleCaches, storable, type SwConfig } from "../../src/customer/pwa/swRules";
+import { CACHE_PREFIX, OFFLINE_CSP, STORABLE_TYPES, cacheName, decide, hasNetworkParam, isRest, offlineShell, parseSwConfig, staleCaches, storable, type SwConfig } from "../../src/customer/pwa/swRules";
 import { createDeviceFlag, INSTALL_HINT_KEY, QR_STORE_PREFIX } from "../../src/customer/qrStore";
 
 /*
@@ -48,6 +48,14 @@ describe("round 11 service worker rules: what is never touched", () => {
       ["a strange version", { version: "a b" }],
     ];
     for (const [label, over] of bad) assert.equal(parseSwConfig({ ...RAW_CFG, ...over }, ORIGIN), null, label);
+    // Round 12 (D26 part 2): the notification icon is optional and only the app's own; a bad one is dropped.
+    const icon = `${ORIGIN}/wp-content/plugins/evangelou-club/customer-app/pwa/icon-192.png`;
+    assert.equal(parseSwConfig({ ...RAW_CFG, icon }, ORIGIN)!.icon, icon);
+    for (const bad of ["https://evil.example/wp-content/plugins/evangelou-club/customer-app/pwa/icon-192.png", `${ORIGIN}/wp-content/uploads/icon.png`, `${icon}?x=1`, `${ORIGIN}/customer-app/pwa/icon.svg`, 7, ""]) {
+      const parsed = parseSwConfig({ ...RAW_CFG, icon: bad }, ORIGIN);
+      assert.ok(parsed, `the config stays: ${String(bad)}`);
+      assert.equal(parsed.icon, "", String(bad));
+    }
     assert.equal(parseSwConfig(null, ORIGIN), null);
     assert.equal(parseSwConfig("x", ORIGIN), null);
   });
@@ -94,7 +102,7 @@ describe("round 11 service worker rules: what is never touched", () => {
   });
 
   it("stores only complete same-origin answers without no-store / private", () => {
-    const r = (status: number, type: string, cc: string | null) => ({ ok: status >= 200 && status < 300, status, type, headers: { get: (n: string) => (n === "Cache-Control" ? cc : null) } });
+    const r = (status: number, type: string, cc: string | null) => ({ ok: status >= 200 && status < 300, status, type, redirected: false, headers: { get: (n: string) => (n === "Cache-Control" ? cc : n === "Content-Type" ? "text/javascript; charset=utf-8" : null) } });
     assert.equal(storable(r(200, "basic", null)), true);
     assert.equal(storable(r(200, "basic", "public, max-age=31536000")), true);
     assert.equal(storable(r(200, "basic", "no-store")), false);
@@ -103,6 +111,37 @@ describe("round 11 service worker rules: what is never touched", () => {
     assert.equal(storable(r(404, "basic", null)), false);
     assert.equal(storable(r(200, "opaque", null)), false);
     assert.equal(storable(r(200, "cors", null)), false);
+  });
+
+  // Round 11 review N1: a redirected answer (e.g. a login page) or anything but a JS / CSS / image file is never kept.
+  it("round 12 (N1): a redirected answer is never stored", () => {
+    const ok = { ok: true, status: 200, type: "basic", headers: { get: (n: string) => (n === "Content-Type" ? "text/css" : null) } };
+    assert.equal(storable({ ...ok, redirected: false }), true);
+    assert.equal(storable({ ...ok, redirected: true }), false, "redirected");
+    assert.equal(storable(ok), false, "unknown whether redirected");
+  });
+
+  it("round 12 (N1): only JS, CSS and image content types are stored", () => {
+    const withType = (t: string | null) => ({ ok: true, status: 200, type: "basic", redirected: false, headers: { get: (n: string) => (n === "Content-Type" ? t : null) } });
+    for (const t of ["text/javascript", "application/javascript; charset=utf-8", "TEXT/CSS", "text/css;charset=UTF-8", "image/png", "image/svg+xml", "image/webp"]) assert.equal(storable(withType(t)), true, t);
+    for (const t of [null, "", "text/html; charset=UTF-8", "application/json", "text/plain", "application/octet-stream", "image/png-x", "text/javascripts"]) assert.equal(storable(withType(t)), false, String(t));
+    assert.deepEqual(STORABLE_TYPES, ["text/javascript", "application/javascript", "text/css", "image/png", "image/svg+xml", "image/webp"]);
+  });
+
+  // Round 11 review N5: each REST rule on its own, so that each one's mutant is killed by itself.
+  it("round 12 (N5): isRest() alone recognises the plain ?rest_route= form", () => {
+    assert.equal(isRest(new URL(`${ORIGIN}/?rest_route=/evangelou-club-customer/v1/me`), CFG), true);
+    assert.equal(isRest(new URL(`${ORIGIN}/index.php?rest_route=`), CFG), true, "even empty");
+    assert.equal(isRest(new URL(`${ORIGIN}/club-member/?other=1`), CFG), false);
+    assert.equal(isRest(new URL(`${ORIGIN}/wp-json/x`), CFG), true, "the pretty form");
+    assert.equal(isRest(new URL(`${ORIGIN}/wp-json/x`), { restPrefixes: ["/other/"] }), false);
+  });
+
+  it("round 12 (N5): hasNetworkParam() alone lists rest_route and every nonce parameter", () => {
+    for (const p of ["rest_route", "_wpnonce", "_wp_http_referer", "nonce"]) assert.equal(hasNetworkParam(new URL(`${ORIGIN}/club-member/?${p}=x`)), true, p);
+    assert.equal(hasNetworkParam(new URL(`${ORIGIN}/club-member/?rest_route`)), true, "rest_route without a value");
+    assert.equal(hasNetworkParam(new URL(`${ORIGIN}/club-member/?page=1`)), false);
+    assert.equal(hasNetworkParam(new URL(`${ORIGIN}/club-member/`)), false);
   });
 
   it("a new build gets a new cache; on activate only this app's older caches are deleted", () => {
@@ -154,7 +193,18 @@ async function workerEnv() {
     if (!online) throw new TypeError("Failed to fetch");
     return new Response(`body of ${url}`, { status: 200, headers: { "Content-Type": "text/plain" } });
   }) as typeof fetch;
-  (globalThis as Record<string, unknown>).self = { __EVC_SW__: RAW_CFG, location: { origin: ORIGIN }, caches, clients: { claim: async () => {} }, skipWaiting: async () => {}, addEventListener: (t: string, f: (e: unknown) => void) => (handlers[t] = f) };
+  // Round 12 (D26 part 2): the registration and window clients the push and notificationclick handlers use.
+  const shown: { title: string; options: Record<string, unknown> }[] = [];
+  const opened: string[] = [];
+  const focused: string[] = [];
+  const windows: { url: string; focus(): Promise<unknown> }[] = [];
+  const clients = {
+    claim: async () => {},
+    matchAll: async (o: unknown) => (assert.deepEqual(o, { type: "window", includeUncontrolled: true }), windows),
+    openWindow: async (u: string) => void opened.push(u),
+  };
+  const registration = { scope: `${ORIGIN}/club-member/`, showNotification: async (title: string, options: Record<string, unknown>) => void shown.push({ title, options }) };
+  (globalThis as Record<string, unknown>).self = { __EVC_SW__: { ...RAW_CFG, icon: ICON }, location: { origin: ORIGIN }, caches, clients, registration, skipWaiting: async () => {}, addEventListener: (t: string, f: (e: unknown) => void) => (handlers[t] = f) };
   await import("../../src/customer/pwa/sw");
   // Responses made by `new Response()` have type "default"; the worker only stores "basic" ones (a real fetch).
   const asBasic = async () => {
@@ -162,9 +212,11 @@ async function workerEnv() {
       const url = typeof input === "string" ? input : (input as { url: string }).url;
       fetched.push(url);
       if (!online) throw new TypeError("Failed to fetch");
-      const r = new Response(`body of ${url}`, { status: 200 });
+      // Round 12 (N1): a real server sends the build files with their content type.
+      const headers = { "Content-Type": typeOf(url) };
+      const r = new Response(`body of ${url}`, { status: 200, headers });
       Object.defineProperty(r, "type", { value: "basic" });
-      Object.defineProperty(r, "clone", { value: () => Object.defineProperty(new Response(`body of ${url}`, { status: 200 }), "type", { value: "basic" }) });
+      Object.defineProperty(r, "clone", { value: () => Object.defineProperty(new Response(`body of ${url}`, { status: 200, headers }), "type", { value: "basic" }) });
       return r;
     }) as typeof fetch;
   };
@@ -179,12 +231,28 @@ async function workerEnv() {
     handlers[type]({ waitUntil: (p: Promise<unknown>) => waits.push(p) });
     await Promise.all(waits);
   };
-  return { handlers, store, puts, matches, fetched, fire, lifecycle, setOnline: (v: boolean) => (online = v), restore: () => (globalThis.fetch = realFetch) };
+  const event = async (type: string, extra: Record<string, unknown>) => {
+    const waits: Promise<unknown>[] = [];
+    handlers[type]({ waitUntil: (p: Promise<unknown>) => waits.push(p), ...extra });
+    await Promise.all(waits);
+  };
+  const addWindow = (url: string) => windows.push({ url, focus: async () => void focused.push(url) });
+  return { handlers, store, puts, matches, fetched, fire, lifecycle, event, shown, opened, focused, addWindow, clearWindows: () => (windows.length = 0), setOnline: (v: boolean) => (online = v), restore: () => (globalThis.fetch = realFetch) };
+}
+let workerEnvOnce: ReturnType<typeof workerEnv> | null = null;
+/** sw.ts runs once per test file (a module): every test shares the one fake worker scope. */
+const sharedWorker = () => (workerEnvOnce ??= workerEnv());
+const ICON = `${ORIGIN}/wp-content/plugins/evangelou-club/customer-app/pwa/icon-192.png`;
+function typeOf(url: string): string {
+  if (url.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (url.endsWith(".css")) return "text/css";
+  if (url.endsWith(".png")) return "image/png";
+  return "text/html; charset=UTF-8";
 }
 
 describe("round 11 service worker in action (sw.ts over a fake worker scope)", () => {
   it("installs the app files, cleans up on activate, never answers REST, never stores the member page", async () => {
-    const env = await workerEnv();
+    const env = await sharedWorker();
     try {
       await env.lifecycle("install");
       assert.deepEqual(env.puts.sort(), [CSS, JS].sort(), "the entry files are precached");

@@ -68,7 +68,7 @@ final class SqlPrepRedemptionStoreTest extends EVC_Db_Test_Case {
         $v1 = $this->service()->redeem($this->request($member, 'greek_coffee', self::R1));
         $this->assertSame(EVC_Redemption_Result::REDEEMED, $v1->outcome());
 
-        $this->assertSame(array(4), $this->migrate());
+        $this->assertSame(array(4), $this->migrate(4));
         $row = $this->db->fetch_one('SELECT * FROM evc_redemptions');
         $this->assertSame('greek_coffee', $row['coffee_code']);
         foreach (array('fingerprint_version', 'catalogue_version', 'prep_hash', 'snapshot_hash') as $column) {

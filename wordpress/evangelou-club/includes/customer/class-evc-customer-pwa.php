@@ -19,7 +19,8 @@ defined('ABSPATH') || exit;
  *
  * Nothing here is personal: the manifest and the worker are the same for every visitor (no sign-in needed: a browser
  * fetches the manifest without cookies), they carry no nonce, and the worker never stores a page or a REST answer
- * (app/src/customer/pwa/swRules.ts).
+ * (app/src/customer/pwa/swRules.ts). Round 12 (D26 part 2): the worker also shows push notifications and opens the
+ * member page on a tap (app/src/customer/pwa/swPush.ts); its configuration names the notification icon.
  */
 final class EVC_Customer_Pwa {
     const MANIFEST = 'manifest';
@@ -138,6 +139,8 @@ final class EVC_Customer_Pwa {
             'precache' => $precache,
             'restPrefixes' => self::rest_prefixes(),
             'offline' => array('scripts' => $resolved['scripts'], 'styles' => $resolved['styles'], 'appVersion' => EVC_CLUB_VERSION),
+            // Round 12 (D26 part 2): the icon a notification shows (the app's own, same origin).
+            'icon' => rtrim($asset_url, '/') . '/pwa/' . self::ICONS[0]['file'],
         );
         $headers = self::headers(self::WORKER_CSP);
         $headers['Content-Type'] = 'text/javascript; charset=utf-8';

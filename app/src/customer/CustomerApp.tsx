@@ -15,6 +15,8 @@ import type { MemberQrFlow, MemberQrState } from "./memberQr";
 import { MemberQrPanel } from "./MemberQrPanel";
 import { InstallHint } from "./InstallHint";
 import type { InstallHintFlow } from "./pwa/installHint";
+import { PushControl } from "./PushControl";
+import type { MemberPushFlow } from "./pwa/push";
 
 /*
  * STAGE-01 REAL customer app (served by WordPress at /club-member/, flag-gated).
@@ -81,6 +83,7 @@ export function CustomerApp({
   historyFlow,
   timers = REAL_TIMERS,
   installHint,
+  pushFlow,
 }: {
   config: CustomerConfig;
   api: CustomerApi;
@@ -96,6 +99,8 @@ export function CustomerApp({
   timers?: MidnightTimers;
   /** Round 11 (D26): «Εγκατάσταση στο κινητό», shown below the member area only. */
   installHint?: InstallHintFlow;
+  /** Round 12 (D26 part 2): «Ειδοποιήσεις», shown below the member area only. */
+  pushFlow?: MemberPushFlow;
 }) {
   const [result, setResult] = useState<MeResult | null>(null);
   const qrState = useSyncExternalStore(qrFlow?.subscribe ?? noSubscribe, qrFlow?.getState ?? (() => NO_QR));
@@ -138,6 +143,8 @@ export function CustomerApp({
     // The phone's QR record and the in-memory copy go BEFORE WordPress signs the account out.
     void (async () => {
       await qrFlow?.forget();
+      // Round 12: the next account on this phone never gets this member's notifications.
+      await pushFlow?.signOut();
       navigate(config.logoutUrl);
     })();
   };
@@ -184,6 +191,10 @@ export function CustomerApp({
       historyFlow.pause();
     };
   }, [account, historyFlow]);
+  // Round 12 (D26 part 2): what the notifications control shows is decided once the member area is open (no prompt).
+  useEffect(() => {
+    if (account !== null) void pushFlow?.open();
+  }, [account, pushFlow]);
   // LOW-2: re-render just after the next Athens midnight (and ask for the new day's figures and history).
   useEffect(() => {
     if (account === null) return;
@@ -266,6 +277,7 @@ export function CustomerApp({
   return (
     <div ref={root} className="evc-ds" data-evc-customer="app" data-evc-customer-state={result?.kind === "ok" ? result.me.state : (result?.kind ?? "loading")}>
       {body}
+      {result?.kind === "ok" && pushFlow && <PushControl flow={pushFlow} />}
       {result?.kind === "ok" && installHint && <InstallHint flow={installHint} />}
     </div>
   );

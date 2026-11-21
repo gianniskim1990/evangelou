@@ -4,8 +4,10 @@ import "../index.css";
 import "../preview/preview.css";
 import { CONFIG_ELEMENT_ID, parseCustomerConfig } from "./config";
 import { CustomerApp, OfflineApp } from "./CustomerApp";
-import { InstallHintFlow, isIosSafari, isStandalone } from "./pwa/installHint";
-import { registerMemberWorker } from "./pwa/register";
+import { InstallHintFlow, isIosDevice, isIosSafari, isStandalone } from "./pwa/installHint";
+import { MemberPushFlow } from "./pwa/push";
+import { pushManagerOf, registerMemberWorker } from "./pwa/register";
+import { createCustomerPushApi } from "./pushApi";
 import { createCustomerCoffeesApi } from "./coffeesApi";
 import { createCustomerApi, createNonceBox } from "./customerApi";
 import { MemberCoffeesFlow } from "./memberCoffees";
@@ -76,9 +78,23 @@ if (root) {
       const coffeesFlow = new MemberCoffeesFlow(createCustomerCoffeesApi(parsed.config, nonce));
       // D24: the member card's own last coffees (read only, never the staff note).
       const historyFlow = new MemberHistoryFlow(createCustomerHistoryApi(parsed.config, nonce));
+      // Round 12 (D26 part 2): «Θέλω ειδοποιήσεις»; nothing is asked of the browser before the member taps it.
+      const win = window as unknown as { Notification?: { permission: string; requestPermission(): Promise<string> }; PushManager?: unknown };
+      const pushFlow = new MemberPushFlow(
+        {
+          publicKey: parsed.config.pushPublicKey ?? "",
+          worker: Boolean(parsed.config.serviceWorker),
+          standalone: () => isStandalone(window as never),
+          ios: isIosDevice(navigator.userAgent, navigator.maxTouchPoints ?? 0),
+          notification: win.Notification ?? null,
+          pushSupported: typeof win.PushManager !== "undefined",
+          pushManager: () => pushManagerOf(parsed.config.serviceWorker ?? null, navigator as never),
+        },
+        createCustomerPushApi(parsed.config, nonce),
+      );
       createRoot(root).render(
         <StrictMode>
-          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} coffeesFlow={coffeesFlow} historyFlow={historyFlow} installHint={installHint} navigate={(url) => window.location.assign(url)} />
+          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} coffeesFlow={coffeesFlow} historyFlow={historyFlow} installHint={installHint} pushFlow={pushFlow} navigate={(url) => window.location.assign(url)} />
         </StrictMode>,
       );
     }

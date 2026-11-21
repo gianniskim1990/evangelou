@@ -13,6 +13,7 @@ final class EVC_Readiness_Page {
         'flags' => 'Ρυθμίσεις ενεργοποίησης (wp-config.php)',
         'shop' => 'Κατάστημα',
         'crm' => 'Το FluentCRM',
+        'push' => 'Ειδοποιήσεις μελών',
         'server' => 'Διακομιστής',
         'staff' => 'Ταμείο',
     );
