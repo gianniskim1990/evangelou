@@ -1600,7 +1600,8 @@ function pwaSelfTest() {
 //      array('EVC_Push_Sender', 'post'), array(EVC_Push_Sender::class, 'post')) outside the sender.
 //    Round 14 (review f): a variable "looks like a URL" only by a whole word of its name (url, uri, endpoint, host,
 //    hostname, href, … as a snake_case / camelCase part; $ghost or $security do not), and property arguments count:
-//    file_get_contents($this->url) elsewhere, error_log($this->endpoint) in a push file.
+//    file_get_contents($this->url) elsewhere, error_log($this->endpoint) in a push file. Round 15 (nit): a method call
+//    ($this->url(), $o?->endpoint()) is not a property argument, for URLs exactly as for secrets.
 //    LIMITS — these guards are ACCIDENT PREVENTION, NOT AN ANTI-EVASION BOUNDARY. They read tokens of each shipped file
 //    on its own; they do not follow data. Code written to evade them (names built by string concatenation outside the
 //    push files, variable variables, include of generated files, callbacks handed to WordPress or to a third-party
