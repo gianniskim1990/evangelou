@@ -1586,6 +1586,23 @@ function pwaSelfTest() {
 //      file_put_contents, …) whose arguments carry an endpoint, a key, a subscription row, the payload or the keys;
 //    - the campaign, the automatic notifications and the admin page never name 'endpoint', 'p256dh' or 'auth' in a
 //      string (their audit entries and pages hold counts only).
+//    Round 13 (review N-d / N-e), cheap widenings:
+//    - PHP's URL-capable file and stream functions: in a push file (the sender included: it uses wp_remote_post() only)
+//      ANY call of file_get_contents / fopen / file / readfile / copy / get_headers / stream_context_create /
+//      stream_socket_client / fsockopen / socket_connect / … is refused; in any other shipped file the always-network
+//      ones (get_headers, get_meta_tags, stream_context_create, socket_connect) are refused, and the file ones when an
+//      argument is a URL string (scheme://, except php://) or a variable named like a URL / endpoint / host;
+//    - the Requests library under its namespace (WpOrg\Requests\…), static calls and callable strings
+//      ('Requests::post', 'WP_Http::…') outside the sender;
+//    - in a push file: variable functions ($f(…)), call_user_func[_array] / forward_static_call[_array], eval, any
+//      Reflection* class and Closure::fromCallable;
+//    - the sender's real request (EVC_Push_Sender::post) called or named as a callable (static call, 'EVC_Push_Sender::post',
+//      array('EVC_Push_Sender', 'post'), array(EVC_Push_Sender::class, 'post')) outside the sender.
+//    LIMITS — these guards are ACCIDENT PREVENTION, NOT AN ANTI-EVASION BOUNDARY. They read tokens of each shipped file
+//    on its own; they do not follow data. Code written to evade them (names built by string concatenation outside the
+//    push files, variable variables, include of generated files, callbacks handed to WordPress or to a third-party
+//    library, a WordPress filter that rewrites a request, …) is not detected. Review stays the boundary; the guards stop
+//    the honest mistake (a second HTTP path, a key in a log line) from shipping unnoticed. Also in docs/member-push.md.
 const PUSH_BOOTSTRAP = "includes/push/class-evc-push-plugin.php";
 const PUSH_FILES = [
   PUSH_BOOTSTRAP,
@@ -1615,6 +1632,12 @@ export const PUSH_RULES = Object.freeze({
   pureFiles: ["includes/class-evc-push-crypto.php", "includes/class-evc-push-vapid.php", "includes/class-evc-push-endpoint.php", "includes/class-evc-push-message.php", "includes/class-evc-sql-push-subscription-store.php"],
   countsOnlyFiles: ["includes/push/class-evc-push-campaign.php", "includes/push/class-evc-push-auto.php", "includes/push/class-evc-push-admin-page.php"],
 });
+// Round 13: URL-capable file / stream / socket functions (see the header above).
+const PUSH_URL_IO = ["file_get_contents", "fopen", "file", "readfile", "copy", "get_headers", "get_meta_tags", "stream_context_create", "stream_socket_client", "fsockopen", "pfsockopen", "socket_create", "socket_connect", "simplexml_load_file", "parse_ini_file", "getimagesize", "exif_read_data", "md5_file", "sha1_file", "hash_file"];
+const PUSH_ALWAYS_NETWORK = ["get_headers", "get_meta_tags", "stream_context_create", "socket_connect"];
+const PUSH_URL_FILE = ["file_get_contents", "fopen", "file", "readfile", "copy", "simplexml_load_file", "getimagesize", "md5_file", "sha1_file", "hash_file"];
+const PUSH_DYNAMIC_CALLS = ["call_user_func", "call_user_func_array", "forward_static_call", "forward_static_call_array", "eval"];
+const looksLikeUrl = (t) => (t.t === "str" && /^[a-z][a-z0-9+.-]*:\/\//i.test(t.v) && !/^php:\/\//i.test(t.v)) || (t.t === "var" && /url|uri|endpoint|host/i.test(t.v));
 const PUSH_HTTP = ["wp_remote_post", "wp_remote_get", "wp_remote_request", "wp_remote_head", "wp_safe_remote_post", "wp_safe_remote_get", "wp_safe_remote_request", "wp_safe_remote_head", "curl_init", "curl_exec", "curl_multi_exec", "fsockopen", "pfsockopen", "stream_socket_client", "wp_http", "requests", "_wp_http_get_object", "download_url"];
 const PUSH_LOG = ["error_log", "print_r", "var_export", "var_dump", "trigger_error", "user_error", "syslog", "file_put_contents", "fwrite", "fputs", "printf", "vprintf", "wp_die", "wp_mail", "set_transient", "update_option", "add_option", "update_user_meta", "do_action", "apply_filters"];
 const PUSH_SECRET_VAR = /endpoint|p256dh|auth|private|secret|subscription|^\$row$|payload|^\$keys?$|sending|^\$body$|^\$json$/i;
@@ -1640,6 +1663,25 @@ export function pushProblemsFor(path, src, rules = PUSH_RULES) {
     if (pushFile && tk.t === "id" && call && !member && PUSH_LOG.includes(v) && carriesPushSecret(argumentTokens(tokens, k + 1))) problems.push(`${path}: ${tk.v}() with an endpoint, a key or a payload`);
     if (pushFile && (tk.v === "echo" || tk.v === "print") && carriesPushSecret(tokens.slice(k + 1, tokens.findIndex((t, j) => j > k && t.v === ";")))) problems.push(`${path}: prints an endpoint, a key or a payload`);
     if (rules.countsOnlyFiles.includes(path) && tk.t === "str" && ["endpoint", "p256dh", "auth", "endpoint_hash"].includes(tk.v.toLowerCase())) problems.push(`${path}: names '${tk.v}' (audit entries and pages hold counts only)`);
+    // ---- round 13 (N-d / N-e) ----
+    const callId = tk.t === "id" && call && !member && tokens[k - 1]?.v.toLowerCase() !== "function";
+    if (callId && pushFile && PUSH_URL_IO.includes(v)) problems.push(`${path}: ${tk.v}() in a push file (it can open a URL; push HTTP goes through the sender's wp_remote_post only)`);
+    else if (callId && path !== rules.senderFile && PUSH_ALWAYS_NETWORK.includes(v)) problems.push(`${path}: ${tk.v}() makes a network request outside the push sender`);
+    else if (callId && path !== rules.senderFile && PUSH_URL_FILE.includes(v) && argumentTokens(tokens, k + 1).some(looksLikeUrl)) problems.push(`${path}: ${tk.v}() with a URL outside the push sender`);
+    if (tk.t === "id" && path !== rules.senderFile && (/^wporg\\requests(\\|$)/.test(v) || v.endsWith("\\wp_http") || v.endsWith("\\requests"))) problems.push(`${path}: names the Requests HTTP library (${tk.v}) outside the push sender`);
+    if (tk.t === "str" && path !== rules.senderFile && (/^(requests|wp_http)::/.test(v) || v.startsWith("wporg\\requests"))) problems.push(`${path}: a callable string names an HTTP class (${tk.v}) outside the push sender`);
+    if (pushFile && tk.t === "var" && call && !member) problems.push(`${path}: variable function ${tk.v}() in a push file`);
+    if (pushFile && callId && PUSH_DYNAMIC_CALLS.includes(v)) problems.push(`${path}: ${tk.v}() in a push file`);
+    if (pushFile && tk.t === "id" && v.startsWith("reflection")) problems.push(`${path}: ${tk.v} in a push file`);
+    if (pushFile && tk.t === "id" && v === "closure" && tokens[k + 1]?.v === "::" && (tokens[k + 2]?.v ?? "").toLowerCase() === "fromcallable") problems.push(`${path}: Closure::fromCallable in a push file`);
+    if (path !== rules.senderFile) {
+      const nameIsSender = (t) => t && (t.t === "id" || t.t === "str") && bare(t.v).toLowerCase() === "evc_push_sender";
+      const isPost = (t) => t && (t.t === "id" || t.t === "str") && t.v.toLowerCase() === "post";
+      if (nameIsSender(tk) && tk.t === "id" && tokens[k + 1]?.v === "::" && isPost(tokens[k + 2])) problems.push(`${path}: EVC_Push_Sender::post outside the sender`);
+      if (nameIsSender(tk) && tk.t === "id" && tokens[k + 1]?.v === "::" && (tokens[k + 2]?.v ?? "").toLowerCase() === "class" && tokens[k + 3]?.v === "," && isPost(tokens[k + 4])) problems.push(`${path}: callable array (EVC_Push_Sender::class, 'post') outside the sender`);
+      if (nameIsSender(tk) && tk.t === "str" && tokens[k + 1]?.v === "," && isPost(tokens[k + 2])) problems.push(`${path}: callable array ('EVC_Push_Sender', 'post') outside the sender`);
+      if (tk.t === "str" && v.replace(/\s+/g, "") === "evc_push_sender::post") problems.push(`${path}: callable string 'EVC_Push_Sender::post' outside the sender`);
+    }
   });
   return problems;
 }
@@ -1697,6 +1739,38 @@ function pushSelfTest() {
   expect("a fixed reason logged", "includes/push/class-evc-push-backend.php", "<?php\nerror_log('Evangelou Club: push unavailable (' . $reason . ').');", false);
   expect("an endpoint in the audit", "includes/push/class-evc-push-campaign.php", "<?php\n$entry = array('endpoint' => $x);", true);
   expect("auth in the admin page", "includes/push/class-evc-push-admin-page.php", "<?php\n$x = $r['auth'];", true);
+  // round 13 (N-d / N-e)
+  const C = "includes/push/class-evc-push-campaign.php";
+  expect("r13 file_get_contents in a push file", C, "<?php\n$x = file_get_contents($p);", true);
+  expect("r13 fopen in the sender", R.senderFile, "<?php\n$h = fopen($u, 'r');", true);
+  expect("r13 get_headers in a pure push file", "includes/class-evc-push-endpoint.php", "<?php\n$h = get_headers('https://x');", true);
+  expect("r13 get_headers anywhere", "includes/customer/x.php", "<?php\n$h = get_headers($a);", true);
+  expect("r13 stream_context_create anywhere", "includes/x.php", "<?php\n$c = stream_context_create(array());", true);
+  expect("r13 fsockopen anywhere", "includes/x.php", "<?php\n$s = fsockopen($h, 443);", true);
+  expect("r13 stream_socket_client anywhere", "includes/x.php", "<?php\n$s = stream_socket_client('tls://a:443');", true);
+  expect("r13 file_get_contents of a URL string", "includes/x.php", "<?php\n$x = file_get_contents('https://fcm.googleapis.com/x');", true);
+  expect("r13 file_get_contents of a URL variable", "includes/x.php", "<?php\n$x = file_get_contents($endpoint);", true);
+  expect("r13 fopen of an http string", "includes/x.php", "<?php\n$h = fopen('http://a/' . $p, 'r');", true);
+  expect("r13 file_get_contents of a local file elsewhere", "includes/customer/x.php", "<?php\n$x = file_get_contents($script_file);", false);
+  expect("r13 php://input elsewhere", "includes/x.php", "<?php\n$x = file_get_contents('php://input');", false);
+  expect("r13 namespaced Requests static call", "includes/x.php", "<?php\n$r = \\WpOrg\\Requests\\Requests::request($u);", true);
+  expect("r13 namespaced Requests use", "includes/x.php", "<?php\nuse WpOrg\\Requests\\Requests;", true);
+  expect("r13 Requests callable string", "includes/x.php", "<?php\nadd_action('x', 'Requests::post');", true);
+  expect("r13 WP_Http callable string", "includes/x.php", "<?php\n$f = 'WP_Http::request';", true);
+  expect("r13 variable function in a push file", C, "<?php\n$f = 'x';\n$f($u);", true);
+  expect("r13 seam call through a property is fine", C, "<?php\n$t = ($this->timer)();", false);
+  expect("r13 call_user_func in a push file", "includes/push/class-evc-push-auto.php", "<?php\ncall_user_func($cb, 1);", true);
+  expect("r13 call_user_func_array in a push file", C, "<?php\ncall_user_func_array(array($o, 'm'), $a);", true);
+  expect("r13 eval in a push file", C, "<?php\neval($code);", true);
+  expect("r13 ReflectionFunction in a push file", C, "<?php\n$r = new ReflectionFunction('f');", true);
+  expect("r13 ReflectionProperty in a push file", "includes/push/class-evc-push-admin-page.php", "<?php\n$r = new ReflectionProperty($o, 'campaign');", true);
+  expect("r13 Closure::fromCallable in a push file", C, "<?php\n$f = Closure::fromCallable('x');", true);
+  expect("r13 the sender's post called from the campaign", C, "<?php\n$s = EVC_Push_Sender::post($u, $h, $b);", true);
+  expect("r13 the sender's post as a callable array", "includes/push/class-evc-push-plugin.php", "<?php\n$h = array('EVC_Push_Sender', 'post');", true);
+  expect("r13 the sender's post as ::class callable", C, "<?php\n$h = array(EVC_Push_Sender::class, 'post');", true);
+  expect("r13 the sender's post as a string", "includes/push/class-evc-push-auto.php", "<?php\n$h = 'EVC_Push_Sender::post';", true);
+  expect("r13 the sender names its own post", R.senderFile, "<?php\n$this->http = $http ?? array(__CLASS__, 'post');", false);
+  expect("r13 the sender's constants elsewhere", C, "<?php\nif ($o === EVC_Push_Sender::SENT) { }", false);
   return bad;
 }
 

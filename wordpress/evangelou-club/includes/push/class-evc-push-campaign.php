@@ -17,7 +17,20 @@ defined('ABSPATH') || exit;
  * per batch) and by WP-Cron (CRON_HOOK, rescheduled while the job runs), whichever comes first.
  * 404 / 410 from a push service revokes the subscription ('gone'); other failures only count.
  *
- * Rate limit: at most MAX_PER_DAY started sends in any 24 hours and at least MIN_INTERVAL seconds between two.
+ * Locks (round 13): a job is only ever changed by the holder of the WordPress-database named lock (lock_name()).
+ *   - GET_LOCK answering NULL or failing = no lock = NOTHING is sent (NO_LOCK, fail closed; never unlocked).
+ *   - GET_LOCK is re-entrant on one MySQL connection; this class is not: a request that already holds a lock is refused
+ *     it again (so a nested call behaves like a second runner).
+ * «Διακοπή αποστολής» (cancel(), round 13 M1): the request is first written as its own row (CANCEL_OPTION = the job id,
+ *   one INSERT … ON DUPLICATE KEY UPDATE, never through the job option that the running batch rewrites). If the lock is
+ *   free, cancel() ends the job itself, under the lock. If a batch holds it, cancel() answers CANCEL_PENDING and that
+ *   batch reads the request again straight from the database (not the object cache) before EVERY message and ends the
+ *   job as 'cancelled'. So 'cancelled' is only ever written under the lock, after which no batch runs: the audit never
+ *   shows 'cancelled' followed by 'done'.
+ *
+ * Rate limit: at most MAX_PER_DAY started sends in any 24 hours and at least MIN_INTERVAL seconds between two, counted
+ * from their own small store (STARTS_OPTION, the newest STARTS_KEEP start times, written under the lock), not from the
+ * audit (automatic notifications add audit entries and could push the starts out of its AUDIT_KEEP entries).
  * Audit (option AUDIT_OPTION, newest AUDIT_KEEP entries): who (user id and login), when, audience (+ days), the planned
  * count and the result counts. NEVER an endpoint, a key, a member, a name, an e-mail address or the message text.
  */
@@ -25,6 +38,11 @@ final class EVC_Push_Campaign {
     const JOB_OPTION = 'evc_club_push_job';
     const AUDIT_OPTION = 'evc_club_push_audit';
     const AUDIT_KEEP = 100;
+    /** Round 13: the pending «Διακοπή αποστολής» request: '<job id>:<user id>'. */
+    const CANCEL_OPTION = 'evc_club_push_cancel';
+    /** Round 13 (N-c): Unix times of the newest started sends, newest first. */
+    const STARTS_OPTION = 'evc_club_push_starts';
+    const STARTS_KEEP = 10;
     const CRON_HOOK = 'evc_club_push_batch';
     const BATCH_SIZE = 25;
     const TIME_BUDGET = 15;
@@ -42,6 +60,14 @@ final class EVC_Push_Campaign {
     const INVALID = 'invalid';
     const UNAVAILABLE = 'unavailable';
     const NONE = 'none';
+    /** Round 13: the cancel request is recorded; the batch in flight stops before its next message. */
+    const CANCEL_PENDING = 'cancel_pending';
+    /** Round 13 (N-a): the database gave no named lock (NULL or an error): nothing is sent. */
+    const NO_LOCK = 'no_lock';
+    const CANCELLED = 'cancelled';
+
+    /** @var array<string,bool> named locks this request holds */
+    private static $held = array();
 
     /** @var EVC_Push_Backend */
     private $backend;
@@ -138,21 +164,71 @@ final class EVC_Push_Campaign {
         return is_array($job) ? $job : null;
     }
 
+    /** The job as the database holds it now (another request may have changed it since this one cached it). */
+    public static function fresh_job(): ?array {
+        $job = self::fresh_option(self::JOB_OPTION);
+        return is_array($job) ? $job : null;
+    }
+
+    /**
+     * An option read straight from the database, never from the object cache (a persistent cache or this request's
+     * own cache can hold a value another request has changed). null = no such option.
+     */
+    public static function fresh_option(string $name) {
+        global $wpdb;
+        wp_cache_delete($name, 'options');
+        $raw = $wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1", $name));
+        return $raw === null ? null : maybe_unserialize($raw);
+    }
+
+    /** Is a «Διακοπή αποστολής» request recorded for this (running) job? For the administrator's page. */
+    public static function cancel_pending_for(array $job): bool {
+        return self::cancel_request_for($job) !== null;
+    }
+
+    /** @return int|null the user id of the recorded cancel request for this job (0 if unknown), null = none */
+    private static function cancel_request_for(array $job): ?int {
+        $flag = self::fresh_option(self::CANCEL_OPTION);
+        if (!is_string($flag) || preg_match('/^([0-9a-f]{16}):([0-9]{1,20})$/D', $flag, $m) !== 1 || $m[1] !== (string) ($job['id'] ?? '')) {
+            return null;
+        }
+        return (int) $m[2];
+    }
+
+    /** Records the cancel request in ONE statement (atomic upsert), outside the job option the batch rewrites. */
+    private static function record_cancel_request(string $job_id, int $user_id): void {
+        global $wpdb;
+        $wpdb->query($wpdb->prepare(
+            "INSERT INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no') ON DUPLICATE KEY UPDATE option_value = VALUES(option_value)",
+            self::CANCEL_OPTION,
+            $job_id . ':' . $user_id
+        ));
+        wp_cache_delete(self::CANCEL_OPTION, 'options');
+        wp_cache_delete('notoptions', 'options');
+    }
+
     /** @return array<int,array<string,mixed>> newest first */
     public static function audit(): array {
         $audit = get_option(self::AUDIT_OPTION, array());
         return is_array($audit) ? array_values($audit) : array();
     }
 
-    /** Seconds until another send may start (0 = now), from the audit of started sends. */
-    public static function wait_seconds(int $now): int {
+    /** Unix times of the newest started sends (newest first), from their own store (never the audit). */
+    public static function starts(): array {
+        $stored = self::fresh_option(self::STARTS_OPTION);
         $starts = array();
-        foreach (self::audit() as $entry) {
-            if (is_array($entry) && ($entry['event'] ?? '') === 'started' && isset($entry['at'])) {
-                $starts[] = (int) $entry['at'];
+        foreach (is_array($stored) ? $stored : array() as $at) {
+            if (is_int($at) || (is_string($at) && ctype_digit($at))) {
+                $starts[] = (int) $at;
             }
         }
         rsort($starts);
+        return $starts;
+    }
+
+    /** Seconds until another send may start (0 = now), from the store of started sends. */
+    public static function wait_seconds(int $now): int {
+        $starts = self::starts();
         $wait = 0;
         if ($starts !== array() && $now - $starts[0] < self::MIN_INTERVAL) {
             $wait = self::MIN_INTERVAL - ($now - $starts[0]);
@@ -174,13 +250,16 @@ final class EVC_Push_Campaign {
         if (EVC_Push_Message::problem($title, $body) !== null || !self::valid_audience($audience, $audience === 'expiring' ? $days : 0)) {
             return array('result' => self::INVALID);
         }
-        $lock = $this->lock();
-        if ($lock === false) {
+        $lock = self::acquire_lock(self::lock_name());
+        if ($lock === null) {
+            return array('result' => self::NO_LOCK);
+        }
+        if ($lock !== true) {
             return array('result' => self::BUSY);
         }
         try {
             $now = time();
-            $job = self::job();
+            $job = self::fresh_job();
             if ($job !== null && ($job['state'] ?? '') === 'running') {
                 if ($now - (int) ($job['touched'] ?? 0) < self::STALE_SECONDS) {
                     return array('result' => self::BUSY);
@@ -210,46 +289,76 @@ final class EVC_Push_Campaign {
                 'removed' => 0,
                 'skipped' => 0,
             );
+            delete_option(self::CANCEL_OPTION);
+            update_option(self::STARTS_OPTION, array_slice(array_merge(array($now), self::starts()), 0, self::STARTS_KEEP), false);
             update_option(self::JOB_OPTION, $job, false);
             $this->record('started', $job);
             $this->schedule($job);
             return array('result' => self::OK);
         } finally {
-            $this->unlock($lock);
-        }
-    }
-
-    /** «Διακοπή αποστολής»: the running job stops after the message in flight. @return string OK | NONE */
-    public function cancel(WP_User $user): string {
-        $lock = $this->lock(5);
-        try {
-            $job = self::job();
-            if ($job === null || ($job['state'] ?? '') !== 'running') {
-                return self::NONE;
-            }
-            $job['cancelled_by'] = (int) $user->ID;
-            $this->finish($job, 'cancelled');
-            return self::OK;
-        } finally {
-            if ($lock !== false) {
-                $this->unlock($lock);
-            }
+            self::release_lock(self::lock_name());
         }
     }
 
     /**
+     * «Διακοπή αποστολής». The request is recorded first; the job is ended here only while holding the lock.
+     * @return string OK (stopped now) | CANCEL_PENDING (a batch holds the lock, or there is no lock: it stops before its
+     *                next message) | NONE (no running job)
+     */
+    public function cancel(WP_User $user): string {
+        $job = self::fresh_job();
+        if ($job === null || ($job['state'] ?? '') !== 'running') {
+            return self::NONE;
+        }
+        self::record_cancel_request((string) $job['id'], (int) $user->ID);
+        $lock = self::acquire_lock(self::lock_name());
+        if ($lock !== true) {
+            return self::CANCEL_PENDING;
+        }
+        try {
+            $job = self::fresh_job();
+            if ($job === null || ($job['state'] ?? '') !== 'running') {
+                return self::NONE;
+            }
+            $job['cancelled_by'] = (int) $user->ID;
+            $this->finish($job, self::CANCELLED);
+            return self::OK;
+        } finally {
+            self::release_lock(self::lock_name());
+        }
+    }
+
+    /** Under the lock: a recorded cancel request for this job ends it now. @return bool true = ended */
+    private function cancelled_now(array $job): bool {
+        $by = self::cancel_request_for($job);
+        if ($by === null) {
+            return false;
+        }
+        $job['cancelled_by'] = $by;
+        $this->finish($job, self::CANCELLED);
+        return true;
+    }
+
+    /**
      * One batch of the running job (from the page or WP-Cron). Never two at a time (database lock; a second caller
-     * returns at once). @return string the job state after the batch ('running', 'done', 'stopped', 'none', 'busy')
+     * returns at once). @return string the job state after the batch ('running', 'done', 'stopped', 'cancelled', 'none',
+     * 'busy', 'no_lock': without a named lock nothing is sent)
      */
     public function step(): string {
-        $lock = $this->lock();
-        if ($lock === false) {
+        $lock = self::acquire_lock(self::lock_name());
+        if ($lock === null) {
+            return self::NO_LOCK;
+        }
+        if ($lock !== true) {
             return self::BUSY;
         }
         try {
-            $job = self::job();
+            $job = self::fresh_job();
             if ($job === null || ($job['state'] ?? '') !== 'running') {
                 return self::NONE;
+            }
+            if ($this->cancelled_now($job)) {
+                return self::CANCELLED;
             }
             $sending = $this->backend->sending();
             if ($sending === null) {
@@ -266,6 +375,9 @@ final class EVC_Push_Campaign {
             foreach ($rows as $row) {
                 if (($this->timer)() - $started >= self::TIME_BUDGET) {
                     break;
+                }
+                if ($this->cancelled_now($job)) {
+                    return self::CANCELLED;
                 }
                 $job['cursor'] = $row['id'];
                 if ($row['member_status'] !== 'enabled') {
@@ -292,7 +404,7 @@ final class EVC_Push_Campaign {
             $this->schedule($job);
             return 'running';
         } finally {
-            $this->unlock($lock);
+            self::release_lock(self::lock_name());
         }
     }
 
@@ -325,6 +437,7 @@ final class EVC_Push_Campaign {
         $job['title'] = '';
         $job['body'] = '';
         update_option(self::JOB_OPTION, $job, false);
+        delete_option(self::CANCEL_OPTION);
         $this->record($state, $job);
         wp_clear_scheduled_hook(self::CRON_HOOK, array((string) $job['id']));
     }
@@ -370,25 +483,47 @@ final class EVC_Push_Campaign {
         $this->step();
     }
 
-    /** A MySQL named lock on the WordPress database, per site; null = the server has no named locks (then unlocked). */
-    private function lock(int $timeout = self::LOCK_TIMEOUT) {
+    /**
+     * A MySQL named lock on the WordPress database (round 13: also used by EVC_Push_Auto).
+     * @return bool|null true = held now; false = busy (another runner, or this request already holds it);
+     *                   null = no named lock (GET_LOCK answered NULL or failed): the caller sends NOTHING (fail closed)
+     */
+    public static function acquire_lock(string $name, int $timeout = self::LOCK_TIMEOUT): ?bool {
         global $wpdb;
-        $held = $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, %d)', self::lock_name(), $timeout));
-        if ($held === null) {
+        if (isset(self::$held[$name])) {
+            return false;
+        }
+        $held = $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, %d)', $name, $timeout));
+        if ($held === null || (string) $wpdb->last_error !== '') {
             return null;
         }
-        return (string) $held === '1' ? true : false;
+        if ((string) $held !== '1') {
+            return false;
+        }
+        self::$held[$name] = true;
+        return true;
     }
 
-    private function unlock($lock): void {
+    /** Releases a lock this request holds (a lock it does not hold is left alone). */
+    public static function release_lock(string $name): void {
         global $wpdb;
-        if ($lock === true) {
-            $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', self::lock_name()));
+        if (isset(self::$held[$name])) {
+            unset(self::$held[$name]);
+            $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $name));
         }
+    }
+
+    private static function site_hash(): string {
+        global $wpdb;
+        return substr(hash('sha256', (defined('DB_NAME') ? DB_NAME : '') . '|' . $wpdb->prefix), 0, 16);
     }
 
     public static function lock_name(): string {
-        global $wpdb;
-        return 'evc_club_push_' . substr(hash('sha256', (defined('DB_NAME') ? DB_NAME : '') . '|' . $wpdb->prefix), 0, 16);
+        return 'evc_club_push_' . self::site_hash();
+    }
+
+    /** Round 13 (N-b): the automatic notifications' own lock (a running campaign does not hold them up). */
+    public static function auto_lock_name(): string {
+        return 'evc_club_push_auto_' . self::site_hash();
     }
 }

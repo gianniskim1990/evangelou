@@ -920,6 +920,11 @@ Details and the real-phone test steps: `docs/member-pwa.md`.
   `EVC_CLUB_PUSH_AUTO_EXPIRY`.
 - Packager guards: `PUSH_RULES` / `pushProblemsFor` (construction only in `EVC_Push_Plugin::wire()`, HTTP only in the
   sender, no endpoint / key / payload in a log, the private key constant only in `EVC_Push_Vapid`), `workerProblems`.
+- Round 13: «Διακοπή αποστολής» stored as its own row and applied only under the lock (a running batch stops before its
+  next message; the page says «Η διακοπή καταχωρήθηκε…» until the job really stopped); no named lock (`GET_LOCK` NULL /
+  error) = nothing sent; the automatic notifications run under their own lock; the rate limit has its own store. The
+  packager guards were widened and are documented as accident prevention, not an anti-evasion boundary. Server-side
+  sign-outs do not revoke push rows (documented in `docs/member-push.md`).
 
 Details, the owner steps and the real-phone tests: `docs/member-push.md`.
 

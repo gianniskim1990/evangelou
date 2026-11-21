@@ -78,6 +78,19 @@ created / updated, last success, success and consecutive failure counters, last 
   account on the same phone never gets the previous member's notifications).
 - `409 endpoint_in_use` (the browser's subscription is another member's active row): the app drops it, subscribes again
   (a new endpoint) and retries once.
+- **Server-side sign-outs do NOT revoke push rows (round 13, N-g; documented, not changed).** Only the app's own
+  «Αποσύνδεση» button removes the device's subscription (it DELETEs on the server and unsubscribes in the browser before
+  navigating). A sign-out that happens anywhere else — the WordPress session expiring, `wp-login.php?action=logout`
+  from another page, «Log out everywhere else», a password change, an administrator destroying the sessions — leaves the
+  row active, so that phone keeps receiving the member's notifications (title and text only: never a card, a QR or a
+  link other than the member page, which asks for a sign-in again). What limits the effect: (1) when another account
+  signs in on the same phone and turns notifications on, the browser's existing subscription is the first member's
+  active row → `409 endpoint_in_use` → the app drops that browser subscription and makes a new one, so from then on the
+  phone receives only the new member's notifications; (2) the member can tap «Διακοπή ειδοποιήσεων» any time; (3) a
+  browser that removes its subscription answers 404 / 410 at the next send and the row is revoked. **Why not revoke on
+  `wp_logout`:** the server cannot tell which of the member's rows belongs to the device that is signing out (a row is
+  not bound to a login session, and binding it would need a new column, i.e. a migration); revoking ALL the member's rows
+  would also silence their other phones. So nothing is revoked server-side.
 - The client never prompts on load; the opt-in state is the browser's own subscription (no browser storage is added).
 
 ## Service worker
@@ -95,6 +108,29 @@ batch, under a database lock; the open page submits the next batch itself, WP-Cr
 sent / failed / removed (404 / 410 → revoked). Rate limit: one send per 15 minutes, at most 4 per 24 hours. Audit
 (newest 100): who, when, audience, counts; never an endpoint, key, member or text.
 
+Round 13:
+
+- **«Διακοπή αποστολής» is never lost.** The stop is first stored as its own row (`evc_club_push_cancel` = the job id,
+  one `INSERT … ON DUPLICATE KEY UPDATE`, outside the job option that a running batch rewrites after every message). If no
+  batch holds the lock, the job ends at once («Η αποστολή διακόπηκε.»). If a batch is sending at that moment, the page
+  says «Η διακοπή καταχωρήθηκε, η αποστολή σταματά σε λίγα δευτερόλεπτα.» and the batch reads the stored stop again
+  straight from the database (never the object cache) before every message, then ends the job itself. «Η αποστολή
+  διακόπηκε» is shown only when the stored job really is «cancelled»; if the job had finished before the stop applied,
+  the page says «Η αποστολή είχε ήδη ολοκληρωθεί πριν από τη διακοπή.». Only the lock holder writes «cancelled», so the
+  audit never shows «cancelled» followed by «done». At most one message (the one in flight, ≤ 5 s timeout) goes after
+  the tap.
+- **Lock («Κλείδωμα»): no named lock = nothing is sent.** Sends use a MySQL / MariaDB named lock (`GET_LOCK`) of the
+  WordPress database. If the server answers `NULL` or an error (some clusters / proxies refuse named locks), nothing is
+  sent and the page says «Η βάση δεδομένων του ιστότοπου δεν επέτρεψε το κλείδωμα… Για ασφάλεια δεν στάλθηκε τίποτα.».
+  The technician must then use a database server that supports `GET_LOCK` (standard MySQL 5.7+ / 8, MariaDB 10.x do).
+  (This differs on purpose from the checkout lock of round 11, K5, which keeps working without named locks.)
+- **Automatic notifications** run under their own named lock (`evc_club_push_auto_…`), so two WP-Cron runners at once
+  never both send «Η συνδρομή σας ενεργοποιήθηκε» / «… λήγει σε 3 ημέρες» to a member; the second answers busy and the
+  event comes back a minute later. The «once per period» markers are read from the database under that lock. No named
+  lock = nothing is sent.
+- **Rate limit store:** the 15-minute / 4-a-day limit is counted from its own option (`evc_club_push_starts`, the newest
+  10 start times), not from the audit, which automatic entries can fill.
+
 ## Security notes
 
 - SSRF: only `https://` + exactly `fcm.googleapis.com`, `web.push.apple.com`, `updates.push.services.mozilla.com` or
@@ -103,6 +139,15 @@ sent / failed / removed (404 / 410 → revoked). Rate limit: one send per 15 min
 - Member isolation: the member is always `get_current_user_id()`; DELETE touches only the caller's row; POST never takes
   over another member's ACTIVE row.
 - No endpoint, key or text in any log or audit entry. The private key lives only in wp-config.php.
+- **Packager guards are accident prevention, not an anti-evasion boundary** (round 13). `pushProblemsFor` refuses, by
+  reading the tokens of each shipped file: outgoing HTTP outside the sender (wp_remote_*, curl_*, the Requests library
+  also under `WpOrg\Requests`, `WP_Http`, callable strings such as `'Requests::post'`), URL-capable file / stream
+  functions (`file_get_contents`, `fopen`, `get_headers`, `stream_socket_client`, `fsockopen`, … — any call in a push
+  file, a URL argument elsewhere), variable functions / `call_user_func` / `eval` / Reflection / `Closure::fromCallable`
+  in push files, and the sender's real request named as a callable outside the sender. It does not follow data: names
+  built by concatenation outside the push files, variable variables, included generated code, callbacks handed to
+  WordPress or a third-party library, or a filter that rewrites a request are not detected. Code review stays the
+  boundary; the guards stop an honest mistake from shipping unnoticed.
 
 ## Οδηγός για τον ιδιοκτήτη (απλά βήματα)
 
@@ -128,3 +173,12 @@ sent / failed / removed (404 / 410 → revoked). Rate limit: one send per 15 min
    ειδοποιήσεις», επιτρέψτε, και στείλτε μια δοκιμαστική όπως στο βήμα 7.
 9. **Αυτόματες ειδοποιήσεις** (προαιρετικά, μετά τις δοκιμές): `EVC_CLUB_PUSH_AUTO_ACTIVATED` και `EVC_CLUB_PUSH_AUTO_EXPIRY`,
    η καθεμία με `true`.
+10. **Διακοπή αποστολής:** αν πατήσετε «Διακοπή αποστολής» ενώ στέλνεται μια ομάδα μηνυμάτων, η σελίδα γράφει «Η διακοπή
+    καταχωρήθηκε, η αποστολή σταματά σε λίγα δευτερόλεπτα». Μετά από λίγα δευτερόλεπτα γράφει «Η αποστολή διακόπηκε».
+    Το πολύ ένα μήνυμα, αυτό που έφευγε εκείνη τη στιγμή, φτάνει μετά το πάτημα.
+11. **Κλείδωμα της βάσης:** αν η σελίδα γράψει ότι η βάση δεδομένων δεν επέτρεψε το κλείδωμα, δεν στάλθηκε τίποτα.
+    Ενημερώστε τον τεχνικό: ο διακομιστής της βάσης πρέπει να υποστηρίζει τα «επώνυμα κλειδώματα» της MySQL / MariaDB.
+12. **Αποσύνδεση:** μόνο το κουμπί «Αποσύνδεση» της κάρτας μέλους σταματά τις ειδοποιήσεις στο συγκεκριμένο κινητό. Αν η
+    σύνδεση λήξει μόνη της ή γίνει αποσύνδεση από άλλη σελίδα, το κινητό συνεχίζει να λαμβάνει τις ειδοποιήσεις του μέλους
+    (μόνο τίτλο και κείμενο), μέχρι το μέλος να πατήσει «Διακοπή ειδοποιήσεων» ή να ενεργοποιήσει ειδοποιήσεις άλλος
+    λογαριασμός στο ίδιο κινητό.

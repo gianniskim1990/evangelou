@@ -16,6 +16,12 @@ defined('ABSPATH') || exit;
  *                                 a long list continues one minute later from where it stopped (option RUN_OPTION).
  * Both use the same gated backend, sender and 404 / 410 revocation as the administrator's page; each run leaves one
  * audit entry with counts only.
+ *
+ * Round 13 (N-b): both run ONLY while holding their own named lock (EVC_Push_Campaign::auto_lock_name()), so two WP-Cron
+ * runners at once (WP-Cron can start the same event twice under load) can never both read «not sent yet» for a member
+ * and both send: the second one answers 'busy' (and comes back a minute later if nothing else is queued). Under the
+ * lock the «once per period» markers and the run state are read straight from the database, never from a cache.
+ * GET_LOCK answering NULL or failing = nothing is sent ('no_lock', fail closed).
  */
 final class EVC_Push_Auto {
     const ACTIVATED_HOOK = 'evc_club_push_activated';
@@ -100,12 +106,31 @@ final class EVC_Push_Auto {
     /** WP-Cron: «Η συνδρομή σας ενεργοποιήθηκε», only for an active membership, once per paid period. @return string what happened */
     public function activated($wp_user_id): string {
         $wp_user_id = (int) $wp_user_id;
+        $lock = EVC_Push_Campaign::acquire_lock(EVC_Push_Campaign::auto_lock_name());
+        if ($lock === null) {
+            return 'no_lock';
+        }
+        if ($lock !== true) {
+            if ($wp_user_id > 0 && !wp_next_scheduled(self::ACTIVATED_HOOK, array($wp_user_id))) {
+                wp_schedule_single_event(time() + 60, self::ACTIVATED_HOOK, array($wp_user_id));
+            }
+            return 'busy';
+        }
+        try {
+            return $this->activated_locked($wp_user_id);
+        } finally {
+            EVC_Push_Campaign::release_lock(EVC_Push_Campaign::auto_lock_name());
+        }
+    }
+
+    /** activated() under the automatic notifications' lock. */
+    private function activated_locked(int $wp_user_id): string {
         $now = EVC_Clock::to_utc($this->backend->clock()->now());
         $m = $this->read($wp_user_id, $now);
         if ($m === null || $m['state'] !== EVC_Customer_Membership::ACTIVE || !is_string($m['paid_until_utc'])) {
             return 'not_active';
         }
-        if ((string) get_user_meta($wp_user_id, self::ACTIVATED_META, true) === $m['paid_until_utc']) {
+        if (self::fresh_marker($wp_user_id, self::ACTIVATED_META) === $m['paid_until_utc']) {
             return 'already';
         }
         $sending = $this->backend->sending();
@@ -120,10 +145,30 @@ final class EVC_Push_Auto {
 
     /** WP-Cron, 10:00 Athens: «Η συνδρομή σας λήγει σε 3 ημέρες». @return string 'done' | 'continued' | 'unavailable' */
     public function expiry(): string {
+        $lock = EVC_Push_Campaign::acquire_lock(EVC_Push_Campaign::auto_lock_name());
+        if ($lock === null) {
+            $this->schedule_next();
+            return 'no_lock';
+        }
+        if ($lock !== true) {
+            if (!wp_next_scheduled(self::EXPIRY_HOOK)) {
+                wp_schedule_single_event(time() + 60, self::EXPIRY_HOOK);
+            }
+            return 'busy';
+        }
+        try {
+            return $this->expiry_locked();
+        } finally {
+            EVC_Push_Campaign::release_lock(EVC_Push_Campaign::auto_lock_name());
+        }
+    }
+
+    /** expiry() under the automatic notifications' lock. */
+    private function expiry_locked(): string {
         $now = EVC_Clock::to_utc($this->backend->clock()->now());
         $today = $now->setTimezone(new DateTimeZone(self::ZONE))->format('Y-m-d');
         $target = $now->setTimezone(new DateTimeZone(self::ZONE))->modify('+' . self::DAYS_AHEAD . ' days')->format('Y-m-d');
-        $run = get_option(self::RUN_OPTION, array());
+        $run = EVC_Push_Campaign::fresh_option(self::RUN_OPTION);
         $run = is_array($run) && ($run['date'] ?? '') === $today ? $run : array('date' => $today, 'after' => 0, 'done' => false, 'sent' => 0, 'failed' => 0, 'removed' => 0, 'members' => 0);
         if (!empty($run['done'])) {
             $this->schedule_next();
@@ -151,7 +196,7 @@ final class EVC_Push_Auto {
                 $m = $this->read($wp_user_id, $now);
                 if ($m !== null && $m['state'] === EVC_Customer_Membership::ACTIVE && is_string($m['paid_until_utc'])
                     && self::athens_day($m['paid_until_utc']) === $target
-                    && (string) get_user_meta($wp_user_id, self::EXPIRY_META, true) !== $m['paid_until_utc']) {
+                    && self::fresh_marker($wp_user_id, self::EXPIRY_META) !== $m['paid_until_utc']) {
                     update_user_meta($wp_user_id, self::EXPIRY_META, $m['paid_until_utc']);
                     $counts = $this->send_member($sending, $wp_user_id, $payload);
                     $run['members']++;
@@ -180,6 +225,12 @@ final class EVC_Push_Auto {
     private function schedule_next(): void {
         wp_clear_scheduled_hook(self::EXPIRY_HOOK);
         wp_schedule_single_event(self::next_run(time()), self::EXPIRY_HOOK);
+    }
+
+    /** A «sent for this period» marker as the database holds it now (another runner may have written it). */
+    private static function fresh_marker(int $wp_user_id, string $key): string {
+        wp_cache_delete($wp_user_id, 'user_meta');
+        return (string) get_user_meta($wp_user_id, $key, true);
     }
 
     public static function athens_day(string $instant): string {

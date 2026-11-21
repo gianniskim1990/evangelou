@@ -1866,8 +1866,8 @@ $mutants = array(
         '            return array(\'state\' => EVC_Db_Grants::UNKNOWN, \'missing\' => $privileges);', '            return array(\'state\' => EVC_Db_Grants::OK, \'missing\' => array());',
         array('ReadinessTest::test_the_prepared_redemption_row_reads_the_users_rights_on_the_preparation_table_without_writing')),
     // STAGE-08 round 12 (owner decision D26 part 2): member web push (PN*, mode push; PN8 in customer mode) and its
-    // readiness rows (AT43-AT46). Not a mutant: dropping the staff-role exclusion of may_send() (the till role never holds
-    // manage_options, as AT5), and dropping the controller's own authorize() call (the permission callback runs it too).
+    // readiness rows (AT43-AT46). Not a mutant: dropping the controller's own authorize() call (the permission callback runs
+    // it too). The staff-role exclusion of may_send() is PN47 since round 13 (an administrator who also holds the till role).
     array('PN1-endpoint-allowlist-skipped-at-subscribe', 'push', 'includes/push/class-evc-rest-me-push-controller.php',
         '            || EVC_Push_Endpoint::problem($body[\'endpoint\']) !== null) {
             return EVC_Rest_Security::error_response(\'invalid_request\', 400);
@@ -1914,25 +1914,27 @@ $mutants = array(
         '                if (($this->timer)() - $started >= self::TIME_BUDGET) {
                     break;
                 }
-                $job[\'cursor\'] = $row[\'id\'];', '                $job[\'cursor\'] = $row[\'id\'];',
+                if ($this->cancelled_now($job)) {', '                if ($this->cancelled_now($job)) {',
         array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
     array('PN13-cursor-not-saved', 'push', 'includes/push/class-evc-push-campaign.php',
         '                $job[\'cursor\'] = $row[\'id\'];
 ', '',
         array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
     array('PN14-second-runner-not-refused', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        $lock = $this->lock();
-        if ($lock === false) {
+        '        if ($lock !== true) {
             return self::BUSY;
         }
         try {
-            $job = self::job();
+            $job = self::fresh_job();
             if ($job === null || ($job[\'state\'] ?? \'\') !== \'running\') {
-                return self::NONE;', '        $lock = $this->lock();
-        try {
-            $job = self::job();
+                return self::NONE;
+            }
+            if ($this->cancelled_now($job)) {', '        try {
+            $job = self::fresh_job();
             if ($job === null || ($job[\'state\'] ?? \'\') !== \'running\') {
-                return self::NONE;',
+                return self::NONE;
+            }
+            if ($this->cancelled_now($job)) {',
         array('PushTest::test_a_second_runner_never_sends_the_same_batch')),
     array('PN15-no-interval-between-sends', 'push', 'includes/push/class-evc-push-campaign.php',
         '            if ($wait > 0) {', '            if (false) {',
@@ -1962,7 +1964,7 @@ $mutants = array(
 ', '',
         array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
     array('PN21-activated-sent-again-in-the-same-period', 'push', 'includes/push/class-evc-push-auto.php',
-        '        if ((string) get_user_meta($wp_user_id, self::ACTIVATED_META, true) === $m[\'paid_until_utc\']) {
+        '        if (self::fresh_marker($wp_user_id, self::ACTIVATED_META) === $m[\'paid_until_utc\']) {
             return \'already\';
         }
 ', '',
@@ -1980,7 +1982,7 @@ $mutants = array(
         array('PushTest::test_the_expiry_notification_goes_to_members_ending_in_3_athens_days_once')),
     array('PN25-expiry-sent-twice-in-a-period', 'push', 'includes/push/class-evc-push-auto.php',
         '
-                    && (string) get_user_meta($wp_user_id, self::EXPIRY_META, true) !== $m[\'paid_until_utc\']) {', ') {',
+                    && self::fresh_marker($wp_user_id, self::EXPIRY_META) !== $m[\'paid_until_utc\']) {', ') {',
         array('PushTest::test_the_expiry_notification_goes_to_members_ending_in_3_athens_days_once')),
     array('PN26-daily-run-at-9', 'push', 'includes/push/class-evc-push-auto.php',
         '    const EXPIRY_HOUR = 10;', '    const EXPIRY_HOUR = 9;',
@@ -2016,6 +2018,73 @@ $mutants = array(
     array('PN35-member-from-the-delete-body', 'push', 'includes/push/class-evc-push-backend.php',
         '            (new EVC_Sql_Push_Subscription_Store($db))->unsubscribe($member[\'id\'], $endpoint, $this->now_utc());', '            $db->execute(\'UPDATE evc_push_subscriptions SET revoked_at_utc = ?, revoked_reason = ? WHERE endpoint_hash = ? AND revoked_at_utc IS NULL\', array($this->now_utc(), \'member\', EVC_Push_Endpoint::hash($endpoint)));',
         array('PushTest::test_member_a_cannot_take_or_stop_member_bs_subscription')),
+    // STAGE-08 round 13: the stop is never lost (M1), no named lock = nothing sent (N-a), the automatic notifications'
+    // lock (N-b), the rate limit from its own store (N-c), the till-role exclusion (N-f).
+    array('PN36-stop-applied-without-the-lock', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        $lock = self::acquire_lock(self::lock_name());
+        if ($lock !== true) {
+            return self::CANCEL_PENDING;
+        }', '        $lock = self::acquire_lock(self::lock_name());',
+        array('PushTest::test_round13_a_stop_during_a_batch_is_recorded_and_the_batch_ends_before_its_next_message')),
+    array('PN37-stop-not-read-before-each-message', 'push', 'includes/push/class-evc-push-campaign.php',
+        '                if ($this->cancelled_now($job)) {
+                    return self::CANCELLED;
+                }
+', '',
+        array('PushTest::test_round13_a_stop_during_a_batch_is_recorded_and_the_batch_ends_before_its_next_message', 'PushTest::test_round13_the_batch_reads_the_stop_request_from_the_database_before_every_message')),
+    array('PN38-stop-request-read-through-the-cache', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        $flag = self::fresh_option(self::CANCEL_OPTION);', '        $flag = get_option(self::CANCEL_OPTION, null);',
+        array('PushTest::test_round13_the_batch_reads_the_stop_request_from_the_database_before_every_message')),
+    array('PN39-pending-stop-reported-as-stopped', 'push', 'includes/push/class-evc-push-admin-page.php',
+        "return \$cancelled === EVC_Push_Campaign::CANCEL_PENDING ? array('code' => 'cancel_pending')", "return \$cancelled === EVC_Push_Campaign::CANCEL_PENDING ? array('code' => 'cancelled_ok')",
+        array('PushTest::test_round13_the_page_says_the_stop_is_pending_until_the_job_really_stopped')),
+    array('PN40-pending-notice-missing', 'push', 'includes/push/class-evc-push-admin-page.php',
+        '        if ($running && EVC_Push_Campaign::cancel_pending_for($job)) {', '        if (false) {',
+        array('PushTest::test_round13_the_page_says_the_stop_is_pending_until_the_job_really_stopped')),
+    array('PN41-null-lock-read-as-held', 'push', 'includes/push/class-evc-push-campaign.php',
+        "        if (\$held === null || (string) \$wpdb->last_error !== '') {
+            return null;", "        if (\$held === null || (string) \$wpdb->last_error !== '') {
+            self::\$held[\$name] = true;
+            return true;",
+        array('PushTest::test_round13_without_a_named_lock_nothing_is_sent_and_the_page_says_why')),
+    array('PN42-step-sends-without-a-lock', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if ($lock === null) {
+            return self::NO_LOCK;
+        }
+        if ($lock !== true) {
+            return self::BUSY;
+        }', '        if ($lock === false) {
+            return self::BUSY;
+        }',
+        array('PushTest::test_round13_without_a_named_lock_nothing_is_sent_and_the_page_says_why')),
+    array('PN43-auto-activated-without-the-lock', 'push', 'includes/push/class-evc-push-auto.php',
+        '        if ($lock !== true) {
+            if ($wp_user_id > 0', '        if (false) {
+            if ($wp_user_id > 0',
+        array('PushTest::test_round13_two_cron_runners_never_send_an_automatic_notification_twice')),
+    array('PN44-auto-expiry-without-the-lock', 'push', 'includes/push/class-evc-push-auto.php',
+        '        if ($lock !== true) {
+            if (!wp_next_scheduled(self::EXPIRY_HOOK)) {', '        if (false) {
+            if (!wp_next_scheduled(self::EXPIRY_HOOK)) {',
+        array('PushTest::test_round13_two_cron_runners_never_send_an_automatic_notification_twice')),
+    array('PN45-nested-lock-granted', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if (isset(self::$held[$name])) {
+            return false;
+        }', '',
+        array('PushTest::test_round13_a_stop_during_a_batch_is_recorded_and_the_batch_ends_before_its_next_message')),
+    array('PN46-rate-limit-from-the-audit', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        $starts = self::starts();
+', '        $starts = array();
+        foreach (self::audit() as $entry) {
+            if (is_array($entry) && ($entry[\'event\'] ?? \'\') === \'started\' && isset($entry[\'at\'])) {
+                $starts[] = (int) $entry[\'at\'];
+            }
+        }
+',
+        array('PushTest::test_round13_the_rate_limit_counts_starts_that_automatic_entries_pushed_out_of_the_audit')),
+    array('PN47-till-role-not-excluded', 'push', 'includes/push/class-evc-push-admin-page.php',
+        '            && !EVC_Staff_Role::has_staff_role($user) && !is_multisite();', '            && !is_multisite();',
+        array('PushTest::test_round13_an_administrator_who_also_holds_the_till_role_is_refused')),
     array('AT43-mismatched-vapid-pair-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
         '        if ($problem !== null) {
             return self::row(\'push_vapid\'', '        if (false) {

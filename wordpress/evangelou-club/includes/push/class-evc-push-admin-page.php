@@ -14,6 +14,9 @@ defined('ABSPATH') || exit;
  *   3. «Αποστολή σε … συσκευές»: the confirmation starts ONE job (EVC_Push_Campaign::start(): rate limit, audit);
  *   4. the page then sends batch after batch (one POST per batch, submitted by the page itself; WP-Cron continues if the
  *      page is closed) and shows sent / failed / removed; «Διακοπή αποστολής» stops it.
+ *      Round 13: when a batch is sending at that moment, the stop is only recorded («Η διακοπή καταχωρήθηκε, η αποστολή
+ *      σταματά σε λίγα δευτερόλεπτα») and the batch ends the job before its next message; «Η αποστολή διακόπηκε» is shown
+ *      only once the stored job really is 'cancelled'. Without a database named lock nothing is sent (NO_LOCK message).
  * Every value printed is escaped. No endpoint, key or member is ever shown; only counts.
  */
 final class EVC_Push_Admin_Page {
@@ -45,8 +48,12 @@ final class EVC_Push_Admin_Page {
         EVC_Push_Campaign::RATE_LIMITED => 'Μία αποστολή ανά 15 λεπτά και έως 4 την ημέρα. Δοκιμάστε ξανά αργότερα.',
         EVC_Push_Campaign::INVALID => 'Η ειδοποίηση δεν είναι έγκυρη. Δεν στάλθηκε τίποτα.',
         EVC_Push_Campaign::UNAVAILABLE => 'Οι ειδοποιήσεις δεν είναι διαθέσιμες: δείτε τη σελίδα «Ετοιμότητα» (κλειδιά, βάση του Club, μετάβαση 005).',
+        EVC_Push_Campaign::NO_LOCK => 'Η βάση δεδομένων του ιστότοπου δεν επέτρεψε το κλείδωμα που χρειάζεται για ασφαλή αποστολή. Για ασφάλεια δεν στάλθηκε τίποτα. Ενημερώστε τον τεχνικό.',
+        EVC_Push_Campaign::NONE => 'Δεν υπάρχει αποστολή σε εξέλιξη.',
         'bad_nonce' => 'Η σελίδα έληξε. Ανοίξτε την ξανά και δοκιμάστε πάλι.',
         'cancelled' => 'Η αποστολή διακόπηκε.',
+        'cancel_pending' => 'Η διακοπή καταχωρήθηκε, η αποστολή σταματά σε λίγα δευτερόλεπτα.',
+        'done_before_cancel' => 'Η αποστολή είχε ήδη ολοκληρωθεί πριν από τη διακοπή.',
     );
     const STATES = array('running' => 'Σε εξέλιξη', 'done' => 'Ολοκληρώθηκε', 'stopped' => 'Σταμάτησε (η βάση ή τα κλειδιά δεν ήταν διαθέσιμα)', 'cancelled' => 'Διακόπηκε');
 
@@ -99,14 +106,16 @@ final class EVC_Push_Admin_Page {
             return;
         }
         $this->result = $this->process(wp_unslash($_POST));
-        if (in_array($this->result['code'], array('started', 'stepped', 'cancelled_ok'), true)) {
-            ($this->redirect)(add_query_arg('evc_push', $this->result['code'] === 'cancelled_ok' ? 'cancelled' : 'ok', self::page_url()));
+        $flash = array('started' => 'ok', 'stepped' => 'ok', 'cancelled_ok' => 'cancelled', 'cancel_pending' => 'cancel_pending');
+        if (isset($flash[$this->result['code']])) {
+            ($this->redirect)(add_query_arg('evc_push', $flash[$this->result['code']], self::page_url()));
         }
     }
 
     /**
      * One POST (already unslashed). Nonce first, then capability, then the action.
      * @return array<string,mixed> code: bad_nonce | forbidden | problem | preview | started | refused | stepped | cancelled_ok
+     *         | cancel_pending
      */
     public function process(array $post): array {
         $action = isset($post[self::FIELD_ACTION]) && is_string($post[self::FIELD_ACTION]) && in_array($post[self::FIELD_ACTION], self::ACTIONS, true) ? $post[self::FIELD_ACTION] : '';
@@ -119,11 +128,15 @@ final class EVC_Push_Admin_Page {
             return array('code' => 'forbidden');
         }
         if ($action === 'step') {
-            $this->campaign->step();
-            return array('code' => 'stepped');
+            $stepped = $this->campaign->step();
+            return $stepped === EVC_Push_Campaign::NO_LOCK ? array('code' => 'refused', 'result' => EVC_Push_Campaign::NO_LOCK) : array('code' => 'stepped');
         }
         if ($action === 'cancel') {
-            return array('code' => $this->campaign->cancel($user) === EVC_Push_Campaign::OK ? 'cancelled_ok' : 'refused', 'result' => EVC_Push_Campaign::NONE);
+            $cancelled = $this->campaign->cancel($user);
+            if ($cancelled === EVC_Push_Campaign::OK) {
+                return array('code' => 'cancelled_ok');
+            }
+            return $cancelled === EVC_Push_Campaign::CANCEL_PENDING ? array('code' => 'cancel_pending') : array('code' => 'refused', 'result' => EVC_Push_Campaign::NONE);
         }
         $title = isset($post['evc_push_title']) && is_string($post['evc_push_title']) ? $post['evc_push_title'] : '';
         $body = isset($post['evc_push_body']) && is_string($post['evc_push_body']) ? $post['evc_push_body'] : '';
@@ -163,8 +176,16 @@ final class EVC_Push_Admin_Page {
         $r = $this->result;
         $out = '<div class="wrap"><h1>' . esc_html(self::TITLE) . '</h1>';
         $flash = isset($_GET['evc_push']) && is_string($_GET['evc_push']) ? sanitize_key(wp_unslash($_GET['evc_push'])) : '';
-        if ($r === null && $flash === 'cancelled') {
+        $job = EVC_Push_Campaign::fresh_job();
+        $state = $job !== null ? (string) ($job['state'] ?? '') : '';
+        $running = $state === 'running';
+        // Round 13: the stop is reported from the stored job, never from the request that asked for it.
+        if ($running && EVC_Push_Campaign::cancel_pending_for($job)) {
+            $out .= self::notice(self::RESULTS['cancel_pending'], 'warning');
+        } elseif (in_array($flash, array('cancelled', 'cancel_pending'), true) && $state === EVC_Push_Campaign::CANCELLED) {
             $out .= self::notice(self::RESULTS['cancelled'], 'info');
+        } elseif ($flash === 'cancel_pending' && $state === 'done') {
+            $out .= self::notice(self::RESULTS['done_before_cancel'], 'info');
         }
         if ($r !== null) {
             if ($r['code'] === 'bad_nonce') {
@@ -177,8 +198,6 @@ final class EVC_Push_Admin_Page {
                 $out .= self::notice(self::RESULTS[$r['result']] ?? self::RESULTS[EVC_Push_Campaign::INVALID], 'error');
             }
         }
-        $job = EVC_Push_Campaign::job();
-        $running = $job !== null && ($job['state'] ?? '') === 'running';
         if ($job !== null) {
             $out .= $this->job_html($job, $running);
         }
