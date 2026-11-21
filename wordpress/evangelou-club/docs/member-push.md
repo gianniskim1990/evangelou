@@ -160,6 +160,33 @@ Round 14:
 - **The daily cap survives the upgrade:** a site that ran round 12 has no `evc_club_push_starts` yet; until the first
   new send it is seeded from the «started» entries of the audit.
 
+Round 15:
+
+- **A runner that lost the lock can never bring a finished send back (no double send).** Before, a batch whose database
+  connection dropped (and with it the lock) during a slow message wrote the job back as «running» with its old cursor
+  after another runner had already finished it, so the next batch sent some messages again and the audit showed «done»
+  twice. Now every write of the job (i) checks right before it that this connection still holds the lock, and (ii) is
+  conditional: the job is read again straight from the database and replaced in one statement (`UPDATE … WHERE
+  option_value = <the value just read>`) only if it is still the same job and still «running». The cursor is moved past
+  a subscription and saved BEFORE its message goes, so each subscription gets the message at most once; a runner that
+  loses the lock mid-message loses at most that message's count, never sends it twice. A refused write ends the batch.
+- **No endless retries without a named lock.** Each WP-Cron batch that gets no named lock counts
+  (`evc_club_push_no_lock`); after 10 in a row (about 10 minutes) the send is stopped («Σταμάτησε», reason `no_lock`)
+  through the same conditional write without the lock (it can only end that same running send), the title and text are
+  cleared and an audit entry is written (a third store, `evc_club_push_stop_audit`, written only by compare-and-replace).
+  A batch that gets the lock starts the count again. While a send is stuck this way, or after it was stopped for this
+  reason, every Club page (`page=evc-club…`) shows a notice to the administrators who may send, until a new send starts.
+  «Διακοπή αποστολής» with no named lock at all now ends the send at once by the same conditional write (before, it was
+  only recorded and waited for a batch that might never get a lock).
+- **A lost lock is treated like a busy one.** WP-Cron comes back 60 seconds later (not at once). The page says «Η σύνδεση
+  με τη βάση δεδομένων του ιστότοπου διακόπηκε για λίγο…» and goes on by itself; after 3 such batches in a row it stops
+  submitting by itself and asks the administrator to press «Συνέχεια αποστολής» or tell the technician.
+- **«Η συνδρομή σας ενεργοποιήθηκε»:** a busy lock keeps the try number (the retry event carries it); a lost lock (found
+  before the «sent» marker is written, so nothing was sent) is retried like a missing lock (5 minutes later, at most 6
+  tries in all) instead of being dropped. The marker keeps every retry at most once.
+- **The daily expiry run** writes its position and counts only while holding its lock, and only over the value it read
+  or last wrote (compare-and-replace); a runner that lost the lock never overwrites another runner's position.
+
 ## Security notes
 
 - SSRF: only `https://` + exactly `fcm.googleapis.com`, `web.push.apple.com`, `updates.push.services.mozilla.com` or
@@ -210,6 +237,13 @@ Round 14:
     Ενημερώστε τον τεχνικό: ο διακομιστής της βάσης πρέπει να υποστηρίζει τα «επώνυμα κλειδώματα» της MySQL / MariaDB.
     Σε αυτή την περίπτωση η σελίδα δεν συνεχίζει μόνη της· όταν ο τεχνικός το διορθώσει, πατήστε «Συνέχεια αποστολής».
     Η αυτόματη ειδοποίηση «Η συνδρομή σας λήγει σε 3 ημέρες» δεν στέλνεται τις ημέρες που λείπει το κλείδωμα.
+    Αν το κλείδωμα λείπει για περίπου 10 λεπτά συνεχόμενα, η αποστολή σταματά μόνη της και τα μηνύματα που δεν είχαν
+    φύγει δεν στέλνονται. Όσο η αποστολή έχει κολλήσει, και αφού σταματήσει για αυτόν τον λόγο, όλες οι σελίδες του Club
+    δείχνουν σχετική ειδοποίηση, μέχρι να ξεκινήσει νέα αποστολή. Η «Διακοπή αποστολής» σταματά την αποστολή αμέσως,
+    ακόμη και χωρίς κλείδωμα.
+    Αν η σελίδα γράψει ότι η σύνδεση με τη βάση δεδομένων διακόπηκε για λίγο, κανένα μήνυμα δεν στάλθηκε δύο φορές και η
+    αποστολή συνεχίζεται μόνη της. Αν συμβεί τρεις φορές στη σειρά, η σελίδα σταματά να συνεχίζει μόνη της· πατήστε
+    «Συνέχεια αποστολής» ή ενημερώστε τον τεχνικό.
 12. **Αποσύνδεση:** μόνο το κουμπί «Αποσύνδεση» της κάρτας μέλους σταματά τις ειδοποιήσεις στο συγκεκριμένο κινητό. Αν η
     σύνδεση λήξει μόνη της ή γίνει αποσύνδεση από άλλη σελίδα, το κινητό συνεχίζει να λαμβάνει τις ειδοποιήσεις του μέλους
     (μόνο τίτλο και κείμενο), μέχρι το μέλος να πατήσει «Διακοπή ειδοποιήσεων» ή να ενεργοποιήσει ειδοποιήσεις άλλος

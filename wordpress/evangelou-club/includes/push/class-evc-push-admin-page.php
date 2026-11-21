@@ -20,6 +20,11 @@ defined('ABSPATH') || exit;
  *      Round 14: after a batch that got no named lock the page does NOT submit the next batch by itself (no endless
  *      reload against a database that refuses the lock); the buttons stay. A stop that arrives just after the job ended
  *      by itself says «Η αποστολή είχε ήδη ολοκληρωθεί πριν από τη διακοπή.».
+ *      Round 15 (L2): a batch whose database connection lost the lock (LOST_LOCK) says so in Greek and the page goes on by
+ *      itself; after LOST_LOCK_STOP such batches in a row it stops submitting by itself (the count travels in the step
+ *      form and the redirect; any other answer starts it again from 0). WP-Cron still continues the job.
+ *      Round 15 (L1): on every Club page (club_notice(), admin_notices) a notice stays while the job is stuck without a
+ *      named lock or was stopped for that reason, until another send starts.
  * Every value printed is escaped. No endpoint, key or member is ever shown; only counts.
  */
 final class EVC_Push_Admin_Page {
@@ -31,6 +36,9 @@ final class EVC_Push_Admin_Page {
     const NONCE_ACTION = 'evc_club_push';
     const FIELD_ACTION = 'evc_push_action';
     const ACTIONS = array('preview', 'send', 'step', 'cancel');
+    /** Round 15 (L2): after this many batches in a row that lost the lock the page stops submitting the next one by itself. */
+    const LOST_LOCK_STOP = 3;
+    const FIELD_LOST = 'evc_push_lost';
     const NOT_ALLOWED = 'Δεν έχετε δικαίωμα για αυτή τη σελίδα.';
     const AUDIENCE_LABELS = array(
         'all' => 'Όλα τα μέλη που έχουν ενεργοποιήσει τις ειδοποιήσεις',
@@ -57,6 +65,14 @@ final class EVC_Push_Admin_Page {
         'cancelled' => 'Η αποστολή διακόπηκε.',
         'cancel_pending' => 'Η διακοπή καταχωρήθηκε, η αποστολή σταματά σε λίγα δευτερόλεπτα.',
         'done_before_cancel' => 'Η αποστολή είχε ήδη ολοκληρωθεί πριν από τη διακοπή.',
+        EVC_Push_Campaign::LOST_LOCK => 'Η σύνδεση με τη βάση δεδομένων του ιστότοπου διακόπηκε για λίγο. Για ασφάλεια δεν έγινε τίποτα. Δοκιμάστε ξανά.',
+        'lost_lock_step' => 'Η σύνδεση με τη βάση δεδομένων του ιστότοπου διακόπηκε για λίγο. Για ασφάλεια η παρτίδα σταμάτησε εκεί και κανένα μήνυμα δεν στάλθηκε δύο φορές. Η αποστολή συνεχίζεται σε λίγο.',
+        'lost_lock_repeated' => 'Η σύνδεση με τη βάση δεδομένων του ιστότοπου διακόπηκε ξανά και ξανά. Η σελίδα σταμάτησε να συνεχίζει μόνη της την αποστολή· πατήστε «Συνέχεια αποστολής» για να δοκιμάσετε ξανά ή ενημερώστε τον τεχνικό.',
+    );
+    /** Round 15 (L1): the persistent notice of the Club pages. */
+    const NO_LOCK_NOTICES = array(
+        'stuck' => 'Η αποστολή ειδοποιήσεων έχει κολλήσει: η βάση δεδομένων του ιστότοπου δεν επιτρέπει το κλείδωμα που χρειάζεται για ασφαλή αποστολή, γι’ αυτό δεν στέλνεται τίποτα. Αν αυτό συνεχιστεί, η αποστολή θα σταματήσει αυτόματα. Ενημερώστε τον τεχνικό.',
+        'stopped' => 'Η τελευταία αποστολή ειδοποιήσεων σταμάτησε αυτόματα, επειδή η βάση δεδομένων του ιστότοπου δεν επέτρεπε για πολλή ώρα το κλείδωμα που χρειάζεται για ασφαλή αποστολή. Τα μηνύματα που δεν είχαν φύγει δεν στάλθηκαν. Ενημερώστε τον τεχνικό πριν από νέα αποστολή.',
     );
     const STATES = array('running' => 'Σε εξέλιξη', 'done' => 'Ολοκληρώθηκε', 'stopped' => 'Σταμάτησε (η βάση ή τα κλειδιά δεν ήταν διαθέσιμα)', 'cancelled' => 'Διακόπηκε');
 
@@ -110,7 +126,9 @@ final class EVC_Push_Admin_Page {
         }
         $this->result = $this->process(wp_unslash($_POST));
         $flash = array('started' => 'ok', 'stepped' => 'ok', 'cancelled_ok' => 'cancelled', 'cancel_pending' => 'cancel_pending', 'done_before_cancel' => 'done_before_cancel');
-        if (isset($flash[$this->result['code']])) {
+        if ($this->result['code'] === 'lost_lock') {
+            ($this->redirect)(add_query_arg(array('evc_push' => 'lost_lock', self::FIELD_LOST => (int) $this->result['lost']), self::page_url()));
+        } elseif (isset($flash[$this->result['code']])) {
             ($this->redirect)(add_query_arg('evc_push', $flash[$this->result['code']], self::page_url()));
         }
     }
@@ -118,7 +136,7 @@ final class EVC_Push_Admin_Page {
     /**
      * One POST (already unslashed). Nonce first, then capability, then the action.
      * @return array<string,mixed> code: bad_nonce | forbidden | problem | preview | started | refused | stepped | cancelled_ok
-     *         | cancel_pending | done_before_cancel
+     *         | cancel_pending | done_before_cancel | lost_lock (round 15, with 'lost' = batches in a row that lost the lock)
      */
     public function process(array $post): array {
         $action = isset($post[self::FIELD_ACTION]) && is_string($post[self::FIELD_ACTION]) && in_array($post[self::FIELD_ACTION], self::ACTIONS, true) ? $post[self::FIELD_ACTION] : '';
@@ -132,6 +150,9 @@ final class EVC_Push_Admin_Page {
         }
         if ($action === 'step') {
             $stepped = $this->campaign->step();
+            if ($stepped === EVC_Push_Campaign::LOST_LOCK) {
+                return array('code' => 'lost_lock', 'lost' => min(99, self::lost_count($post[self::FIELD_LOST] ?? null) + 1));
+            }
             return $stepped === EVC_Push_Campaign::NO_LOCK ? array('code' => 'refused', 'result' => EVC_Push_Campaign::NO_LOCK) : array('code' => 'stepped');
         }
         if ($action === 'cancel') {
@@ -170,6 +191,29 @@ final class EVC_Push_Admin_Page {
         return array('code' => 'refused', 'result' => $started['result'], 'form' => $form);
     }
 
+    /** Round 15 (L2): a count of lost-lock batches from the form or the address (anything else = 0). */
+    private static function lost_count($value): int {
+        return is_string($value) && preg_match('/^[0-9]{1,2}$/D', $value) === 1 ? (int) $value : 0;
+    }
+
+    /** Round 15 (L1): admin_notices on the Club pages (page=evc-club…), for the administrators who may send. */
+    public function club_notice(): void {
+        $page = isset($_GET['page']) && is_string($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : '';
+        if (strpos($page, self::PARENT_SLUG) !== 0 || !self::may_send(wp_get_current_user())) {
+            return;
+        }
+        echo self::club_notice_html(); // phpcs:ignore WordPress.Security.EscapeOutput -- escaped in notice()
+    }
+
+    /** Round 15 (L1): the notice while the job is stuck without a named lock or was stopped for that reason ('' otherwise). */
+    public static function club_notice_html(): string {
+        $problem = EVC_Push_Campaign::no_lock_problem(EVC_Push_Campaign::fresh_job());
+        if ($problem === null) {
+            return '';
+        }
+        return self::notice(self::NO_LOCK_NOTICES[$problem], $problem === 'stopped' ? 'error' : 'warning');
+    }
+
     public function render(): void {
         if (!self::may_send(wp_get_current_user())) {
             wp_die(esc_html(self::NOT_ALLOWED), '', array('response' => 403));
@@ -193,6 +237,11 @@ final class EVC_Push_Admin_Page {
         } elseif (in_array($flash, array('cancel_pending', 'done_before_cancel'), true) && in_array($state, array('done', 'stopped'), true)) {
             $out .= self::notice(self::RESULTS['done_before_cancel'], 'info');
         }
+        // Round 15 (L2): batches in a row whose connection lost the lock (from the redirect; 0 after any other answer).
+        $lost = $flash === 'lost_lock' ? self::lost_count(isset($_GET[self::FIELD_LOST]) ? wp_unslash($_GET[self::FIELD_LOST]) : null) : 0;
+        if ($running && $lost > 0) {
+            $out .= self::notice(self::RESULTS[$lost >= self::LOST_LOCK_STOP ? 'lost_lock_repeated' : 'lost_lock_step'], 'warning');
+        }
         if ($r !== null) {
             if ($r['code'] === 'bad_nonce') {
                 $out .= self::notice(self::RESULTS['bad_nonce'], 'error');
@@ -207,7 +256,7 @@ final class EVC_Push_Admin_Page {
         if ($job !== null) {
             // Round 14: no automatic next batch after a batch that got no named lock.
             $no_lock = $r !== null && $r['code'] === 'refused' && ($r['result'] ?? '') === EVC_Push_Campaign::NO_LOCK;
-            $out .= $this->job_html($job, $running, $running && !$no_lock);
+            $out .= $this->job_html($job, $running, $running && !$no_lock && $lost < self::LOST_LOCK_STOP, $lost);
         }
         if (!$running) {
             if ($r !== null && $r['code'] === 'preview') {
@@ -227,7 +276,7 @@ final class EVC_Push_Admin_Page {
         return '<input type="hidden" name="' . esc_attr(self::FIELD_ACTION) . '" value="' . esc_attr($action) . '">' . wp_nonce_field(self::nonce_action($action), '_wpnonce', true, false);
     }
 
-    private function job_html(array $job, bool $running, bool $continue): string {
+    private function job_html(array $job, bool $running, bool $continue, int $lost = 0): string {
         $out = '<h2>Τελευταία αποστολή</h2><p>' . esc_html(sprintf(
             '%s · κοινό: %s · σχεδιασμένες συσκευές: %d · στάλθηκαν: %d · απέτυχαν: %d · αφαιρέθηκαν (η συσκευή δεν δέχεται πια ειδοποιήσεις): %d · παραλείφθηκαν: %d',
             self::STATES[$job['state'] ?? ''] ?? '—',
@@ -235,7 +284,7 @@ final class EVC_Push_Admin_Page {
             (int) ($job['planned'] ?? 0), (int) ($job['sent'] ?? 0), (int) ($job['failed'] ?? 0), (int) ($job['removed'] ?? 0), (int) ($job['skipped'] ?? 0)
         )) . '</p>';
         if ($running) {
-            $out .= '<form method="post" id="evc-push-step">' . self::hidden('step') . '<p><button type="submit" class="button button-primary">Συνέχεια αποστολής</button></p></form>';
+            $out .= '<form method="post" id="evc-push-step">' . self::hidden('step') . '<input type="hidden" name="' . esc_attr(self::FIELD_LOST) . '" value="' . esc_attr((string) $lost) . '"><p><button type="submit" class="button button-primary">Συνέχεια αποστολής</button></p></form>';
             $out .= '<form method="post">' . self::hidden('cancel') . '<p><button type="submit" class="button">Διακοπή αποστολής</button></p></form>';
         }
         if ($continue) {

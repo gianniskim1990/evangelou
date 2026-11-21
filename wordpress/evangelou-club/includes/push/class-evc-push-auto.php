@@ -35,6 +35,16 @@ defined('ABSPATH') || exit;
  *     drops it): if not, it stops at once ('lost_lock') and sends nothing more; the markers keep it «at most once».
  *   - Audit entries go to their own store (EVC_Push_Campaign::AUTO_AUDIT_OPTION, written only under this lock), so an
  *     automatic entry and an administrator's entry written at the same moment never overwrite each other.
+ *
+ * Round 15 (review of round 14):
+ *   - «ενεργοποιήθηκε» refused as BUSY keeps its try number: the retry event is array(user, attempt) (it was array(user),
+ *     which restarted the count). A LOST_LOCK (the connection lost the lock before the marker was written, so nothing was
+ *     sent) is retried exactly like a missing lock: NO_LOCK_RETRY_SECONDS later with attempt + 1, at most NO_LOCK_TRIES
+ *     tries in all; it is no longer dropped. The «once per period» marker keeps every retry «at most once».
+ *   - The expiry run state (RUN_OPTION) is written only by save_run(): this connection must still hold the automatic lock
+ *     (checked right before the write) and the write is a compare-and-replace over the value this run read or last
+ *     wrote (EVC_Push_Campaign::replace_option()), so a runner that lost the lock never overwrites the position or the
+ *     counts another runner saved. A refused write stops the run ('lost_lock', retried a minute later).
  */
 final class EVC_Push_Auto {
     const ACTIVATED_HOOK = 'evc_club_push_activated';
@@ -129,23 +139,33 @@ final class EVC_Push_Auto {
         $attempt = max(0, (int) $attempt);
         $lock = EVC_Push_Campaign::acquire_lock(EVC_Push_Campaign::auto_lock_name());
         if ($lock === null) {
-            // Round 14: never lose the notification to a passing refusal: try again later, a bounded number of times.
-            $next = array($wp_user_id, $attempt + 1);
-            if ($wp_user_id > 0 && $attempt + 1 < self::NO_LOCK_TRIES && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {
-                wp_schedule_single_event(time() + self::NO_LOCK_RETRY_SECONDS, self::ACTIVATED_HOOK, $next);
-            }
+            $this->retry_activated($wp_user_id, $attempt);
             return 'no_lock';
         }
         if ($lock !== true) {
-            if ($wp_user_id > 0 && !wp_next_scheduled(self::ACTIVATED_HOOK, array($wp_user_id))) {
-                wp_schedule_single_event(time() + 60, self::ACTIVATED_HOOK, array($wp_user_id));
+            // Round 15 (L3): the try number travels on (a busy lock is not a new first try).
+            if ($wp_user_id > 0 && !wp_next_scheduled(self::ACTIVATED_HOOK, array($wp_user_id, $attempt))) {
+                wp_schedule_single_event(time() + 60, self::ACTIVATED_HOOK, array($wp_user_id, $attempt));
             }
             return 'busy';
         }
         try {
-            return $this->activated_locked($wp_user_id);
+            $result = $this->activated_locked($wp_user_id);
         } finally {
             EVC_Push_Campaign::release_lock(EVC_Push_Campaign::auto_lock_name());
+        }
+        if ($result === 'lost_lock') {
+            // Round 15 (L3): nothing was sent (the marker comes after the check): retried like a missing lock.
+            $this->retry_activated($wp_user_id, $attempt);
+        }
+        return $result;
+    }
+
+    /** Round 14 / 15: never lose the notification to a passing refusal: try again later, a bounded number of times. */
+    private function retry_activated(int $wp_user_id, int $attempt): void {
+        $next = array($wp_user_id, $attempt + 1);
+        if ($wp_user_id > 0 && $attempt + 1 < self::NO_LOCK_TRIES && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {
+            wp_schedule_single_event(time() + self::NO_LOCK_RETRY_SECONDS, self::ACTIVATED_HOOK, $next);
         }
     }
 
@@ -197,7 +217,8 @@ final class EVC_Push_Auto {
         $now = EVC_Clock::to_utc($this->backend->clock()->now());
         $today = $now->setTimezone(new DateTimeZone(self::ZONE))->format('Y-m-d');
         $target = $now->setTimezone(new DateTimeZone(self::ZONE))->modify('+' . self::DAYS_AHEAD . ' days')->format('Y-m-d');
-        $run = EVC_Push_Campaign::fresh_option(self::RUN_OPTION);
+        $raw = EVC_Push_Campaign::fresh_raw(self::RUN_OPTION);
+        $run = $raw === null ? null : maybe_unserialize($raw);
         $run = is_array($run) && ($run['date'] ?? '') === $today ? $run : array('date' => $today, 'after' => 0, 'done' => false, 'sent' => 0, 'failed' => 0, 'removed' => 0, 'members' => 0);
         if (!empty($run['done'])) {
             $this->schedule_next();
@@ -223,10 +244,7 @@ final class EVC_Push_Auto {
                 }
                 if (!EVC_Push_Campaign::holds_lock(EVC_Push_Campaign::auto_lock_name())) {
                     // Round 14: a reconnect dropped the lock: stop now; the next run continues from the saved position.
-                    if (!wp_next_scheduled(self::EXPIRY_HOOK)) {
-                        wp_schedule_single_event(time() + 60, self::EXPIRY_HOOK);
-                    }
-                    return 'lost_lock';
+                    return $this->expiry_lost();
                 }
                 $run['after'] = $member_id;
                 $m = $this->read($wp_user_id, $now);
@@ -240,22 +258,53 @@ final class EVC_Push_Auto {
                         $run[$k] += $counts[$k];
                     }
                 }
-                update_option(self::RUN_OPTION, $run, false);
+                // Round 15: written back only by the lock holder, over the value this run last saw.
+                if (!$this->save_run($run, $raw)) {
+                    return $this->expiry_lost();
+                }
             }
             if (count($members) < self::BATCH) {
                 $finished = true;
             }
         }
         if (!$finished) {
-            update_option(self::RUN_OPTION, $run, false);
+            if (!$this->save_run($run, $raw)) {
+                return $this->expiry_lost();
+            }
             wp_schedule_single_event(time() + 60, self::EXPIRY_HOOK);
             return 'continued';
         }
         $run['done'] = true;
-        update_option(self::RUN_OPTION, $run, false);
+        if (!$this->save_run($run, $raw)) {
+            return $this->expiry_lost();
+        }
         $this->audit('auto_expiry', $run);
         $this->schedule_next();
         return 'done';
+    }
+
+    /**
+     * Round 15: the run state written only while this connection holds the automatic lock, and only over the value this
+     * run read or last wrote ($raw, updated on success). @return bool false = nothing written
+     */
+    private function save_run(array $run, ?string &$raw): bool {
+        if (!EVC_Push_Campaign::holds_lock(EVC_Push_Campaign::auto_lock_name())) {
+            return false;
+        }
+        $new = maybe_serialize($run);
+        if (!EVC_Push_Campaign::replace_option(self::RUN_OPTION, $raw, $new)) {
+            return false;
+        }
+        $raw = $new;
+        return true;
+    }
+
+    /** The run stopped without the lock (or its write was refused): it comes back a minute later from the saved position. */
+    private function expiry_lost(): string {
+        if (!wp_next_scheduled(self::EXPIRY_HOOK)) {
+            wp_schedule_single_event(time() + 60, self::EXPIRY_HOOK);
+        }
+        return 'lost_lock';
     }
 
     private function schedule_next(): void {

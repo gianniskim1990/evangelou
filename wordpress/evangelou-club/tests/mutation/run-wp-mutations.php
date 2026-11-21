@@ -1914,7 +1914,7 @@ $mutants = array(
         '            if (($this->timer)() - $started >= self::TIME_BUDGET) {
                 break;
             }
-            if (!self::holds_lock(', '            if (!self::holds_lock(',
+            $stop = $this->stop_requested($job);', '            $stop = $this->stop_requested($job);',
         array('PushTest::test_a_confirmed_send_runs_in_batches_under_a_time_budget_and_is_audited_without_endpoints')),
     array('PN13-cursor-not-saved', 'push', 'includes/push/class-evc-push-campaign.php',
         '            $job[\'cursor\'] = $row[\'id\'];
@@ -1924,9 +1924,7 @@ $mutants = array(
         '        if ($lock !== true) {
             return self::BUSY;
         }
-        try {
-            return $this->step_locked();', '        try {
-            return $this->step_locked();',
+        $result = null;', '        $result = null;',
         array('PushTest::test_a_second_runner_never_sends_the_same_batch')),
     array('PN15-no-interval-between-sends', 'push', 'includes/push/class-evc-push-campaign.php',
         '            if ($wait > 0) {', '            if (false) {',
@@ -2013,16 +2011,16 @@ $mutants = array(
     // STAGE-08 round 13: the stop is never lost (M1), no named lock = nothing sent (N-a), the automatic notifications'
     // lock (N-b), the rate limit from its own store (N-c), the till-role exclusion (N-f).
     array('PN36-stop-applied-without-the-lock', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        $lock = self::acquire_lock(self::lock_name());
-        if ($lock !== true) {
+        '        if ($lock !== true) {
             return self::CANCEL_PENDING;
-        }', '        $lock = self::acquire_lock(self::lock_name());',
+        }', '',
         array('PushTest::test_round13_a_stop_during_a_batch_is_recorded_and_the_batch_ends_before_its_next_message')),
     array('PN37-stop-not-read-before-each-message', 'push', 'includes/push/class-evc-push-campaign.php',
-        '            if ($this->cancelled_now($job)) {
-                return self::CANCELLED;
+        '            $stop = $this->stop_requested($job);
+            if ($stop !== null) {
+                return $stop;
             }
-            $job[\'cursor\']', '            $job[\'cursor\']',
+            // Round 15 (M1): the cursor', '            // Round 15 (M1): the cursor',
         array('PushTest::test_round13_a_stop_during_a_batch_is_recorded_and_the_batch_ends_before_its_next_message', 'PushTest::test_round13_the_batch_reads_the_stop_request_from_the_database_before_every_message')),
     array('PN38-stop-request-read-through-the-cache', 'push', 'includes/push/class-evc-push-campaign.php',
         '        $flag = self::fresh_option(self::CANCEL_OPTION);', '        $flag = get_option(self::CANCEL_OPTION, null);',
@@ -2051,8 +2049,8 @@ $mutants = array(
         array('PushTest::test_round13_without_a_named_lock_nothing_is_sent_and_the_page_says_why')),
     array('PN43-auto-activated-without-the-lock', 'push', 'includes/push/class-evc-push-auto.php',
         '        if ($lock !== true) {
-            if ($wp_user_id > 0', '        if (false) {
-            if ($wp_user_id > 0',
+            // Round 15 (L3)', '        if (false) {
+            // Round 15 (L3)',
         array('PushTest::test_round13_two_cron_runners_never_send_an_automatic_notification_twice')),
     array('PN44-auto-expiry-without-the-lock', 'push', 'includes/push/class-evc-push-auto.php',
         '        if ($lock !== true) {
@@ -2081,11 +2079,12 @@ $mutants = array(
     // nits a-g. Not a mutant: the post-release placement of schedule() itself (cross-process timing, not observable in one
     // PHP process); its observable half (an event after every batch, also after a throw) is PN49.
     array('PN48-cron-busy-not-queued-again', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        if ($result === self::BUSY || $result === self::NO_LOCK) {', '        if (false) {',
+        '        if ($result === self::BUSY || $result === self::NO_LOCK || $result === self::LOST_LOCK) {', '        if (false) {',
         array('PushTest::test_round14_a_cron_runner_that_finds_the_lock_busy_queues_itself_again')),
     array('PN49-no-event-after-a-batch', 'push', 'includes/push/class-evc-push-campaign.php',
         '            // Round 14: after the lock is released (and also when the batch threw), a job still running has its next event.
-            $this->keep_alive();
+            // Round 15 (L2): after a lost lock it comes RETRY_SECONDS later, like a busy lock (not at once).
+            $this->keep_alive($result === self::LOST_LOCK ? self::RETRY_SECONDS : 0);
 ', '',
         array('PushTest::test_round14_a_running_job_always_has_its_next_event_queued_after_the_lock_is_released')),
     array('PN50-no-event-after-the-start', 'push', 'includes/push/class-evc-push-campaign.php',
@@ -2111,26 +2110,27 @@ $mutants = array(
 ', '',
         array('PushTest::test_round14_a_stop_arriving_as_the_job_finishes_says_it_had_already_finished')),
     array('PN55-page-continues-after-no-lock', 'push', 'includes/push/class-evc-push-admin-page.php',
-        '            $out .= $this->job_html($job, $running, $running && !$no_lock);', '            $out .= $this->job_html($job, $running, $running);',
+        '$running && !$no_lock && $lost < self::LOST_LOCK_STOP, $lost);', '$running && $lost < self::LOST_LOCK_STOP, $lost);',
         array('PushTest::test_round14_after_a_batch_without_a_lock_the_page_does_not_continue_by_itself')),
     array('PN56-activated-no-lock-not-retried', 'push', 'includes/push/class-evc-push-auto.php',
-        '            if ($wp_user_id > 0 && $attempt + 1 < self::NO_LOCK_TRIES && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {', '            if (false) {',
+        '        if ($wp_user_id > 0 && $attempt + 1 < self::NO_LOCK_TRIES && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {', '        if (false) {',
         array('PushTest::test_round14_the_activated_notification_without_a_lock_comes_back_later_a_bounded_number_of_times')),
     array('PN57-activated-no-lock-retried-forever', 'push', 'includes/push/class-evc-push-auto.php',
-        '            if ($wp_user_id > 0 && $attempt + 1 < self::NO_LOCK_TRIES && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {', '            if ($wp_user_id > 0 && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {',
+        '        if ($wp_user_id > 0 && $attempt + 1 < self::NO_LOCK_TRIES && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {', '        if ($wp_user_id > 0 && !wp_next_scheduled(self::ACTIVATED_HOOK, $next)) {',
         array('PushTest::test_round14_the_activated_notification_without_a_lock_comes_back_later_a_bounded_number_of_times')),
+    // Round 15: re-pointed: the lock is checked inside save_running_job(), right before every write of the job (the cursor
+    // before each message, the counts after it, finish()).
     array('PN58-lost-lock-not-checked-before-each-message', 'push', 'includes/push/class-evc-push-campaign.php',
-        '            if (!self::holds_lock(self::lock_name())) {
-                return self::LOST_LOCK;
-            }
-            if ($this->cancelled_now($job)) {', '            if ($this->cancelled_now($job)) {',
-        array('PushTest::test_round14_a_run_whose_connection_lost_the_lock_stops_and_another_runner_continues')),
+        '        if ($locked && !self::holds_lock(self::lock_name())) {', '        if (false) {',
+        array('PushTest::test_round14_a_run_whose_connection_lost_the_lock_stops_and_another_runner_continues', 'PushTest::test_round15_a_runner_that_lost_the_lock_mid_message_never_brings_the_finished_job_back')),
+    // Round 15: re-pointed: finish() goes on (audit, event cleared) although its write was refused.
     array('PN59-lost-lock-not-checked-before-the-job-is-written', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        if (!self::holds_lock(self::lock_name())) {
-            return self::LOST_LOCK;
+        '        if (!self::save_running_job($job, $locked)) {
+            return false;
         }
-        if (count($rows)', '        if (count($rows)',
-        array('PushTest::test_round14_a_run_whose_connection_lost_the_lock_stops_and_another_runner_continues')),
+        delete_option(self::CANCEL_OPTION);', '        self::save_running_job($job, $locked);
+        delete_option(self::CANCEL_OPTION);',
+        array('PushTest::test_round15_a_batch_that_loses_the_lock_just_before_finishing_writes_nothing_and_retries_later')),
     array('PN60-held-lock-never-checked-on-the-server', 'push', 'includes/push/class-evc-push-campaign.php',
         '        return (string) $wpdb->last_error === \'\' && (string) $mine === \'1\';', '        return true;',
         array('PushTest::test_round14_a_run_whose_connection_lost_the_lock_stops_and_another_runner_continues')),
@@ -2144,7 +2144,8 @@ $mutants = array(
         '                if (!EVC_Push_Campaign::holds_lock(EVC_Push_Campaign::auto_lock_name())) {
                     // Round 14', '                if (false) {
                     // Round 14',
-        array('PushTest::test_round14_a_run_whose_connection_lost_the_lock_stops_and_another_runner_continues')),
+        // Round 15: the round-14 test no longer tells (the guarded run-state write after an earlier member stops it first).
+        array('PushTest::test_round15_the_expiry_run_state_is_written_only_by_the_lock_holder_over_what_it_read')),
     array('PN63-starts-not-seeded-from-the-audit', 'push', 'includes/push/class-evc-push-campaign.php',
         '        if ($stored === null) {', '        if (false) {',
         array('PushTest::test_round14_the_daily_cap_survives_the_upgrade_seeded_from_the_audit')),
@@ -2152,6 +2153,83 @@ $mutants = array(
         '        wp_cache_delete($wp_user_id, \'user_meta\');
 ', '',
         array('PushTest::test_round14_the_activated_notification_reads_its_marker_fresh_not_from_a_stale_cache')),
+    // STAGE-08 round 15 (round-14 review: M1 stale lock holder, L1 endless NO_LOCK, L2 LOST_LOCK like BUSY, L3 activated
+    // retries, nits). Not a mutant: ignoring a refused write of the counts after a message (the next row's write or
+    // finish() is refused as well: equivalent, it only stops later).
+    array('PN65-job-write-ignores-the-job-id', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if (!is_array($fresh) || (string) ($fresh[\'id\'] ?? \'\') !== (string) ($job[\'id\'] ?? \'\')) {', '        if (!is_array($fresh)) {',
+        array('PushTest::test_round15_a_job_replaced_meanwhile_is_never_overwritten')),
+    array('PN66-job-write-ignores-the-ended-state', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if (($fresh[\'state\'] ?? \'\') !== \'running\') {
+            return false;
+        }
+', '',
+        array('PushTest::test_round15_a_job_ended_without_the_lock_is_never_written_back_by_the_batch')),
+    array('PN67-job-write-without-compare', 'push', 'includes/push/class-evc-push-campaign.php',
+        'WHERE option_name = %s AND option_value = %s", $new, $name, $expected));', 'WHERE option_name = %s AND %s IS NOT NULL", $new, $name, $expected));',
+        array('PushTest::test_round15_the_job_write_compares_and_replaces_in_one_statement')),
+    array('PN68-cursor-saved-only-after-the-send', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            $job[\'touched\'] = time();
+            if (!self::save_running_job($job)) {
+                return self::refused();
+            }
+            if ($row[\'member_status\'] !== \'enabled\') {', '            if ($row[\'member_status\'] !== \'enabled\') {',
+        array('PushTest::test_round15_a_runner_that_lost_the_lock_mid_message_never_brings_the_finished_job_back')),
+    array('PN69-lost-lock-retried-at-once', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            $this->keep_alive($result === self::LOST_LOCK ? self::RETRY_SECONDS : 0);', '            $this->keep_alive();',
+        array('PushTest::test_round15_a_batch_that_loses_the_lock_just_before_finishing_writes_nothing_and_retries_later')),
+    array('PN70-no-lock-retried-for-ever', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        if ($count < self::NO_LOCK_TRIES) {', '        if (true) {',
+        array('PushTest::test_round15_cron_stops_a_job_that_never_gets_a_named_lock_and_the_club_pages_say_so')),
+    array('PN71-no-lock-count-not-reset-by-a-locked-batch', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        // Round 15 (L1): a batch that got the lock ends a run of batches without one.
+        delete_option(self::NO_LOCK_OPTION);
+', '',
+        array('PushTest::test_round15_cron_stops_a_job_that_never_gets_a_named_lock_and_the_club_pages_say_so')),
+    array('PN72-club-notice-missing', 'push', 'includes/push/class-evc-push-admin-page.php',
+        '        if ($problem === null) {
+            return \'\';', '        if (true) {
+            return \'\';',
+        array('PushTest::test_round15_cron_stops_a_job_that_never_gets_a_named_lock_and_the_club_pages_say_so')),
+    array('PN73-club-notice-on-every-page', 'push', 'includes/push/class-evc-push-admin-page.php',
+        '        if (strpos($page, self::PARENT_SLUG) !== 0 || !self::may_send(wp_get_current_user())) {', '        if (!self::may_send(wp_get_current_user())) {',
+        array('PushTest::test_round15_cron_stops_a_job_that_never_gets_a_named_lock_and_the_club_pages_say_so')),
+    array('PN74-cancel-without-any-lock-only-recorded', 'push', 'includes/push/class-evc-push-campaign.php',
+        '            if ($this->finish($job, self::CANCELLED, false)) {
+                return self::OK;
+            }', '            if (false) {
+                return self::OK;
+            }',
+        array('PushTest::test_round13_without_a_named_lock_nothing_is_sent_and_the_page_says_why')),
+    array('PN75-page-continues-after-repeated-lost-locks', 'push', 'includes/push/class-evc-push-admin-page.php',
+        '$running && !$no_lock && $lost < self::LOST_LOCK_STOP, $lost);', '$running && !$no_lock, $lost);',
+        array('PushTest::test_round15_the_page_says_when_a_batch_lost_the_lock_and_stops_continuing_after_three_in_a_row')),
+    array('PN76-lost-locks-not-counted-in-a-row', 'push', 'includes/push/class-evc-push-admin-page.php',
+        "'lost' => min(99, self::lost_count(\$post[self::FIELD_LOST] ?? null) + 1)", "'lost' => 1",
+        array('PushTest::test_round15_the_page_says_when_a_batch_lost_the_lock_and_stops_continuing_after_three_in_a_row')),
+    array('PN77-activated-busy-loses-the-try-number', 'push', 'includes/push/class-evc-push-auto.php',
+        '                wp_schedule_single_event(time() + 60, self::ACTIVATED_HOOK, array($wp_user_id, $attempt));', '                wp_schedule_single_event(time() + 60, self::ACTIVATED_HOOK, array($wp_user_id));',
+        array('PushTest::test_round15_the_activated_notification_keeps_its_try_number_when_busy_and_retries_a_lost_lock')),
+    array('PN78-activated-lost-lock-dropped', 'push', 'includes/push/class-evc-push-auto.php',
+        '        if ($result === \'lost_lock\') {', '        if (false) {',
+        array('PushTest::test_round15_the_activated_notification_keeps_its_try_number_when_busy_and_retries_a_lost_lock')),
+    array('PN79-run-state-written-without-the-lock', 'push', 'includes/push/class-evc-push-auto.php',
+        '    private function save_run(array $run, ?string &$raw): bool {
+        if (!EVC_Push_Campaign::holds_lock(EVC_Push_Campaign::auto_lock_name())) {', '    private function save_run(array $run, ?string &$raw): bool {
+        if (false) {',
+        array('PushTest::test_round15_the_expiry_run_state_is_written_only_by_the_lock_holder_over_what_it_read')),
+    array('PN80-run-state-written-blindly', 'push', 'includes/push/class-evc-push-auto.php',
+        '        if (!EVC_Push_Campaign::replace_option(self::RUN_OPTION, $raw, $new)) {', '        if (!EVC_Push_Campaign::replace_option(self::RUN_OPTION, EVC_Push_Campaign::fresh_raw(self::RUN_OPTION), $new)) {',
+        array('PushTest::test_round15_the_expiry_run_state_is_written_only_by_the_lock_holder_over_what_it_read')),
+    array('PN81-audit-ties-in-the-wrong-order', 'push', 'includes/push/class-evc-push-campaign.php',
+        '(int) ($store[0][\'at\'] ?? 0) > (int) ($stores[$pick][0][\'at\'] ?? 0)', '(int) ($store[0][\'at\'] ?? 0) >= (int) ($stores[$pick][0][\'at\'] ?? 0)',
+        array('PushTest::test_round15_the_audit_merges_the_stores_newest_first_and_the_rate_limit_keeps_the_newest_starts')),
+    array('PN82-audit-not-capped', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        while (count($merged) < self::AUDIT_KEEP) {', '        while (true) {',
+        array('PushTest::test_round15_the_audit_merges_the_stores_newest_first_and_the_rate_limit_keeps_the_newest_starts')),
+    array('PN83-starts-not-capped', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        return array_slice($starts, 0, self::STARTS_KEEP);', '        return $starts;',
+        array('PushTest::test_round15_the_audit_merges_the_stores_newest_first_and_the_rate_limit_keeps_the_newest_starts')),
     array('AT43-mismatched-vapid-pair-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
         '        if ($problem !== null) {
             return self::row(\'push_vapid\'', '        if (false) {
