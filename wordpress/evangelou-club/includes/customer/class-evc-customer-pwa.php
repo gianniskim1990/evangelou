@@ -100,7 +100,6 @@ final class EVC_Customer_Pwa {
             // Plain permalinks: the member page is <home>/?evc_club_member=1, so its path (the scope) is the home path.
             'scope' => self::pretty() ? self::scope() : EVC_Rest_Security::home_path(),
             'display' => 'standalone',
-            'orientation' => 'portrait',
             'background_color' => self::BACKGROUND_COLOR,
             'theme_color' => self::THEME_COLOR,
             'icons' => $icons,

@@ -1464,7 +1464,7 @@ $mutants = array(
         '            if (!$creating) {', '            if (false) {',
         array('OnboardingCommerceTest::test_the_checkout_refuses_a_mixed_cart_a_guest_and_a_second_order')),
     array('OG9-second-order-at-the-checkout', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-checkout-guard.php',
-        '        if (is_user_logged_in() && $this->handoff->blocks_new_order(get_current_user_id())) {', '        if (false) {',
+        '        if ($this->handoff->blocks_new_order($user)) {', '        if (false) {',
         array('OnboardingCommerceTest::test_the_checkout_refuses_a_mixed_cart_a_guest_and_a_second_order', 'OnboardingCommerceTest::test_the_block_checkout_refuses_a_mixed_cart_a_second_order_and_a_guest_without_an_account')),
     array('OG10-active-member-may-not-renew', 'commerce_onboarding', 'includes/onboarding/class-evc-onboarding-handoff.php',
         '        return in_array($state, array(EVC_Customer_Membership::PENDING_PAYMENT, EVC_Customer_Membership::UNVERIFIED), true);', '        return true;',

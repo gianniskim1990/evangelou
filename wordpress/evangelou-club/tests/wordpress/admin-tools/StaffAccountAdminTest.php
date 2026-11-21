@@ -276,11 +276,13 @@ final class StaffAccountAdminTest extends EVC_WP_Test_Case {
         $this->assertSame(10, $calls);
         $this->assertTrue(wp_check_password($created['password'], get_userdata($id)->user_pass, $id), 'the old password still works');
         $this->assertCount(1, WP_Session_Tokens::get_instance($id)->get_all(), 'the tablet stays signed in');
-        // A filter that weakens only the first tries: the retry still yields a strong password.
+        // A filter that weakens only the first tries: the retry still yields a strong password. Round 11: from the 4th
+        // try on it answers a FIXED strong value: a real 24-character letters-and-digits password lacks a digit or a
+        // letter case about 2.5 % of the time, which made "4 calls" fail now and then in CI (run 44774630444).
         $calls = 0;
         $flaky = function ($password) use (&$calls) {
             $calls++;
-            return $calls <= 3 ? 'short' : $password;
+            return $calls <= 3 ? 'short' : 'Ena3KafesTinImeraSto5Limani';
         };
         add_filter('random_password', $flaky);
         try {
@@ -290,6 +292,7 @@ final class StaffAccountAdminTest extends EVC_WP_Test_Case {
         }
         $this->assertSame('ok', $r['code']);
         $this->assertSame(4, $calls);
+        $this->assertSame('Ena3KafesTinImeraSto5Limani', $r['password']);
         $this->assertTrue(EVC_Staff_Account_Service::strong($r['password']));
     }
 

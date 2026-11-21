@@ -187,7 +187,7 @@ describe("STAGE-08 round 11, owner decision D27: renewal from the member card", 
       assert.match(renew[0].className, /min-h-14/, `${where}: a large target`);
       await dom.click(renew[0]);
       assert.equal(visited.at(-1), JOIN, `${where}: to the join flow`);
-      assert.equal(note(), null, `${where}: no extra text`);
+      assert.ok(note() === null, `${where}: no extra text`);
       if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
     }
     assert.deepEqual(visited, [JOIN, JOIN]);
@@ -225,7 +225,7 @@ describe("STAGE-08 round 11, owner decision D27: renewal from the member card", 
       assert.match(n!.textContent ?? "", /περιμένει την τραπεζική μεταφορά/);
       assert.match(n!.textContent ?? "", /στο μήνυμα επιβεβαίωσης της παραγγελίας/);
       assert.match(n!.textContent ?? "", /μόλις το κατάστημα επιβεβαιώσει/);
-      assert.equal(n!.querySelector("a"), null, "no link: the shop's order page does not show the bank details");
+      assert.ok(n!.querySelector("a") === null, "no link: the shop's order page does not show the bank details");
       if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
     }
     assert.deepEqual(visited, []);
@@ -237,7 +237,7 @@ describe("STAGE-08 round 11, owner decision D27: renewal from the member card", 
       const { visited } = await mount([{ kind: "ok", me: m }], WITH_JOIN);
       for (const where of ["dashboard", "card"]) {
         assert.equal(actions("renew").length + actions("pay").length + actions("join").length, 0, `${m.state} ${where}`);
-        assert.equal(note(), null, `${m.state} ${where}`);
+        assert.ok(note() === null, `${m.state} ${where}`);
         if (where === "dashboard") await dom.click(button("Άνοιγμα κάρτας"));
       }
       assert.deepEqual(visited, []);
@@ -342,14 +342,14 @@ describe("STAGE-08 round 11 (D26): «Εγκατάσταση στο κινητό�
     const target = new Target();
     const stored = new Map<string, string>();
     await mountWithHint({ kind: "ok", me: me("active", "2026-11-15T10:00:00+00:00") }, false, target, stored);
-    assert.equal(hint(), null, "nothing before the browser's event");
+    assert.ok(hint() === null, "nothing before the browser's event");
     let prompted = 0;
     await act(async () => target.emit("beforeinstallprompt", { preventDefault() {}, prompt: async () => void prompted++, userChoice: Promise.resolve({ outcome: "accepted" }) }));
     assert.equal(hint()?.getAttribute("data-evc-install"), "prompt");
     assert.match(hint()!.textContent ?? "", /Εγκατάσταση στο κινητό/);
     assert.ok(app().querySelector("article")!.compareDocumentPosition(hint()!) & 4, "after the card, never over the QR");
     await dom.click(button("Όχι τώρα", hint()!));
-    assert.equal(hint(), null);
+    assert.ok(hint() === null);
     assert.equal(stored.get("x"), "1");
     assert.equal(prompted, 0);
   });
@@ -362,7 +362,7 @@ describe("STAGE-08 round 11 (D26): «Εγκατάσταση στο κινητό�
     await dom.click(button("Εγκατάσταση", hint()!));
     await act(async () => {});
     assert.equal(prompted, 1);
-    assert.equal(hint(), null);
+    assert.ok(hint() === null);
   });
 
   it("iPhone: the Safari steps; «Εντάξει» closes them; never on the sign-in or error pages", async () => {
@@ -370,11 +370,11 @@ describe("STAGE-08 round 11 (D26): «Εγκατάσταση στο κινητό�
     await mountWithHint({ kind: "ok", me: me("pending_payment") }, true, new Target(), stored);
     assert.match(hint()!.textContent ?? "", /«Κοινή χρήση» και μετά «Προσθήκη στην οθόνη Αφετηρίας»/);
     await dom.click(button("Εντάξει", hint()!));
-    assert.equal(hint(), null);
+    assert.ok(hint() === null);
     for (const r of [{ kind: "signed_out" }, { kind: "error" }, { kind: "unavailable" }, { kind: "forbidden" }] as MeResult[]) {
       await dom.reset();
       await mountWithHint(r, true, new Target(), new Map());
-      assert.equal(hint(), null, r.kind);
+      assert.ok(hint() === null, r.kind);
     }
   });
 });

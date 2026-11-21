@@ -157,6 +157,7 @@ final class CustomerShellTest extends EVC_WP_Test_Case {
             $this->assertSame('Ευαγγέλου Club', $m['name']);
             $this->assertSame('Club', $m['short_name']);
             $this->assertSame('standalone', $m['display']);
+            $this->assertArrayNotHasKey('orientation', $m, 'no orientation lock (a member may use a tablet)');
             $this->assertSame('el', $m['lang']);
             $this->assertSame('#1e1713', $m['theme_color']);
             $this->assertSame('#1e1713', $m['background_color']);

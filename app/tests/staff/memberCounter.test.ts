@@ -1288,7 +1288,7 @@ describe("D24 the till screens (DOM)", () => {
     await type(note, "☕🍰".repeat(40));
     assert.equal([...note.value].length, NOTE_MAX, "80 code points accepted, even when each one is two UTF-16 units");
     assert.match(dom.document.getElementById("evc-order-note-help")!.textContent ?? "", /80\/80$/, "the counter counts code points");
-    assert.equal(notice(), null);
+    assert.ok(notice() === null);
     // Round 11 (C1): one more character is refused as a whole edit: the previous note stays, nothing is cut.
     await type(note, "☕🍰".repeat(40) + "x");
     assert.equal(note.value, "☕🍰".repeat(40), "the previous value stays");
@@ -1296,7 +1296,7 @@ describe("D24 the till screens (DOM)", () => {
     assert.equal(notice()?.getAttribute("role"), "alert");
     await type(note, "🍰".repeat(30));
     assert.match(dom.document.getElementById("evc-order-note-help")!.textContent ?? "", /30\/80$/);
-    assert.equal(notice(), null, "an accepted edit clears the notice");
+    assert.ok(notice() === null, "an accepted edit clears the notice");
     await type(note, "<i>με κανέλα</i>");
     assert.equal(note.value, "iμε κανέλα/i");
     await dom.click(dom.document.querySelector('[data-evc-extra="foam:extra"]')!);
@@ -1322,7 +1322,7 @@ describe("D24 the till screens (DOM)", () => {
     const composing = "λίγο " + "ά".repeat(90);
     await type(note, composing);
     assert.equal(note.value, composing, "while composing the field shows exactly what is being typed");
-    assert.equal(notice(), null, "and says nothing yet");
+    assert.ok(notice() === null, "and says nothing yet");
     await type(note, "λίγο γάλα");
     await compose("compositionend");
     assert.equal(note.value, "λίγο γάλα", "committed at compositionend");
@@ -1338,6 +1338,6 @@ describe("D24 the till screens (DOM)", () => {
     assert.ok(notice());
     await type(note, "πολύ ζεστό");
     assert.equal(note.value, "πολύ ζεστό");
-    assert.equal(notice(), null);
+    assert.ok(notice() === null);
   });
 });

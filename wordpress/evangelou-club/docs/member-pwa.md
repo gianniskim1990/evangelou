@@ -15,7 +15,7 @@ the server.
 
 - All of it exists only while `EVC_CLUB_CUSTOMER_ENABLED` is on (404 otherwise). The manifest and the worker are
   public: a browser fetches the manifest without cookies, and neither carries a nonce, a name or an account.
-- Manifest: name «Ευαγγέλου Club», short name «Club», `display: standalone`, portrait, theme and background colour
+- Manifest: name «Ευαγγέλου Club», short name «Club», `display: standalone` (no orientation lock), theme and background colour
   `#1e1713` (`--roast`, the member card), `start_url` = the member page in the site's permalink form, `id` = the same.
   `scope` = the member page path: `/club-member/` (or `/<sub-folder>/club-member/`); with plain permalinks the member
   page's path IS the home path, so the scope can only be the home path there.
