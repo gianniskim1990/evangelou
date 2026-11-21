@@ -3512,8 +3512,11 @@ const optionValue = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1
 
 if (argv.includes("--list")) {
   assertUniqueIds(mutants);
-  for (const m of mutants) console.log(m.id);
-  process.exit(0);
+  // STAGE-08 round 11: one write, and exit only once it has been flushed. console.log + process.exit(0) lost the
+  // tail of the list when stdout is a pipe (check-mutation-coverage.mjs reads it through spawnSync): PR run
+  // 44889829815 saw 463 of 573 ids; locally 7 of 30 runs were cut short.
+  process.stdout.write(`${mutants.map((m) => m.id).join("\n")}\n`, () => process.exit(0));
+  await new Promise(() => {}); // nothing below runs for --list
 }
 if (argv.includes("--verify-partition")) {
   const count = Number(optionValue("--verify-partition"));

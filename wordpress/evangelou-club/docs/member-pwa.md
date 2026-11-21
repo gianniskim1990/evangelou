@@ -146,6 +146,13 @@ transfer and no button.
   answers); the staff bundle may not contain `serviceWorker`, `beforeinstallprompt`, `webmanifest` or the hint's
   title; the icons must be PNG files of 192 / 512 / 512 / 180 px.
 
+### CI notes of round 11
+
+- New jsdom tests compare elements only as `assert.ok(x === null)`: `assert.equal(element, null)` makes node:test diff
+  the whole DOM when a mutant fails, which shut the runners down on 8655f0b (the round-9b trap again).
+- `run-club-mutations.mjs --list` now writes the whole list and exits only after stdout is flushed: with
+  `process.exit()` right after `console.log` the coverage job read 463 of 573 ids on 76a0069 (PR run).
+
 ## Not verified
 
 Nothing was run on a real phone or on staging. Chrome's install prompt timing, iOS's separate sign-in for installed
