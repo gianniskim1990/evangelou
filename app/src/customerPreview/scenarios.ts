@@ -1,6 +1,7 @@
 import { historyPreparation } from "../preview/coffeeConfig";
 import type { CustomerHistoryItem, CustomerView } from "../preview/customerView";
-import { COFFEES, MEMBERS, addDays, type PreviewMember } from "../preview/previewData";
+import { COFFEES, addDays, type PreviewMember } from "../preview/previewData";
+import { MEMBERS } from "../preview/previewRoster";
 import type { Account, ClubRedemption, MemberSnapshot, ServerSeed } from "./customerServer";
 import { addCalendarMonth, athensDate, athensInstant, athensTime, calendarDaysBetween, nextAthensMidnight, type PaidPeriod } from "./membershipCalendar";
 

@@ -12,7 +12,7 @@ import { msToNextAthensMidnight, toLiveView } from "./liveView";
 import type { MemberCoffeesFlow } from "./memberCoffees";
 import type { MemberHistoryFlow } from "./memberHistory";
 import type { MemberQrFlow, MemberQrState } from "./memberQr";
-import { MemberQrPanel } from "./MemberQrPanel";
+import { MemberQrPanel, QrNotAvailable } from "./MemberQrPanel";
 import { InstallHint } from "./InstallHint";
 import type { InstallHintFlow } from "./pwa/installHint";
 import { PushControl } from "./PushControl";
@@ -21,9 +21,15 @@ import type { MemberPushFlow } from "./pwa/push";
 /*
  * STAGE-01 REAL customer app (served by WordPress at /club-member/, flag-gated).
  * The member area is the approved UI-02 customer screens, fed by the
- * protected GET /me. STAGE-05D: when the server's QR route exists
- * (GET /me/qr is not 404) the card shows the member's real Club QR
- * (MemberQrPanel / memberQr.ts); otherwise the approved non-redeemable sample.
+ * protected GET /me. STAGE-05D: the card shows the member's real Club QR
+ * (MemberQrPanel / memberQr.ts). STAGE-08 round 17 (owner-found bug, staging
+ * 2026-11-23: an active member saw the design preview's SAMPLE QR for about
+ * 2 seconds after every cold start of the home-screen app, i.e. between the
+ * GET /me answer and the first GET /me/qr answer): the card's QR place is the
+ * panel from the first render on («Φόρτωση του κωδικού σας…» until the code is
+ * known; «not available yet» without the route). The sample code, the sample
+ * member and its figures are not in this app's import graph at all
+ * (tests/club/customerSampleGuard.test.ts, scripts/sample-guard.mjs).
  * Signed out, not a customer, membership source unavailable and errors get
  * their own plain pages: nothing is ever shown as paid unless /me says so.
  * D23: with a coffees flow (GET /me/coffees) today's coffee and this month's
@@ -54,6 +60,9 @@ function StatusPage({ title, lede, children }: { title: string; lede: string; ch
 }
 
 const NO_QR: MemberQrState = { phase: "off" };
+/** Round 17: the notes under the steps of the live card (never the preview's sample notes). */
+export const LIVE_QR_NOTE = "Δείξτε τον κωδικό στο ταμείο. Το προσωπικό βλέπει μόνο το μικρό σας όνομα και αν δικαιούστε καφέ σήμερα.";
+export const LIVE_QR_OFF_NOTE = "Ο κωδικός QR θα εμφανιστεί σε αυτή την κάρτα μόλις ενεργοποιηθεί.";
 const noSubscribe = () => () => {};
 const noCoffees = (): MemberCoffees | null => null;
 const noHistory = (): HistoryCoffee[] | null => null;
@@ -89,7 +98,7 @@ export function CustomerApp({
   api: CustomerApi;
   now?: () => number;
   navigate: Navigate;
-  /** STAGE-05D: the member's real QR (absent = always the sample code). */
+  /** STAGE-05D: the member's real QR (absent = «not available yet»; round 17: never the sample code). */
   qrFlow?: MemberQrFlow;
   /** D23: the member's own coffee figures (absent = «—», as before). */
   coffeesFlow?: MemberCoffeesFlow;
@@ -213,8 +222,10 @@ export function CustomerApp({
     void qrFlow.open(account);
     return () => qrFlow.pause();
   }, [onCard, account, qrFlow]);
-  // The real panel replaces the sample only once the route is known to exist (never «Φόρτωση…» when it is off).
-  const showQr = qrFlow !== undefined && qrState.phase !== "off" && (qrState.phase !== "loading" || qrFlow.seenRoute());
+  // Round 17: the QR place of the live card is ALWAYS the real panel (or «not available» without a flow). The old
+  // rule kept the design preview's sample code on screen until the first GET /me/qr answer (the owner's 2-second
+  // sample QR on a cold start); there is no sample in this app any more.
+  const qrOff = !qrFlow || qrState.phase === "off";
 
   let body: ReactNode;
   if (result === null) {
@@ -260,9 +271,8 @@ export function CustomerApp({
           go={go}
           view={view}
           actions={actions}
-          {...(qrFlow && showQr
-            ? { qr: <MemberQrPanel flow={qrFlow} />, qrNote: "Δείξτε τον κωδικό στο ταμείο. Το προσωπικό βλέπει μόνο το μικρό σας όνομα και αν δικαιούστε καφέ σήμερα." }
-            : {})}
+          qr={qrFlow ? <MemberQrPanel flow={qrFlow} /> : <QrNotAvailable />}
+          qrNote={qrOff ? LIVE_QR_OFF_NOTE : LIVE_QR_NOTE}
         />
       ) : (
         <MemberChrome screen={current} go={go}>

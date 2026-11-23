@@ -1082,16 +1082,21 @@ describe("STAGE-05D customer app: the real QR on the card", () => {
     assert.ok((app().querySelector('[data-evc-qr="member"]')) === (null), "app().querySelector('[data-evc-qr=\"member\"]') === null");
   });
 
-  it("the route does not exist (feature off): the approved sample card, never replaced by «Φόρτωση…»", async () => {
+  it("round 17: the route does not exist (feature off): «Φόρτωση…» while asked, then «not available yet»; never the sample card", async () => {
     let answer: (s: QrStatus) => void = () => {};
     await mountWith([() => new Promise<QrStatus>((r) => (answer = r))], []);
-    assert.ok(app().querySelector('[data-evc-preview="sample-qr"]'), "while the first GET is pending: the sample");
-    assert.doesNotMatch(text(), /Φόρτωση του κωδικού σας/);
+    assert.ok(app().querySelector('[data-evc-preview="sample-qr"]') === null, "while the first GET is pending: never the sample");
+    assert.ok(app().querySelector('[data-evc-qr-placeholder="loading"]'), "the neutral place-holder");
+    assert.match(text(), /Φόρτωση του κωδικού σας…/);
     await act(async () => answer({ kind: "off" }));
     await settle();
-    assert.ok(app().querySelector('[data-evc-preview="sample-qr"]'));
-    assert.match(text(), /Ο κωδικός QR δεν είναι ακόμη ενεργός/);
-    assert.ok((app().querySelector("[data-evc-qr-state]")) === (null), "app().querySelector(\"[data-evc-qr-state]\") === null");
+    assert.ok(app().querySelector('[data-evc-preview="sample-qr"]') === null);
+    assert.equal(app().querySelector("[data-evc-qr-state]")?.getAttribute("data-evc-qr-state"), "off");
+    assert.ok(app().querySelector('[data-evc-qr-placeholder="not-available"]'));
+    assert.match(text(), /Ο κωδικός QR δεν είναι ακόμη διαθέσιμος/);
+    assert.match(text(), /Ο κωδικός QR θα εμφανιστεί σε αυτή την κάρτα μόλις ενεργοποιηθεί\./);
+    assert.doesNotMatch(text(), /Δείξτε τον κωδικό στο ταμείο/, "no «show the code» note without a code");
+    assert.equal(app().querySelectorAll("[data-evc-qr-state] svg").length, 0, "no pattern of any kind");
   });
 
   it("unavailable: retry starts again from GET; sign-out deletes the remembered code before WordPress signs out", async () => {

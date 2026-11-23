@@ -62,21 +62,3 @@ export function previewPath(area: Area, screen: string): string {
 export function cx(...c: (string | false | null | undefined)[]): string {
   return c.filter(Boolean).join(" ");
 }
-
-/** Deterministic QR-LOOKING module pattern (not an encoded QR code). */
-export function sampleQrModules(seed: number, n = 25): [number, number][] {
-  let s = seed * 9301 + 49297;
-  const out: [number, number][] = [];
-  const inFinder = (r: number, c: number) => {
-    const box = (r0: number, c0: number) => r >= r0 && r < r0 + 7 && c >= c0 && c < c0 + 7;
-    return box(0, 0) || box(0, n - 7) || box(n - 7, 0);
-  };
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      if (inFinder(r, c)) continue;
-      s = (s * 9301 + 49297) % 233280;
-      if (s / 233280 > 0.52) out.push([r, c]);
-    }
-  }
-  return out;
-}

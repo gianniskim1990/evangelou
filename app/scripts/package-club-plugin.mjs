@@ -16,6 +16,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, PREPARED_RULES, PUSH_RULES, PWA_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, preparedProblemsFor, problemsFor, pushProblemsFor, pwaProblemsFor, qrProblemsFor, redemptionProblemsFor, selfTest, workerProblems } from "./php-guards.mjs";
 import { storageProblems, storageSelfTest } from "./storage-guard.mjs";
+import { sampleBundleMarkers, sampleBundleProblems, sampleGraphProblems, sampleGuardSelfTest } from "./sample-guard.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginSrc = join(appDir, "..", "wordpress", "evangelou-club");
@@ -34,8 +35,9 @@ const FORBIDDEN_BUNDLE_STRINGS = [
   // Round 12 (D26 part 2): nor its notifications.
   "requestPermission", "pushManager", "Θέλω ειδοποιήσεις", "/me/push",
 ];
-// STAGE-01 customer app: the approved screens with the non-redeemable sample QR stamp are expected,
-// but never the synthetic roster, the local journey simulation, the staff app or a mock service.
+// STAGE-01 customer app: never the synthetic roster, the local journey simulation, the staff app or a mock service.
+// STAGE-08 round 17 (owner-found bug): never the design preview's sample QR either (scripts/sample-guard.mjs: its
+// stamp, pattern, labels and the whole roster are refused below, and so are the preview-only modules in the graph).
 const FORBIDDEN_CUSTOMER_BUNDLE_STRINGS = [
   "example.invalid", "Αλεξάνδρα Κωνσταντίνου", "evc-club-design-preview", "customer-journey-local", "evc-cj", "SCENARIO_START",
   "mockClubService", "createMockClubService", "DEMO-QR", "evc-staff-config", "/club-admin", "x-admin-password", "/api/orders", "/api/overrides",
@@ -176,12 +178,22 @@ const WORKER_FILE = "customer-app/pwa/sw.js";
   }
   if (texts.some((t) => NAVIGATOR_DESTRUCTURING.test(t))) fail("the built customer JS destructures storage out of navigator");
 }
+const SAMPLE_MARKERS = sampleBundleMarkers(appDir);
+{
+  const sampleSelf = sampleGuardSelfTest(appDir);
+  if (sampleSelf.length > 0) fail(`sample guard self-test failed: ${sampleSelf.join("; ")}`);
+}
 for (const f of files.filter((x) => /\.(js|css)$/.test(x) && x !== WORKER_FILE)) {
   const text = readFileSync(join(out, f), "utf8");
   const customer = f.startsWith("customer-app/");
   if (!customer && !f.startsWith("staff-app/")) fail(`unexpected bundle file ${f}`);
   for (const needle of customer ? FORBIDDEN_CUSTOMER_BUNDLE_STRINGS : FORBIDDEN_BUNDLE_STRINGS) {
     if (text.includes(needle)) fail(`forbidden content "${needle}" in ${f}`);
+  }
+  // Round 17: the member app never contains the design preview's sample QR, sample card texts or roster.
+  if (customer) {
+    const problems = sampleBundleProblems(f, text, SAMPLE_MARKERS);
+    if (problems.length > 0) fail(problems.join("; "));
   }
 }
 // STAGE-03D: the guarded classes may be constructed ONLY by the WooCommerce-completion bootstrap, inside
@@ -214,6 +226,9 @@ const FORBIDDEN_CLASSES = ["EVC_Bacs_Payment_Confirmation", "EVC_Bacs_Payment_Fi
   });
   const inputs = Object.keys(graph.metafile.inputs).filter((p) => /\.(m?[jt]sx?|cjs)$/.test(p));
   if (!inputs.includes("src/customer/qrStore.ts")) fail("storage guard: the customer graph does not contain src/customer/qrStore.ts (sanity)");
+  // Round 17: the member app's graph never reaches the preview-only sample modules.
+  const sampleGraph = sampleGraphProblems(inputs.map((p) => p.split(sep).join("/")));
+  if (sampleGraph.length > 0) fail(sampleGraph.join("; "));
   for (const input of inputs) {
     const problems = storageProblems(input.split(sep).join("/"), readFileSync(join(appDir, input), "utf8"));
     if (problems.length > 0) fail(problems.join("; "));

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CustomerPreview } from "../../src/preview/CustomerPreview";
+import { CustomerPreview } from "../../src/preview/customerSampleScreens";
 import { ManagementPreview } from "../../src/preview/ManagementPreview";
 import { StaffPreview } from "../../src/preview/StaffPreview";
 import { addCalendarMonths } from "../../src/preview/format";

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ClubWelcome, MemberPass } from "../preview/CustomerSignature";
+import { ClubWelcome } from "../preview/CustomerSignature";
+import { MemberPass } from "../preview/customerSampleScreens";
 import { Dashboard, History, MemberChrome, Offer, Onboarding, PageTitle, Profile, Today } from "../preview/CustomerPreview";
 import type { CustomerActions } from "../preview/customerView";
 import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote } from "../preview/ds";

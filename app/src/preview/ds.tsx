@@ -1,6 +1,6 @@
 import type { ReactNode, Ref } from "react";
 import type { CustomerMembershipState } from "./customerView";
-import { cx, sampleQrModules } from "./screens";
+import { cx } from "./screens";
 // Imported (hashed by Vite, relative to the bundle) so the logo also loads where the app is not served from the site
 // root: the WordPress customer pages load it from the plugin's customer-app/assets/ (STAGE-08 round 4; a root path
 // "/logo-…png" was a 404 there, the broken image with alt «Ευαγγέλου» seen on staging).
@@ -77,43 +77,6 @@ export function PreviewNote({ children, dark = false, className }: { children: R
       <span className={cx("mt-[7px] h-[5px] w-[5px] flex-none rotate-45", dark ? "bg-[var(--brass)]" : "bg-[var(--bronze)]")} aria-hidden="true" />
       <span>{children}</span>
     </p>
-  );
-}
-
-/**
- * A QR-LOOKING pattern for the membership pass. NOT an encoded QR code
- * (seeded random modules), so it cannot be scanned or redeemed, and it is
- * permanently stamped "ΔΕΙΓΜΑ / ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ".
- */
-export function PassQr({ seed = 11, size = 196, muted = false }: { seed?: number; size?: number; muted?: boolean }) {
-  const n = 25;
-  const finder = (x: number, y: number) => (
-    <g key={`f${x}-${y}`}>
-      <rect x={x} y={y} width="7" height="7" rx="1.4" />
-      <rect x={x + 1} y={y + 1} width="5" height="5" rx="0.9" fill="#fffdf9" />
-      <rect x={x + 2} y={y + 2} width="3" height="3" rx="0.6" />
-    </g>
-  );
-  return (
-    <div className="relative inline-block" data-evc-preview="sample-qr">
-      <svg width={size} height={size} viewBox={`-1 -1 ${n + 2} ${n + 2}`} role="img" aria-label="Δείγμα κωδικού QR, μη εξαργυρώσιμο" className={cx("block", muted && "opacity-30")}>
-        <g fill="#2a211b">
-          {sampleQrModules(seed, n).map(([r, c]) => (
-            <rect key={`${r}-${c}`} x={c + 0.06} y={r + 0.06} width="0.88" height="0.88" rx="0.22" />
-          ))}
-          {finder(0, 0)}
-          {finder(n - 7, 0)}
-          {finder(0, n - 7)}
-        </g>
-      </svg>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <span className="-rotate-[8deg] border-[1.5px] border-[var(--stop)] bg-[#fffdf9] px-2.5 py-1 text-center text-[11px] leading-[1.25] font-bold tracking-[0.06em] text-[var(--stop)]">
-          ΔΕΙΓΜΑ
-          <br />
-          ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ
-        </span>
-      </div>
-    </div>
   );
 }
 

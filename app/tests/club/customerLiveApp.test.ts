@@ -69,17 +69,21 @@ function assertNoPreviewFiction(where: string) {
 }
 
 describe("STAGE-01 customer app: membership states from GET /me", () => {
-  it("an active member opens on the card: exact end, sample QR, no claim about today's coffee", async () => {
+  it("an active member opens on the card: exact end, NO sample QR (round 17), no claim about today's coffee", async () => {
     await mount([{ kind: "ok", me: me("active", "2026-11-15T10:00:00+00:00") }]);
     assert.equal(app().dataset.evcCustomerState, "active");
-    const qr = app().querySelector('[data-evc-preview="sample-qr"]');
-    assert.ok(qr, "the approved sample code");
-    assert.match(qr!.textContent!, /ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ/);
+    assert.ok(app().querySelector('[data-evc-preview="sample-qr"]') === null, "round 17: never the design preview's sample code");
+    assert.doesNotMatch(text(), /ΔΕΙΓΜΑ|ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ|δείγμα/);
+    assert.ok(app().querySelector('[data-evc-qr-placeholder="not-available"]'), "without a QR flow: «not available yet», words only");
+    assert.equal(app().querySelectorAll("[data-evc-qr-placeholder] svg").length, 0, "no pattern of any kind");
+    assert.match(text(), /Ο κωδικός QR δεν είναι ακόμη διαθέσιμος/);
+    assert.ok(app().querySelector('[aria-label="Κάρτα μέλους Evangelou Club"]'));
     assert.match(text(), /Ελένη Μαρκοπούλου/);
     assert.match(text(), /Ισχύει έως 15 Νοεμβρίου 2026, 12:00/);
     assert.match(text(), /Η συνδρομή σας είναι ενεργή/);
     assert.doesNotMatch(text(), /Ο σημερινός καφές σας περιμένει|Τον απολαύσατε σήμερα/, "today's coffee is unknown");
-    assert.match(text(), /Ο κωδικός QR δεν είναι ακόμη ενεργός/);
+    assert.match(text(), /Ο κωδικός QR θα εμφανιστεί σε αυτή την κάρτα μόλις ενεργοποιηθεί\./);
+    assert.doesNotMatch(text(), /Ο κωδικός QR δεν είναι ακόμη ενεργός/, "the old note was written for the sample code");
     assert.doesNotMatch(text(), /Μέλος από τις/, "no invented member-since date");
     assertNoPreviewFiction("card");
 

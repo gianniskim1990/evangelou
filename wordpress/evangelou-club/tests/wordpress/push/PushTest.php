@@ -76,7 +76,7 @@ final class PushTest extends EVC_WP_Test_Case {
         delete_option(EVC_Push_Campaign::AUDIT_OPTION);
         delete_option(EVC_Push_Auto::RUN_OPTION);
         delete_option(EVC_Push_Campaign::CANCEL_OPTION);
-        delete_option(EVC_Push_Campaign::STARTS_OPTION);
+        delete_option('evc_club_push_starts'); // D29: the old start-time store, no longer read or written
         delete_option(EVC_Push_Campaign::AUTO_AUDIT_OPTION);
         unset($_GET['evc_push']);
     }
@@ -572,31 +572,36 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertSame(1, (int) EVC_Push_Campaign::job()['skipped']);
     }
 
-    public function test_one_job_at_a_time_and_at_most_one_send_per_15_minutes_and_4_a_day(): void {
+    /** Owner decision D29 (round 17): one send at a time stays; there is NO rate limit on administrators' sends. */
+    public function test_d29_one_job_at_a_time_and_no_rate_limit_for_administrators(): void {
         $user = $this->customer();
         $this->member($user);
         $this->subscribe_as($user, $this->subscription());
         $admin = get_userdata($this->admin());
         $c = $this->parts['campaign'];
-        $this->assertSame('ok', $c->start($admin, 'a', 'b', 'all', 0, 1)['result']);
+        $this->assertSame(array('result' => 'ok'), $c->start($admin, 'a', 'b', 'all', 0, 1));
         $this->assertSame('busy', $c->start($admin, 'a', 'b', 'all', 0, 1)['result'], 'while one runs');
-        $c->step();
-        $limited = $c->start($admin, 'a', 'b', 'all', 0, 1);
-        $this->assertSame('rate_limited', $limited['result']);
-        $this->assertGreaterThan(800, $limited['wait']);
-        // Four starts in the last 24 hours (16 minutes apart) block a fifth.
-        $starts = array();
-        foreach (array(16, 32, 48, 64) as $minutes) {
-            $starts[] = time() - $minutes * 60;
+        $this->assertSame('done', $c->step());
+        // Six sends in a row, seconds apart (more than the old 15-minute gap and 4-a-day cap allowed): every one starts.
+        for ($i = 0; $i < 6; $i++) {
+            $this->assertSame(array('result' => 'ok'), $c->start($admin, 'a' . $i, 'b', 'all', 0, 1), "send $i starts at once");
+            $this->assertSame('done', $c->step());
         }
-        update_option(EVC_Push_Campaign::STARTS_OPTION, $starts);
-        delete_option(EVC_Push_Campaign::JOB_OPTION);
-        $this->assertSame('rate_limited', $c->start($admin, 'a', 'b', 'all', 0, 1)['result']);
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array_slice($starts, 0, 3));
-        $this->assertSame('ok', $c->start($admin, 'a', 'b', 'all', 0, 1)['result']);
+        // An audit full of recent starts (what the old cap counted after an upgrade) blocks nothing either.
+        $entry = function (int $minutes_ago): array {
+            return array('event' => 'started', 'at' => time() - $minutes_ago * 60, 'job' => 'j' . $minutes_ago, 'user_id' => 1, 'user_login' => 'a', 'audience' => 'all', 'days' => 0, 'planned' => 1, 'sent' => 1, 'failed' => 0, 'removed' => 0, 'skipped' => 0);
+        };
+        update_option(EVC_Push_Campaign::AUDIT_OPTION, array($entry(1), $entry(2), $entry(3), $entry(4), $entry(5)), false);
+        update_option('evc_club_push_starts', array(time() - 5, time() - 10, time() - 15, time() - 20), false);
+        $this->assertSame(array('result' => 'ok'), $c->start($admin, 'a', 'b', 'all', 0, 1));
+        $this->assertCount(4, get_option('evc_club_push_starts'), 'the old start-time option is neither read nor written');
         $this->assertSame('ok', $c->cancel($admin));
         $this->assertSame('cancelled', EVC_Push_Campaign::job()['state']);
         $this->assertSame('none', $c->cancel($admin));
+        $page = (string) file_get_contents(dirname(__DIR__, 3) . '/includes/push/class-evc-push-admin-page.php');
+        $this->assertStringNotContainsString('15 λεπτά', $page, 'the Greek rate-limit message is gone');
+        $this->assertFalse(defined('EVC_Push_Campaign::RATE_LIMITED'));
+        $this->assertFalse(method_exists('EVC_Push_Campaign', 'wait_seconds'));
     }
 
     public function test_a_second_runner_never_sends_the_same_batch(): void {
@@ -719,12 +724,10 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertStringNotContainsString('Η διακοπή καταχωρήθηκε', $html);
         $this->assertSame(array('cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
         // With the lock free the stop ends the job at once.
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array()); // round 14: an EMPTY store (a missing one is seeded from the audit)
         $this->assertSame('started', $this->page_post(array('evc_push_action' => 'send', 'evc_push_title' => 'Καλημέρα', 'evc_push_body' => 'Κείμενο.', 'evc_push_audience' => 'all'))['code']);
         $this->assertSame(array('code' => 'cancelled_ok'), $this->page_post(array('evc_push_action' => 'cancel')));
         $this->assertSame('cancelled', EVC_Push_Campaign::fresh_job()['state']);
         // The job ended by itself before the stop was applied: the page says so, never «stopped».
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array()); // round 14: an EMPTY store (a missing one is seeded from the audit)
         $this->page_post(array('evc_push_action' => 'send', 'evc_push_title' => 'Καλημέρα', 'evc_push_body' => 'Κείμενο.', 'evc_push_audience' => 'all'));
         $this->assertSame('done', $this->parts['campaign']->step());
         $html = $this->parts['page']->html();
@@ -756,8 +759,7 @@ final class PushTest extends EVC_WP_Test_Case {
             $this->assertNull(EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::CANCEL_OPTION));
             $this->assertSame(array('cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'), 'audited once');
             $this->assertCount(1, EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::STOP_AUDIT_OPTION), 'in the store of the lock-free stops');
-            update_option(EVC_Push_Campaign::STARTS_OPTION, array()); // round 14: an EMPTY store (a missing one is seeded from the audit)
-            $this->assertSame('no_lock', $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 2)['result']);
+                $this->assertSame('no_lock', $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 2)['result']);
         } finally {
             remove_filter('query', $null_lock);
         }
@@ -826,21 +828,6 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertSame('sent', $auto->activated($user), 'a renewal still goes once the lock is back');
     }
 
-    public function test_round13_the_rate_limit_counts_starts_that_automatic_entries_pushed_out_of_the_audit(): void {
-        $this->subscribers(1);
-        $admin = get_userdata($this->admin());
-        $c = $this->parts['campaign'];
-        $this->assertSame('ok', $c->start($admin, 'Τ', 'Κ', 'all', 0, 1)['result']);
-        $this->assertSame('done', $c->step());
-        for ($i = 0; $i < EVC_Push_Campaign::AUDIT_KEEP; $i++) {
-            EVC_Push_Campaign::append_audit(array('event' => 'auto_activated', 'at' => time(), 'job' => '', 'user_id' => 0, 'user_login' => '', 'audience' => 'active', 'days' => 0, 'planned' => 1, 'sent' => 1, 'failed' => 0, 'removed' => 0, 'skipped' => 0));
-        }
-        $this->assertNotContains('started', array_column(EVC_Push_Campaign::audit(), 'event'), 'the start left the audit');
-        $limited = $c->start($admin, 'Τ', 'Κ', 'all', 0, 1);
-        $this->assertSame('rate_limited', $limited['result']);
-        $this->assertGreaterThan(800, $limited['wait']);
-        $this->assertCount(1, EVC_Push_Campaign::starts());
-    }
 
     public function test_round13_an_administrator_who_also_holds_the_till_role_is_refused(): void {
         $id = $this->admin();
@@ -1019,7 +1006,6 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertSame('done', EVC_Push_Campaign::fresh_job()['state']);
         $this->assertSame(array('done', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
         // The same through the page.
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
         $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 1);
         $filter = $finish_first();
         add_filter('query', $filter);
@@ -1149,23 +1135,6 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertSame('sent', $this->parts['auto']->activated($user));
     }
 
-    public function test_round14_the_daily_cap_survives_the_upgrade_seeded_from_the_audit(): void {
-        $this->subscribers(1);
-        $admin = get_userdata($this->admin());
-        $c = $this->parts['campaign'];
-        $this->assertNull(EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::STARTS_OPTION), 'a site upgraded from round 12 has no store');
-        $entry = function (string $event, int $minutes_ago): array {
-            return array('event' => $event, 'at' => time() - $minutes_ago * 60, 'job' => 'j' . $minutes_ago, 'user_id' => 1, 'user_login' => 'a', 'audience' => 'all', 'days' => 0, 'planned' => 1, 'sent' => 1, 'failed' => 0, 'removed' => 0, 'skipped' => 0);
-        };
-        $audit = array($entry('done', 15), $entry('started', 16), $entry('done', 31), $entry('started', 32), $entry('started', 48), $entry('started', 64));
-        update_option(EVC_Push_Campaign::AUDIT_OPTION, $audit, false);
-        $limited = $c->start($admin, 'Τ', 'Κ', 'all', 0, 1);
-        $this->assertSame('rate_limited', $limited['result'], 'four starts in 24 hours, from the audit');
-        $this->assertGreaterThan(80000, $limited['wait']);
-        update_option(EVC_Push_Campaign::AUDIT_OPTION, array_slice($audit, 0, 5), false);
-        $this->assertSame('ok', $c->start($admin, 'Τ', 'Κ', 'all', 0, 1)['result'], 'three: a fourth may start');
-        $this->assertCount(4, EVC_Push_Campaign::fresh_option(EVC_Push_Campaign::STARTS_OPTION), 'the first start stores the seeded times with its own');
-    }
 
     public function test_round14_the_activated_notification_reads_its_marker_fresh_not_from_a_stale_cache(): void {
         $user = $this->active_subscriber('2026-12-21T08:00:00+00:00');
@@ -1423,7 +1392,6 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertStringContainsString(EVC_Push_Admin_Page::NO_LOCK_NOTICES['stopped'], $print('evc-club'), 'still there on the next visit');
         $this->assertNotFalse(has_action('admin_notices', array(EVC_Push_Plugin::parts()['page'], 'club_notice')), 'wired');
         // A new send replaces the stopped job; the notice goes.
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
         $this->assertSame('ok', $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 3)['result']);
         $this->assertSame('', EVC_Push_Admin_Page::club_notice_html());
     }
@@ -1565,7 +1533,7 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertCount(2, $this->requests);
     }
 
-    public function test_round15_the_audit_merges_the_stores_newest_first_and_the_rate_limit_keeps_the_newest_starts(): void {
+    public function test_round15_the_audit_merges_the_stores_newest_first(): void {
         $e = function (string $event, int $at): array {
             return array('event' => $event, 'at' => $at, 'job' => '', 'user_id' => 0, 'user_login' => '', 'audience' => 'all', 'days' => 0, 'planned' => 0, 'sent' => 0, 'failed' => 0, 'removed' => 0, 'skipped' => 0);
         };
@@ -1582,10 +1550,6 @@ final class PushTest extends EVC_WP_Test_Case {
         update_option(EVC_Push_Campaign::AUTO_AUDIT_OPTION, $many, false);
         update_option(EVC_Push_Campaign::AUDIT_OPTION, array_slice($many, 0, 40), false);
         $this->assertCount(EVC_Push_Campaign::AUDIT_KEEP, EVC_Push_Campaign::audit(), 'at most AUDIT_KEEP entries');
-        // starts(): the newest STARTS_KEEP start times, newest first, numbers only.
-        $stored = array(5, '40', 30, 'x', 10, 60, 20, 90, 70, 80, 50, 100, '110', null, 0);
-        update_option(EVC_Push_Campaign::STARTS_OPTION, $stored, false);
-        $this->assertSame(array(110, 100, 90, 80, 70, 60, 50, 40, 30, 20), EVC_Push_Campaign::starts());
     }
 
     // ---- automatic notifications --------------------------------------------------------------------------------
@@ -1651,7 +1615,6 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertSame(0, (int) $job['cursor']);
         // The same job, ended by a write that kept its revision: never written back as running.
         delete_option(EVC_Push_Campaign::JOB_OPTION);
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
         $this->assertSame('ok', $c->start($admin, 'Τ', 'Κ', 'all', 0, 3)['result']);
         $this->on_request = function (int $n) use ($wpdb) {
             if ($n === 2) {
@@ -1730,12 +1693,10 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertSame(array(), $this->requests);
         $this->assertSame(array('cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
         // start(): a stale running job whose takeover is refused: nothing is created, and the answer says why.
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
         $this->assertSame('ok', $c->start($admin, 'Τ', 'Κ', 'all', 0, 2)['result']);
         $stale = EVC_Push_Campaign::fresh_job();
         $stale['touched'] = time() - EVC_Push_Campaign::STALE_SECONDS - 1;
         update_option(EVC_Push_Campaign::JOB_OPTION, $stale, false);
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array(time() - 60));
         $drop = $release_at_first_check();
         add_filter('query', $drop);
         try {
@@ -1747,9 +1708,7 @@ final class PushTest extends EVC_WP_Test_Case {
         $job = EVC_Push_Campaign::fresh_job();
         $this->assertSame($stale['id'], $job['id'], 'the stale job was neither ended nor replaced');
         $this->assertSame('running', $job['state']);
-        $this->assertCount(1, EVC_Push_Campaign::starts(), 'no start counted');
         $this->assertSame(array('started', 'cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
         $this->assertSame('ok', $c->start($admin, 'Ν', 'Ν', 'all', 0, 2)['result'], 'with the lock the takeover goes through');
         $this->assertSame(array('started', 'stopped', 'started', 'cancelled', 'started'), array_column(EVC_Push_Campaign::audit(), 'event'));
         $this->assertNotSame($id, EVC_Push_Campaign::fresh_job()['id']);
@@ -1795,7 +1754,6 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertSame(EVC_Push_Campaign::REASON_NO_LOCK, $audit[0]['reason']);
         $this->assertSame(array(), $this->requests, 'nothing was sent without a usable lock');
         // «Διακοπή αποστολής» on such a job: its write under the lock is refused, so the lock-free conditional stop ends it.
-        update_option(EVC_Push_Campaign::STARTS_OPTION, array());
         $this->assertSame('ok', $c->start(get_userdata($admin), 'Τ', 'Κ', 'all', 0, 3)['result']);
         $second = EVC_Push_Campaign::fresh_job()['id'];
         $lost_crons(1, $second);
@@ -1816,7 +1774,92 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertSame(array(), $this->requests);
     }
 
-    public function test_round16_a_start_is_counted_before_its_job_is_written(): void {
+    /**
+     * Round 17 (D29 follow-up): without the rate limit, PN87 (a refused takeover ignored) was only caught when the lock was
+     * gone. A takeover refused while this connection STILL holds the lock (the stale job changed between the read and
+     * the conditional write) must answer BUSY and create nothing; it must never overwrite the other writer's job.
+     */
+    public function test_round17_a_takeover_refused_while_holding_the_lock_answers_busy_and_creates_nothing(): void {
+        $this->subscribers(1);
+        $admin = get_userdata($this->admin());
+        $c = $this->parts['campaign'];
+        $this->assertSame(array('result' => 'ok'), $c->start($admin, 'Τ', 'Κ', 'all', 0, 1));
+        $stale = EVC_Push_Campaign::fresh_job();
+        $stale['touched'] = time() - EVC_Push_Campaign::STALE_SECONDS - 1;
+        update_option(EVC_Push_Campaign::JOB_OPTION, $stale, false);
+        global $wpdb;
+        $once = false;
+        $between = function ($query) use ($wpdb, &$once) {
+            if (!$once && stripos($query, 'UPDATE') === 0 && strpos($query, EVC_Push_Campaign::JOB_OPTION) !== false) {
+                // Between start()'s read of the stale job and its conditional write, another writer moves that job on.
+                $once = true;
+                $job = EVC_Push_Campaign::fresh_job();
+                $job['rev'] = (int) $job['rev'] + 1;
+                $job['touched'] = time();
+                $wpdb->update($wpdb->options, array('option_value' => maybe_serialize($job)), array('option_name' => EVC_Push_Campaign::JOB_OPTION));
+            }
+            return $query;
+        };
+        add_filter('query', $between);
+        try {
+            $result = $c->start($admin, 'Ν', 'Ν', 'all', 0, 1);
+        } finally {
+            remove_filter('query', $between);
+        }
+        $this->assertTrue($once);
+        $this->assertSame(array('result' => EVC_Push_Campaign::BUSY), $result, 'the lock is still held: BUSY, not a new send');
+        $job = EVC_Push_Campaign::fresh_job();
+        $this->assertSame($stale['id'], $job['id'], 'the other writer\'s job is neither ended nor replaced');
+        $this->assertSame('running', $job['state']);
+        $this->assertSame((int) $stale['rev'] + 1, (int) $job['rev']);
+        $this->assertSame(array('started'), array_column(EVC_Push_Campaign::audit(), 'event'));
+    }
+
+    /**
+     * Round 17 (round-16 review N2): a compare-and-replace whose statement FAILS (a database error: wpdb->query() answers
+     * false, not 0) is a refused write, never a written one; also through a batch, which then sends nothing.
+     */
+    public function test_round17_a_compare_and_replace_that_fails_with_a_database_error_counts_as_not_written(): void {
+        global $wpdb;
+        $broken = function ($query) use ($wpdb) {
+            if ((stripos($query, 'UPDATE') === 0 || stripos($query, 'INSERT IGNORE') === 0) && (strpos($query, 'evc_round17_probe') !== false || strpos($query, EVC_Push_Campaign::JOB_OPTION) !== false)) {
+                return "UPDATE {$wpdb->prefix}evc_round17_no_such_table SET x = 1";
+            }
+            return $query;
+        };
+        update_option('evc_round17_probe', 'before', false);
+        $raw = EVC_Push_Campaign::fresh_raw('evc_round17_probe');
+        $quiet = $wpdb->suppress_errors(true);
+        add_filter('query', $broken);
+        try {
+            $this->assertFalse(EVC_Push_Campaign::replace_option('evc_round17_probe', $raw, 'after'), 'UPDATE failed: not written');
+            $this->assertFalse(EVC_Push_Campaign::replace_option('evc_round17_probe_new', null, 'x'), 'INSERT failed: not written');
+        } finally {
+            remove_filter('query', $broken);
+            $wpdb->suppress_errors($quiet);
+        }
+        $this->assertSame($raw, EVC_Push_Campaign::fresh_raw('evc_round17_probe'), 'the stored value is unchanged');
+        $this->assertNull(EVC_Push_Campaign::fresh_raw('evc_round17_probe_new'));
+        // Through a batch: its first save (the cursor before the send) fails with a database error: nothing is sent.
+        $this->subscribers(2);
+        $c = $this->parts['campaign'];
+        $this->assertSame(array('result' => 'ok'), $c->start(get_userdata($this->admin()), 'Τ', 'Κ', 'all', 0, 2));
+        $before = EVC_Push_Campaign::fresh_raw(EVC_Push_Campaign::JOB_OPTION);
+        $quiet = $wpdb->suppress_errors(true);
+        add_filter('query', $broken);
+        try {
+            $this->assertSame('none', $c->step(), 'the failed write is refused, the batch stops');
+        } finally {
+            remove_filter('query', $broken);
+            $wpdb->suppress_errors($quiet);
+        }
+        $this->assertSame(array(), $this->requests, 'no message without a saved cursor');
+        $this->assertSame($before, EVC_Push_Campaign::fresh_raw(EVC_Push_Campaign::JOB_OPTION));
+        delete_option('evc_round17_probe');
+    }
+
+    /** D29 (replaces round 16's «a start is counted before its job»): a failed job write never blocks the next start. */
+    public function test_d29_a_failed_job_write_leaves_nothing_behind_that_blocks_the_next_start(): void {
         $this->subscribers(1);
         $admin = get_userdata($this->admin());
         $c = $this->parts['campaign'];
@@ -1833,8 +1876,8 @@ final class PushTest extends EVC_WP_Test_Case {
             remove_filter('pre_update_option_' . EVC_Push_Campaign::JOB_OPTION, $fail);
         }
         $this->assertNull(EVC_Push_Campaign::fresh_job(), 'no job');
-        $this->assertCount(1, EVC_Push_Campaign::starts(), 'the start is counted although its job was never written');
-        $this->assertSame('rate_limited', $c->start($admin, 'Τ', 'Κ', 'all', 0, 1)['result']);
+        $this->assertFalse(get_option('evc_club_push_starts'), 'no start-time store is written any more');
+        $this->assertSame(array('result' => 'ok'), $c->start($admin, 'Τ', 'Κ', 'all', 0, 1), 'the next start goes through at once');
     }
 
     public function test_the_activated_notification_goes_once_per_paid_period_to_an_active_member_only(): void {

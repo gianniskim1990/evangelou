@@ -1926,12 +1926,6 @@ $mutants = array(
         }
         $result = null;', '        $result = null;',
         array('PushTest::test_a_second_runner_never_sends_the_same_batch')),
-    array('PN15-no-interval-between-sends', 'push', 'includes/push/class-evc-push-campaign.php',
-        '            if ($wait > 0) {', '            if (false) {',
-        array('PushTest::test_one_job_at_a_time_and_at_most_one_send_per_15_minutes_and_4_a_day')),
-    array('PN16-no-daily-limit', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        if (count($recent) >= self::MAX_PER_DAY) {', '        if (false) {',
-        array('PushTest::test_one_job_at_a_time_and_at_most_one_send_per_15_minutes_and_4_a_day')),
     array('PN17-endpoint-kept-in-the-job', 'push', 'includes/push/class-evc-push-campaign.php',
         '        $outcome = $this->sender->send($row, $payload, $sending[\'keys\']);
         $at = $this->backend->now_utc();
@@ -2062,16 +2056,6 @@ $mutants = array(
             return false;
         }', '',
         array('PushTest::test_round13_a_stop_during_a_batch_is_recorded_and_the_batch_ends_before_its_next_message')),
-    array('PN46-rate-limit-from-the-audit', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        $starts = self::starts();
-', '        $starts = array();
-        foreach (self::audit() as $entry) {
-            if (is_array($entry) && ($entry[\'event\'] ?? \'\') === \'started\' && isset($entry[\'at\'])) {
-                $starts[] = (int) $entry[\'at\'];
-            }
-        }
-',
-        array('PushTest::test_round13_the_rate_limit_counts_starts_that_automatic_entries_pushed_out_of_the_audit')),
     array('PN47-till-role-not-excluded', 'push', 'includes/push/class-evc-push-admin-page.php',
         '            && !EVC_Staff_Role::has_staff_role($user) && !is_multisite();', '            && !is_multisite();',
         array('PushTest::test_round13_an_administrator_who_also_holds_the_till_role_is_refused')),
@@ -2146,9 +2130,6 @@ $mutants = array(
                     // Round 14',
         // Round 15: the round-14 test no longer tells (the guarded run-state write after an earlier member stops it first).
         array('PushTest::test_round15_the_expiry_run_state_is_written_only_by_the_lock_holder_over_what_it_read')),
-    array('PN63-starts-not-seeded-from-the-audit', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        if ($stored === null) {', '        if (false) {',
-        array('PushTest::test_round14_the_daily_cap_survives_the_upgrade_seeded_from_the_audit')),
     array('PN64-activated-marker-read-through-the-cache', 'push', 'includes/push/class-evc-push-auto.php',
         '        wp_cache_delete($wp_user_id, \'user_meta\');
 ', '',
@@ -2168,7 +2149,7 @@ $mutants = array(
         // Round 16: re-pointed (as PN65).
         array('PushTest::test_round16_the_job_id_and_the_running_state_are_still_compared_when_the_revision_matches')),
     array('PN67-job-write-without-compare', 'push', 'includes/push/class-evc-push-campaign.php',
-        'WHERE option_name = %s AND BINARY option_value = %s", $new, $name, $expected));', 'WHERE option_name = %s AND %s IS NOT NULL", $new, $name, $expected));',
+        'WHERE option_name = %s AND CAST(option_value AS BINARY) = CAST(%s AS BINARY)", $new, $name, $expected));', 'WHERE option_name = %s AND %s IS NOT NULL", $new, $name, $expected));',
         array('PushTest::test_round15_the_job_write_compares_and_replaces_in_one_statement')),
     array('PN68-cursor-saved-only-after-the-send', 'push', 'includes/push/class-evc-push-campaign.php',
         '            $job[\'touched\'] = time();
@@ -2228,13 +2209,10 @@ $mutants = array(
         array('PushTest::test_round15_the_expiry_run_state_is_written_only_by_the_lock_holder_over_what_it_read')),
     array('PN81-audit-ties-in-the-wrong-order', 'push', 'includes/push/class-evc-push-campaign.php',
         '(int) ($store[0][\'at\'] ?? 0) > (int) ($stores[$pick][0][\'at\'] ?? 0)', '(int) ($store[0][\'at\'] ?? 0) >= (int) ($stores[$pick][0][\'at\'] ?? 0)',
-        array('PushTest::test_round15_the_audit_merges_the_stores_newest_first_and_the_rate_limit_keeps_the_newest_starts')),
+        array('PushTest::test_round15_the_audit_merges_the_stores_newest_first')),
     array('PN82-audit-not-capped', 'push', 'includes/push/class-evc-push-campaign.php',
         '        while (count($merged) < self::AUDIT_KEEP) {', '        while (true) {',
-        array('PushTest::test_round15_the_audit_merges_the_stores_newest_first_and_the_rate_limit_keeps_the_newest_starts')),
-    array('PN83-starts-not-capped', 'push', 'includes/push/class-evc-push-campaign.php',
-        '        return array_slice($starts, 0, self::STARTS_KEEP);', '        return $starts;',
-        array('PushTest::test_round15_the_audit_merges_the_stores_newest_first_and_the_rate_limit_keeps_the_newest_starts')),
+        array('PushTest::test_round15_the_audit_merges_the_stores_newest_first')),
     // STAGE-08 round 16 (round-15 review: L-a revision compared, L-b refused cancel / takeover, L-c LOST_LOCK bounded, nit).
     // Not a mutant: save_running_job() taking the job by value again (every batch's second save is then refused: it breaks
     // nearly every push test, not a subtle survivor).
@@ -2245,7 +2223,7 @@ $mutants = array(
 ', '',
         array('PushTest::test_round16_a_write_by_a_stale_runner_refuses_the_holders_next_save_and_no_row_goes_twice')),
     array('PN85-compare-and-replace-by-collation', 'push', 'includes/push/class-evc-push-campaign.php',
-        'AND BINARY option_value = %s"', 'AND option_value = %s"',
+        'AND CAST(option_value AS BINARY) = CAST(%s AS BINARY)"', 'AND option_value = %s"',
         array('PushTest::test_round16_the_compare_and_replace_compares_the_stored_value_byte_for_byte')),
     array('PN86-refused-cancel-reads-as-stopped', 'push', 'includes/push/class-evc-push-campaign.php',
         '            if ($this->finish($job, self::CANCELLED)) {
@@ -2257,7 +2235,9 @@ $mutants = array(
         array('PushTest::test_round16_a_cancel_or_a_takeover_whose_write_under_the_lock_is_refused_does_not_say_it_happened')),
     array('PN87-refused-takeover-ignored', 'push', 'includes/push/class-evc-push-campaign.php',
         '                if (!$this->finish($job, \'stopped\')) {', '                if (!$this->finish($job, \'stopped\') && false) {',
-        array('PushTest::test_round16_a_cancel_or_a_takeover_whose_write_under_the_lock_is_refused_does_not_say_it_happened')),
+        // Round 17: re-pointed. Without the D29-removed rate limit the round-16 test (lock gone) no longer tells: start()
+        // stops at its own lock check before the job write. The new test refuses the takeover while the lock is held.
+        array('PushTest::test_round17_a_takeover_refused_while_holding_the_lock_answers_busy_and_creates_nothing')),
     array('PN88-cancel-lock-free-without-the-count', 'push', 'includes/push/class-evc-push-campaign.php',
         '            if (!self::holds_lock(self::lock_name()) && self::no_lock_count($job) > 0) {', '            if (!self::holds_lock(self::lock_name())) {',
         array('PushTest::test_round16_a_cancel_or_a_takeover_whose_write_under_the_lock_is_refused_does_not_say_it_happened')),
@@ -2274,11 +2254,11 @@ $mutants = array(
     array('PN91-cancel-of-a-lost-lock-job-left-pending', 'push', 'includes/push/class-evc-push-campaign.php',
         '            if (!self::holds_lock(self::lock_name()) && self::no_lock_count($job) > 0) {', '            if (false) {',
         array('PushTest::test_round16_a_lock_lost_in_every_batch_ends_the_job_after_the_same_bound_and_cancel_can_end_it')),
-    array('PN92-start-counted-after-the-job', 'push', 'includes/push/class-evc-push-campaign.php',
-        '            update_option(self::STARTS_OPTION, array_slice(array_merge(array($now), self::starts()), 0, self::STARTS_KEEP), false);
-            update_option(self::JOB_OPTION, $job, false);', '            update_option(self::JOB_OPTION, $job, false);
-            update_option(self::STARTS_OPTION, array_slice(array_merge(array($now), self::starts()), 0, self::STARTS_KEEP), false);',
-        array('PushTest::test_round16_a_start_is_counted_before_its_job_is_written')),
+    // STAGE-08 round 17: round-16 review N1 (PN67 / PN85 re-pointed to CAST(… AS BINARY)) and N2; owner decision D29 removed
+    // the administrators' rate limit, and with it PN15, PN16, PN46, PN63, PN83 and PN92 (their code no longer exists).
+    array('PN93-db-error-reads-as-written', 'push', 'includes/push/class-evc-push-campaign.php',
+        '        return $changed === 1;', '        return $changed !== 0;',
+        array('PushTest::test_round17_a_compare_and_replace_that_fails_with_a_database_error_counts_as_not_written')),
     array('AT43-mismatched-vapid-pair-reads-ok', 'admin_tools', 'includes/admin/class-evc-readiness.php',
         '        if ($problem !== null) {
             return self::row(\'push_vapid\'', '        if (false) {

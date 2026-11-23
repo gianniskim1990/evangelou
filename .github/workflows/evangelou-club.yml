@@ -16,6 +16,7 @@ on:
       - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/scripts/php-guards.mjs'
+      - 'app/scripts/sample-guard.*'
       - 'app/package.json'
       - 'app/package-lock.json'
   pull_request:
@@ -34,6 +35,7 @@ on:
       - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/scripts/php-guards.mjs'
+      - 'app/scripts/sample-guard.*'
       - 'app/package.json'
       - 'app/package-lock.json'
 

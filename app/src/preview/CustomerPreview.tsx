@@ -1,52 +1,25 @@
 import { useState, type ReactNode } from "react";
-import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, CUSTOMER, addDays, coffeeName, greekDate, type PreviewMembershipState } from "./previewData";
+import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, addDays, coffeeName, greekDate } from "./previewData";
 import { cx, type CustomerScreen } from "./screens";
-import { ClubWelcome, MemberPass } from "./CustomerSignature";
 import { historyPreparation, preparationLine } from "./coffeeConfig";
-import { PREVIEW_ONLY, joinAction, membershipLine, paymentAction, paymentNote, renewalLine, sampleCustomerView, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
-import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote, StateMark, Steps } from "./ds";
-import { ONBOARDING_COPY, ONBOARDING_STEPS, consentsLine } from "./onboardingCopy";
+import { PREVIEW_ONLY, joinAction, membershipLine, paymentAction, paymentNote, renewalLine, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
+import { Btn, DefRows, Logo, PreviewNote, StateMark, Steps } from "./ds";
+import { ONBOARDING_COPY, ONBOARDING_STEPS } from "./onboardingCopy";
 
 /*
  * UI-02 design preview, Customer Club (visual only, synthetic data). Uses the
  * approved "contemporary coffee club" system; welcome and card are the UI-01.R1
  * reference screens. Nothing here registers, pays, stores or redeems anything.
  *
- * CUSTOMER-01: the member screens render a CustomerView. This design preview
- * passes the approved sample (sampleCustomerView, unchanged output); the
+ * CUSTOMER-01: the member screens render a CustomerView. The design preview
+ * (customerSampleScreens.tsx since STAGE-08 round 17, so the real member app
+ * never imports the sample) passes the approved sample; the
  * LOCAL-ONLY customer journey preview (src/customerPreview/) passes one built
  * from its simulated server, plus optional actions.
  */
 
-type Props = {
-  screen: CustomerScreen;
-  go: (screen: CustomerScreen) => void;
-  state: PreviewMembershipState;
-  coffeeUsedToday: boolean;
-  today: string;
-};
-
 /** What every member-area screen receives. */
 export type MemberScreenProps = { view: CustomerView; go: (screen: CustomerScreen) => void; actions?: CustomerActions };
-
-export function CustomerPreview(props: Props) {
-  const { screen, go } = props;
-  const view = sampleCustomerView(props.state, props.coffeeUsedToday, props.today);
-  if (screen === "welcome") return <ClubWelcome go={go} />;
-  if (screen === "card") return <MemberPass go={go} view={view} />;
-  if (screen === "register") return <Register go={go} />;
-  if (screen === "newsletter") return <Newsletter go={go} />;
-  if (screen === "offer") return <Offer go={go} />;
-  return (
-    <MemberChrome screen={screen} go={go}>
-      {screen === "dashboard" && <Dashboard view={view} go={go} />}
-      {screen === "states" && <States today={props.today} />}
-      {screen === "today" && <Today view={view} go={go} />}
-      {screen === "history" && <History view={view} go={go} />}
-      {screen === "profile" && <Profile view={view} go={go} />}
-    </MemberChrome>
-  );
-}
 
 // ---- Shared chrome ------------------------------------------------------------------
 
@@ -120,44 +93,6 @@ export function PageTitle({ title, lede }: { title: string; lede?: string }) {
 
 // ---- Onboarding -------------------------------------------------------------------------
 
-function Register({ go }: { go: (s: CustomerScreen) => void }) {
-  return (
-    <Onboarding step={0} go={go} title={ONBOARDING_COPY.register.title} lede={ONBOARDING_COPY.register.lede}>
-      <div className="grid gap-6">
-        <Field label={ONBOARDING_COPY.register.nameLabel} value={CUSTOMER.name} />
-        <Field label={ONBOARDING_COPY.register.phoneLabel} value={CUSTOMER.phoneMasked} type="tel" hint={ONBOARDING_COPY.register.phoneHint} />
-        <Field label={ONBOARDING_COPY.register.emailLabel} value={CUSTOMER.email} type="email" hint={ONBOARDING_COPY.register.emailHint} />
-      </div>
-      <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-4">
-        <Btn onClick={() => go("newsletter")} className="px-8">Συνέχεια</Btn>
-        <button type="button" onClick={() => go("welcome")} className="t-label -my-1 py-3 text-[var(--ink-2)] underline decoration-[var(--rule-strong)] underline-offset-[6px] hover:text-[var(--ink)]">Πίσω</button>
-      </div>
-      <PreviewNote className="mt-8">Προεπισκόπηση σχεδίου: τα πεδία είναι δείγματα και δεν δημιουργείται λογαριασμός.</PreviewNote>
-    </Onboarding>
-  );
-}
-
-function Newsletter({ go }: { go: (s: CustomerScreen) => void }) {
-  const [terms, setTerms] = useState(false);
-  const [news, setNews] = useState(false);
-  return (
-    <Onboarding step={1} go={go} title={ONBOARDING_COPY.consents.title} lede={ONBOARDING_COPY.consents.lede}>
-      <div className="border-t border-[var(--rule-strong)]">
-        <ConsentRow checked={terms} onChange={setTerms} required title={ONBOARDING_COPY.consents.termsTitle} body={ONBOARDING_COPY.consents.termsBody} />
-        <ConsentRow checked={news} onChange={setNews} title={ONBOARDING_COPY.consents.newsTitle} body={ONBOARDING_COPY.consents.newsBody} />
-      </div>
-      <p className="t-small mt-4 text-[var(--ink-2)]" aria-live="polite">
-        {consentsLine(terms, news)}
-      </p>
-      <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
-        <Btn onClick={() => go("offer")} disabled={!terms} className="px-8">Συνέχεια</Btn>
-        <button type="button" onClick={() => go("register")} className="t-label -my-1 py-3 text-[var(--ink-2)] underline decoration-[var(--rule-strong)] underline-offset-[6px] hover:text-[var(--ink)]">Πίσω</button>
-      </div>
-      <PreviewNote className="mt-8">Οι επιλογές ισχύουν μόνο σε αυτή τη σελίδα· καμία συναίνεση δεν αποθηκεύεται.</PreviewNote>
-    </Onboarding>
-  );
-}
-
 /**
  * The approved offer. CUSTOMER-01: the customer journey preview passes `onPay`
  * (which only leads to its "payment is not connected" step, never to a payment)
@@ -199,7 +134,7 @@ export function Offer({ go, onPay, secondary, steps, live }: { go: (s: CustomerS
 
 // ---- Member area --------------------------------------------------------------------------
 
-function entitlement(state: CustomerMembershipState, used: boolean, clubDataUnavailable = false): { headline: string; detail: string; ready: boolean } {
+export function entitlement(state: CustomerMembershipState, used: boolean, clubDataUnavailable = false): { headline: string; detail: string; ready: boolean } {
   if (state === "none") return { headline: "Δεν έχετε συνδρομή", detail: "Σε αυτόν τον λογαριασμό δεν υπάρχει συνδρομή στο Club.", ready: false };
   if (state === "unverified") return { headline: "Η συνδρομή δεν επιβεβαιώθηκε", detail: "Δεν μπορούμε να επιβεβαιώσουμε την πληρωμή σας αυτή τη στιγμή. Αν έχετε πληρώσει, μιλήστε με το κατάστημα.", ready: false };
   if (state === "active" && clubDataUnavailable) return { headline: "Η συνδρομή σας είναι ενεργή", detail: "Δείξτε την κάρτα σας στο ταμείο· εκεί ελέγχεται ο σημερινός καφές.", ready: true };
@@ -278,39 +213,6 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
           ))}
         </ul>
       </section>
-    </div>
-  );
-}
-
-function States({ today }: { today: string }) {
-  const specimens: { state: PreviewMembershipState; used: boolean; caption: string }[] = [
-    { state: "active", used: false, caption: "Ενεργή, ο καφές της ημέρας είναι διαθέσιμος" },
-    { state: "active", used: true, caption: "Ενεργή, ο καφές της ημέρας δόθηκε" },
-    { state: "pending", used: false, caption: "Η πληρωμή δεν έχει επιβεβαιωθεί" },
-    { state: "expired", used: false, caption: "Η συνδρομή έληξε" },
-  ];
-  return (
-    <div>
-      <PageTitle title="Η συνδρομή σε κάθε κατάσταση" lede="Τι βλέπει ένα μέλος στην αρχική του, ανάλογα με την κατάσταση της συνδρομής και τον σημερινό καφέ." />
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-        {specimens.map((s) => {
-          const e = entitlement(s.state, s.used);
-          return (
-            <figure key={s.caption} className="m-0">
-              <div className="on-dark flex min-h-[220px] flex-col rounded-[18px] bg-[var(--roast)] p-5 text-[var(--milk)]">
-                <StateMark state={s.state} className="t-small text-[var(--milk)]/80" />
-                <p className={cx("t-title mt-auto pt-8", e.ready ? "text-[var(--brass)]" : "text-[var(--milk)]")}>{e.headline}</p>
-                <p className="t-small mt-2 text-[var(--milk)]/65">{e.detail}</p>
-              </div>
-              <figcaption className="t-small mt-3 text-[var(--ink-2)]">
-                <span className="block font-semibold text-[var(--ink)]">{s.caption}</span>
-                {membershipLine(sampleCustomerView(s.state, s.used, today))}
-              </figcaption>
-            </figure>
-          );
-        })}
-      </div>
-      <PreviewNote className="mt-10">Οι τέσσερις καταστάσεις είναι δείγματα σχεδίου. Η ανανέωση και η πληρωμή δεν λειτουργούν στην προεπισκόπηση.</PreviewNote>
     </div>
   );
 }

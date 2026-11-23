@@ -56,7 +56,6 @@ final class EVC_Push_Admin_Page {
     const RESULTS = array(
         EVC_Push_Campaign::OK => 'Η αποστολή ξεκίνησε.',
         EVC_Push_Campaign::BUSY => 'Τρέχει ήδη μια αποστολή. Περιμένετε να τελειώσει.',
-        EVC_Push_Campaign::RATE_LIMITED => 'Μία αποστολή ανά 15 λεπτά και έως 4 την ημέρα. Δοκιμάστε ξανά αργότερα.',
         EVC_Push_Campaign::INVALID => 'Η ειδοποίηση δεν είναι έγκυρη. Δεν στάλθηκε τίποτα.',
         EVC_Push_Campaign::UNAVAILABLE => 'Οι ειδοποιήσεις δεν είναι διαθέσιμες: δείτε τη σελίδα «Ετοιμότητα» (κλειδιά, βάση του Club, μετάβαση 005).',
         EVC_Push_Campaign::NO_LOCK => 'Η βάση δεδομένων του ιστότοπου δεν επέτρεψε το κλείδωμα που χρειάζεται για ασφαλή αποστολή. Για ασφάλεια δεν στάλθηκε τίποτα. Ενημερώστε τον τεχνικό.',
@@ -328,7 +327,7 @@ final class EVC_Push_Admin_Page {
         $days = isset($f['days']) && (int) $f['days'] > 0 ? (int) $f['days'] : 7;
         $out .= '<label for="evc-push-days">Ημέρες μέχρι τη λήξη (1–30):</label> <input type="number" min="1" max="30" id="evc-push-days" name="evc_push_days" value="' . esc_attr((string) $days) . '">';
         $out .= '</fieldset></td></tr></table><p><button type="submit" class="button button-primary">Προεπισκόπηση</button></p></form>';
-        return $out . '<p>Οι ειδοποιήσεις φτάνουν μόνο σε μέλη που τις ζήτησαν από την κάρτα τους. Μία αποστολή ανά 15 λεπτά, έως 4 την ημέρα.</p>';
+        return $out . '<p>Οι ειδοποιήσεις φτάνουν μόνο σε μέλη που τις ζήτησαν από την κάρτα τους. Τρέχει μία αποστολή κάθε φορά.</p>';
     }
 
     private function audit_html(): string {

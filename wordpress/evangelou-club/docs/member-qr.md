@@ -492,7 +492,7 @@ with no dependency: byte mode, level M, versions 1–10, and a Club token is ver
 | tab visible again / `online` | `GET` again (at most every 30 s; 5 s in an error state, `unchecked`, or after a failed quiet check); the shown QR stays on screen meanwhile. |
 | the member leaves the card (`CustomerApp` effect cleanup, round 7 LOW-3) | `pause()`: every pending retry is cancelled and requests in flight are voided, so no `POST` follows them; `wake()` / `retry()` / another tab's change do nothing; opening the card again resumes with `open()`. |
 | `not_member` / `member_disabled` | Delete; explain; no code. |
-| `404` (no route: the provenance gate is off) | Delete everything; the approved sample card, unchanged (never replaced by «Φόρτωση…» while the route is unknown). |
+| `404` (no route: the provenance gate is off) | Delete everything; the card says «Ο κωδικός QR δεν είναι ακόμη διαθέσιμος» (words only). Round 17 (owner-found bug): never the design preview's sample code; while the first answer is awaited the card shows «Φόρτωση του κωδικού σας…» (no pattern). |
 | `409 concurrent_change` (or `qr_exists` from an older server) | `GET` again once, then follow the rules; twice in a row → error. |
 | `503` (including an unknown COMMIT) / error on the POST | Keep nothing (the record was deleted before the POST); «Δοκιμάστε ξανά» starts again from `GET` (never a replace). |
 

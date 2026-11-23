@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { CLUB_RULES, COFFEES, MEMBERS, addDays, coffeeName, greekDate, redemptionHistory, shortGreekDate, todaysRedemptions, type PreviewMember, type PreviewMembershipState } from "./previewData";
+import { CLUB_RULES, COFFEES, addDays, coffeeName, greekDate, shortGreekDate, type PreviewMember, type PreviewMembershipState } from "./previewData";
+import { MEMBERS, redemptionHistory, todaysRedemptions } from "./previewRoster";
 import { cx, type ManagementScreen } from "./screens";
 import { Glyph, Logo, PreviewNote, StateMark } from "./ds";
 import { daysWord, fmt } from "./format";

@@ -1,4 +1,5 @@
-import { MEMBERS, type PreviewMember } from "../../preview/previewData";
+import { type PreviewMember } from "../../preview/previewData";
+import { MEMBERS } from "../../preview/previewRoster";
 
 /**
  * UI-04O LOCAL-ONLY counter-flow preview: the deterministic fake member

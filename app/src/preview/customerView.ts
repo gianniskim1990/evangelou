@@ -1,11 +1,12 @@
 import type { CoffeeOrder } from "./coffeeConfig";
-import { CLUB_RULES, CUSTOMER, addDays, greekDate, memberHistory, type CoffeeCode, type PreviewMember, type PreviewMembershipState, type PreviewRedemption } from "./previewData";
+import { CLUB_RULES, greekDate, type CoffeeCode, type PreviewMember, type PreviewMembershipState, type PreviewRedemption } from "./previewData";
 
 /*
  * What the approved customer screens show, as one value (CUSTOMER-01).
  *
  * The UI-02 design preview builds it from the fixed sample member and the
- * preview's sample switch (sampleCustomerView: unchanged behaviour). The
+ * preview's sample switch (sampleCustomerView in customerSample.ts, a module
+ * the real member app never imports: STAGE-08 round 17). The
  * LOCAL-ONLY customer journey preview builds it from its simulated server
  * instead, so both render through the same approved components.
  */
@@ -77,29 +78,6 @@ export function liveActions(state: CustomerMembershipState, joinUrl: string, nav
   if (state === "none") return { signOut, join: () => navigate(joinUrl) };
   if (state === "expired") return { signOut, renew: () => navigate(joinUrl) };
   return { signOut };
-}
-
-function samplePaidUntil(state: PreviewMembershipState, today: string): string | null {
-  if (state === "pending") return null;
-  return addDays(today, state === "active" ? CUSTOMER.paidUntilOffsetDays : -3);
-}
-
-/** The approved UI-02 sample: the fixed preview member in the chosen sample state. */
-export function sampleCustomerView(state: PreviewMembershipState, coffeeUsedToday: boolean, today: string): CustomerView {
-  return {
-    member: CUSTOMER,
-    state,
-    coffeeUsedToday,
-    today,
-    paidUntil: samplePaidUntil(state, today),
-    paidUntilTime: null,
-    daysLeft: state === "active" ? CUSTOMER.paidUntilOffsetDays : 0,
-    visitsThisMonth: CUSTOMER.visitsThisMonth,
-    history: memberHistory(CUSTOMER.id, today),
-    usual: CUSTOMER.favourite,
-    minutesToMidnight: null,
-    pendingRenewal: false,
-  };
 }
 
 /**

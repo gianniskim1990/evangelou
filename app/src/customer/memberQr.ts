@@ -16,7 +16,7 @@ import type { CustomerQrApi, QrIssue, QrStatus } from "./qrApi";
  *                                        (the same one every other device shows)
  *   none                                POST {} -> shows and keeps it
  *   not_member / member_disabled        explained; the account's record is deleted
- *   off (no route)                      the approved sample card; everything deleted
+ *   off (no route)                      «not available yet» (round 17: never a sample code); everything deleted
  *   signed_out                          everything deleted (the plaintext too)
  *   unavailable / error                 short message, automatic retry with
  *                                        backoff, a «Δοκιμάστε ξανά» link
@@ -202,7 +202,7 @@ export class MemberQrFlow {
 
   getState = (): MemberQrState => this.state;
 
-  /** Whether the QR route has been seen in this page (so a «Φόρτωση…» never hides the sample card when it is off). */
+  /** Whether the QR route has been seen in this page (round 17: the card no longer depends on it; kept for tests). */
   seenRoute(): boolean {
     return this.routeSeen;
   }

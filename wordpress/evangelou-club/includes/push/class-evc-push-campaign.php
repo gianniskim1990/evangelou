@@ -60,7 +60,8 @@ defined('ABSPATH') || exit;
  *     conditional write also requires the stored revision to be the one this runner last wrote (or read). So a write by
  *     anyone else in between (e.g. a stale runner whose lock check passed just before it lost the lock) refuses this
  *     runner's next save: it never puts an older cursor back, so no row is sent twice. The compare-and-replace compares
- *     the stored value byte for byte (BINARY option_value = …; the options table's collation ignores letter case).
+ *     the stored value byte for byte (round 17: CAST(option_value AS BINARY) = CAST(… AS BINARY); the options table's
+ *     collation ignores letter case).
  *   - L-b: cancel() holding the lock answers CANCEL_PENDING when its write was refused (the request stays recorded; the
  *     next batch ends the job), never OK; start() does not go on after a refused stale takeover (LOST_LOCK or BUSY).
  *   - L-c: a batch that got the named lock but lost it (LOST_LOCK, e.g. IS_USED_LOCK never equals CONNECTION_ID on a
@@ -68,14 +69,12 @@ defined('ABSPATH') || exit;
  *     any lock; only a batch that did NOT lose the lock clears it. So such a job is stopped after the same NO_LOCK_TRIES
  *     (reason 'no_lock', the same notice), and cancel() ends it with the lock-free conditional stop when its own write
  *     under the lock is refused because the lock is gone while the counter shows batches in a row without a usable lock.
- *   - start() stores the start time (STARTS_OPTION) BEFORE it writes the job: a failure in between leaves a counted start
- *     without a job (stricter), never a job whose send the rate limit did not count.
  *
- * Rate limit: at most MAX_PER_DAY started sends in any 24 hours and at least MIN_INTERVAL seconds between two, counted
- * from their own small store (STARTS_OPTION, the newest STARTS_KEEP start times, written under the lock), not from the
- * audit (automatic notifications add audit entries and could push the starts out of its AUDIT_KEEP entries). Round 14:
- * while STARTS_OPTION does not exist yet (a site upgraded from round 12), it is seeded from the 'started' entries of the
- * administrators' audit, so the daily cap survives the upgrade; the first start() stores it.
+ * OWNER DECISION D29 (2026-11-23, round 17): NO rate limit on administrators' sends. The 15-minute gap and the 4-a-day
+ * cap (MIN_INTERVAL / MAX_PER_DAY, wait_seconds(), the start-time store and the answer 'rate_limited') are gone; start()
+ * neither reads nor writes the old start-time option 'evc_club_push_starts' (it may stay in the database, unused; no
+ * migration). What stays, because it is safety and not a rate limit: one send at a time (the named lock + BUSY while a
+ * job runs) and the preview / confirm step of the page. The automatic notifications keep their once-per-period rules.
  * Audit: who (user id and login), when, audience (+ days), the planned count and the result counts. NEVER an endpoint, a
  * key, a member, a name, an e-mail address or the message text. Round 14: two stores, so that two writers can never
  * overwrite each other's entry (the campaign holds its lock, the automatic notifications hold theirs, and the two run at
@@ -91,14 +90,9 @@ final class EVC_Push_Campaign {
     const AUTO_AUDIT_OPTION = 'evc_club_push_auto_audit';
     /** Round 13: the pending «Διακοπή αποστολής» request: '<job id>:<user id>'. */
     const CANCEL_OPTION = 'evc_club_push_cancel';
-    /** Round 13 (N-c): Unix times of the newest started sends, newest first. */
-    const STARTS_OPTION = 'evc_club_push_starts';
-    const STARTS_KEEP = 10;
     const CRON_HOOK = 'evc_club_push_batch';
     const BATCH_SIZE = 25;
     const TIME_BUDGET = 15;
-    const MIN_INTERVAL = 900;
-    const MAX_PER_DAY = 4;
     const MAX_DAYS = 30;
     /** A running job that has not moved for this long is stopped (e.g. the site was restored meanwhile). */
     const STALE_SECONDS = 3600;
@@ -120,7 +114,6 @@ final class EVC_Push_Campaign {
 
     const OK = 'ok';
     const BUSY = 'busy';
-    const RATE_LIMITED = 'rate_limited';
     const INVALID = 'invalid';
     const UNAVAILABLE = 'unavailable';
     const NONE = 'none';
@@ -304,47 +297,10 @@ final class EVC_Push_Campaign {
         return is_array($audit) ? array_values(array_filter($audit, 'is_array')) : array();
     }
 
-    /** Unix times of the newest started sends (newest first), from their own store (never the audit). */
-    public static function starts(): array {
-        $stored = self::fresh_option(self::STARTS_OPTION);
-        if ($stored === null) {
-            // Round 14: no store yet (upgraded from round 12): the start times the administrators' audit still holds.
-            $stored = array();
-            foreach (self::audit_store(self::AUDIT_OPTION) as $entry) {
-                if (($entry['event'] ?? '') === 'started' && isset($entry['at'])) {
-                    $stored[] = $entry['at'];
-                }
-            }
-        }
-        $starts = array();
-        foreach (is_array($stored) ? $stored : array() as $at) {
-            if (is_int($at) || (is_string($at) && ctype_digit($at))) {
-                $starts[] = (int) $at;
-            }
-        }
-        rsort($starts);
-        return array_slice($starts, 0, self::STARTS_KEEP);
-    }
-
-    /** Seconds until another send may start (0 = now), from the store of started sends. */
-    public static function wait_seconds(int $now): int {
-        $starts = self::starts();
-        $wait = 0;
-        if ($starts !== array() && $now - $starts[0] < self::MIN_INTERVAL) {
-            $wait = self::MIN_INTERVAL - ($now - $starts[0]);
-        }
-        $recent = array_values(array_filter($starts, function ($at) use ($now) {
-            return $now - $at < 86400;
-        }));
-        if (count($recent) >= self::MAX_PER_DAY) {
-            $wait = max($wait, 86400 - ($now - $recent[self::MAX_PER_DAY - 1]));
-        }
-        return max(0, $wait);
-    }
-
     /**
      * The administrator confirmed: create the job. The caller checked the capability and the nonce.
-     * @return array{result:string,wait?:int}
+     * D29 (round 17): no rate limit; only one send at a time (BUSY while a job runs).
+     * @return array{result:string}
      */
     public function start(WP_User $user, $title, $body, string $audience, int $days, int $planned): array {
         if (EVC_Push_Message::problem($title, $body) !== null || !self::valid_audience($audience, $audience === 'expiring' ? $days : 0)) {
@@ -368,10 +324,6 @@ final class EVC_Push_Campaign {
                 if (!$this->finish($job, 'stopped')) {
                     return array('result' => self::holds_lock(self::lock_name()) ? self::BUSY : self::LOST_LOCK);
                 }
-            }
-            $wait = self::wait_seconds($now);
-            if ($wait > 0) {
-                return array('result' => self::RATE_LIMITED, 'wait' => $wait);
             }
             $job = array(
                 'id' => bin2hex(random_bytes(8)),
@@ -397,8 +349,6 @@ final class EVC_Push_Campaign {
             if (!self::holds_lock(self::lock_name())) {
                 return array('result' => self::LOST_LOCK);
             }
-            // Round 16 (nit): the start is counted BEFORE the job exists, so a failure in between never leaves an uncounted send.
-            update_option(self::STARTS_OPTION, array_slice(array_merge(array($now), self::starts()), 0, self::STARTS_KEEP), false);
             update_option(self::JOB_OPTION, $job, false);
             delete_option(self::CANCEL_OPTION);
             delete_option(self::NO_LOCK_OPTION);
@@ -585,7 +535,7 @@ final class EVC_Push_Campaign {
      *   (1) $locked: this request's connection still holds the campaign lock (checked right before the write), and
      *   (2) the database still holds a RUNNING job with the same id AND the same revision as $job (round 16, L-a: the one
      *       this runner read or last wrote; anyone else's write in between refuses this one): read straight from the
-     *       database and replaced in one statement (UPDATE … WHERE BINARY option_value = the value just read).
+     *       database and replaced in one statement (UPDATE … WHERE CAST(option_value AS BINARY) = CAST(the value just read AS BINARY)).
      * $job is passed by reference: after a write that went through it carries the new revision (round 16, L-a); after a
      * refusal it is unchanged.
      * $locked = false only for the lock-free stops (no usable named lock, L1 / L-c): they can only END that same running job.
@@ -632,7 +582,7 @@ final class EVC_Push_Campaign {
 
     /**
      * Round 15: compare and replace in ONE statement: the option becomes $new only if it still holds exactly $expected
-     * (null = only if it does not exist yet; round 16: compared byte for byte, BINARY, not by the table's collation). The same value again counts as written. @return bool true = written
+     * (null = only if it does not exist yet; round 16: compared byte for byte, not by the table's collation; round 17 N1: CAST(… AS BINARY) on both sides, not the BINARY operator, which MySQL 8.0.27+ deprecates). The same value again counts as written. @return bool true = written
      */
     public static function replace_option(string $name, ?string $expected, string $new): bool {
         global $wpdb;
@@ -642,7 +592,7 @@ final class EVC_Push_Campaign {
         if ($expected === null) {
             $changed = $wpdb->query($wpdb->prepare("INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", $name, $new));
         } else {
-            $changed = $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND BINARY option_value = %s", $new, $name, $expected));
+            $changed = $wpdb->query($wpdb->prepare("UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND CAST(option_value AS BINARY) = CAST(%s AS BINARY)", $new, $name, $expected));
         }
         wp_cache_delete($name, 'options');
         wp_cache_delete('notoptions', 'options');

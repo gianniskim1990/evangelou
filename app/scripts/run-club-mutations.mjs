@@ -1816,8 +1816,9 @@ const mutants = [
   {
     id: "Q11-sample-instead-of-the-real-qr",
     file: "customer/CustomerApp.tsx",
-    search: "          {...(qrFlow && showQr",
-    replace: "          {...(false && showQr",
+    // Re-pointed STAGE-08 round 17: there is no sample in the live app any more; the real panel must stay.
+    search: "          qr={qrFlow ? <MemberQrPanel flow={qrFlow} /> : <QrNotAvailable />}",
+    replace: "          qr={<QrNotAvailable />}",
   },
   // STAGE-05D round 2: camera leak, hand-scanner text, Retry-After, focus, the jsQR fallback; the phone's QR record and its guard.
   {
@@ -1952,12 +1953,8 @@ const mutants = [
     search: "  const accountHash = (account: string) => sha256(subtle, `evc-club-qr-account|${account.trim().toLowerCase()}`);",
     replace: "  const accountHash = (_account: string) => sha256(subtle, \"evc-club-qr-account|\");",
   },
-  {
-    id: "Q20-sample-hidden-by-loading",
-    file: "customer/CustomerApp.tsx",
-    search: "qrState.phase !== \"off\" && (qrState.phase !== \"loading\" || qrFlow.seenRoute())",
-    replace: "qrState.phase !== \"off\"",
-  },
+  // Q20-sample-hidden-by-loading removed in STAGE-08 round 17: it guarded the rule that kept the sample code on the
+  // card until the first GET /me/qr answer, i.e. the owner-found bug itself (replaced by the S8R17 mutants).
   {
     id: "Q21-storage-allowed-everywhere",
     file: "../scripts/storage-guard.mjs",
@@ -3759,6 +3756,63 @@ const mutants = [
     file: "customer/pwa/installHint.ts",
     search: "maxTouchPoints > 1);\n}\n\n/** Running from the home screen",
     replace: "maxTouchPoints >= 0);\n}\n\n/** Running from the home screen",
+  },
+  // STAGE-08 round 17 (owner-found bug, staging 2026-11-23): an active member saw the design preview's SAMPLE QR for
+  // about 2 seconds on a cold start of the home-screen app. The live card never shows a sample (customerSampleGuard /
+  // customerBootPhases tests; scripts/sample-guard.mjs in the packager).
+  {
+    id: "S8R17-1-loading-draws-a-fake-pattern",
+    file: "customer/MemberQrPanel.tsx",
+    search: "        <p className=\"t-small text-[var(--ink-2)]\">Φόρτωση του κωδικού σας…</p>\n",
+    replace: "        <QrSvg text=\"evc-placeholder\" size={150} />\n        <p className=\"t-small text-[var(--ink-2)]\">Φόρτωση του κωδικού σας…</p>\n",
+  },
+  {
+    id: "S8R17-2-live-app-imports-the-sample-qr",
+    file: "customer/CustomerApp.tsx",
+    search: "import { MemberQrPanel, QrNotAvailable } from \"./MemberQrPanel\";\n",
+    replace: "import { MemberQrPanel, QrNotAvailable } from \"./MemberQrPanel\";\nimport \"../preview/sampleQr\";\n",
+  },
+  {
+    id: "S8R17-3-graph-guard-ignores-sample-modules",
+    file: "../scripts/sample-guard.mjs",
+    search: "    if (norm.some((p) => p === mod || p.endsWith(`/${mod}`))) problems.push(",
+    replace: "    if (false) problems.push(",
+  },
+  {
+    id: "S8R17-4-bundle-guard-misses-roster-names",
+    file: "../scripts/sample-guard.mjs",
+    search: "  for (const re of [/\\bname: \"([^\"]+)\"/g, ",
+    replace: "  for (const re of [",
+  },
+  {
+    id: "S8R17-5-off-renders-nothing",
+    file: "customer/MemberQrPanel.tsx",
+    search: "    case \"off\":\n      return <QrNotAvailable />;",
+    replace: "    case \"off\":\n      return null;",
+  },
+  {
+    id: "S8R17-6-live-pass-labelled-as-sample",
+    file: "preview/CustomerSignature.tsx",
+    search: "  label = \"Κάρτα μέλους Evangelou Club\",",
+    replace: "  label = \"Κάρτα μέλους Evangelou Club (δείγμα)\",",
+  },
+  {
+    id: "S8R17-7-not-available-note-while-loading",
+    file: "customer/CustomerApp.tsx",
+    search: "  const qrOff = !qrFlow || qrState.phase === \"off\";",
+    replace: "  const qrOff = !qrFlow || qrState.phase !== \"shown\";",
+  },
+  {
+    id: "S8R17-8-show-the-code-note-without-a-code",
+    file: "customer/CustomerApp.tsx",
+    search: "          qrNote={qrOff ? LIVE_QR_OFF_NOTE : LIVE_QR_NOTE}",
+    replace: "          qrNote={LIVE_QR_NOTE}",
+  },
+  {
+    id: "S8R17-9-preview-pass-loses-its-sample",
+    file: "preview/customerSampleScreens.tsx",
+    search: "      qr={<PassQr seed={11} size={188} muted={view.state !== \"active\"} />}",
+    replace: "      qr={null}",
   },
 ];
 

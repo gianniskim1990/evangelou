@@ -105,7 +105,7 @@ Administrators only (`manage_options` + `evc_manage_club`, never the till role, 
 sees it. Title ≤ 50, text ≤ 150 characters; audience: all subscribed members / active members / members expiring within
 N days (1–30). Preview with recipient count → confirmation → one job sent in batches (25 subscriptions or 15 seconds per
 batch, under a database lock; the open page submits the next batch itself, WP-Cron continues if it is closed). Result:
-sent / failed / removed (404 / 410 → revoked). Rate limit: one send per 15 minutes, at most 4 per 24 hours. Audit
+sent / failed / removed (404 / 410 → revoked). One send at a time; **no rate limit** (owner decision D29, round 17). Audit
 (newest 100): who, when, audience, counts; never an endpoint, key, member or text.
 
 Round 13:
@@ -128,8 +128,8 @@ Round 13:
   never both send «Η συνδρομή σας ενεργοποιήθηκε» / «… λήγει σε 3 ημέρες» to a member; the second answers busy and the
   event comes back a minute later. The «once per period» markers are read from the database under that lock. No named
   lock = nothing is sent.
-- **Rate limit store:** the 15-minute / 4-a-day limit is counted from its own option (`evc_club_push_starts`, the newest
-  10 start times), not from the audit, which automatic entries can fill.
+- ~~**Rate limit store:**~~ removed by D29 (round 17): there is no rate limit any more; `evc_club_push_starts` is neither
+  read nor written (it may stay in the database, unused).
 
 Round 14:
 
@@ -157,8 +157,7 @@ Round 14:
   `IS_USED_LOCK(name) = CONNECTION_ID()`; if not, it stops at once and writes nothing more. The cursor saved after the
   last message lets the next lock holder continue without sending anything twice. The automatic notifications check the
   same before each member (their «once per period» markers keep them at most once).
-- **The daily cap survives the upgrade:** a site that ran round 12 has no `evc_club_push_starts` yet; until the first
-  new send it is seeded from the «started» entries of the audit.
+- ~~**The daily cap survives the upgrade.**~~ Removed by D29 (round 17): there is no daily cap.
 
 Round 15:
 
@@ -193,8 +192,8 @@ Round 16:
   runner read or last wrote, and the new revision is handed back to the runner. So if anyone else wrote the job in
   between (for example a runner whose lock check passed just before it lost the lock), this runner's next write is
   refused and it stops; it never puts an older cursor back, so no subscription gets the message twice. The
-  compare-and-replace compares the stored value byte for byte (`BINARY option_value = …`; the options table's collation
-  ignores letter case).
+  compare-and-replace compares the stored value byte for byte (round 17: `CAST(option_value AS BINARY) = CAST(… AS
+  BINARY)`; the options table's collation ignores letter case).
 - **A refused «Διακοπή αποστολής» or takeover is not reported as done.** If the stop's write under the lock is refused,
   the page says the stop is pending (the request stays recorded and the next batch ends the send). A new send that
   finds a stale running send and cannot end it creates nothing and says why.
@@ -202,8 +201,36 @@ Round 16:
   connection hold it» check differently every time, so every batch stops at once (nothing is sent). Such batches now
   count like batches without any lock: after the same 10 in a row the send is stopped (reason `no_lock`, the same notice
   on the Club pages). «Διακοπή αποστολής» on such a send ends it at once by the same conditional write without the lock.
-- **A start is counted first.** The start time is stored for the rate limit before the send is written, so a failure in
-  between can only leave a counted start without a send, never a send that the rate limit did not count.
+- ~~**A start is counted first.**~~ Removed by D29 (round 17) together with the rate limit.
+
+Round 17:
+
+- **OWNER DECISION D29 (2026-11-23): no rate limit on administrators' sends.** The 15-minute gap, the 4-a-day cap and the
+  message «Μία αποστολή ανά 15 λεπτά και έως 4 την ημέρα…» are gone; an administrator may send again as soon as the
+  previous send has finished (or was stopped). What stays, because it is safety and not a rate limit: **only one send
+  runs at a time** (the named lock; «Τρέχει ήδη μια αποστολή. Περιμένετε να τελειώσει.» while one runs) and the
+  **preview → confirmation** step with the recipient count. The automatic notifications keep their «once per period»
+  rules. The old option `evc_club_push_starts` is no longer read or written and may stay in the database (no migration).
+- **Compare-and-replace (review N1 / N2).** The byte-for-byte compare is now `CAST(option_value AS BINARY) = CAST(%s AS
+  BINARY)` (MySQL 8.0.27+ deprecates the `BINARY` operator). A compare-and-replace whose statement fails with a database
+  error (wpdb answers `false`, not a row count) is a refused write, never a written one; a batch whose write fails that
+  way stops and sends nothing (tested with a `query` filter that breaks the statement).
+- **Known limitation: a pooling database proxy can keep the lock held (review I1).** The send lock is a MySQL / MariaDB
+  named lock, which belongs to a database *connection*. WordPress releases it at the end of the batch (`RELEASE_LOCK` in
+  a `finally`), and MySQL releases it by itself when the connection closes. Behind a **connection-pooling proxy** that
+  keeps server connections open between PHP requests (for example ProxySQL or MaxScale with pooled / persistent
+  backend connections), a batch that dies before its `RELEASE_LOCK` (PHP fatal error, timeout, killed worker) can leave
+  the lock held by a pooled server connection that no PHP request uses any more. Then every later `GET_LOCK(name, 0)`
+  answers 0: each batch and each new send answers **BUSY for ever** («Τρέχει ήδη μια αποστολή…»), WP-Cron retries every
+  60 seconds, and **nothing is sent** (fails closed, never a double send). BUSY is not counted like a missing lock, so
+  the 10-batch automatic stop does not end such a send, and «Διακοπή αποστολής» stays «pending» (it is recorded; the
+  send ends at the first batch that gets the lock). The automatic notifications (their own lock) can stay blocked the
+  same way. **Fix (technician):** list the user-level locks whose name starts with `evc_club_push_` (MySQL 8:
+  `SELECT OBJECT_NAME FROM performance_schema.metadata_locks WHERE OBJECT_TYPE = 'USER LEVEL LOCK'`; MariaDB: the
+  `metadata_lock_info` plugin), get the holding connection with `SELECT IS_USED_LOCK('<that name>')` and `KILL` it, or
+  restart the proxy; better, let WordPress connect to the database directly (no pooling of server connections across
+  PHP requests). Standard hosting (WordPress
+  connecting straight to MySQL / MariaDB, one connection per PHP request) is not affected.
 
 ## Security notes
 

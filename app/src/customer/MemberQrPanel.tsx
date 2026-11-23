@@ -13,6 +13,12 @@ import { encodeQr } from "./qrEncode";
  * never changes when the card is opened. Round 7: when the server cannot be
  * reached the phone's own copy is shown as «unchecked», saying plainly that it
  * was not checked now and will be checked again (`online` re-checks at once).
+ * STAGE-08 round 17 (owner-found bug, staging 2026-11-23): this panel is the
+ * ONLY thing the live card ever puts in its QR place, from the very first
+ * render: until the member's code is known it is a neutral place-holder
+ * («Φόρτωση του κωδικού σας…», no pattern); without the QR route (`off`) it says
+ * that the code is not available yet. The design preview's sample code is
+ * not reachable from the live app at all (src/preview/sampleQr.tsx).
  */
 
 
@@ -43,10 +49,30 @@ function Message({ title, children }: { title: string; children?: ReactNode }) {
   );
 }
 
+/** The QR's place while the member's code is fetched: the size of the drawn code, words only, never a pattern. */
+export function QrLoading() {
+  return (
+    <div className="inline-block rounded-[10px] bg-[var(--stone)] p-1" style={{ width: 204, height: 204 }} data-evc-qr-placeholder="loading">
+      <div className="flex h-full items-center justify-center px-4 text-center">
+        <p className="t-small text-[var(--ink-2)]">Φόρτωση του κωδικού σας…</p>
+      </div>
+    </div>
+  );
+}
+
+/** The QR's place when this site has no member QR route yet (or no QR flow): words only, never a pattern. */
+export function QrNotAvailable() {
+  return (
+    <div data-evc-qr-placeholder="not-available">
+      <Message title="Ο κωδικός QR δεν είναι ακόμη διαθέσιμος">Θα εμφανιστεί σε αυτή την κάρτα μόλις ενεργοποιηθεί.</Message>
+    </div>
+  );
+}
+
 function body(state: MemberQrState, flow: MemberQrFlow) {
   switch (state.phase) {
     case "loading":
-      return <Message title="Φόρτωση του κωδικού σας…" />;
+      return <QrLoading />;
     case "shown":
       return (
         <div className="text-center">
@@ -85,7 +111,7 @@ function body(state: MemberQrState, flow: MemberQrFlow) {
         </Message>
       );
     case "off":
-      return null;
+      return <QrNotAvailable />;
   }
 }
 
