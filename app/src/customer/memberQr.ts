@@ -365,11 +365,8 @@ export class MemberQrFlow {
     if (!this.take(false)) return this.unreachable(mine, account, { phase: "error" }, first);
     const status = await this.api.status();
     if (mine !== this.generation) return;
-    if (status.kind !== "off" && !this.routeSeen) {
-      this.routeSeen = true;
-      // The card may show «Φόρτωση…» from now on (the POST can take a moment).
-      if (this.state.phase === "loading") this.set({ phase: "loading" });
-    }
+    // Round 17: the card no longer waits for this (it shows «Φόρτωση…» from the first render); the flag stays for tests.
+    if (status.kind !== "off") this.routeSeen = true;
     if (status.kind === "error" || status.kind === "unavailable") return this.unreachable(mine, account, { phase: status.kind }, first);
     const plain = await this.plain(status, account);
     if (mine !== this.generation) return;

@@ -2435,12 +2435,9 @@ const mutants = [
     search: "            <QrSvg text={state.token} size={196} />\n          </div>\n          <p className=\"t-small mt-3 text-[var(--ink-2)]\">Ο κωδικός σας μένει",
     replace: "            <QrSvg text={state.token} size={196} />\n            <button type=\"button\" onClick={() => flow.retry()}>Νέο QR</button>\n          </div>\n          <p className=\"t-small mt-3 text-[var(--ink-2)]\">Ο κωδικός σας μένει",
   },
-  {
-    id: "QR21-14-loading-hidden-during-the-post",
-    file: "customer/memberQr.ts",
-    search: "      if (this.state.phase === \"loading\") this.set({ phase: \"loading\" });\n",
-    replace: "",
-  },
+  // QR21-14-loading-hidden-during-the-post removed in STAGE-08 round 17: the re-render it guarded only served the old
+  // sample-card rule (CustomerApp waited for seenRoute()); the card now shows «Φόρτωση…» from the first render, so the
+  // line is gone and the mutant would be equivalent (CI run 45138545955, shard 3).
   {
     id: "QR21-15-retry-in-any-state",
     file: "customer/memberQr.ts",
