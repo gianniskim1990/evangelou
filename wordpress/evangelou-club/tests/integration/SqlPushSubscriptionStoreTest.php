@@ -163,6 +163,13 @@ final class SqlPushSubscriptionStoreTest extends EVC_Db_Test_Case {
         $this->assertSame(1, $s->count_active(), 'a disabled member is not counted');
         $this->assertSame(array($a => 9001), $s->subscribed_members(0, 10));
         $this->assertSame(array(), $s->subscribed_members($a, 10));
+        // Round 18 (D30): every ENABLED member, with or without a subscription, ascending, after a member id.
+        $quiet = $this->member(9050);
+        $off = $this->member(9060, 'disabled');
+        $this->assertSame(array($a => 9001, $quiet => 9050), $s->enabled_members(0, 1000), 'the disabled ones are not read');
+        $this->assertCount(1, $s->enabled_members(0, 1), 'the limit');
+        $this->assertArrayNotHasKey($off, $s->enabled_members(0, 1000));
+        $this->assertSame(array($quiet => 9050), $s->enabled_members($a, 1000), 'after the member id');
         $this->assertSame(array('id' => $b, 'status' => 'disabled'), $s->member_for_wp_user(9002));
         $this->assertNull($s->member_for_wp_user(9999));
     }
@@ -242,6 +249,8 @@ final class SqlPushSubscriptionStoreTest extends EVC_Db_Test_Case {
         $s->record_success($id, self::NOW);
         $this->assertSame(1, $s->count_active());
         $this->assertSame(array($a => 9001), $s->subscribed_members(0, 5));
+        // Round 18 (D30): the in-app message audience reads evc_members only (SELECT).
+        $this->assertSame(array($a => 9001), $s->enabled_members(0, 5));
         $this->assertTrue($s->unsubscribe($a, self::FCM, self::LATER));
         $this->assertSame('renewed', $s->subscribe($a, self::FCM, self::P256, self::AUTH, 'fcm', 'chrome', self::LATER));
         $s->revoke_gone($id, self::LATER);

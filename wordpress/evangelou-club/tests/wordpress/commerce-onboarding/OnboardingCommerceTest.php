@@ -153,7 +153,7 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $email = 'tablet.' . wp_generate_password(6, false, false) . '@example.org';
         // 1. A new account from the public join page.
         $this->assertSame('register', EVC_Onboarding_Plugin::parts()['shell']->step(new WP_User(0)));
-        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', array('name' => 'Νίκος Γεωργίου', 'phone' => '6977000111', 'email' => $email, 'password' => 'ena-kafe-tin-imera', 'evc_extra' => ''))->get_data());
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', array('name' => 'Νίκος Γεωργίου', 'phone' => '6977000111', 'email' => $email, 'password' => 'ena-kafe-tin-imera', 'password_confirm' => 'ena-kafe-tin-imera', 'evc_extra' => ''))->get_data());
         $user = (int) get_user_by('email', $email)->ID;
         $this->login_as($user); // the browser now carries the new session
         $this->assertSame('terms', $this->step($user));
@@ -188,7 +188,7 @@ final class OnboardingCommerceTest extends EVC_WP_Test_Case {
         $existing = $this->customer();
         $email = get_userdata($existing)->user_email;
         $this->order($existing);
-        $r = $this->post('/join/account', array('name' => 'Άλλος Άνθρωπος', 'phone' => '6900000001', 'email' => strtoupper($email), 'password' => 'diaforetikos-kodikos', 'evc_extra' => ''));
+        $r = $this->post('/join/account', array('name' => 'Άλλος Άνθρωπος', 'phone' => '6900000001', 'email' => strtoupper($email), 'password' => 'diaforetikos-kodikos', 'password_confirm' => 'diaforetikos-kodikos', 'evc_extra' => ''));
         $this->assertSame(array('result' => 'check_account'), $r->get_data());
         $this->assertSame(0, get_current_user_id());
         $this->assertCount(1, wc_get_orders(array('customer_id' => $existing, 'limit' => -1)));

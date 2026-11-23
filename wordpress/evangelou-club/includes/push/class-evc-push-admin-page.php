@@ -9,9 +9,13 @@ defined('ABSPATH') || exit;
  *
  * Flow (every POST on the page's load-* hook, before any output: the nonce bound to the action, then the capability):
  *   1. form: title (at most 50 characters), text (at most 150), audience (all subscribed members / active members /
- *      members whose membership ends within N days);
- *   2. «Προεπισκόπηση»: the notification as the phone shows it and the number of recipients (nothing sent yet);
- *   3. «Αποστολή σε … συσκευές»: the confirmation starts ONE job (EVC_Push_Campaign::start(): rate limit, audit);
+ *      members whose membership ends within N days); round 18 (owner decision D30): the full message, written with
+ *      WordPress' own editor (wp_editor: bold, italic, headings, sizes, colour, lists, links, images from the media
+ *      library), shown in the member app;
+ *   2. «Προεπισκόπηση»: the notification as the phone shows it, the formatted message as the app shows it (sanitised)
+ *      and the number of recipients (devices and members in the app; nothing sent yet);
+ *   3. «Αποστολή σε … συσκευές»: the confirmation starts ONE job (EVC_Push_Campaign::start(): one send at a time, the
+ *      in-app message, audit; D29: no rate limit);
  *   4. the page then sends batch after batch (one POST per batch, submitted by the page itself; WP-Cron continues if the
  *      page is closed) and shows sent / failed / removed; «Διακοπή αποστολής» stops it.
  *      Round 13: when a batch is sending at that moment, the stop is only recorded («Η διακοπή καταχωρήθηκε, η αποστολή
@@ -39,6 +43,9 @@ final class EVC_Push_Admin_Page {
     /** Round 15 (L2): after this many batches in a row that lost the lock the page stops submitting the next one by itself. */
     const LOST_LOCK_STOP = 3;
     const FIELD_LOST = 'evc_push_lost';
+    /** Round 18 (D30): the formatted in-app message (wp_editor). */
+    const FIELD_MESSAGE = 'evc_push_message';
+    const EDITOR_ID = 'evcpushmessage';
     const NOT_ALLOWED = 'Δεν έχετε δικαίωμα για αυτή τη σελίδα.';
     const AUDIENCE_LABELS = array(
         'all' => 'Όλα τα μέλη που έχουν ενεργοποιήσει τις ειδοποιήσεις',
@@ -52,6 +59,7 @@ final class EVC_Push_Admin_Page {
         EVC_Push_Message::PROBLEM_BODY_LONG => 'Το κείμενο ξεπερνά τους 150 χαρακτήρες.',
         EVC_Push_Message::PROBLEM_CHARACTERS => 'Το κείμενο έχει χαρακτήρες που δεν επιτρέπονται.',
         'audience' => 'Διαλέξτε ποιοι θα λάβουν την ειδοποίηση (και, για τη λήξη, από 1 έως 30 ημέρες).',
+        'message_long' => 'Το πλήρες μήνυμα είναι πολύ μεγάλο. Συντομεύστε το ή αφαιρέστε κάποιες εικόνες.',
     );
     const RESULTS = array(
         EVC_Push_Campaign::OK => 'Η αποστολή ξεκίνησε.',
@@ -168,8 +176,13 @@ final class EVC_Push_Admin_Page {
         $body = isset($post['evc_push_body']) && is_string($post['evc_push_body']) ? $post['evc_push_body'] : '';
         $audience = isset($post['evc_push_audience']) && is_string($post['evc_push_audience']) ? $post['evc_push_audience'] : '';
         $days = isset($post['evc_push_days']) && is_string($post['evc_push_days']) && preg_match('/^\d{1,2}$/D', $post['evc_push_days']) === 1 ? (int) $post['evc_push_days'] : 0;
-        $form = array('title' => $title, 'body' => $body, 'audience' => $audience, 'days' => $days);
+        // Round 18 (D30): the formatted message, sanitised at once (only the allowlist ever reaches the page again).
+        $rich = isset($post[self::FIELD_MESSAGE]) && is_string($post[self::FIELD_MESSAGE]) ? EVC_Club_Messages::sanitize_html($post[self::FIELD_MESSAGE]) : '';
+        $form = array('title' => $title, 'body' => $body, 'audience' => $audience, 'days' => $days, 'message' => $rich);
         $problem = EVC_Push_Message::problem($title, $body);
+        if ($problem === null && strlen($rich) > EVC_Club_Messages::MAX_HTML) {
+            $problem = 'message_long';
+        }
         if ($problem === null && !EVC_Push_Campaign::valid_audience($audience, $audience === 'expiring' ? $days : 0)) {
             $problem = 'audience';
         }
@@ -181,9 +194,10 @@ final class EVC_Push_Admin_Page {
             return array('code' => 'refused', 'result' => $preview['result'], 'form' => $form);
         }
         if ($action === 'preview') {
-            return array('code' => 'preview', 'form' => $form, 'members' => $preview['members'], 'subscriptions' => $preview['subscriptions']);
+            $reach = $this->campaign->recipients($audience, $days);
+            return array('code' => 'preview', 'form' => $form, 'members' => $preview['members'], 'subscriptions' => $preview['subscriptions'], 'app_members' => count($reach['users'] ?? array()));
         }
-        $started = $this->campaign->start($user, $title, $body, $audience, $days, (int) $preview['subscriptions']);
+        $started = $this->campaign->start($user, $title, $body, $audience, $days, (int) $preview['subscriptions'], $rich);
         if ($started['result'] === EVC_Push_Campaign::OK) {
             return array('code' => 'started');
         }
@@ -303,14 +317,21 @@ final class EVC_Push_Admin_Page {
         $out = '<h2>Προεπισκόπηση</h2>';
         $out .= '<div style="max-width:360px;border:1px solid #c3c4c7;border-radius:12px;padding:12px 16px;background:#fff">'
             . '<strong>' . esc_html((string) EVC_Push_Message::normalise($f['title'])) . '</strong><br>' . esc_html((string) EVC_Push_Message::normalise($f['body'])) . '</div>';
+        // Round 18 (D30): the formatted message as the member app shows it (already sanitised by the allowlist).
+        $rich = EVC_Club_Messages::sanitize_html((string) ($f['message'] ?? ''));
+        $out .= '<h3>Το μήνυμα στην εφαρμογή</h3><div class="evc-push-message-preview" style="max-width:560px;border:1px solid #c3c4c7;border-radius:12px;padding:12px 16px;background:#fff">'
+            . '<strong>' . esc_html((string) EVC_Push_Message::normalise($f['title'])) . '</strong><p>' . esc_html((string) EVC_Push_Message::normalise($f['body'])) . '</p>'
+            . ($rich !== '' ? wp_kses($rich, EVC_Club_Messages::allowed_html(), EVC_Club_Messages::PROTOCOLS) : '<p><em>Χωρίς πλήρες μήνυμα: η εφαρμογή δείχνει τον τίτλο και τη σύνοψη.</em></p>') . '</div>';
         $out .= '<p>' . esc_html(sprintf('Κοινό: %s. Παραλήπτες τώρα: %d μέλη, %d συσκευές.', self::audience_text($f['audience'], (int) $f['days']), (int) $r['members'], (int) $r['subscriptions'])) . '</p>';
-        if ((int) $r['subscriptions'] === 0) {
+        $out .= '<p>' . esc_html(sprintf('Το μήνυμα θα εμφανιστεί στην ενότητα «Μηνύματα» της εφαρμογής σε %d μέλη.', (int) ($r['app_members'] ?? 0))) . '</p>';
+        if ((int) $r['subscriptions'] === 0 && (int) ($r['app_members'] ?? 0) === 0) {
             return $out . self::notice('Δεν υπάρχει κανένας παραλήπτης για αυτό το κοινό. Δεν θα σταλεί τίποτα.', 'warning');
         }
         $out .= '<form method="post">' . self::hidden('send');
         foreach (array('title', 'body', 'audience') as $k) {
             $out .= '<input type="hidden" name="evc_push_' . $k . '" value="' . esc_attr((string) $f[$k]) . '">';
         }
+        $out .= '<input type="hidden" name="' . esc_attr(self::FIELD_MESSAGE) . '" value="' . esc_attr($rich) . '">';
         $out .= '<input type="hidden" name="evc_push_days" value="' . esc_attr((string) (int) $f['days']) . '">';
         return $out . '<p><button type="submit" class="button button-primary">' . esc_html(sprintf('Αποστολή σε %d συσκευές', (int) $r['subscriptions'])) . '</button></p></form>';
     }
@@ -318,8 +339,11 @@ final class EVC_Push_Admin_Page {
     private function form_html(array $f): string {
         $audience = isset($f['audience']) && is_string($f['audience']) ? $f['audience'] : 'all';
         $out = '<h2>Νέα ειδοποίηση</h2><form method="post">' . self::hidden('preview') . '<table class="form-table" role="presentation">';
-        $out .= '<tr><th scope="row"><label for="evc-push-title">Τίτλος (έως 50 χαρακτήρες)</label></th><td><input type="text" class="regular-text" id="evc-push-title" name="evc_push_title" maxlength="50" required value="' . esc_attr((string) ($f['title'] ?? '')) . '"></td></tr>';
-        $out .= '<tr><th scope="row"><label for="evc-push-body">Κείμενο (έως 150 χαρακτήρες)</label></th><td><textarea class="large-text" rows="3" id="evc-push-body" name="evc_push_body" maxlength="150" required>' . esc_textarea((string) ($f['body'] ?? '')) . '</textarea></td></tr>';
+        $out .= '<tr><th scope="row"><label for="evc-push-title">Τίτλος (έως 50 χαρακτήρες)</label></th><td><input type="text" class="regular-text" id="evc-push-title" name="evc_push_title" maxlength="50" required value="' . esc_attr((string) ($f['title'] ?? '')) . '"><p class="description">Ο τίτλος της ειδοποίησης και του μηνύματος.</p></td></tr>';
+        $out .= '<tr><th scope="row"><label for="evc-push-body">Σύνοψη (έως 150 χαρακτήρες)</label></th><td><textarea class="large-text" rows="3" id="evc-push-body" name="evc_push_body" maxlength="150" required>' . esc_textarea((string) ($f['body'] ?? '')) . '</textarea><p class="description">Το απλό κείμενο που δείχνει η ειδοποίηση στο κινητό.</p></td></tr>';
+        // Round 18 (D30): the full message with WordPress' own editor (TinyMCE, media library for images).
+        $out .= '<tr><th scope="row"><label for="' . esc_attr(self::EDITOR_ID) . '">Πλήρες μήνυμα (προαιρετικό)</label></th><td>' . self::editor_html((string) ($f['message'] ?? ''))
+            . '<p class="description">Εμφανίζεται στην εφαρμογή, στην ενότητα «Μηνύματα», και ανοίγει όταν το μέλος πατήσει την ειδοποίηση. Επιτρέπονται έντονα, πλάγια, επικεφαλίδες, μεγέθη, χρώμα, λίστες, σύνδεσμοι και εικόνες από τη βιβλιοθήκη πολυμέσων.</p></td></tr>';
         $out .= '<tr><th scope="row">Ποιοι τη λαμβάνουν</th><td><fieldset>';
         foreach (self::AUDIENCE_LABELS as $value => $label) {
             $out .= '<label><input type="radio" name="evc_push_audience" value="' . esc_attr($value) . '"' . checked($audience, $value, false) . '> ' . esc_html($label) . '</label><br>';
@@ -328,6 +352,28 @@ final class EVC_Push_Admin_Page {
         $out .= '<label for="evc-push-days">Ημέρες μέχρι τη λήξη (1–30):</label> <input type="number" min="1" max="30" id="evc-push-days" name="evc_push_days" value="' . esc_attr((string) $days) . '">';
         $out .= '</fieldset></td></tr></table><p><button type="submit" class="button button-primary">Προεπισκόπηση</button></p></form>';
         return $out . '<p>Οι ειδοποιήσεις φτάνουν μόνο σε μέλη που τις ζήτησαν από την κάρτα τους. Τρέχει μία αποστολή κάθε φορά.</p>';
+    }
+
+    /** Round 18 (D30): WordPress' own editor for the full message (its output is sanitised on every POST). */
+    private static function editor_html(string $content): string {
+        if (!function_exists('wp_editor')) {
+            return '<textarea class="large-text" rows="10" id="' . esc_attr(self::EDITOR_ID) . '" name="' . esc_attr(self::FIELD_MESSAGE) . '">' . esc_textarea($content) . '</textarea>';
+        }
+        ob_start();
+        wp_editor(EVC_Club_Messages::sanitize_html($content), self::EDITOR_ID, array(
+            'textarea_name' => self::FIELD_MESSAGE,
+            'textarea_rows' => 12,
+            'media_buttons' => current_user_can('upload_files'),
+            'teeny' => false,
+            'quicktags' => true,
+            'tinymce' => array(
+                'toolbar1' => 'formatselect,fontsizeselect,bold,italic,underline,strikethrough,forecolor,bullist,numlist,blockquote,alignleft,aligncenter,alignright,link,unlink,undo,redo',
+                'toolbar2' => '',
+                'block_formats' => 'Παράγραφος=p;Επικεφαλίδα 2=h2;Επικεφαλίδα 3=h3;Επικεφαλίδα 4=h4',
+                'fontsize_formats' => '12px 14px 16px 18px 22px 28px 36px',
+            ),
+        ));
+        return (string) ob_get_clean();
     }
 
     private function audit_html(): string {

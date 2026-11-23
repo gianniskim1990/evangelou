@@ -129,6 +129,9 @@ final class EVC_Staff_Shell {
             'idleLockSeconds' => self::IDLE_LOCK_SECONDS,
             'sessionRef' => (is_string($token) && $token !== '') ? EVC_Staff_Session::session_ref($token) : '',
             'appVersion' => EVC_CLUB_VERSION,
+            // Round 18 (owner decision D31): «Χρήσιμοι σύνδεσμοι»: the Club addresses of the enabled features, never an
+            // administrator page (EVC_Club_Links::staff()).
+            'links' => EVC_Club_Links::staff(),
             'features' => array(
                 'qrLookup' => false,
                 'phoneLookup' => false,

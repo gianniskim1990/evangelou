@@ -553,7 +553,6 @@ describe("STAGE-05D member QR flow (docs/member-qr.md decision rules)", () => {
     assert.equal(keeper.memory(), null);
     assert.equal(storage.ours().length, 0);
     assert.deepEqual(flow.getState(), { phase: "loading" });
-    assert.equal(flow.seenRoute(), true);
   });
 });
 
@@ -1181,5 +1180,103 @@ describe("STAGE-08 round 7: the card's listeners and timers stop when the member
     await settle();
     assert.ok(app().querySelector('[data-evc-qr="member"]'), "still the QR");
     assert.doesNotMatch(text(), /Δεν φορτώθηκε|Φόρτωση του κωδικού/);
+  });
+});
+
+describe("STAGE-08 round 18 (round-17 review, UX): a cold start shows this member's kept code at once while it is checked", () => {
+  it("the kept code of THIS account is «checking» before GET /me/qr answers, then the answer replaces it", async () => {
+    const { keeper } = persisted();
+    await keeper.write(ME, ISSUED, TOKEN);
+    let release: (s: QrStatus) => void = () => {};
+    const api: CustomerQrApi = { status: () => new Promise<QrStatus>((r) => (release = r)), issue: async () => ({ kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }) };
+    // A fresh page: a new in-memory keeper over the phone's store.
+    const flow = new MemberQrFlow(api, createQrKeeper(createStorageQrKeeper(persisted().storage as unknown as Storage, subtle)!));
+    const reopened = new MemberQrFlow(api, keeper);
+    const open = reopened.open(ME);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(reopened.getState(), { phase: "checking", token: TOKEN }, "the kept code at once");
+    release({ kind: "active", issuedAt: ISSUED });
+    await open;
+    assert.deepEqual(reopened.getState(), { phase: "shown", token: TOKEN, issuedAt: ISSUED, fresh: false });
+    // Nothing kept (another phone store): «Φόρτωση…» as before, never a code.
+    const other = flow.open(ME);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(flow.getState(), { phase: "loading" });
+    release({ kind: "none" });
+    await other;
+  });
+
+  it("never another account's code; a stale kept code leaves the screen before the POST; a revoked member loses it", async () => {
+    const { keeper } = persisted();
+    await keeper.write("someone@else.org", ISSUED, TOKEN);
+    const answers: QrStatus[] = [];
+    let release: () => void = () => {};
+    const api: CustomerQrApi = {
+      status: () => new Promise<QrStatus>((r) => (release = () => r(answers.shift()!))),
+      issue: async () => ({ kind: "issued", token: TOKEN2, issuedAt: ISSUED2 }),
+    };
+    const flow = new MemberQrFlow(api, keeper);
+    const seen: string[] = [];
+    flow.subscribe(() => seen.push(`${flow.getState().phase}:${"token" in flow.getState() ? (flow.getState() as { token: string }).token.slice(-4) : ""}`));
+    answers.push({ kind: "none" });
+    let open = flow.open(ME);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(flow.getState(), { phase: "loading" }, "another account's code is never shown");
+    release();
+    await open;
+    assert.ok(!seen.some((s) => s.endsWith(TOKEN.slice(-4))), "not even for a moment");
+    // This account keeps TOKEN2 now; the server moved on (an administrator's revocation): issued_at differs.
+    seen.length = 0;
+    answers.push({ kind: "active", issuedAt: "2026-12-01T10:00:00+02:00" });
+    open = flow.open(ME);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(flow.getState().phase, "checking");
+    release();
+    await open;
+    const checking = seen.indexOf(`checking:${TOKEN2.slice(-4)}`);
+    assert.ok(checking >= 0 && seen.indexOf("loading:", checking) > checking, `the stale code leaves before the POST: ${seen.join(" ")}`);
+    // A disabled member: the kept code goes.
+    answers.push({ kind: "member_disabled" });
+    open = flow.open(ME);
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await open;
+    assert.deepEqual(flow.getState(), { phase: "member_disabled" });
+    assert.equal(await keeper.peek!(ME), null);
+  });
+
+  it("a kept code read after the server already answered never replaces the answer", async () => {
+    let releasePeek: (t: string | null) => void = () => {};
+    const keeper: QrKeeper = {
+      read: async () => TOKEN2,
+      write: async () => {},
+      forget: async () => {},
+      forgetAll: async () => {},
+      peek: () => new Promise<string | null>((r) => (releasePeek = r)),
+    };
+    const api: CustomerQrApi = { status: async () => ({ kind: "active", issuedAt: ISSUED2 }), issue: async () => ({ kind: "error" }) };
+    const flow = new MemberQrFlow(api, keeper);
+    await flow.open(ME);
+    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN2, issuedAt: ISSUED2, fresh: false });
+    releasePeek(TOKEN);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(flow.getState(), { phase: "shown", token: TOKEN2, issuedAt: ISSUED2, fresh: false }, "the late kept code is ignored");
+  });
+
+  it("the panel draws the kept code with a quiet «checking» line and is busy", async () => {
+    const { keeper } = persisted();
+    await keeper.write(ME, ISSUED, TOKEN);
+    const api: CustomerQrApi = { status: () => new Promise<QrStatus>(() => {}), issue: async () => ({ kind: "error" }) };
+    const flow = new MemberQrFlow(api, keeper);
+    void flow.open(ME);
+    await new Promise((r) => setTimeout(r, 0));
+    await dom.render(createElement(MemberQrPanel, { flow }));
+    const panel = dom.document.querySelector("[data-evc-qr-state]") as HTMLElement;
+    assert.equal(panel.dataset.evcQrState, "checking");
+    assert.equal(panel.getAttribute("aria-busy"), "true");
+    assert.ok(panel.querySelector('[data-evc-qr="member"]'), "the member's code");
+    assert.match(panel.textContent ?? "", /Έλεγχος του κωδικού σας…/);
+    assert.doesNotMatch(panel.textContent ?? "", /ΔΕΙΓΜΑ|Φόρτωση του κωδικού/);
+    flow.pause();
   });
 });

@@ -232,6 +232,63 @@ Round 17:
   PHP requests). Standard hosting (WordPress
   connecting straight to MySQL / MariaDB, one connection per PHP request) is not affected.
 
+## Round 18 — owner decision D30 (2026-11-23): rich messages inside the app
+
+A notification can only carry plain text, so every send from «Ειδοποιήσεις» now also leaves **one message in the member
+app** («Μηνύματα»):
+
+- **Writing.** The page has WordPress' own editor (`wp_editor`, TinyMCE: headings, sizes, bold, italic, underline,
+  strike-through, colour, lists, quote, alignment, links, images from the media library) for the optional **full
+  message**, under the **title** (≤ 50, the notification's title) and the **summary** (≤ 150, the notification's text,
+  plain). «Προεπισκόπηση» shows the notification, the formatted message as the app draws it, the devices and the number
+  of members whose app will show it.
+- **Storage.** WordPress database only (no Club DB change, no migration): the private post type `evc_club_message`
+  (`public`, `publicly_queryable`, `show_ui`, `show_in_rest`, `query_var`, `rewrite`, `has_archive` all false,
+  `exclude_from_search` true, removed from the sitemaps). Every capability maps to `evc_manage_club` and an account
+  with the till role is refused all of them (`map_meta_cap`). The page is the only writer. A message is a **draft until
+  the send job is written under the lock**, then `private` (never shown to visitors). A refused start (no lock, lock
+  lost, failing job write) deletes the draft. Post meta: audience, days, send time and, for «active» / «expiring», one
+  row per WordPress user who was in that audience **at the moment of sending** (read over every enabled Club member,
+  with or without a subscription).
+- **Sanitising (twice: when written and when read).** `wp_kses` with an explicit allowlist (p, br, strong, b, em, i, u,
+  s, del, span, h2–h4, ul, ol, li, blockquote, hr, a[href,title], img[src,alt,width,height]); links only
+  http / https / mailto / tel; then a DOM pass: style only `color` (#hex, rgb()), `text-align`, `text-decoration`
+  (underline / line-through), `font-size` 8–36 px / pt; images only below this site's uploads address
+  (`wp_get_upload_dir()`); script / style / iframe / form … removed **with their content**. Without PHP's DOM
+  extension: text and basic tags only (no style, no image). An offloaded media library (a CDN on another host) is
+  dropped; that would be an explicit allowlist decision.
+- **Sending.** The job keeps only the message number; every notification of the job carries
+  `{"title", "body", "message": <id>}`. The lock, the at-most-once cursor and D29 are unchanged; the automatic
+  notifications carry no message.
+- **The tap.** The service worker accepts only a positive whole number (≤ 2147483647) as `message`, keeps it in the
+  notification's own tag (`evc-message-<id>`, written by the worker) and opens **its registration scope +
+  `#message=<id>`** (same origin, inside `/club-member/`, built from the checked number; never a URL from the payload).
+  An open window of the member page is sent there (`WindowClient.navigate`, same document = `hashchange`) and brought
+  forward. The app opens the message and removes the hash from the address.
+- **Reading.** `GET /me/messages` (newest first, at most 50, `unread` per message and in total) and
+  `GET /me/messages/<id>` (the sanitised `html`; moves the member's read mark, user meta `evc_club_messages_last_read`,
+  forward to that message, so it and every older one count as read). Customer authorization, no-store, the member is
+  always the caller. 404 `message_not_found` for a message that does not exist and for one that is not the caller's
+  (the same answer); 404 `not_a_member`, 403 `member_disabled`, 503 `unavailable`. «Όλα τα μέλη» = every enabled Club
+  member (also those who joined later); «active» / «expiring» = the snapshot above. Reading needs no VAPID key.
+- **Drawing (member app).** No `innerHTML` / `dangerouslySetInnerHTML` anywhere: `richText.tsx` parses the body with
+  `DOMParser` into an inert document and turns only the same allowlist into React elements (links open in a new tab
+  with `rel="noopener noreferrer nofollow"`; images only on this origin; depth and size bounded). **CSP:** the member
+  page keeps `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:` — React sets the allowed
+  styles through the CSSOM (allowed by `style-src 'self'`; style attributes in markup are not used), and `img-src
+  'self'` refuses any other origin again.
+- **Not covered (owner decisions if wanted):** editing or withdrawing a message after it was sent (no admin screen; a
+  cancelled send keeps its message), a message without a notification, images from another host.
+
+### Owner test (Android)
+1. Staging with push ready. «Ειδοποιήσεις»: title «Νέα γεύση», summary «Ελάτε να τη δοκιμάσετε.», full message with a
+   heading, **bold**, a colour, a list, a link and an image from the media library. «Προεπισκόπηση»: check how the
+   message looks and the member count; «Αποστολή».
+2. On the phone (installed card, notifications on): the notification shows the title and the summary. Tap it: the app
+   opens straight at the message, formatted. «Πίσω»: the card, and below it «Μηνύματα» with the message (no «Νέο»).
+3. Leave the app open, send a second message, tap its notification: the same window shows the new message.
+4. A member outside the audience (e.g. «Μόνο τα μέλη με ενεργή συνδρομή» and an expired member) does not see it.
+
 ## Security notes
 
 - SSRF: only `https://` + exactly `fcm.googleapis.com`, `web.push.apple.com`, `updates.push.services.mozilla.com` or
@@ -293,3 +350,12 @@ Round 17:
     σύνδεση λήξει μόνη της ή γίνει αποσύνδεση από άλλη σελίδα, το κινητό συνεχίζει να λαμβάνει τις ειδοποιήσεις του μέλους
     (μόνο τίτλο και κείμενο), μέχρι το μέλος να πατήσει «Διακοπή ειδοποιήσεων» ή να ενεργοποιήσει ειδοποιήσεις άλλος
     λογαριασμός στο ίδιο κινητό.
+
+13. **Μηνύματα στην εφαρμογή (απόφαση D30):** κάθε ειδοποίηση αφήνει και ένα μήνυμα στην εφαρμογή, στην ενότητα
+    «Μηνύματα» κάτω από την κάρτα. Στη σελίδα «Ειδοποιήσεις» γράφετε τον τίτλο, μια σύντομη σύνοψη (αυτή φαίνεται στην
+    ειδοποίηση του κινητού) και, αν θέλετε, το πλήρες μήνυμα με τον κανονικό επεξεργαστή κειμένου του WordPress:
+    έντονα, πλάγια, επικεφαλίδες, μεγέθη, χρώμα, λίστες, συνδέσμους και εικόνες από τη βιβλιοθήκη πολυμέσων. Η
+    προεπισκόπηση δείχνει το μήνυμα όπως θα το δει το μέλος και σε πόσα μέλη θα εμφανιστεί. Όταν το μέλος πατήσει την
+    ειδοποίηση, ανοίγει κατευθείαν το μήνυμα. Κάθε μέλος βλέπει μόνο τα μηνύματα που στάλθηκαν σε κοινό στο οποίο ανήκε·
+    τα μηνύματα προς «όλα τα μέλη» τα βλέπουν όλα. Ένα μήνυμα δεν διορθώνεται και δεν αποσύρεται μετά την αποστολή·
+    η «Διακοπή αποστολής» σταματά μόνο τις ειδοποιήσεις.

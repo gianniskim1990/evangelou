@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ClubWelcome } from "../preview/CustomerSignature";
+import { ClubWelcome } from "../preview/clubWelcome";
 import { MemberPass } from "../preview/customerSampleScreens";
 import { Dashboard, History, MemberChrome, Offer, Onboarding, PageTitle, Profile, Today } from "../preview/CustomerPreview";
 import type { CustomerActions } from "../preview/customerView";
 import { Btn, ConsentRow, DefRows, Field, Logo, PreviewNote } from "../preview/ds";
 import { ONBOARDING_COPY, consentsLine } from "../preview/onboardingCopy";
 import { CLUB_RULES, type PreviewMember } from "../preview/previewData";
+import { PreviewCopyContext } from "../preview/previewCopyContext";
+import { PREVIEW_COPY } from "../preview/previewCopy";
 import type { CustomerScreen } from "../preview/screens";
 import type { FakeCustomerServer, JourneyState } from "./customerServer";
 import { athensDate } from "./membershipCalendar";
@@ -281,11 +283,13 @@ export function CustomerJourney({ server, now, emailRequired }: Props) {
   }
 
   return (
-    <div ref={root} data-evc-cj="app" data-evc-cj-screen={current}>
-      {body}
-      <p role="status" aria-live="polite" className="sr-only">
-        {announce}
-      </p>
-    </div>
+    <PreviewCopyContext.Provider value={PREVIEW_COPY}>
+      <div ref={root} data-evc-cj="app" data-evc-cj-screen={current}>
+        {body}
+        <p role="status" aria-live="polite" className="sr-only">
+          {announce}
+        </p>
+      </div>
+    </PreviewCopyContext.Provider>
   );
 }

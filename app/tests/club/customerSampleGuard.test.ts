@@ -11,7 +11,9 @@ import type { CustomerApi, Me, MeResult } from "../../src/customer/customerApi";
 import { MemberQrFlow, createQrKeeper, type QrFlowClock } from "../../src/customer/memberQr";
 import type { CustomerQrApi, QrIssue, QrStatus } from "../../src/customer/qrApi";
 import { createDom, type DomHarness } from "../staff/support/dom";
-import { SAMPLE_ONLY_MODULES, sampleBundleMarkers, sampleBundleProblems, sampleGraphProblems, sampleGuardSelfTest } from "../../scripts/sample-guard.mjs";
+import { PREVIEW_WORD_MARKERS, SAMPLE_ONLY_MODULES, sampleBundleMarkers, sampleBundleProblems, sampleGraphProblems, sampleGuardSelfTest, staffSampleGraphProblems } from "../../scripts/sample-guard.mjs";
+import { Today, History, Profile } from "../../src/preview/CustomerPreview";
+import { toLiveView } from "../../src/customer/liveView";
 
 /*
  * STAGE-08 round 17 — owner-found bug on staging (2026-11-23, plugin 98e25e8): an ACTIVE member saw the design
@@ -29,13 +31,13 @@ const TOKEN = `evc_${"0123456789abcdef".repeat(3)}`;
 const ISSUED = "2026-11-04T12:00:00+02:00";
 const EMAIL = "eleni@example.org";
 
-async function bundle(minify: boolean): Promise<{ inputs: string[]; output: string }> {
+async function bundle(minify: boolean, entry = "src/customer/main.tsx"): Promise<{ inputs: string[]; output: string }> {
   const mod = await import(pathToFileURL(join(appDir, "node_modules", "esbuild", "lib", "main.js")).href);
   const esbuild = (mod.default ?? mod) as typeof import("esbuild");
   const outdir = mkdtempSync(join(tmpdir(), "evc-sample-"));
   try {
     const result = await esbuild.build({
-      entryPoints: [join(appDir, "src/customer/main.tsx")],
+      entryPoints: [join(appDir, entry)],
       absWorkingDir: appDir,
       bundle: true,
       write: false,
@@ -93,6 +95,40 @@ describe("round 17: the member app cannot reach the preview sample (structure)",
     assert.match(packager, /sampleGraphProblems\(inputs/);
     assert.match(packager, /sampleBundleProblems\(f, text, SAMPLE_MARKERS\)/);
     assert.match(packager, /sampleGuardSelfTest\(appDir\)/);
+  });
+});
+
+describe("round 18 (round-17 review, Low 3 + nit): the preview's own words and the staff app", () => {
+  it("the preview's words are bundle markers, and previewCopy.ts is a preview-only module", () => {
+    assert.ok((SAMPLE_ONLY_MODULES as string[]).includes("src/preview/previewCopy.ts"));
+    for (const w of ["Δείγμα", "προεπισκόπηση"]) assert.ok((PREVIEW_WORD_MARKERS as string[]).includes(w), w);
+    assert.ok(sampleBundleMarkers(appDir).includes("Δείγμα"));
+    for (const file of ["src/preview/CustomerPreview.tsx", "src/preview/CustomerSignature.tsx", "src/preview/customerView.ts"]) {
+      const src = readFileSync(join(appDir, file), "utf8");
+      for (const word of ["Δείγμα ιστορικού", "Δείγμα προφίλ", "Μη διαθέσιμο στην προεπισκόπηση", "Ενδεικτικές επιλογές", "Ο τελικός κατάλογος δεν έχει οριστικοποιηθεί", "Δεν υπάρχει πληρωμή στην προεπισκόπηση"]) {
+        assert.ok(!src.includes(word), `${file} must not contain «${word}» (it lives in previewCopy.ts)`);
+      }
+    }
+  });
+
+  it("the live «Σήμερα», «Ιστορικό» and «Λογαριασμός» show none of the preview's notes or the illustrative list", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const view = toLiveView({ displayName: "Ελένη Μαρκοπούλου", email: EMAIL, state: "active", paidUntilUtc: "2099-11-15T10:00:00+00:00" }, NOW);
+    for (const Screen of [Today, History, Profile]) {
+      const html = renderToStaticMarkup(createElement(Screen, { view, go: () => {} }));
+      for (const re of [/Ενδεικτικές/, /οριστικοποιηθεί/, /[Δδ]είγμα/, /προεπισκόπηση/i, /Για παράδειγμα/]) assert.doesNotMatch(html, re, `${Screen.name}: ${re}`);
+    }
+  });
+
+  it("the staff app's graph and production-like bundle hold no sample module, marker or preview word", async () => {
+    for (const minify of [false, true]) {
+      const { inputs, output } = await bundle(minify, "src/staff/main.tsx");
+      assert.deepEqual(staffSampleGraphProblems(inputs), []);
+      assert.deepEqual(sampleBundleProblems(minify ? "staff-min.js" : "staff.js", output, sampleBundleMarkers(appDir)), [], `minify ${minify}`);
+    }
+    const packager = readFileSync(join(appDir, "scripts/package-club-plugin.mjs"), "utf8");
+    assert.match(packager, /staffSampleGraphProblems\(staffInputs\)/);
+    assert.doesNotMatch(packager, /if \(customer\) \{\n    const problems = sampleBundleProblems/, "the bundle markers apply to the staff files too");
   });
 });
 

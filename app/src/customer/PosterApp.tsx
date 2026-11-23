@@ -22,7 +22,7 @@ export function PosterApp({ config, reload, online = () => (typeof navigator ===
   }, [online]);
   const c = JOIN_COPY.poster;
   return (
-    <div data-evc-customer="poster" className="flex min-h-[100svh] flex-col items-center justify-center gap-8 bg-[var(--stone)] px-6 py-10 text-center">
+    <div data-evc-customer="poster" className="evc-ds flex min-h-[100svh] flex-col items-center justify-center gap-8 bg-[var(--stone)] px-6 py-10 text-center">
       <Logo className="h-12" />
       <div>
         <p className="t-label text-[var(--ink-2)]">{c.kicker}</p>

@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 import { BUSINESS_TIME_ZONE, CLUB_RULES, COFFEES, addDays, coffeeName, greekDate } from "./previewData";
 import { cx, type CustomerScreen } from "./screens";
 import { historyPreparation, preparationLine } from "./coffeeConfig";
-import { PREVIEW_ONLY, joinAction, membershipLine, paymentAction, paymentNote, renewalLine, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
+import { joinAction, membershipLine, paymentAction, paymentNote, renewalLine, type CustomerActions, type CustomerHistoryItem, type CustomerMembershipState, type CustomerView } from "./customerView";
 import { Btn, DefRows, Logo, PreviewNote, StateMark, Steps } from "./ds";
 import { ONBOARDING_COPY, ONBOARDING_STEPS } from "./onboardingCopy";
+import { PreviewCopyContext } from "./previewCopyContext";
 
 /*
  * UI-02 design preview, Customer Club (visual only, synthetic data). Uses the
@@ -100,6 +101,7 @@ export function PageTitle({ title, lede }: { title: string; lede?: string }) {
  */
 export function Offer({ go, onPay, secondary, steps, live }: { go: (s: CustomerScreen) => void; onPay?: () => void; secondary?: { label: string; onClick: () => void }; steps?: readonly string[]; live?: { note: string } }) {
   const included = ONBOARDING_COPY.offer.included;
+  const copy = useContext(PreviewCopyContext);
   return (
     <Onboarding step={2} go={go} title={ONBOARDING_COPY.offer.title} lede={ONBOARDING_COPY.offer.lede} steps={steps}>
       <div className="on-dark rounded-[22px] bg-[var(--roast)] px-6 pt-7 pb-8 text-[var(--milk)] md:px-9 md:pt-9">
@@ -117,7 +119,7 @@ export function Offer({ go, onPay, secondary, steps, live }: { go: (s: CustomerS
         {/* STAGE-08 round 4 (owner's staging run on a phone): the payment is THE action of this step, a full-width
             filled button with a clear edge and a shadow; the account link below it is small and quiet. */}
         <div className="mt-8 flex flex-col items-stretch gap-y-3 sm:max-w-[420px]">
-          <Btn tone="brass" disabled={!onPay} title={onPay || live ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"} onClick={onPay} className="w-full min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)]" data-evc-action="pay">
+          <Btn tone="brass" disabled={!onPay} title={onPay || live ? undefined : copy?.paymentUnavailable} onClick={onPay} className="w-full min-h-14 px-8 text-[17px] shadow-[0_6px_18px_rgba(0,0,0,0.35)] ring-1 ring-[var(--brass)]" data-evc-action="pay">
             Πληρωμή {CLUB_RULES.monthlyPriceEur} €
           </Btn>
           <button type="button" data-evc-action="secondary" onClick={secondary ? secondary.onClick : () => go("dashboard")} className="t-small self-center py-3 text-[var(--milk)]/60 underline decoration-[var(--brass-soft)] underline-offset-4 hover:text-[var(--milk)]">{secondary ? secondary.label : "Δείτε τον λογαριασμό μέλους"}</button>
@@ -126,7 +128,7 @@ export function Offer({ go, onPay, secondary, steps, live }: { go: (s: CustomerS
       {live ? (
         <p className="t-small mt-6 max-w-[52ch] text-[var(--ink-2)]">{live.note}</p>
       ) : (
-      <PreviewNote className="mt-6">{onPay ? "Δεν υπάρχει πληρωμή στην προεπισκόπηση: το κουμπί δεν χρεώνει τίποτα και η συνδρομή μένει σε αναμονή πληρωμής." : "Δεν υπάρχει πληρωμή στην προεπισκόπηση: το κουμπί είναι ανενεργό και καμία χρέωση δεν γίνεται."}</PreviewNote>
+      copy && <PreviewNote className="mt-6">{onPay ? copy.offerNoteOnPay : copy.offerNote}</PreviewNote>
       )}
     </Onboarding>
   );
@@ -160,6 +162,7 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
   const pay = paymentAction(view, actions);
   const join = joinAction(view, actions);
   const note = paymentNote(view, actions);
+  const copy = useContext(PreviewCopyContext);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
       <section>
@@ -177,7 +180,7 @@ export function Dashboard({ view, go, actions }: MemberScreenProps) {
             )}
             <Btn tone={state === "active" ? "brass" : "ghost-dark"} onClick={() => go("card")}>Άνοιγμα κάρτας</Btn>
             {pay && (
-              <Btn tone="brass" disabled={!pay.run} title={pay.run || view.live ? undefined : PREVIEW_ONLY} onClick={pay.run} className={pay.run ? "min-h-14 px-8 text-[17px]" : undefined} data-evc-action={pay.run ? pay.kind : undefined}>
+              <Btn tone="brass" disabled={!pay.run} title={pay.run || view.live ? undefined : copy?.unavailable} onClick={pay.run} className={pay.run ? "min-h-14 px-8 text-[17px]" : undefined} data-evc-action={pay.run ? pay.kind : undefined}>
                 {pay.label}
               </Btn>
             )}
@@ -226,6 +229,7 @@ function minutesToAthensMidnight(): number {
 
 export function Today({ view, go }: MemberScreenProps) {
   const { state, coffeeUsedToday, today } = view;
+  const copy = useContext(PreviewCopyContext);
   const [deviceLeft] = useState(minutesToAthensMidnight);
   const left = view.minutesToMidnight ?? deviceLeft;
   const clubDataUnavailable = view.clubData === "unavailable";
@@ -283,8 +287,11 @@ export function Today({ view, go }: MemberScreenProps) {
             </li>
           ))}
         </ol>
-        <h2 className="t-title mt-10 text-[var(--ink)]">Ενδεικτικές επιλογές</h2>
-        <p className="t-body mt-2 text-[var(--ink-2)]">Για παράδειγμα: {COFFEES.map((c) => c.label).join(", ")}. Ο τελικός κατάλογος δεν έχει οριστικοποιηθεί.</p>
+        {/* Round 18 (round-17 review, Low 3): the illustrative list is the design preview's only; the live app shows nothing here. */}
+        {!view.live && copy && (<>
+        <h2 className="t-title mt-10 text-[var(--ink)]">{copy.coffeesTitle}</h2>
+        <p className="t-body mt-2 text-[var(--ink-2)]">{copy.coffeesLine(COFFEES.map((c) => c.label).join(", "))}</p>
+        </>)}
       </section>
     </div>
   );
@@ -292,6 +299,7 @@ export function Today({ view, go }: MemberScreenProps) {
 
 export function History({ view }: MemberScreenProps) {
   const { state } = view;
+  const copy = useContext(PreviewCopyContext);
   const items = view.history;
   const months = new Map<string, CustomerHistoryItem[]>();
   for (const r of items) months.set(r.date.slice(0, 7), [...(months.get(r.date.slice(0, 7)) ?? []), r]);
@@ -331,7 +339,7 @@ export function History({ view }: MemberScreenProps) {
           </ol>
         </section>
       ))}
-      {!view.live && <PreviewNote>Δείγμα ιστορικού με φανταστικά δεδομένα· καμία εξαργύρωση δεν έχει καταχωρηθεί.</PreviewNote>}
+      {!view.live && copy && <PreviewNote>{copy.historyNote}</PreviewNote>}
     </div>
   );
 }
@@ -340,6 +348,7 @@ export function Profile({ view, actions }: MemberScreenProps) {
   const { state, member } = view;
   // Early renewal of an active membership exists only in the design preview: the live app never offers it (D27).
   const renew = !view.live && state === "active" && !view.pendingRenewal ? actions?.renew : undefined;
+  const copy = useContext(PreviewCopyContext);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
       <section>
@@ -347,11 +356,11 @@ export function Profile({ view, actions }: MemberScreenProps) {
         {member.memberSince && <p className="t-body mt-2 text-[var(--ink-2)]">Μέλος από τις {greekDate(member.memberSince)}</p>}
         <div className="mt-8 flex flex-wrap gap-3">
           {!view.live && (
-            <Btn tone="line" disabled title={PREVIEW_ONLY}>
+            <Btn tone="line" disabled title={copy?.unavailable}>
               Επεξεργασία στοιχείων
             </Btn>
           )}
-          <Btn tone="line" disabled={!actions?.signOut} title={actions?.signOut || view.live ? undefined : PREVIEW_ONLY} onClick={actions?.signOut}>Αποσύνδεση</Btn>
+          <Btn tone="line" disabled={!actions?.signOut} title={actions?.signOut || view.live ? undefined : copy?.unavailable} onClick={actions?.signOut}>Αποσύνδεση</Btn>
         </div>
       </section>
       <section>
@@ -380,7 +389,7 @@ export function Profile({ view, actions }: MemberScreenProps) {
         {!view.live && (<>
         <h2 className="t-title mt-10 border-b border-[var(--rule-strong)] pb-3 text-[var(--ink)]">Επικοινωνία</h2>
         <DefRows rows={[["Newsletter", member.newsletter ? "Ναι, ξεχωριστή συναίνεση από τη συνδρομή" : "Όχι"]]} />
-        <PreviewNote className="mt-8">Δείγμα προφίλ με φανταστικά στοιχεία· καμία αλλαγή δεν αποθηκεύεται.</PreviewNote>
+        {copy && <PreviewNote className="mt-8">{copy.profileNote}</PreviewNote>}
         </>)}
       </section>
     </div>

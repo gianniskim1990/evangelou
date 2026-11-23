@@ -9,11 +9,15 @@ defined('ABSPATH') || (defined('EVC_STANDALONE_TEST') && EVC_STANDALONE_TEST) ||
  *
  * The payload the member's phone decrypts is JSON {"title": ..., "body": ...} and nothing else: no URL, no icon, no
  * action. The service worker always opens the member page itself (app/src/customer/pwa/swPush.ts), never an address
- * from a message.
+ * from a message. Round 18 (owner decision D30): a notification sent from «Ειδοποιήσεις» also names its in-app message
+ * by number ({"title", "body", "message": <id>}, a positive integer only); the worker checks it and opens the member
+ * page at its own scope with «#message=<id>», never a URL taken from the payload.
  */
 final class EVC_Push_Message {
     const MAX_TITLE = 50;
     const MAX_BODY = 150;
+    /** Round 18 (D30): the largest message number a payload may name (the worker refuses anything else). */
+    const MAX_MESSAGE_ID = 2147483647;
 
     const PROBLEM_TITLE_EMPTY = 'title_empty';
     const PROBLEM_TITLE_LONG = 'title_too_long';
@@ -60,10 +64,15 @@ final class EVC_Push_Message {
      * The JSON the phone decrypts. The caller has checked problem() === null.
      * @throws InvalidArgumentException for text that problem() refuses
      */
-    public static function payload($title, $body): string {
+    public static function payload($title, $body, int $message = 0): string {
         if (self::problem($title, $body) !== null) {
             throw new InvalidArgumentException('Refused notification text.');
         }
-        return (string) json_encode(array('title' => self::normalise($title), 'body' => self::normalise($body)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $data = array('title' => self::normalise($title), 'body' => self::normalise($body));
+        // Round 18 (D30): the number of the in-app message (absent for the automatic notifications).
+        if ($message > 0 && $message <= self::MAX_MESSAGE_ID) {
+            $data['message'] = $message;
+        }
+        return (string) json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 }

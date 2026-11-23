@@ -131,6 +131,11 @@ export type MemberQrState =
   | { phase: "shown"; token: string; issuedAt: string; fresh: boolean }
   /** Round 7: the server could not be reached; the QR this phone keeps for the member, not verified now. */
   | { phase: "unchecked"; token: string }
+  /**
+   * Round 18 (round-17 review, UX): a cold start while the phone keeps THIS member's code: it is shown at once with a
+   * quiet «checking» line while GET /me/qr runs (instead of «Φόρτωση…»); the answer then replaces it.
+   */
+  | { phase: "checking"; token: string }
   | { phase: "not_member" }
   | { phase: "member_disabled" }
   | { phase: "off" }
@@ -172,8 +177,6 @@ export class MemberQrFlow {
   private readonly listeners = new Set<() => void>();
   private generation = 0;
   private account: string | null = null;
-  /** True once the server answered with anything but "no route" (the panel may then show «Φόρτωση…»). */
-  private routeSeen = false;
   /** Requests sent in the last minute (`issue`: a POST). */
   private sent: { at: number; issue: boolean }[] = [];
   /** Failures in a row (the backoff step); reset when a QR is shown. */
@@ -196,16 +199,11 @@ export class MemberQrFlow {
     // Round 4: another tab signed out or replaced the QR: never keep showing the old code here.
     keeper.onExternalChange?.(() => {
       if (this.paused) return;
-      if (this.state.phase === "shown" || this.state.phase === "unchecked") void this.open();
+      if (this.state.phase === "shown" || this.state.phase === "unchecked" || this.state.phase === "checking") void this.open();
     });
   }
 
   getState = (): MemberQrState => this.state;
-
-  /** Whether the QR route has been seen in this page (round 17: the card no longer depends on it; kept for tests). */
-  seenRoute(): boolean {
-    return this.routeSeen;
-  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -233,8 +231,20 @@ export class MemberQrFlow {
     this.paused = false;
     this.cancelRetry();
     this.lastOpen = this.clock.now();
-    if (!(quiet && this.showing())) this.set({ phase: "loading" });
+    if (!(quiet && this.showing())) {
+      this.set({ phase: "loading" });
+      // Round 18: the code this phone keeps for THIS account (peek: by the account, never another one's) is shown at
+      // once while the server is asked; the server's answer always replaces it.
+      void this.showKept(mine, account);
+    }
     await this.resolve(mine, account, 0);
+  }
+
+  /** Round 18: «checking» with the kept code, only while this open is still waiting for its first answer. */
+  private async showKept(mine: number, account: string): Promise<void> {
+    const kept = this.keeper.peek ? await this.keeper.peek(account) : null;
+    if (mine !== this.generation || kept === null || this.state.phase !== "loading" || account !== this.account) return;
+    this.set({ phase: "checking", token: kept });
   }
 
   /**
@@ -251,7 +261,7 @@ export class MemberQrFlow {
   wake(): void {
     if (this.account === null || this.paused) return;
     const phase = this.state.phase;
-    if (phase === "loading" || phase === "off") return;
+    if (phase === "loading" || phase === "checking" || phase === "off") return;
     const since = this.clock.now() - this.lastOpen;
     if (phase === "error" || phase === "unavailable") {
       if (since >= QR_RETRY_DELAYS_MS[0]) void this.open();
@@ -365,8 +375,6 @@ export class MemberQrFlow {
     if (!this.take(false)) return this.unreachable(mine, account, { phase: "error" }, first);
     const status = await this.api.status();
     if (mine !== this.generation) return;
-    // Round 17: the card no longer waits for this (it shows «Φόρτωση…» from the first render); the flag stays for tests.
-    if (status.kind !== "off") this.routeSeen = true;
     if (status.kind === "error" || status.kind === "unavailable") return this.unreachable(mine, account, { phase: status.kind }, first);
     const plain = await this.plain(status, account);
     if (mine !== this.generation) return;
@@ -383,6 +391,8 @@ export class MemberQrFlow {
       if (token !== null) return this.settle(mine, { phase: "shown", token, issuedAt: status.issuedAt, fresh: false });
     }
     // D22: nothing valid kept on this device (or none on the server): POST {} gives the member's own stable QR.
+    // Round 18: the kept code is not the server's any more: it leaves the screen before the POST.
+    if (this.state.phase === "checking") this.set({ phase: "loading" });
     return this.issue(mine, account, concurrentRetries);
   }
 

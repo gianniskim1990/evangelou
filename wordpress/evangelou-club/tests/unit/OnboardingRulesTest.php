@@ -4,7 +4,31 @@ use PHPUnit\Framework\TestCase;
 /** STAGE-07: the pure onboarding rules (the same as the approved CUSTOMER-01 form, plus the password policy). */
 final class OnboardingRulesTest extends TestCase {
     private static function valid(array $override = array()): array {
-        return array_merge(array('name' => 'Μαρία Παπαδοπούλου', 'phone' => '694 123 4567', 'email' => ' Maria.P@Example.gr ', 'password' => 'kafes-sto-limani-7'), $override);
+        $form = array_merge(array('name' => 'Μαρία Παπαδοπούλου', 'phone' => '694 123 4567', 'email' => ' Maria.P@Example.gr ', 'password' => 'kafes-sto-limani-7'), $override);
+        if (!array_key_exists('password_confirm', $override)) {
+            $form['password_confirm'] = $form['password']; // round 18 (D32): the confirmation follows the password
+        }
+        return $form;
+    }
+
+    /** STAGE-08 round 18, owner decision D32: «Επιβεβαίωση κωδικού» is required and must be identical (fail closed). */
+    public function test_round18_d32_the_password_confirmation_is_required_and_must_match(): void {
+        $cases = array(
+            'no confirmation' => array(array('password_confirm' => null), EVC_Onboarding_Rules::CONFIRM_MISSING),
+            'empty confirmation' => array(array('password_confirm' => ''), EVC_Onboarding_Rules::CONFIRM_MISSING),
+            'confirmation not a string' => array(array('password_confirm' => array('kafes-sto-limani-7')), EVC_Onboarding_Rules::CONFIRM_MISSING),
+            'different' => array(array('password_confirm' => 'kafes-sto-limani-8'), EVC_Onboarding_Rules::CONFIRM_MISMATCH),
+            'different case' => array(array('password_confirm' => 'KAFES-sto-limani-7'), EVC_Onboarding_Rules::CONFIRM_MISMATCH),
+            'trailing space' => array(array('password_confirm' => 'kafes-sto-limani-7 '), EVC_Onboarding_Rules::CONFIRM_MISMATCH),
+        );
+        foreach ($cases as $label => list($override, $code)) {
+            $input = self::valid($override);
+            if ($override['password_confirm'] === null) {
+                unset($input['password_confirm']);
+            }
+            $this->assertSame(array('confirm' => $code), EVC_Onboarding_Rules::validate($input), $label);
+        }
+        $this->assertSame(array('password' => EVC_Onboarding_Rules::PASSWORD_SHORT), EVC_Onboarding_Rules::validate(self::valid(array('password' => 'short1', 'password_confirm' => 'other'))), 'the password first');
     }
 
     public function test_a_valid_registration_has_no_errors(): void {

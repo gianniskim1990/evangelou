@@ -57,7 +57,11 @@ final class OnboardingTest extends EVC_WP_Test_Case {
     }
 
     private static function form(array $override = array()): array {
-        return array_merge(array('name' => 'Μαρία Παπαδοπούλου', 'phone' => '694 123 4567', 'email' => 'maria.' . wp_generate_password(6, false, false) . '@example.gr', 'password' => 'kafes-sto-limani-7', 'evc_extra' => ''), $override);
+        $form = array_merge(array('name' => 'Μαρία Παπαδοπούλου', 'phone' => '694 123 4567', 'email' => 'maria.' . wp_generate_password(6, false, false) . '@example.gr', 'password' => 'kafes-sto-limani-7', 'evc_extra' => ''), $override);
+        if (!array_key_exists('password_confirm', $override)) {
+            $form['password_confirm'] = $form['password']; // round 18 (D32)
+        }
+        return $form;
     }
 
     /** A POST from the join page (its own Origin, the page's nonce unless given). */
@@ -255,12 +259,31 @@ final class OnboardingTest extends EVC_WP_Test_Case {
         $this->assertSame(array('result' => 'check_account'), $this->post('/join/account', self::form(array('email' => 'other@example.gr')))->get_data());
     }
 
+    /** STAGE-08 round 18, owner decision D32: a client that skips its own check cannot register two different values. */
+    public function test_round18_d32_the_route_refuses_a_missing_or_different_confirmation_and_creates_nothing(): void {
+        $email = 'confirm.' . wp_generate_password(6, false, false) . '@example.gr';
+        foreach (array('different' => array('password_confirm' => 'kafes-sto-limani-8', 'code' => 'confirm_mismatch'), 'missing' => array('password_confirm' => '', 'code' => 'confirm_missing')) as $label => $case) {
+            $r = $this->post('/join/account', self::form(array('email' => $email, 'password_confirm' => $case['password_confirm'])));
+            $this->assertSame(array('result' => 'invalid', 'fields' => array('confirm' => $case['code'])), $r->get_data(), $label);
+        }
+        $body = self::form(array('email' => $email));
+        unset($body['password_confirm']);
+        $this->assertSame(array('result' => 'invalid', 'fields' => array('confirm' => 'confirm_missing')), $this->post('/join/account', $body)->get_data(), 'a client that sends no confirmation');
+        $this->assertSame(0, get_current_user_id());
+        $this->assertFalse(get_user_by('email', $email), 'no account');
+        $log = is_file($this->log) ? (string) file_get_contents($this->log) : '';
+        foreach (array('kafes-sto-limani-7', 'kafes-sto-limani-8') as $secret) {
+            $this->assertStringNotContainsString($secret, $log, 'neither value is ever logged');
+        }
+        $this->assertSame(array('result' => 'ok'), $this->post('/join/account', self::form(array('email' => $email)))->get_data(), 'with the same value it registers');
+    }
+
     public function test_invalid_input_answers_with_field_codes_only(): void {
         $r = $this->post('/join/account', self::form(array('name' => 'Μαρία', 'phone' => '2510123456', 'email' => 'x@y', 'password' => 'short')));
         $this->assertSame(array('result' => 'invalid', 'fields' => array('name' => 'name_one_word', 'phone' => 'phone_invalid', 'email' => 'email_invalid', 'password' => 'password_short')), $r->get_data());
         $this->assertSame(0, get_current_user_id());
         $this->assertEnvelope($this->post('/join/account', '{not json'), 400, 'invalid_request');
-        $this->assertSame(array('result' => 'invalid', 'fields' => array('name' => 'name_missing', 'phone' => 'phone_missing', 'email' => 'email_missing', 'password' => 'password_short')), $this->post('/join/account', '[]')->get_data());
+        $this->assertSame(array('result' => 'invalid', 'fields' => array('name' => 'name_missing', 'phone' => 'phone_missing', 'email' => 'email_missing', 'password' => 'password_short')), $this->post('/join/account', '[]')->get_data(), 'round 18: the confirmation is checked once the password passes');
     }
 
     public function test_the_honeypot_creates_nothing(): void {

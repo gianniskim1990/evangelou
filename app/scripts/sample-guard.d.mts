@@ -5,3 +5,5 @@ export function sampleBundleMarkers(appDir?: string): string[];
 export function sampleBundleProblems(fileName: string, text: string, markers: string[]): string[];
 export function sampleGraphProblems(inputs: string[]): string[];
 export function sampleGuardSelfTest(appDir?: string): string[];
+export const PREVIEW_WORD_MARKERS: string[];
+export function staffSampleGraphProblems(inputs: string[]): string[];

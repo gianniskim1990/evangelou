@@ -53,6 +53,8 @@ final class EVC_Rest_Security {
         'prepared_unavailable' => 'Η καταγραφή της προετοιμασίας δεν είναι ακόμη διαθέσιμη. Καταχωρήστε μόνο το είδος του καφέ.',
         // Round 12 (D26 part 2): this browser's push subscription belongs to another member's active row.
         'endpoint_in_use' => 'Οι ειδοποιήσεις αυτής της συσκευής ανήκουν σε άλλον λογαριασμό. Δοκιμάστε ξανά.',
+        // STAGE-08 round 18 (D30): a message that does not exist or is not this member's (the same answer).
+        'message_not_found' => 'Το μήνυμα δεν βρέθηκε.',
     );
 
     public static function register_hooks(): void {

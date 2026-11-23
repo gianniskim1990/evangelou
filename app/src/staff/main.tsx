@@ -73,7 +73,7 @@ if (!parsed.ok) {
 
   root.render(
     <StrictMode>
-      <StaffApp controller={controller} counter={counter} camera={browserCameraEnv()} />
+      <StaffApp controller={controller} counter={counter} camera={browserCameraEnv()} links={config.links ?? []} />
     </StrictMode>,
   );
   void controller.boot();

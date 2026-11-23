@@ -2,13 +2,16 @@ import { useState } from "react";
 import { type PreviewMembershipState } from "./previewData";
 import { CUSTOMER } from "./previewRoster";
 import { cx, type CustomerScreen } from "./screens";
-import { ClubWelcome, MemberPassView } from "./CustomerSignature";
+import { MemberPassView } from "./CustomerSignature";
+import { ClubWelcome } from "./clubWelcome";
 import { Dashboard, History, MemberChrome, Offer, Onboarding, PageTitle, Profile, Today, entitlement } from "./CustomerPreview";
 import { membershipLine, type CustomerActions, type CustomerView } from "./customerView";
 import { sampleCustomerView } from "./customerSample";
 import { Btn, ConsentRow, Field, PreviewNote, StateMark } from "./ds";
 import { ONBOARDING_COPY, consentsLine } from "./onboardingCopy";
 import { PassQr } from "./sampleQr";
+import { PreviewCopyContext } from "./previewCopyContext";
+import { PREVIEW_COPY } from "./previewCopy";
 
 /*
  * STAGE-08 round 17 (owner-found bug, staging 2026-11-23): the design-preview-ONLY customer screens, moved unchanged
@@ -32,6 +35,7 @@ type PassProps = { go: (screen: CustomerScreen) => void; actions?: CustomerActio
 export function MemberPass(props: PassProps) {
   const view = "view" in props ? props.view : sampleCustomerView(props.state, props.coffeeUsedToday, props.today);
   return (
+    <PreviewCopyContext.Provider value={PREVIEW_COPY}>
     <MemberPassView
       go={props.go}
       view={view}
@@ -40,6 +44,7 @@ export function MemberPass(props: PassProps) {
       label="Κάρτα μέλους Evangelou Club (δείγμα)"
       qrNote={view.live ? "Ο κωδικός QR δεν είναι ακόμη ενεργός: δεν σαρώνεται και δεν εξαργυρώνεται." : "Ο κωδικός είναι δείγμα: δεν αντιστοιχεί σε μέλος, δεν σαρώνεται και δεν εξαργυρώνεται."}
     />
+    </PreviewCopyContext.Provider>
   );
 }
 
@@ -51,7 +56,16 @@ type Props = {
   today: string;
 };
 
+/** Round 18: the design preview's own words reach the shared screens through PreviewCopyContext (previewCopy.ts). */
 export function CustomerPreview(props: Props) {
+  return (
+    <PreviewCopyContext.Provider value={PREVIEW_COPY}>
+      <CustomerPreviewScreen {...props} />
+    </PreviewCopyContext.Provider>
+  );
+}
+
+function CustomerPreviewScreen(props: Props) {
   const { screen, go } = props;
   const view = sampleCustomerView(props.state, props.coffeeUsedToday, props.today);
   if (screen === "welcome") return <ClubWelcome go={go} />;

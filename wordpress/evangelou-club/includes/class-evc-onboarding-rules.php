@@ -27,6 +27,9 @@ final class EVC_Onboarding_Rules {
     const PASSWORD_SHORT = 'password_short';
     const PASSWORD_LONG = 'password_long';
     const PASSWORD_WEAK = 'password_weak';
+    /** STAGE-08 round 18 (owner decision D32): «Επιβεβαίωση κωδικού», required and identical to the password. */
+    const CONFIRM_MISSING = 'confirm_missing';
+    const CONFIRM_MISMATCH = 'confirm_mismatch';
 
     /** A few passwords people really choose; anything this predictable is refused. */
     const COMMON_PASSWORDS = array('1234567890', '0123456789', 'qwertyuiop', 'password12', 'password123', 'evangelou1', 'evangelou123', 'kafes12345', 'coffee1234', 'asdfghjkl1', '1111111111', 'abcdefghij', 'abc1234567');
@@ -55,7 +58,8 @@ final class EVC_Onboarding_Rules {
     /**
      * Field errors (codes only) for a registration; an empty array = valid.
      *
-     * @param array<string,mixed> $input name, phone, email, password (anything else is ignored)
+     * @param array<string,mixed> $input name, phone, email, password, password_confirm (round 18, D32; anything else
+     *        is ignored). The confirmation is reported under the field 'confirm'; neither value is ever logged.
      * @return array<string,string>
      */
     public static function validate(array $input): array {
@@ -87,6 +91,18 @@ final class EVC_Onboarding_Rules {
         $problem = self::password_problem(is_string($password) ? $password : '', (string) $email, (string) self::canonical_greek_mobile($phone));
         if ($problem !== null) {
             $errors['password'] = $problem;
+        }
+        // Round 18 (D32): the confirmation must be sent and be byte for byte the password (fail closed: a client that
+        // skips its own check still cannot register two different values). Checked once the password itself passes
+        // (a password error already refuses the registration; one message per field at a time).
+        $confirm = $input['password_confirm'] ?? null;
+        if ($problem !== null) {
+            return $errors;
+        }
+        if (!is_string($confirm) || $confirm === '') {
+            $errors['confirm'] = self::CONFIRM_MISSING;
+        } elseif (!is_string($password) || !hash_equals($password, $confirm)) {
+            $errors['confirm'] = self::CONFIRM_MISMATCH;
         }
         return $errors;
     }

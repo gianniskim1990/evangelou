@@ -10,5 +10,7 @@ require_once $evc_push . 'class-evc-push-campaign.php';
 require_once $evc_push . 'class-evc-push-admin-page.php';
 require_once $evc_push . 'class-evc-push-auto.php';
 require_once $evc_push . 'class-evc-rest-me-push-controller.php';
+require_once $evc_push . 'class-evc-club-messages.php';
+require_once $evc_push . 'class-evc-rest-me-messages-controller.php';
 require_once $evc_push . 'class-evc-push-plugin.php';
 unset($evc_push);

@@ -50,6 +50,40 @@ final class StaffAccountAdminTest extends EVC_WP_Test_Case {
         $this->assertNotFalse(has_action('wp_login', array($this->service(), 'record_login')));
     }
 
+    /**
+     * STAGE-08 round 18, owner decision D31: «Σύνδεσμοι Club» on the Evangelou Club page, for administrators with the
+     * Club capability: only the pages that exist (here: readiness; push, the Club DB page, the member page, the join
+     * flow and the till are off in this suite), each with a copy button, and nothing for an administrator without it.
+     */
+    public function test_round18_d31_the_club_page_lists_the_links_of_the_enabled_features_with_copy_buttons(): void {
+        global $submenu, $menu, $_registered_pages, $_parent_pages;
+        $saved = array($submenu, $menu, $_registered_pages, $_parent_pages);
+        try {
+            $this->parts()['page']->add_menu();
+            $this->parts()['readiness_page']->add_menu();
+            $html = $this->parts()['page']->html(null);
+            $this->assertStringContainsString('<h2 id="evc-club-links">Σύνδεσμοι Club</h2>', $html);
+            $this->assertSame(array(array('key' => 'readiness', 'url' => admin_url('admin.php?page=evc-club-readiness'))), EVC_Club_Links::admin());
+            $this->assertStringContainsString('value="' . esc_attr(admin_url('admin.php?page=evc-club-readiness')) . '"', $html);
+            $this->assertStringContainsString('data-evc-link="readiness"', $html);
+            $this->assertSame(1, substr_count($html, 'data-evc-copy='), 'one copy button per link');
+            $this->assertStringContainsString('navigator.clipboard', $html);
+            $this->assertStringContainsString('execCommand("copy")', $html, 'the fallback');
+            foreach (array('data-evc-link="push"', 'data-evc-link="database"', 'data-evc-link="till"', 'data-evc-link="member"', 'data-evc-link="join"', 'data-evc-link="orders"') as $absent) {
+                $this->assertStringNotContainsString($absent, $html, $absent);
+            }
+            $this->assertSame(array(), EVC_Club_Links::staff(), 'the till list is empty while its features are off');
+            $plain = (int) self::factory()->user->create(array('role' => 'administrator'));
+            get_userdata($plain)->remove_cap(EVC_Staff_Role::CAP_MANAGE);
+            get_role('administrator')->remove_cap(EVC_Staff_Role::CAP_MANAGE);
+            wp_set_current_user($plain);
+            $this->assertStringNotContainsString('Σύνδεσμοι Club', $this->parts()['page']->html(null), 'not without the Club capability');
+        } finally {
+            get_role('administrator')->add_cap(EVC_Staff_Role::CAP_MANAGE);
+            list($submenu, $menu, $_registered_pages, $_parent_pages) = $saved;
+        }
+    }
+
     public function test_the_shared_account_is_created_once_with_the_staff_role_only(): void {
         $r = $this->post(array('evc_staff_action' => 'create', 'evc_staff_login' => ''));
         $this->assertSame('ok', $r['code']);

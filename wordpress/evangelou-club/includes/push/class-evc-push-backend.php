@@ -98,6 +98,28 @@ final class EVC_Push_Backend {
     }
 
     /**
+     * Round 18 (D30): may this account read its messages? Like status(), but without the VAPID keys (reading what was
+     * already sent never needs them). @return string ready | not_member | member_disabled | unavailable
+     */
+    public function member_state(int $wp_user_id): string {
+        $db = $this->open(false);
+        $this->keys = null;
+        if ($db === null) {
+            return 'unavailable';
+        }
+        try {
+            $member = self::member($db, $wp_user_id);
+            if ($member === null) {
+                return 'not_member';
+            }
+            return $member['status'] === 'enabled' ? 'ready' : 'member_disabled';
+        } catch (Throwable $e) {
+            $this->refuse(self::REASON_FAILED, $e);
+            return 'unavailable';
+        }
+    }
+
+    /**
      * The member's explicit consent: store (or refresh) this browser's subscription. The caller validated the values.
      * @return array{result:string} result: created | refreshed | renewed | taken | not_member | member_disabled | unavailable
      */

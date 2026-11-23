@@ -331,7 +331,7 @@ const mutants = [
   },
   {
     id: "U7-welcome-says-membership-lasts-30-days",
-    file: "preview/CustomerSignature.tsx",
+    file: "preview/clubWelcome.tsx",
     search: "Η συνδρομή ισχύει έναν ημερολογιακό μήνα και λήγει με ώρα Ελλάδας.",
     replace: "Πληρώνετε μία φορά για 30 ημέρες.",
   },
@@ -343,7 +343,7 @@ const mutants = [
   },
   {
     id: "U9-coffee-list-advertised-as-final",
-    file: "preview/CustomerSignature.tsx",
+    file: "preview/clubWelcome.tsx",
     search: 'title: "ενδεικτικές επιλογές", body: `Για παράδειγμα: ${COFFEES.map((c) => c.label).join(", ")}. Ο τελικός κατάλογος δεν έχει οριστικοποιηθεί.`',
     replace: 'title: "επιλογές", body: `${COFFEES.map((c) => c.label).join(", ")}.`',
   },
@@ -351,8 +351,9 @@ const mutants = [
     id: "U10-offer-payment-button-enabled",
     file: "preview/CustomerPreview.tsx",
     // Re-aimed CUSTOMER-01: the Offer takes an optional journey pay action; without it (design preview) it must stay disabled.
-    search: '<Btn tone="brass" disabled={!onPay} title={onPay || live ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"}',
-    replace: '<Btn tone="brass" disabled={false} title={onPay || live ? undefined : "Η πληρωμή δεν είναι διαθέσιμη στην προεπισκόπηση"}',
+    // Round 18: the tooltip comes from PreviewCopyContext (previewCopy.ts).
+    search: '<Btn tone="brass" disabled={!onPay} title={onPay || live ? undefined : copy?.paymentUnavailable}',
+    replace: '<Btn tone="brass" disabled={false} title={onPay || live ? undefined : copy?.paymentUnavailable}',
   },
   {
     id: "U11-offer-says-30-days",
@@ -362,9 +363,10 @@ const mutants = [
   },
   {
     id: "U12-today-coffee-list-not-illustrative",
-    file: "preview/CustomerPreview.tsx",
-    search: '<h2 className="t-title mt-10 text-[var(--ink)]">Ενδεικτικές επιλογές</h2>',
-    replace: '<h2 className="t-title mt-10 text-[var(--ink)]">Επιλογές</h2>',
+    // Round 18: the preview's words moved to previewCopy.ts (preview-only).
+    file: "preview/previewCopy.ts",
+    search: 'coffeesTitle: "Ενδεικτικές επιλογές",',
+    replace: 'coffeesTitle: "Επιλογές",',
   },
   {
     id: "U13-staff-confirm-drops-not-recorded-notice",
@@ -1680,12 +1682,7 @@ const mutants = [
     search: "    if (url.origin !== origin || (url.protocol",
     replace: "    if (((url.protocol",
   },
-  {
-    id: "S7-history-fiction-note-in-live-app",
-    file: "preview/CustomerPreview.tsx",
-    search: "      {!view.live && <PreviewNote>Δείγμα ιστορικού",
-    replace: "      {<PreviewNote>Δείγμα ιστορικού",
-  },
+
   // STAGE-05D: the real counter (staff) and the member's own QR (customer).
   {
     id: "C1-other-coffee-missing",
@@ -2050,7 +2047,7 @@ const mutants = [
   {
     id: "Q35-other-tab-change-not-re-read",
     file: "customer/memberQr.ts",
-    search: "      if (this.state.phase === \"shown\" || this.state.phase === \"unchecked\") void this.open();\n",
+    search: "      if (this.state.phase === \"shown\" || this.state.phase === \"unchecked\" || this.state.phase === \"checking\") void this.open();\n",
     replace: "",
   },
   {
@@ -2159,8 +2156,8 @@ const mutants = [
   {
     id: "JM10-honeypot-not-sent",
     file: "customer/joinApi.ts",
-    search: "password: form.password, evc_extra: honeypot });",
-    replace: "password: form.password, evc_extra: \"\" });",
+    search: "password_confirm: form.confirm, evc_extra: honeypot });",
+    replace: "password_confirm: form.confirm, evc_extra: \"\" });",
   },
   {
     id: "JM11-checkout-url-ignored",
@@ -2408,8 +2405,8 @@ const mutants = [
   {
     id: "QR21-9-wake-hides-the-qr",
     file: "customer/memberQr.ts",
-    search: "    if (!(quiet && this.showing())) this.set({ phase: \"loading\" });",
-    replace: "    this.set({ phase: \"loading\" });",
+    search: "    if (!(quiet && this.showing())) {\n      this.set({ phase: \"loading\" });",
+    replace: "    if (true) {\n      this.set({ phase: \"loading\" });",
   },
   {
     id: "QR21-10-no-visibility-listener",
@@ -2594,8 +2591,8 @@ const mutants = [
   {
     id: "R7-18-wake-while-loading",
     file: "customer/memberQr.ts",
-    search: "    if (phase === \"loading\" || phase === \"off\") return;",
-    replace: "    if (phase === \"off\") return;",
+    search: "    if (phase === \"loading\" || phase === \"checking\" || phase === \"off\") return;",
+    replace: "    if (phase === \"checking\" || phase === \"off\") return;",
   },
   {
     id: "R7-19-two-re-reads-after-a-409",
@@ -3201,8 +3198,8 @@ const mutants = [
   {
     id: "S8R11-R8-preview-edit-button-on-live",
     file: "preview/CustomerPreview.tsx",
-    search: "          {!view.live && (\n            <Btn tone=\"line\" disabled title={PREVIEW_ONLY}>",
-    replace: "          {(\n            <Btn tone=\"line\" disabled title={PREVIEW_ONLY}>",
+    search: "          {!view.live && (\n            <Btn tone=\"line\" disabled title={copy?.unavailable}>",
+    replace: "          {(\n            <Btn tone=\"line\" disabled title={copy?.unavailable}>",
   },
   {
     id: "S8R11-R9-renew-a-small-button",
@@ -3472,8 +3469,9 @@ const mutants = [
   {
     id: "S8R11-I8-hint-above-the-card",
     file: "customer/CustomerApp.tsx",
-    search: "      {body}\n      {result?.kind === \"ok\" && pushFlow && <PushControl flow={pushFlow} />}\n      {result?.kind === \"ok\" && installHint && <InstallHint flow={installHint} />}",
-    replace: "      {result?.kind === \"ok\" && installHint && <InstallHint flow={installHint} />}\n      {body}\n      {result?.kind === \"ok\" && pushFlow && <PushControl flow={pushFlow} />}",
+    // Round 18: «Μηνύματα» now sits between the card and the controls; the mutant puts a hint above the card.
+    search: "      {body}\n      {result?.kind === \"ok\" && messagesFlow",
+    replace: "      {result?.kind === \"ok\" && installHint && <InstallHint flow={installHint} />}\n      {body}\n      {result?.kind === \"ok\" && messagesFlow",
   },
   {
     id: "S8R11-I9-hint-on-error-pages",
@@ -3607,8 +3605,9 @@ const mutants = [
   {
     id: "S8R12-A3-control-above-the-card",
     file: "customer/CustomerApp.tsx",
-    search: "      {body}\n      {result?.kind === \"ok\" && pushFlow && <PushControl flow={pushFlow} />}",
-    replace: "      {result?.kind === \"ok\" && pushFlow && <PushControl flow={pushFlow} />}\n      {body}",
+    // Round 18: the mutant puts a control above the card (the list «Μηνύματα» now follows the card).
+    search: "    <div ref={root} className=\"evc-ds\" data-evc-customer=\"app\" data-evc-customer-state={result?.kind === \"ok\" ? result.me.state : (result?.kind ?? \"loading\")}>\n      {body}",
+    replace: "    <div ref={root} className=\"evc-ds\" data-evc-customer=\"app\" data-evc-customer-state={result?.kind === \"ok\" ? result.me.state : (result?.kind ?? \"loading\")}>\n      {result?.kind === \"ok\" && pushFlow && <PushControl flow={pushFlow} />}\n      {body}",
   },
   {
     id: "S8R12-A4-enable-button-while-on",
@@ -3810,6 +3809,231 @@ const mutants = [
     file: "preview/customerSampleScreens.tsx",
     search: "      qr={<PassQr seed={11} size={188} muted={view.state !== \"active\"} />}",
     replace: "      qr={null}",
+  },
+  // STAGE-08 round 18: round-17 review Low 1 (R17X-4, the reviewer's name), owner decisions D30 (rich messages in the
+  // app), D31 (Club links in the till), D32 (join form: password confirmation, show / hide, real buttons), the cold
+  // start with this member's kept code (Q*), and the preview words / staff app in the sample guard (SG*, B1).
+  {
+    id: "R17X-4-loading-says-not-available",
+    file: "customer/MemberQrPanel.tsx",
+    search: "    case \"loading\":\n      return <QrLoading />;",
+    replace: "    case \"loading\":\n      return <QrNotAvailable />;",
+  },
+  {
+    id: "S8R18-M1-list-order-not-checked",
+    file: "customer/messagesApi.ts",
+    search: "    if (m.id >= previous) return null;\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-M2-message-id-not-compared",
+    file: "customer/messagesApi.ts",
+    search: "keysAre(m, [\"id\", \"title\", \"summary\", \"sent_at\", \"html\"]) || m.id !== id ||",
+    replace: "keysAre(m, [\"id\", \"title\", \"summary\", \"sent_at\", \"html\"]) ||",
+  },
+  {
+    id: "S8R18-M3-hash-takes-any-digits",
+    file: "customer/messagesApi.ts",
+    search: "const m = /^#message=([1-9][0-9]{0,9})$/.exec(hash);",
+    replace: "const m = /#message=(\\d+)/.exec(hash);",
+  },
+  {
+    id: "S8R18-M4-script-text-drawn",
+    file: "customer/richText.tsx",
+    search: "  if (DROPPED.has(tag)) return null;\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-M5-any-link-scheme",
+    file: "customer/richText.tsx",
+    search: "return (url.protocol === \"https:\" || url.protocol === \"http:\") && url.hostname !== \"\" ? url.href : null;",
+    replace: "return url.href;",
+  },
+  {
+    id: "S8R18-M6-image-of-another-origin",
+    file: "customer/richText.tsx",
+    search: "return url.origin === origin && (url.protocol === \"https:\" || url.protocol === \"http:\") ? url.href : null;",
+    replace: "return url.href;",
+  },
+  {
+    id: "S8R18-M7-any-colour-value",
+    file: "customer/richText.tsx",
+    search: "    if (prop === \"color\" && (",
+    replace: "    if (prop === \"color\" || (",
+  },
+  {
+    id: "S8R18-M8-link-without-rel",
+    file: "customer/richText.tsx",
+    search: " target=\"_blank\" rel=\"noopener noreferrer nofollow\">",
+    replace: " target=\"_blank\">",
+  },
+  {
+    id: "S8R18-M9-push-message-any-number",
+    file: "customer/pwa/swPush.ts",
+    search: "  return typeof v === \"number\" && Number.isInteger(v) && v >= 1 && v <= MAX_MESSAGE_ID;",
+    replace: "  return typeof v === \"number\";",
+  },
+  {
+    id: "S8R18-M10-tap-ignores-the-message",
+    file: "customer/pwa/swPush.ts",
+    search: "(isPushMessageId(message) ? `#message=${message}` : \"\")",
+    replace: "\"\"",
+  },
+  {
+    id: "S8R18-M11-no-tag-for-the-message",
+    file: "customer/pwa/swPush.ts",
+    search: "  if (isPushMessageId(payload.message)) options.tag = TAG_PREFIX + String(payload.message);\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-M12-any-tag-is-a-message",
+    file: "customer/pwa/swPush.ts",
+    search: "const m = /^evc-message-([1-9][0-9]{0,9})$/.exec(tag);",
+    replace: "const m = /(\\d+)/.exec(tag);",
+  },
+  {
+    id: "S8R18-M13-hash-stays-in-the-address",
+    file: "customer/CustomerApp.tsx",
+    search: "        win.history?.replaceState?.(null, \"\", loc.pathname + loc.search);\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-M14-no-hashchange-listener",
+    file: "customer/CustomerApp.tsx",
+    search: "    win.addEventListener?.(\"hashchange\", fromHash);\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-M15-open-message-stays-unread",
+    file: "customer/memberMessages.ts",
+    search: "      this.markRead(id);\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-M16-failure-hides-the-list",
+    file: "customer/memberMessages.ts",
+    search: "      if (this.state.list.phase !== \"ready\") this.set({ list: { phase: \"error\" } });",
+    replace: "      this.set({ list: { phase: \"error\" } });",
+  },
+  {
+    id: "S8R18-M17-message-view-never-shown",
+    file: "customer/CustomerApp.tsx",
+    search: "      messagesFlow && messages.view.phase !== \"closed\" ? (",
+    replace: "      false ? (",
+  },
+  {
+    id: "S8R18-M18-truthy-messages-flag",
+    file: "customer/config.ts",
+    search: "      clubMessages: d.clubMessages === true,",
+    replace: "      clubMessages: Boolean(d.clubMessages),",
+  },
+  {
+    id: "S8R18-M19-any-id-is-asked",
+    file: "customer/messagesApi.ts",
+    search: "      if (!isMessageId(id)) return { kind: \"not_found\" };\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-Q1-kept-code-not-shown-at-once",
+    file: "customer/memberQr.ts",
+    search: "      void this.showKept(mine, account);\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-Q2-stale-kept-code-during-post",
+    file: "customer/memberQr.ts",
+    search: "    if (this.state.phase === \"checking\") this.set({ phase: \"loading\" });\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-Q3-late-kept-code-over-an-answer",
+    file: "customer/memberQr.ts",
+    search: " || this.state.phase !== \"loading\" || account !== this.account) return;",
+    replace: " || account !== this.account) return;",
+  },
+  {
+    id: "S8R18-L1-link-of-another-site",
+    file: "staff/config.ts",
+    search: "    if (href === null) continue;\n",
+    replace: "    if (href === null && false) continue;\n",
+  },
+  {
+    id: "S8R18-L2-unknown-link-keys",
+    file: "staff/config.ts",
+    search: "    if (!(STAFF_LINK_KEYS as readonly unknown[]).includes(key) || out.some((l) => l.key === key)) continue;",
+    replace: "    if (out.some((l) => l.key === key)) continue;",
+  },
+  {
+    id: "S8R18-L3-copy-without-fallback",
+    file: "staff/UsefulLinks.tsx",
+    search: "  return env.fallback(text);\n}",
+    replace: "  return false;\n}",
+  },
+  {
+    id: "S8R18-L4-clipboard-outside-a-secure-page",
+    file: "staff/UsefulLinks.tsx",
+    search: "  if (env.clipboard && env.secure) {",
+    replace: "  if (env.clipboard) {",
+  },
+  {
+    id: "S8R18-J1-different-passwords-accepted",
+    file: "customer/joinRules.ts",
+    search: "  else if (form.confirm !== form.password) errors.confirm = JOIN_MESSAGES.confirmMismatch;\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-J2-toggle-takes-the-focus",
+    file: "customer/JoinApp.tsx",
+    search: "          onMouseDown={keep}\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-J3-caret-not-kept",
+    file: "customer/JoinApp.tsx",
+    search: "        input.setSelectionRange(kept.start, kept.end);\n",
+    replace: "",
+  },
+  {
+    id: "S8R18-J4-confirmation-not-sent",
+    file: "customer/joinApi.ts",
+    search: "password: form.password, password_confirm: form.confirm,",
+    replace: "password: form.password,",
+  },
+  {
+    id: "S8R18-J5-join-page-without-design-tokens",
+    file: "customer/JoinApp.tsx",
+    search: "className=\"evc-ds\" data-evc-customer=\"join\"",
+    replace: "data-evc-customer=\"join\"",
+  },
+  {
+    id: "S8R18-J6-toggle-label-never-changes",
+    file: "customer/JoinApp.tsx",
+    search: "          aria-label={visible ? hideLabel : showLabel}",
+    replace: "          aria-label={showLabel}",
+  },
+  {
+    id: "S8R18-SG1-preview-copy-not-preview-only",
+    file: "../scripts/sample-guard.mjs",
+    search: ", \"src/preview/previewCopy.ts\", \"src/preview/clubWelcome.tsx\"];",
+    replace: ", \"src/preview/clubWelcome.tsx\"];",
+  },
+  {
+    id: "S8R18-SG2-preview-words-not-markers",
+    file: "../scripts/sample-guard.mjs",
+    search: "  return [...SAMPLE_QR_MARKERS, ...PREVIEW_WORD_MARKERS, ...roster];",
+    replace: "  return [...SAMPLE_QR_MARKERS, ...roster];",
+  },
+  {
+    id: "S8R18-SG3-staff-graph-unchecked",
+    file: "../scripts/sample-guard.mjs",
+    search: "  return graphProblems(inputs, \"staff app\", \"src/staff/StaffApp.tsx\");",
+    replace: "  return [];",
+  },
+  {
+    id: "S8R18-B1-live-app-imports-preview-copy",
+    file: "customer/CustomerApp.tsx",
+    search: "import { MessagesSection, MessageView } from \"./MessagesPanel\";\n",
+    replace: "import { MessagesSection, MessageView } from \"./MessagesPanel\";\nimport \"../preview/previewCopy\";\n",
   },
 ];
 

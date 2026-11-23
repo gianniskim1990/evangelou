@@ -42,6 +42,8 @@ export interface CustomerConfig {
    * refuse the page.
    */
   pushPublicKey?: string;
+  /** STAGE-08 round 18 (D30): the server has the member's in-app messages (GET /me/messages); only the boolean true. */
+  clubMessages?: boolean;
   appVersion: string;
 }
 
@@ -98,6 +100,7 @@ export function parseCustomerConfig(raw: string | null | undefined, origin: stri
       joinUrl,
       serviceWorker: parseServiceWorker(d.serviceWorkerUrl, d.serviceWorkerScope, origin),
       pushPublicKey: typeof d.pushPublicKey === "string" && keyBytes(d.pushPublicKey) !== null ? d.pushPublicKey : "",
+      clubMessages: d.clubMessages === true,
       appVersion: typeof d.appVersion === "string" ? d.appVersion : "",
     },
   };

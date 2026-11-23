@@ -91,8 +91,8 @@ export function joinAction(view: CustomerView, actions?: CustomerActions): { lab
   return { label: "Γίνετε μέλος", run: actions.join };
 }
 
-/** The tooltip of a button that only the design preview leaves disabled. Never on the live app (round 11). */
-export const PREVIEW_ONLY = "Μη διαθέσιμο στην προεπισκόπηση";
+/* Round 18 (round-17 review, Low 3): the tooltip of a button that only the design preview leaves disabled lives in
+   previewCopy.ts (PREVIEW_ONLY), a preview-only module; the shared screens read it from PreviewCopyContext. */
 
 /**
  * The payment button a non-active member sees; without a journey action it stays disabled (preview only).

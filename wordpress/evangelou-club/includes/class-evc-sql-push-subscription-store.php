@@ -135,6 +135,23 @@ final class EVC_Sql_Push_Subscription_Store {
         return $out;
     }
 
+    /**
+     * Round 18 (D30): every ENABLED Club member, with or without a subscription: [member_id => wp_user_id], ascending,
+     * after $after_member (the audience of an in-app message). Reads evc_members only (SELECT, as before).
+     */
+    public function enabled_members(int $after_member, int $limit): array {
+        $limit = max(1, min(1000, $limit));
+        $rows = $this->db->fetch_all(
+            "SELECT id, wp_user_id FROM evc_members WHERE status = 'enabled' AND id > ? ORDER BY id LIMIT " . $limit,
+            array($after_member)
+        );
+        $out = array();
+        foreach ($rows as $row) {
+            $out[(int) $row['id']] = (int) $row['wp_user_id'];
+        }
+        return $out;
+    }
+
     /** The Club member of a WordPress user: [id, status], or null. */
     public function member_for_wp_user(int $wp_user_id): ?array {
         if ($wp_user_id <= 0) {

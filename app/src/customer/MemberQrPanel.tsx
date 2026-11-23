@@ -19,6 +19,9 @@ import { encodeQr } from "./qrEncode";
  * («Φόρτωση του κωδικού σας…», no pattern); without the QR route (`off`) it says
  * that the code is not available yet. The design preview's sample code is
  * not reachable from the live app at all (src/preview/sampleQr.tsx).
+ * Round 18 (round-17 review, UX): on a cold start, when this phone keeps THIS member's code (qrStore.ts, by account),
+ * that code is drawn at once with a quiet «Έλεγχος του κωδικού σας…» line («checking») while GET /me/qr runs; the
+ * server's answer then replaces it (another account's code is never read: the store is keyed by the account).
  */
 
 
@@ -83,6 +86,16 @@ function body(state: MemberQrState, flow: MemberQrFlow) {
           <p className="t-small mt-1 text-[var(--ink-2)]">Στιγμιότυπο οθόνης ισχύει κανονικά στο ταμείο, από όποια συσκευή κι αν το δείξετε.</p>
         </div>
       );
+    case "checking":
+      // Round 18: this member's code kept on the phone, shown at once on a cold start while the server is asked.
+      return (
+        <div className="text-center" data-evc-qr-checking="kept">
+          <div className="inline-block rounded-[10px] bg-white p-1">
+            <QrSvg text={state.token} size={196} />
+          </div>
+          <p className="t-small mt-3 text-[var(--ink-3)]">Έλεγχος του κωδικού σας…</p>
+        </div>
+      );
     case "unchecked":
       return (
         <div className="text-center">
@@ -122,6 +135,8 @@ function announce(state: MemberQrState): { status: string; alert: string } {
       return { status: "Φόρτωση του κωδικού σας.", alert: "" };
     case "shown":
       return { status: "Ο κωδικός QR σας εμφανίζεται.", alert: "" };
+    case "checking":
+      return { status: "Εμφανίζεται ο κωδικός QR σας. Γίνεται έλεγχος.", alert: "" };
     case "unchecked":
       return { status: "Εμφανίζεται ο αποθηκευμένος κωδικός QR σας, χωρίς έλεγχο αυτή τη στιγμή.", alert: "" };
     case "unavailable":
@@ -154,7 +169,7 @@ export function MemberQrPanel({ flow }: { flow: MemberQrFlow }) {
   }, [flow]);
   const said = announce(state);
   return (
-    <div data-evc-qr-state={state.phase} aria-busy={state.phase === "loading"}>
+    <div data-evc-qr-state={state.phase} aria-busy={state.phase === "loading" || state.phase === "checking"}>
       {/* Two fixed live regions. */}
       <p role="status" aria-live="polite" className="sr-only">
         {said.status}

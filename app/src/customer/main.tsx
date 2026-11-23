@@ -16,6 +16,8 @@ import { MemberHistoryFlow } from "./memberHistory";
 import { createQrKeeper, MemberQrFlow } from "./memberQr";
 import { createCustomerQrApi } from "./qrApi";
 import { createDeviceFlag, createStorageQrKeeper } from "./qrStore";
+import { createCustomerMessagesApi } from "./messagesApi";
+import { MemberMessagesFlow } from "./memberMessages";
 import { createJoinApi } from "./joinApi";
 import { bootMode, parseJoinConfig, parsePosterConfig } from "./joinConfig";
 import { JoinApp } from "./JoinApp";
@@ -92,9 +94,11 @@ if (root) {
         },
         createCustomerPushApi(parsed.config, nonce),
       );
+      // Round 18 (D30): «Μηνύματα», only when the server has them (clubMessages); nothing is asked otherwise.
+      const messagesFlow = parsed.config.clubMessages ? new MemberMessagesFlow(createCustomerMessagesApi(parsed.config, nonce)) : undefined;
       createRoot(root).render(
         <StrictMode>
-          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} coffeesFlow={coffeesFlow} historyFlow={historyFlow} installHint={installHint} pushFlow={pushFlow} navigate={(url) => window.location.assign(url)} />
+          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} coffeesFlow={coffeesFlow} historyFlow={historyFlow} installHint={installHint} pushFlow={pushFlow} messagesFlow={messagesFlow} navigate={(url) => window.location.assign(url)} />
         </StrictMode>,
       );
     }

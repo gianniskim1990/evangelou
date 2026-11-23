@@ -28,9 +28,14 @@ const violations: string[] = [];
 const seenStates = new Set<string>();
 let observer: MutationObserver;
 
+// Round 18 (round-17 review, Low 1; mutant R17X-4): the route GET /me/qr exists in this boot, so the card may never say
+// that the code is not available yet, at any moment of it.
+const NOT_AVAILABLE = [/δεν είναι ακόμη διαθέσιμος/, /data-evc-qr-placeholder="not-available"/];
+
 function check(where: string) {
   const html = dom.document.body.innerHTML;
   for (const re of SAMPLE) if (re.test(html)) violations.push(`${where}: ${re}`);
+  for (const re of NOT_AVAILABLE) if (re.test(html)) violations.push(`${where}: not available while the route exists: ${re}`);
   const panel = dom.document.querySelector("[data-evc-qr-state]");
   if (panel) seenStates.add(panel.getAttribute("data-evc-qr-state") ?? "");
 }
@@ -101,6 +106,8 @@ describe("round 17: cold start of the real member entry never shows the sample Q
     assert.ok(dom.document.querySelector('[data-evc-qr-placeholder="loading"]'), "phase 2: the neutral place-holder");
     assert.match(dom.document.body.textContent ?? "", /Φόρτωση του κωδικού σας…/);
     assert.equal(dom.document.querySelectorAll("[data-evc-qr-state] svg").length, 0, "phase 2: no pattern of any kind");
+    assert.doesNotMatch(dom.document.body.textContent ?? "", /δεν είναι ακόμη διαθέσιμος/, "phase 2: never «not available» while GET /me/qr runs");
+    assert.ok(dom.document.querySelector('[data-evc-qr-placeholder="not-available"]') === null, "phase 2: no not-available place-holder");
 
     take("/me/qr").resolve(200, { result: "ok", qr: { state: "active", issued_at: ISSUED } });
     await turns(60);
@@ -113,6 +120,6 @@ describe("round 17: cold start of the real member entry never shows the sample Q
     check("phase 4");
     assert.ok(dom.document.querySelector('[data-evc-qr="member"]'), "phase 4: the member's real code");
     assert.ok(seenStates.has("loading") && seenStates.has("shown"));
-    assert.deepEqual(violations, [], "no DOM state of the boot ever contained a sample");
+    assert.deepEqual(violations, [], "no DOM state of the boot ever contained a sample or a not-available place-holder");
   });
 });

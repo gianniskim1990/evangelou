@@ -17,6 +17,9 @@ import { InstallHint } from "./InstallHint";
 import type { InstallHintFlow } from "./pwa/installHint";
 import { PushControl } from "./PushControl";
 import type { MemberPushFlow } from "./pwa/push";
+import type { MemberMessagesFlow, MemberMessagesState } from "./memberMessages";
+import { MessagesSection, MessageView } from "./MessagesPanel";
+import { messageIdFromHash } from "./messagesApi";
 
 /*
  * STAGE-01 REAL customer app (served by WordPress at /club-member/, flag-gated).
@@ -37,6 +40,10 @@ import type { MemberPushFlow } from "./pwa/push";
  * D24 (round 9): with a history flow (GET /me/history) the «Ιστορικό» lists show the member's own last
  * coffees. Round 8 LOW-2: the member area re-renders just after each Athens midnight (a timer), so
  * yesterday's «Τον απολαύσατε σήμερα» never stays on screen; the figures and history are asked again then.
+ * Round 18 (owner decision D30): with a messages flow (GET /me/messages) the member area ends with «Μηνύματα»; a
+ * message opens in place of the member screens (MessagesPanel.tsx). A notification tap arrives as #message=<id>
+ * (the service worker's own scope + that hash, never an address from the payload): the message opens at once and the
+ * hash is removed from the address.
  */
 
 type MemberScreen = "card" | "dashboard" | "today" | "history" | "profile";
@@ -66,6 +73,8 @@ export const LIVE_QR_OFF_NOTE = "Ο κωδικός QR θα εμφανιστεί 
 const noSubscribe = () => () => {};
 const noCoffees = (): MemberCoffees | null => null;
 const noHistory = (): HistoryCoffee[] | null => null;
+const NO_MESSAGES: MemberMessagesState = { list: { phase: "hidden" }, view: { phase: "closed" } };
+const noMessages = (): MemberMessagesState => NO_MESSAGES;
 
 /** The timer the midnight re-render uses (injected in tests). */
 export interface MidnightTimers {
@@ -93,6 +102,7 @@ export function CustomerApp({
   timers = REAL_TIMERS,
   installHint,
   pushFlow,
+  messagesFlow,
 }: {
   config: CustomerConfig;
   api: CustomerApi;
@@ -110,11 +120,14 @@ export function CustomerApp({
   installHint?: InstallHintFlow;
   /** Round 12 (D26 part 2): «Ειδοποιήσεις», shown below the member area only. */
   pushFlow?: MemberPushFlow;
+  /** Round 18 (D30): «Μηνύματα» (absent = no list, nothing asked). */
+  messagesFlow?: MemberMessagesFlow;
 }) {
   const [result, setResult] = useState<MeResult | null>(null);
   const qrState = useSyncExternalStore(qrFlow?.subscribe ?? noSubscribe, qrFlow?.getState ?? (() => NO_QR));
   const coffees = useSyncExternalStore(coffeesFlow?.subscribe ?? noSubscribe, coffeesFlow?.getState ?? noCoffees);
   const history = useSyncExternalStore(historyFlow?.subscribe ?? noSubscribe, historyFlow?.getState ?? noHistory);
+  const messages = useSyncExternalStore(messagesFlow?.subscribe ?? noSubscribe, messagesFlow?.getState ?? noMessages);
   // LOW-2: bumped just after each Athens midnight, so the view is computed again for the new day.
   const [day, setDay] = useState(0);
   const [screen, setScreen] = useState<MemberScreen | null>(null);
@@ -146,7 +159,7 @@ export function CustomerApp({
       heading.focus();
     }
     window.scrollTo?.({ top: 0 });
-  }, [screen, result]);
+  }, [screen, result, messages.view.phase]);
 
   const signOut = () => {
     // The phone's QR record and the in-memory copy go BEFORE WordPress signs the account out.
@@ -200,6 +213,39 @@ export function CustomerApp({
       historyFlow.pause();
     };
   }, [account, historyFlow]);
+  // Round 18 (D30): the list «Μηνύματα» once the member area is open (again when the page is shown, throttled), and the
+  // message of a notification tap (#message=<id>, also when the open app is brought forward by the tap: hashchange).
+  useEffect(() => {
+    if (account === null || !messagesFlow) return;
+    void messagesFlow.load();
+    // The page's window (globalThis in a browser).
+    const win = ((globalThis as { window?: Window }).window ?? globalThis) as Window;
+    const fromHash = () => {
+      const loc = win.location;
+      const id = messageIdFromHash(loc?.hash);
+      if (id === null) return;
+      navigated.current = true;
+      void messagesFlow.open(id);
+      try {
+        win.history?.replaceState?.(null, "", loc.pathname + loc.search);
+      } catch {
+        // the address keeps its hash; nothing else depends on it
+      }
+    };
+    fromHash();
+    const page = globalThis.document;
+    const onShown = () => {
+      if (!page || page.visibilityState !== "hidden") messagesFlow.wake();
+    };
+    win.addEventListener?.("hashchange", fromHash);
+    page?.addEventListener("visibilitychange", onShown);
+    win.addEventListener?.("focus", onShown);
+    return () => {
+      win.removeEventListener?.("hashchange", fromHash);
+      page?.removeEventListener("visibilitychange", onShown);
+      win.removeEventListener?.("focus", onShown);
+    };
+  }, [account, messagesFlow]);
   // Round 12 (D26 part 2): what the notifications control shows is decided once the member area is open (no prompt).
   useEffect(() => {
     if (account !== null) void pushFlow?.open();
@@ -266,7 +312,16 @@ export function CustomerApp({
     // membership. Both only when the server sent the join URL (customerView.ts liveActions).
     const actions: CustomerActions = liveActions(view.state, config.joinUrl ?? "", navigate, signOut);
     body =
-      current === "card" ? (
+      messagesFlow && messages.view.phase !== "closed" ? (
+        <MessageView
+          flow={messagesFlow}
+          origin={new URL(config.restBase).origin}
+          onBack={() => {
+            navigated.current = true;
+            messagesFlow.close();
+          }}
+        />
+      ) : current === "card" ? (
         <MemberPassView
           go={go}
           view={view}
@@ -287,6 +342,15 @@ export function CustomerApp({
   return (
     <div ref={root} className="evc-ds" data-evc-customer="app" data-evc-customer-state={result?.kind === "ok" ? result.me.state : (result?.kind ?? "loading")}>
       {body}
+      {result?.kind === "ok" && messagesFlow && messages.view.phase === "closed" && (
+        <MessagesSection
+          flow={messagesFlow}
+          onOpen={(id) => {
+            navigated.current = true;
+            void messagesFlow.open(id);
+          }}
+        />
+      )}
       {result?.kind === "ok" && pushFlow && <PushControl flow={pushFlow} />}
       {result?.kind === "ok" && installHint && <InstallHint flow={installHint} />}
     </div>

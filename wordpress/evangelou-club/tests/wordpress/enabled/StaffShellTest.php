@@ -262,6 +262,37 @@ final class StaffShellTest extends EVC_WP_Test_Case {
     }
 
     /** STAGE-08 round 4: staging ran with plain permalinks; /club-admin/ never reached WordPress there (Apache 404). */
+    /**
+     * STAGE-08 round 18, owner decision D31: «Χρήσιμοι σύνδεσμοι». The till receives only the addresses of the enabled
+     * features (here only the staff app: the member page, the join flow and push are off in this suite), each built
+     * by the server for the permalink form and the install folder in use, and never an administrator page.
+     */
+    public function test_round18_d31_the_till_gets_only_the_enabled_club_links_built_for_the_site(): void {
+        $staff = get_userdata($this->create_staff_user());
+        $sub = static function () {
+            return 'http://example.org/prometheus';
+        };
+        foreach (array('' => 'http://example.org/prometheus/?evc_club_admin=1', '/%postname%/' => 'http://example.org/prometheus/club-admin/') as $structure => $till) {
+            $this->set_permalink_structure($structure);
+            add_filter('pre_option_home', $sub);
+            try {
+                $this->login_as($staff->ID);
+                $config = self::config_of($this->shell());
+            } finally {
+                remove_filter('pre_option_home', $sub);
+            }
+            $this->assertSame(array(array('key' => 'till', 'url' => $till)), $config['links'], 'structure «' . $structure . '»');
+        }
+        foreach (EVC_Club_Links::staff() as $link) {
+            $this->assertContains($link['key'], EVC_Club_Links::STAFF_KEYS);
+        }
+        $this->assertSame(array(), array_intersect(array_column(EVC_Club_Links::staff(), 'key'), EVC_Club_Links::ADMIN_KEYS), 'never an administrator page');
+        $body = $this->shell()['body'];
+        foreach (array('wp-admin', 'evc-club-push', 'evc-club-readiness', 'evc-club-db', 'shop_order', 'wc-orders') as $needle) {
+            $this->assertStringNotContainsString($needle, $body, $needle);
+        }
+    }
+
     public function test_the_shell_url_follows_the_permalink_setting(): void {
         $this->set_permalink_structure('');
         $plain = EVC_Staff_Shell::shell_url();

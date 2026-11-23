@@ -17,4 +17,6 @@ require_once $evc_admin . 'class-evc-staff-account-page.php';
 require_once $evc_admin . 'class-evc-readiness.php';
 require_once $evc_admin . 'class-evc-readiness-page.php';
 require_once $evc_admin . 'class-evc-admin-tools-plugin.php';
+// STAGE-08 round 18 (D31): the useful Club addresses (static, read-only; the till app and the Club page show them).
+require_once $evc_admin . 'class-evc-club-links.php';
 unset($evc_admin);

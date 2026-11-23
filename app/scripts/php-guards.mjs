@@ -1350,6 +1350,9 @@ export const ONBOARDING_RULES = Object.freeze({
     // STAGE-08 round 10: the member page sends EVC_Onboarding_Shell::join_url() (static, behind
     // EVC_Onboarding_Feature::enabled()) so a customer without a membership can join; it constructs nothing.
     "includes/customer/class-evc-customer-shell.php",
+    // STAGE-08 round 18 (owner decision D31): the Club links list reads the two static addresses of the join flow
+    // (behind EVC_Onboarding_Feature::enabled()); it constructs nothing.
+    "includes/admin/class-evc-club-links.php",
   ],
   guardedFiles: [
     ONBOARDING_BOOTSTRAP,
@@ -1366,6 +1369,8 @@ export const ONBOARDING_RULES = Object.freeze({
   // method (accept_terms, poster_url, …), no ::class, no string, no type hint.
   pinnedCalls: {
     "includes/customer/class-evc-customer-shell.php": ["evc_onboarding_shell::join_url"],
+    // Round 18 (D31): exactly the join and poster addresses, nothing else of the onboarding classes.
+    "includes/admin/class-evc-club-links.php": ["evc_onboarding_shell::join_url", "evc_onboarding_shell::poster_url"],
   },
   registrationFile: "includes/onboarding/class-evc-onboarding-registration.php",
   handoffFile: "includes/onboarding/class-evc-onboarding-handoff.php",
@@ -1458,6 +1463,14 @@ function onboardingSelfTest() {
   expect("round 11: nor name the class", SHELL, "<?php\n$c = EVC_Onboarding_Shell::class;", true);
   expect("round 11: nor take the method as a callable", SHELL, "<?php\n$f = array('EVC_Onboarding_Shell', 'join_url');", true);
   expect("round 11: nor a type hint", SHELL, "<?php\nfunction f(EVC_Onboarding_Shell $s) { return 1; }", true);
+  // Round 18 (D31): the links list is pinned to the join and poster addresses.
+  const LINKS = "includes/admin/class-evc-club-links.php";
+  expect("round 18: the links list reads the join address", LINKS, "<?php\nif (EVC_Onboarding_Feature::enabled()) { $a = EVC_Onboarding_Shell::join_url(); }", false);
+  expect("round 18: the links list reads the poster address", LINKS, "<?php\n$b = EVC_Onboarding_Shell::poster_url();", false);
+  expect("round 18: the links list may not accept the terms", LINKS, "<?php\nEVC_Onboarding_Handoff::accept_terms($id);", true);
+  expect("round 18: the links list may not construct the join shell", LINKS, "<?php\n$s = new EVC_Onboarding_Shell($h, $a);", true);
+  expect("round 18: the links list may not call another method", LINKS, "<?php\n$u = EVC_Onboarding_Shell::same_site_url($x);", true);
+  expect("round 18: nor name the class in a string", LINKS, "<?php\n$f = array('EVC_Onboarding_Shell', 'poster_url');", true);
   expect("round 11: nor the plugin's parts", SHELL, "<?php\n$p = EVC_Onboarding_Plugin::parts();", true);
   expect("round 11: the pinned call with a leading backslash and spaces", SHELL, "<?php\n$u = \\EVC_Onboarding_Shell :: join_url ();", false);
   // Round 12 (N2): a class name assembled at run time.
@@ -1618,12 +1631,15 @@ const PUSH_FILES = [
   "includes/push/class-evc-push-admin-page.php",
   "includes/push/class-evc-push-auto.php",
   "includes/push/class-evc-rest-me-push-controller.php",
+  // Round 18 (owner decision D30): the in-app messages (static type + store) and the member's read routes.
+  "includes/push/class-evc-club-messages.php",
+  "includes/push/class-evc-rest-me-messages-controller.php",
 ];
 export const PUSH_RULES = Object.freeze({
   bootstrap: PUSH_BOOTSTRAP,
   pluginClass: "EVC_Push_Plugin",
   featureClass: "EVC_Push_Feature",
-  guarded: ["EVC_Push_Backend", "EVC_Push_Sender", "EVC_Push_Campaign", "EVC_Push_Admin_Page", "EVC_Push_Auto", "EVC_Rest_Me_Push_Controller"],
+  guarded: ["EVC_Push_Backend", "EVC_Push_Sender", "EVC_Push_Campaign", "EVC_Push_Admin_Page", "EVC_Push_Auto", "EVC_Rest_Me_Push_Controller", "EVC_Rest_Me_Messages_Controller"],
   forbidden: [],
   allowlist: ["evangelou-club.php", ...PUSH_FILES],
   guardedFiles: PUSH_FILES,

@@ -49,14 +49,20 @@ final class EVC_Push_Feature {
 
     /**
      * The member page's bootstrap keys: the public key only while push is ready (the page then shows the control,
-     * or explains why it cannot work, e.g. without the service worker of pretty permalinks). Nothing otherwise.
+     * or explains why it cannot work, e.g. without the service worker of pretty permalinks). Round 18 (D30):
+     * clubMessages = true while the flag is on (the member app then shows «Μηνύματα»). Nothing while the flag is off.
      * @return array<string,string>
      */
     public static function page_config(): array {
-        if (!self::ready()) {
+        if (!self::enabled()) {
             return array();
         }
-        return array('pushPublicKey' => (string) constant(EVC_Push_Vapid::PUBLIC_CONSTANT));
+        // Round 18 (D30): the list «Μηνύματα» exists while push is switched on (reading needs no key).
+        $config = array('clubMessages' => true);
+        if (self::ready()) {
+            $config['pushPublicKey'] = (string) constant(EVC_Push_Vapid::PUBLIC_CONSTANT);
+        }
+        return $config;
     }
 
     /** Second layer behind the packager's construction guard. */

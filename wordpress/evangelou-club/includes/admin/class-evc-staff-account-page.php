@@ -166,7 +166,12 @@ final class EVC_Staff_Account_Page {
         foreach (EVC_Staff_Account_Service::audit_entries(20) as $e) {
             $out .= '<tr><td>' . esc_html(wp_date('d/m/Y H:i', (int) $e['at'])) . '</td><td>' . esc_html(self::ACTION_LABELS[$e['action']] ?? (string) $e['action']) . '</td><td>' . esc_html((string) $e['outcome']) . '</td><td>' . esc_html((string) $e['actor']) . '</td><td>' . esc_html((string) $e['target']) . '</td></tr>';
         }
-        return $out . '</tbody></table></div>';
+        $out .= '</tbody></table>';
+        // Round 18 (owner decision D31): «Σύνδεσμοι Club», for administrators who hold the Club capability.
+        if (current_user_can(EVC_Staff_Role::CAP_MANAGE) && !EVC_Staff_Role::has_staff_role(wp_get_current_user())) {
+            $out .= EVC_Club_Links::admin_html();
+        }
+        return $out . '</div>';
     }
 
     private function form(string $action, int $user_id, string $label, string $extra = ''): string {

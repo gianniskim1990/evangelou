@@ -12,7 +12,7 @@ import { parsePreviewPath } from "../../src/preview/screens";
 import { sampleQrModules } from "../../src/preview/sampleQr";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ClubWelcome } from "../../src/preview/CustomerSignature";
+import { ClubWelcome } from "../../src/preview/clubWelcome";
 import { MemberPass } from "../../src/preview/customerSampleScreens";
 
 /**

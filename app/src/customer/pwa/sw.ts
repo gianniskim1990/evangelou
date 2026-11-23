@@ -3,19 +3,20 @@
  * scripts/package-club-plugin.mjs (esbuild, one classic script, not minified) into customer-app/pwa/sw.js; the
  * plugin serves it at <home>/club-member/sw.js with its configuration in front (self.__EVC_SW__,
  * EVC_Customer_Shell::service_worker()). The rules are in swRules.ts (tested there); this file only applies them.
- * Round 12 (D26 part 2): push and notificationclick (swPush.ts): show the message, open the member page. No background
- * sync, no storage other than the versioned cache of the app's own build files.
+ * Round 12 (D26 part 2): push and notificationclick (swPush.ts): show the message, open the member page (round 18,
+ * D30: at the checked in-app message, #message=<id>). No background sync, no storage other than the versioned cache of the app's own build files.
  */
-import { clickTarget, notificationFor, parsePushPayload } from "./swPush";
+import { clickTarget, messageOfTag, notificationFor, parsePushPayload } from "./swPush";
 import { cacheName, decide, offlineShell, OFFLINE_CSP, parseSwConfig, staleCaches, storable, type SwConfig } from "./swRules";
 
 type FetchEventLike = Event & { request: Request; respondWith(r: Promise<Response>): void };
 type ExtendableEventLike = Event & { waitUntil(p: Promise<unknown>): void };
 type PushEventLike = ExtendableEventLike & { data?: { text(): string } | null };
-type NotificationEventLike = ExtendableEventLike & { notification: { close(): void } };
+type NotificationEventLike = ExtendableEventLike & { notification: { close(): void; tag?: string } };
 interface WindowClientLike {
   url: string;
   focus(): Promise<unknown>;
+  navigate?(url: string): Promise<WindowClientLike | null>;
 }
 interface WorkerScope {
   __EVC_SW__?: unknown;
@@ -104,8 +105,10 @@ sw.addEventListener("push", (e) => {
 });
 
 // A tap opens (or brings forward) the member page: the registration's own scope, never an address from a message.
+// Round 18 (D30): with the checked message number of the tag, at «#message=<id>» (the app opens that message).
 sw.addEventListener("notificationclick", (e) => {
   const event = e as NotificationEventLike;
+  const message = messageOfTag(event.notification.tag);
   event.notification.close();
   event.waitUntil(
     (async () => {
@@ -113,8 +116,19 @@ sw.addEventListener("notificationclick", (e) => {
       const target = clickTarget(
         windows.map((w) => w.url),
         sw.registration.scope,
+        message,
       );
-      if ("focus" in target) return windows[target.focus].focus();
+      if ("focus" in target) {
+        let win = windows[target.focus];
+        if (target.navigate && win.navigate) {
+          try {
+            win = (await win.navigate(target.navigate)) ?? win;
+          } catch {
+            // a window this worker does not control cannot be sent elsewhere: it is only brought forward
+          }
+        }
+        return win.focus();
+      }
       return sw.clients.openWindow(target.open);
     })(),
   );

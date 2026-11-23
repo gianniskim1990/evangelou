@@ -18,6 +18,11 @@ export const JOIN_COPY = {
     emailHint: ONBOARDING_COPY.register.emailHint,
     passwordLabel: "Κωδικός πρόσβασης",
     passwordHint: "Τουλάχιστον 10 χαρακτήρες. Τον χρειάζεστε για να μπαίνετε στον λογαριασμό σας.",
+    // Round 18 (owner decision D32).
+    confirmLabel: "Επιβεβαίωση κωδικού",
+    confirmHint: "Γράψτε ξανά τον ίδιο κωδικό.",
+    show: "Εμφάνιση κωδικού",
+    hide: "Απόκρυψη κωδικού",
     submit: "Δημιουργία λογαριασμού",
     busy: "Μια στιγμή…",
     haveAccount: "Έχετε ήδη λογαριασμό;",

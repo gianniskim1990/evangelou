@@ -133,6 +133,7 @@ final class PushTest extends EVC_WP_Test_Case {
             },
         ));
         $this->parts['controller']->register_routes(true);
+        $this->parts['messages']->register_routes(true);
     }
 
     private function db(): EVC_Club_Db {
@@ -203,7 +204,10 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertNotFalse(has_action('admin_menu', array($parts['page'], 'add_menu')));
         $this->assertNotFalse(has_action(EVC_Push_Campaign::CRON_HOOK, array($parts['campaign'], 'cron')));
         $this->assertArrayHasKey(self::ME, rest_get_server()->get_routes());
-        $this->assertSame(array('pushPublicKey' => self::PUBLIC), EVC_Push_Feature::page_config());
+        $this->assertSame(array('clubMessages' => true, 'pushPublicKey' => self::PUBLIC), EVC_Push_Feature::page_config());
+        // Round 18 (D30): the in-app messages: the private type and the member's own read routes.
+        $this->assertNotFalse(has_action('rest_api_init', array($parts['messages'], 'register_routes')));
+        $this->assertTrue(post_type_exists(EVC_Club_Messages::POST_TYPE));
     }
 
     public function test_the_member_page_sends_the_public_key_and_never_the_private_one(): void {
@@ -1878,6 +1882,250 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertNull(EVC_Push_Campaign::fresh_job(), 'no job');
         $this->assertFalse(get_option('evc_club_push_starts'), 'no start-time store is written any more');
         $this->assertSame(array('result' => 'ok'), $c->start($admin, 'Τ', 'Κ', 'all', 0, 1), 'the next start goes through at once');
+    }
+
+    // ---- round 18: owner decision D30 (rich messages inside the app) and round-17 review Low 2 ---------------------
+
+    const MESSAGES = '/evangelou-club-customer/v1/me/messages';
+
+    /** A GET of the member's messages as the browser sends it (through rest_post_dispatch: no-store, mapped errors). */
+    private function messages_as(int $user, string $route = self::MESSAGES): WP_REST_Response {
+        wp_set_current_user(0);
+        $this->login_as($user);
+        $request = new WP_REST_Request('GET', $route);
+        $request->set_header('X-WP-Nonce', $this->nonce());
+        $_SERVER['HTTP_X_WP_NONCE'] = $this->nonce();
+        return apply_filters('rest_post_dispatch', rest_ensure_response(rest_get_server()->dispatch($request)), rest_get_server(), $request);
+    }
+
+    /** Every evc_club_message post of any status. */
+    private function message_posts(): array {
+        return get_posts(array('post_type' => EVC_Club_Messages::POST_TYPE, 'post_status' => 'any', 'numberposts' => -1, 'fields' => 'ids', 'suppress_filters' => true));
+    }
+
+    private function rich_fixture(): string {
+        $uploads = wp_get_upload_dir()['baseurl'];
+        return '<h2 style="color: #e03e2d; position: fixed">Νέα γεύση</h2><p onclick="alert(1)">Δοκιμάστε <strong>σήμερα</strong> το <em>νέο</em> γλυκό.</p>'
+            . '<script>alert(1)</script><iframe src="https://evil.example/x"></iframe>'
+            . '<ul><li style="text-align: center; background: url(https://evil.example/t.png)">ένα</li><li>δύο</li></ul>'
+            . '<p><a href="javascript:alert(1)">κακό</a> <a href="https://evangelou.gr/gluka" onmouseover="x()" target="_self" class="c">καλό</a></p>'
+            . '<img src="https://evil.example/track.png" alt="ξένη"><img src="' . $uploads . '/2026/11/glyko.jpg" alt="γλυκό" width="600" height="400" srcset="https://evil.example/a.jpg 2x" onerror="x()">'
+            . '<form action="https://evil.example"><input name="p"></form><span style="font-size: 18px; font-size: 400px">μέγεθος</span>';
+    }
+
+    public function test_round18_d30_the_body_is_sanitised_by_an_explicit_allowlist(): void {
+        $uploads = wp_get_upload_dir()['baseurl'];
+        $html = EVC_Club_Messages::sanitize_html($this->rich_fixture());
+        foreach (array('<script', 'alert(', '<iframe', 'onclick', 'onmouseover', 'onerror', 'javascript:', 'position', 'background', 'evil.example', '<form', '<input', 'class=', 'target=', 'srcset', '400px') as $bad) {
+            $this->assertStringNotContainsString($bad, $html, $bad);
+        }
+        foreach (array('<h2 style="color: #e03e2d">Νέα γεύση</h2>', '<strong>σήμερα</strong>', '<em>νέο</em>', '<li style="text-align: center">ένα</li>', '<a href="https://evangelou.gr/gluka">καλό</a>', '<span style="font-size: 18px">μέγεθος</span>', 'src="' . $uploads . '/2026/11/glyko.jpg"', 'alt="γλυκό"', 'width="600"') as $good) {
+            $this->assertStringContainsString($good, $html, $good);
+        }
+        $this->assertSame(1, substr_count($html, '<img'), 'only the media-library image');
+        $this->assertSame('', EVC_Club_Messages::sanitize_html('<script>x</script>'), 'nothing left = empty');
+        $this->assertSame('', EVC_Club_Messages::sanitize_html("\xff\xfe"), 'invalid UTF-8');
+        $this->assertSame('color: rgb(1, 2, 3); text-decoration: underline', EVC_Club_Messages::clean_style('COLOR: RGB(1, 2, 3); text-decoration: underline; color: red; behavior: url(x)'));
+        $this->assertTrue(EVC_Club_Messages::allowed_link('mailto:club@evangelou.gr'));
+        $this->assertTrue(EVC_Club_Messages::allowed_link('tel:+302510000000'));
+        foreach (array('javascript:alert(1)', 'data:text/html,x', '/relative', '//evil.example/x', 'https://ev"il.example') as $bad) {
+            $this->assertFalse(EVC_Club_Messages::allowed_link($bad), $bad);
+        }
+        foreach (array($uploads . '/../wp-config.php', 'https://evil.example/wp-content/uploads/a.jpg', $uploads . 'x/a.jpg', 'data:image/png;base64,AAAA') as $bad) {
+            $this->assertFalse(EVC_Club_Messages::allowed_image($bad), $bad);
+        }
+        $this->assertTrue(EVC_Club_Messages::allowed_image($uploads . '/2026/11/a.jpg'));
+    }
+
+    public function test_round18_d30_a_send_leaves_one_message_that_only_its_audience_reads(): void {
+        $now = $this->clock->now()->getTimestamp();
+        $active = $this->customer();
+        $this->member($active);
+        $this->memberships[$active] = array('state' => 'active', 'paid_until_utc' => gmdate('Y-m-d\TH:i:sP', $now + 20 * 86400));
+        $sub = $this->subscription();
+        $this->subscribe_as($active, $sub);
+        $quiet = $this->customer();
+        $this->member($quiet);
+        $this->memberships[$quiet] = array('state' => 'active', 'paid_until_utc' => gmdate('Y-m-d\TH:i:sP', $now + 5 * 86400));
+        $expired = $this->customer();
+        $this->member($expired);
+        $this->memberships[$expired] = array('state' => 'expired', 'paid_until_utc' => gmdate('Y-m-d\TH:i:sP', $now - 86400));
+        $this->subscribe_as($expired, $this->subscription());
+        $stranger = $this->customer();
+        $admin = $this->admin();
+        wp_set_current_user($admin);
+        $preview = $this->page_post(array('evc_push_action' => 'preview', 'evc_push_title' => 'Νέα γεύση', 'evc_push_body' => 'Ελάτε να τη δοκιμάσετε.', 'evc_push_audience' => 'active', EVC_Push_Admin_Page::FIELD_MESSAGE => $this->rich_fixture()));
+        $this->assertSame('preview', $preview['code']);
+        $this->assertSame(1, $preview['subscriptions']);
+        $this->assertSame(2, $preview['app_members'], 'the app reaches the active member without a subscription too');
+        $this->assertStringNotContainsString('<script', $preview['form']['message']);
+        $this->assertSame(array(), $this->message_posts(), 'a preview creates nothing');
+        $r = $this->page_post(array('evc_push_action' => 'send', 'evc_push_title' => 'Νέα γεύση', 'evc_push_body' => 'Ελάτε να τη δοκιμάσετε.', 'evc_push_audience' => 'active', EVC_Push_Admin_Page::FIELD_MESSAGE => $preview['form']['message']));
+        $this->assertSame('started', $r['code']);
+        $job = EVC_Push_Campaign::fresh_job();
+        $id = (int) $job['message'];
+        $this->assertGreaterThan(0, $id);
+        $this->assertSame(array($id), $this->message_posts());
+        $this->assertSame('private', get_post_status($id));
+        $this->assertSame('done', $this->parts['campaign']->step());
+        $this->assertCount(1, $this->requests, 'only the active subscriber');
+        $plain = json_decode((string) $this->decrypt($sub['endpoint'], $this->requests[0]['body'], $sub['keys']['auth']), true);
+        $this->assertSame(array('title' => 'Νέα γεύση', 'body' => 'Ελάτε να τη δοκιμάσετε.', 'message' => $id), $plain, 'the notification names its message');
+        $this->assertSame($id, (int) EVC_Push_Campaign::fresh_job()['message'], 'the job keeps the number, not the text');
+
+        $list = $this->messages_as($active);
+        $this->assertSame(200, $list->get_status());
+        $this->assertSame('no-store, private, max-age=0', $list->get_headers()['Cache-Control']);
+        $data = $list->get_data();
+        $this->assertSame(1, $data['unread']);
+        $this->assertSame(array('id', 'title', 'summary', 'sent_at', 'unread'), array_keys($data['messages'][0]));
+        $this->assertSame(array($id, 'Νέα γεύση', 'Ελάτε να τη δοκιμάσετε.', true), array($data['messages'][0]['id'], $data['messages'][0]['title'], $data['messages'][0]['summary'], $data['messages'][0]['unread']));
+        $this->assertSame(1, preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/D', $data['messages'][0]['sent_at']));
+        $this->assertCount(1, $this->messages_as($quiet)->get_data()['messages'], 'in the audience without a subscription');
+        $this->assertSame(array(), $this->messages_as($expired)->get_data()['messages'], 'not in the audience when it was sent');
+        $this->assertSame(404, $this->messages_as($expired, self::MESSAGES . '/' . $id)->get_status(), 'not in the audience: not found');
+        $this->assertSame('message_not_found', $this->messages_as($expired, self::MESSAGES . '/' . $id)->get_data()['error']['code'] ?? null);
+        $this->assertSame(404, $this->messages_as($stranger)->get_status(), 'no Club member row');
+        $this->assertSame('not_a_member', $this->messages_as($stranger)->get_data()['error']['code'] ?? null);
+        $this->assertSame('message_not_found', $this->messages_as($active, self::MESSAGES . '/' . ($id + 1000))->get_data()['error']['code'] ?? null, 'no such message: the same answer');
+
+        $one = $this->messages_as($active, self::MESSAGES . '/' . $id);
+        $this->assertSame(200, $one->get_status());
+        $this->assertSame('no-store, private, max-age=0', $one->get_headers()['Cache-Control']);
+        $message = $one->get_data()['message'];
+        $this->assertSame(array('id', 'title', 'summary', 'sent_at', 'html'), array_keys($message));
+        $this->assertStringContainsString('<strong>σήμερα</strong>', $message['html']);
+        foreach (array('<script', 'onclick', 'javascript:', 'evil.example') as $bad) {
+            $this->assertStringNotContainsString($bad, $message['html'], $bad);
+        }
+        $this->assertSame(0, $this->messages_as($active)->get_data()['unread'], 'opening it marks it read');
+        $this->assertSame($id, EVC_Club_Messages::last_read($active));
+    }
+
+    public function test_round18_d30_a_message_to_all_reaches_every_enabled_member_and_is_sanitised_again_on_the_way_out(): void {
+        $a = $this->customer();
+        $this->member($a);
+        $b = $this->customer();
+        $this->member($b);
+        $off = $this->customer();
+        $this->member($off, 'disabled');
+        $this->subscribe_as($a, $this->subscription());
+        $c = $this->parts['campaign'];
+        $this->assertSame(array('result' => 'ok'), $c->start(get_userdata($this->admin()), 'Για όλους', 'Καλή εβδομάδα.', 'all', 0, 1, '<p>Γεια</p>'));
+        $id = (int) EVC_Push_Campaign::fresh_job()['message'];
+        $this->assertSame(array(), get_post_meta($id, EVC_Club_Messages::META_RECIPIENT, false), 'no list for «all»');
+        foreach (array($a, $b) as $user) {
+            $this->assertSame($id, $this->messages_as($user)->get_data()['messages'][0]['id']);
+        }
+        $this->assertSame(403, $this->messages_as($off)->get_status());
+        $this->assertSame('member_disabled', $this->messages_as($off)->get_data()['error']['code']);
+        // Something written past the allowlist straight into the database is still cleaned when it is read.
+        global $wpdb;
+        $wpdb->update($wpdb->posts, array('post_content' => '<p>Γεια</p><script>alert(1)</script><img src="https://evil.example/x.png">'), array('ID' => $id));
+        clean_post_cache($id);
+        $html = $this->messages_as($b, self::MESSAGES . '/' . $id)->get_data()['message']['html'];
+        $this->assertSame('<p>Γεια</p>', $html);
+        // A draft (a send that was never confirmed) is nobody's.
+        $draft = EVC_Club_Messages::create_draft('Πρόχειρο', 'Όχι ακόμη.', '', 'all', 0, null, 1);
+        $this->assertSame(404, $this->messages_as($a, self::MESSAGES . '/' . $draft)->get_status());
+        $this->assertCount(1, $this->messages_as($a)->get_data()['messages']);
+    }
+
+    public function test_round18_d30_the_message_type_is_private_everywhere_and_never_the_till_accounts(): void {
+        $type = get_post_type_object(EVC_Club_Messages::POST_TYPE);
+        $this->assertNotNull($type);
+        $this->assertFalse($type->public);
+        $this->assertFalse($type->publicly_queryable);
+        $this->assertTrue($type->exclude_from_search);
+        $this->assertFalse($type->show_in_rest);
+        $this->assertFalse($type->show_ui);
+        $this->assertFalse($type->query_var);
+        $this->assertFalse($type->rewrite);
+        $this->assertFalse(is_post_type_viewable($type));
+        $this->assertNotContains(EVC_Club_Messages::POST_TYPE, get_post_types(array('public' => true)));
+        $this->assertArrayNotHasKey(EVC_Club_Messages::POST_TYPE, apply_filters('wp_sitemaps_post_types', array(EVC_Club_Messages::POST_TYPE => $type)));
+        $routes = implode("\n", array_keys(rest_get_server()->get_routes()));
+        $this->assertStringNotContainsString(EVC_Club_Messages::POST_TYPE, $routes);
+        $user = $this->customer();
+        $this->member($user);
+        $this->assertSame(array('result' => 'ok'), $this->parts['campaign']->start(get_userdata($this->admin()), 'Τ', 'Κ', 'all', 0, 0, '<p>κρυφό κείμενο</p>'));
+        $id = (int) EVC_Push_Campaign::fresh_job()['message'];
+        // The front end and the search never find it, for a visitor or a signed-in customer.
+        foreach (array(0, $user) as $who) {
+            wp_set_current_user($who);
+            $this->assertSame(array(), (new WP_Query(array('p' => $id)))->posts);
+            $this->assertSame(array(), (new WP_Query(array('s' => 'κρυφό')))->posts);
+            $this->assertSame(array(), (new WP_Query(array('post_type' => 'any', 'post_status' => 'publish')))->posts);
+            $this->assertFalse(current_user_can('read_post', $id));
+        }
+        $till = (int) self::factory()->user->create(array('role' => EVC_Staff_Role::ROLE));
+        get_userdata($till)->add_cap(EVC_Staff_Role::CAP_MANAGE);
+        foreach (array('edit_post', 'read_post', 'delete_post') as $cap) {
+            $this->assertFalse(user_can($till, $cap, $id), 'till: ' . $cap);
+        }
+        $admin = $this->admin();
+        $this->assertTrue(user_can($admin, 'edit_post', $id), 'an administrator with the Club capability');
+        $plain = (int) self::factory()->user->create(array('role' => 'editor'));
+        $this->assertFalse(user_can($plain, 'edit_post', $id), 'an editor without the Club capability');
+    }
+
+    /**
+     * Round-17 review Low 2 (mutant R17W-3): the lock is lost between start()'s acquire_lock() and its job write: LOST_LOCK,
+     * no job, and (D30) no message left behind either.
+     */
+    public function test_round18_a_lock_lost_before_the_job_write_creates_neither_a_job_nor_a_message(): void {
+        $this->subscribers(1);
+        $admin = get_userdata($this->admin());
+        $c = $this->parts['campaign'];
+        $lost = function ($query) {
+            return stripos($query, 'IS_USED_LOCK(') !== false ? 'SELECT 0' : $query;
+        };
+        add_filter('query', $lost);
+        try {
+            $result = $c->start($admin, 'Τ', 'Κ', 'all', 0, 1, '<p>κείμενο</p>');
+        } finally {
+            remove_filter('query', $lost);
+        }
+        $this->assertSame(array('result' => EVC_Push_Campaign::LOST_LOCK), $result);
+        $this->assertNull(EVC_Push_Campaign::fresh_job(), 'no job');
+        $this->assertSame(array(), $this->message_posts(), 'no message, not even a draft');
+        $this->assertSame(array(), EVC_Push_Campaign::audit());
+        // A failing job write (an exception) leaves no message either.
+        $fail = function () {
+            throw new RuntimeException('the job write fails');
+        };
+        add_filter('pre_update_option_' . EVC_Push_Campaign::JOB_OPTION, $fail);
+        try {
+            $c->start($admin, 'Τ', 'Κ', 'all', 0, 1);
+            $this->fail('expected the job write to fail');
+        } catch (RuntimeException $e) {
+            $this->assertSame('the job write fails', $e->getMessage());
+        } finally {
+            remove_filter('pre_update_option_' . EVC_Push_Campaign::JOB_OPTION, $fail);
+        }
+        $this->assertSame(array(), $this->message_posts());
+        $this->assertSame(array('result' => 'ok'), $c->start($admin, 'Τ', 'Κ', 'all', 0, 1));
+        $this->assertCount(1, $this->message_posts());
+    }
+
+    public function test_round18_d30_the_page_writes_with_the_editor_and_previews_the_formatted_message(): void {
+        $user = $this->customer();
+        $this->member($user);
+        $this->subscribe_as($user, $this->subscription());
+        wp_set_current_user($this->admin());
+        $html = $this->page_request(array('evc_push_action' => 'preview', 'evc_push_title' => 'Νέα γεύση', 'evc_push_body' => 'Ελάτε.', 'evc_push_audience' => 'all', EVC_Push_Admin_Page::FIELD_MESSAGE => '<p><strong>Έντονο</strong></p><script>x()</script>'));
+        $this->assertStringContainsString('Το μήνυμα στην εφαρμογή', $html);
+        $this->assertStringContainsString('<strong>Έντονο</strong>', $html);
+        $this->assertStringNotContainsString('<script>x()', $html);
+        $this->assertStringContainsString('σε 1 μέλη', $html);
+        $this->assertStringContainsString('name="' . EVC_Push_Admin_Page::FIELD_MESSAGE . '"', $html);
+        $this->assertSame(1, preg_match('/<input type="hidden" name="evc_push_message" value="([^"]*)"/', $html, $m));
+        $this->assertSame('<p><strong>Έντονο</strong></p>', html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), 'the confirmation carries the sanitised body');
+        $this->assertStringContainsString('Πλήρες μήνυμα (προαιρετικό)', $html);
+        $too_long = str_repeat('<p>' . str_repeat('α', 100) . '</p>', 120);
+        $long = $this->page_post(array('evc_push_action' => 'preview', 'evc_push_title' => 'Τ', 'evc_push_body' => 'Κ', 'evc_push_audience' => 'all', EVC_Push_Admin_Page::FIELD_MESSAGE => $too_long));
+        $this->assertSame('problem', $long['code'], 'a message past the limit is refused');
+        $this->assertSame('message_long', $long['problem'] ?? null);
     }
 
     public function test_the_activated_notification_goes_once_per_paid_period_to_an_active_member_only(): void {

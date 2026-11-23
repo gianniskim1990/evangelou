@@ -16,7 +16,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, PREPARED_RULES, PUSH_RULES, PWA_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, preparedProblemsFor, problemsFor, pushProblemsFor, pwaProblemsFor, qrProblemsFor, redemptionProblemsFor, selfTest, workerProblems } from "./php-guards.mjs";
 import { storageProblems, storageSelfTest } from "./storage-guard.mjs";
-import { sampleBundleMarkers, sampleBundleProblems, sampleGraphProblems, sampleGuardSelfTest } from "./sample-guard.mjs";
+import { sampleBundleMarkers, sampleBundleProblems, sampleGraphProblems, sampleGuardSelfTest, staffSampleGraphProblems } from "./sample-guard.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginSrc = join(appDir, "..", "wordpress", "evangelou-club");
@@ -191,7 +191,8 @@ for (const f of files.filter((x) => /\.(js|css)$/.test(x) && x !== WORKER_FILE))
     if (text.includes(needle)) fail(`forbidden content "${needle}" in ${f}`);
   }
   // Round 17: the member app never contains the design preview's sample QR, sample card texts or roster.
-  if (customer) {
+  // Round 18 (round-17 review nit): nor does the staff app; and neither has the preview's own words.
+  {
     const problems = sampleBundleProblems(f, text, SAMPLE_MARKERS);
     if (problems.length > 0) fail(problems.join("; "));
   }
@@ -233,6 +234,23 @@ const FORBIDDEN_CLASSES = ["EVC_Bacs_Payment_Confirmation", "EVC_Bacs_Payment_Fi
     const problems = storageProblems(input.split(sep).join("/"), readFileSync(join(appDir, input), "utf8"));
     if (problems.length > 0) fail(problems.join("; "));
   }
+  // Round 18 (round-17 review nit): the staff app's graph never reaches the preview-only sample modules either.
+  const staffGraph = await esbuildBuild({
+    entryPoints: [join(appDir, "src", "staff", "main.tsx")],
+    absWorkingDir: appDir,
+    bundle: true,
+    write: false,
+    metafile: true,
+    outdir: join(appDir, "dist-plugin", ".staff-graph"),
+    format: "esm",
+    platform: "browser",
+    jsx: "automatic",
+    loader: { ".png": "file", ".css": "empty", ".webp": "file", ".svg": "file", ".jpg": "file" },
+    logLevel: "silent",
+  });
+  const staffInputs = Object.keys(staffGraph.metafile.inputs).filter((p) => /\.(m?[jt]sx?|cjs)$/.test(p)).map((p) => p.split(sep).join("/"));
+  const staffSample = staffSampleGraphProblems(staffInputs);
+  if (staffSample.length > 0) fail(staffSample.join("; "));
 }
 const guardSelfTest = selfTest();
 if (guardSelfTest.length > 0) fail(`PHP construction guard self-test failed: ${guardSelfTest.join("; ")}`);

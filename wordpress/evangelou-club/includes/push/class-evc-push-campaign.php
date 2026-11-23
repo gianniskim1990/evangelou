@@ -75,6 +75,13 @@ defined('ABSPATH') || exit;
  * neither reads nor writes the old start-time option 'evc_club_push_starts' (it may stay in the database, unused; no
  * migration). What stays, because it is safety and not a rate limit: one send at a time (the named lock + BUSY while a
  * job runs) and the preview / confirm step of the page. The automatic notifications keep their once-per-period rules.
+ * OWNER DECISION D30 (2026-11-23, round 18): rich messages inside the app. start() also creates the send's in-app message
+ * (EVC_Club_Messages: title, summary and the sanitised formatted body; for 'active' / 'expiring' the WordPress users of
+ * the audience at this moment, read over EVERY enabled Club member, not only those with a subscription). The message is
+ * a draft until the job has been written under the lock, then it becomes visible; any refusal (no lock, lock lost, a
+ * failing job write) deletes the draft, so a refused send leaves nothing in the app. The job keeps only the message
+ * number ('message'); every notification of the job names it in its payload ({"title", "body", "message"}), so a tap
+ * opens that message. The lock, the at-most-once cursor and D29 are unchanged.
  * Audit: who (user id and login), when, audience (+ days), the planned count and the result counts. NEVER an endpoint, a
  * key, a member, a name, an e-mail address or the message text. Round 14: two stores, so that two writers can never
  * overwrite each other's entry (the campaign holds its lock, the automatic notifications hold theirs, and the two run at
@@ -219,6 +226,34 @@ final class EVC_Push_Campaign {
         return array('result' => self::OK, 'members' => count(array_filter($members)), 'subscriptions' => $subscriptions);
     }
 
+    /**
+     * Round 18 (D30): the WordPress users an in-app message of this audience reaches NOW: every enabled Club member for
+     * 'all', the enabled members in the audience (in_audience(), the same reading as the notifications) otherwise.
+     * @return array{result:string,users?:int[]}
+     */
+    public function recipients(string $audience, int $days): array {
+        if (!self::valid_audience($audience, $audience === 'expiring' ? $days : 0)) {
+            return array('result' => self::INVALID);
+        }
+        $sending = $this->backend->sending();
+        if ($sending === null) {
+            return array('result' => self::UNAVAILABLE);
+        }
+        $now = EVC_Clock::to_utc($this->backend->clock()->now());
+        $users = array();
+        $after = 0;
+        do {
+            $page = $sending['store']->enabled_members($after, 500);
+            foreach ($page as $member_id => $wp_user_id) {
+                $after = (int) $member_id;
+                if ($this->in_audience((int) $wp_user_id, $audience, $days, $now)) {
+                    $users[] = (int) $wp_user_id;
+                }
+            }
+        } while (count($page) === 500);
+        return array('result' => self::OK, 'users' => $users);
+    }
+
     /** @return array<string,mixed>|null the current (or last) job, as stored */
     public static function job(): ?array {
         $job = get_option(self::JOB_OPTION, null);
@@ -300,10 +335,13 @@ final class EVC_Push_Campaign {
     /**
      * The administrator confirmed: create the job. The caller checked the capability and the nonce.
      * D29 (round 17): no rate limit; only one send at a time (BUSY while a job runs).
+     * Round 18 (D30): $rich is the formatted body of the in-app message (sanitised again here; '' = title and summary
+     * only). The message is created as a draft, linked to the job and made visible only once the job is written.
      * @return array{result:string}
      */
-    public function start(WP_User $user, $title, $body, string $audience, int $days, int $planned): array {
-        if (EVC_Push_Message::problem($title, $body) !== null || !self::valid_audience($audience, $audience === 'expiring' ? $days : 0)) {
+    public function start(WP_User $user, $title, $body, string $audience, int $days, int $planned, string $rich = ''): array {
+        if (EVC_Push_Message::problem($title, $body) !== null || !self::valid_audience($audience, $audience === 'expiring' ? $days : 0)
+            || strlen(EVC_Club_Messages::sanitize_html($rich)) > EVC_Club_Messages::MAX_HTML) {
             return array('result' => self::INVALID);
         }
         $lock = self::acquire_lock(self::lock_name());
@@ -345,11 +383,38 @@ final class EVC_Push_Campaign {
                 'removed' => 0,
                 'skipped' => 0,
             );
+            // Round 18 (D30): the in-app message, a draft until the job below is written.
+            $recipients = null;
+            if ($audience !== 'all') {
+                $reach = $this->recipients($audience, $days);
+                if ($reach['result'] !== self::OK) {
+                    return array('result' => $reach['result']);
+                }
+                $recipients = $reach['users'];
+            }
+            $message = EVC_Club_Messages::create_draft((string) $job['title'], (string) $job['body'], $rich, $audience, (int) $job['days'], $recipients, (int) $user->ID);
+            if ($message <= 0) {
+                return array('result' => self::UNAVAILABLE);
+            }
+            $job['message'] = $message;
             // Round 15 (M1): the job is written only while this connection still holds the lock.
             if (!self::holds_lock(self::lock_name())) {
+                EVC_Club_Messages::discard($message);
                 return array('result' => self::LOST_LOCK);
             }
-            update_option(self::JOB_OPTION, $job, false);
+            try {
+                update_option(self::JOB_OPTION, $job, false);
+            } catch (Throwable $e) {
+                EVC_Club_Messages::discard($message);
+                throw $e;
+            }
+            // Only a job that is really stored makes its message visible.
+            $stored = self::fresh_job();
+            if ($stored === null || (string) ($stored['id'] ?? '') !== (string) $job['id']) {
+                EVC_Club_Messages::discard($message);
+                return array('result' => self::UNAVAILABLE);
+            }
+            EVC_Club_Messages::publish($message, $now);
             delete_option(self::CANCEL_OPTION);
             delete_option(self::NO_LOCK_OPTION);
             $this->record('started', $job);
@@ -484,7 +549,8 @@ final class EVC_Push_Campaign {
             $job['reason'] = (string) $this->backend->last_reason();
             return $this->finish($job, 'stopped') ? 'stopped' : self::refused();
         }
-        $payload = EVC_Push_Message::payload($job['title'], $job['body']);
+        // Round 18 (D30): every notification of the job names its in-app message.
+        $payload = EVC_Push_Message::payload($job['title'], $job['body'], (int) ($job['message'] ?? 0));
         $started = ($this->timer)();
         $now = EVC_Clock::to_utc($this->backend->clock()->now());
         $members = array();

@@ -38,6 +38,16 @@ export interface StaffConfig {
   sessionRef: string;
   appVersion: string;
   features: StaffFeatures;
+  /** Round 18 (D31): «Χρήσιμοι σύνδεσμοι»; each one this site's address (a bad entry is dropped, never a reason to refuse). */
+  links?: StaffLink[];
+}
+
+/** STAGE-08 round 18, owner decision D31: the useful Club addresses the till app may show (never an administrator page). */
+export const STAFF_LINK_KEYS = ["join", "poster", "member", "member_login", "till"] as const;
+export type StaffLinkKey = (typeof STAFF_LINK_KEYS)[number];
+export interface StaffLink {
+  key: StaffLinkKey;
+  url: string;
 }
 
 export type ConfigResult = { ok: true; config: StaffConfig } | { ok: false; reason: string };
@@ -52,6 +62,26 @@ function sameOriginUrl(value: unknown, origin: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Round 18 (D31): the links of the server's config: only the known keys, each once, each a same-origin http(s) address
+ * with no user name, password or fragment. Anything else is dropped (the card then shows fewer links).
+ */
+export function parseStaffLinks(value: unknown, origin: string): StaffLink[] {
+  if (!Array.isArray(value)) return [];
+  const out: StaffLink[] = [];
+  for (const item of value.slice(0, 20)) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const { key, url } = item as Record<string, unknown>;
+    if (!(STAFF_LINK_KEYS as readonly unknown[]).includes(key) || out.some((l) => l.key === key)) continue;
+    const href = sameOriginUrl(url, origin);
+    if (href === null) continue;
+    const parsed = new URL(href);
+    if (parsed.username !== "" || parsed.password !== "" || parsed.hash !== "") continue;
+    out.push({ key: key as StaffLinkKey, url: href });
+  }
+  return out;
 }
 
 export function isValidNonce(value: unknown): value is string {
@@ -100,6 +130,7 @@ export function parseStaffConfig(raw: string | null | undefined, origin: string)
         coffeeRedemption: f.coffeeRedemption === true,
         history: f.history === true,
       },
+      links: parseStaffLinks(d.links, origin),
     },
   };
 }
