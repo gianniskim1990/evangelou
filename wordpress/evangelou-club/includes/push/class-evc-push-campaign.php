@@ -123,6 +123,12 @@ final class EVC_Push_Campaign {
     const BUSY = 'busy';
     const INVALID = 'invalid';
     const UNAVAILABLE = 'unavailable';
+    /** Round 19: the in-app audience is larger than the snapshot bounds below; nothing is sent. */
+    const TOO_MANY = 'too_many';
+    /** Round 19: most WordPress users one in-app message may keep as its recipient snapshot ('active' / 'expiring'). */
+    const MAX_RECIPIENTS = 5000;
+    /** Round 19: most enabled members read (500 per query) while the snapshot is built; more = TOO_MANY, nothing is sent. */
+    const MAX_SCAN = 20000;
     const NONE = 'none';
     /** Round 13: the cancel request is recorded; the batch in flight stops before its next message. */
     const CANCEL_PENDING = 'cancel_pending';
@@ -229,6 +235,8 @@ final class EVC_Push_Campaign {
     /**
      * Round 18 (D30): the WordPress users an in-app message of this audience reaches NOW: every enabled Club member for
      * 'all', the enabled members in the audience (in_audience(), the same reading as the notifications) otherwise.
+     * Round 19: for 'active' / 'expiring' (a stored snapshot) at most MAX_SCAN enabled members are read and MAX_RECIPIENTS
+     * kept; beyond either the answer is TOO_MANY and nothing is sent. 'all' stores no list (this count is the preview only).
      * @return array{result:string,users?:int[]}
      */
     public function recipients(string $audience, int $days): array {
@@ -242,12 +250,19 @@ final class EVC_Push_Campaign {
         $now = EVC_Clock::to_utc($this->backend->clock()->now());
         $users = array();
         $after = 0;
+        $scanned = 0;
         do {
             $page = $sending['store']->enabled_members($after, 500);
             foreach ($page as $member_id => $wp_user_id) {
                 $after = (int) $member_id;
+                if ($audience !== 'all' && ++$scanned > self::MAX_SCAN) {
+                    return array('result' => self::TOO_MANY);
+                }
                 if ($this->in_audience((int) $wp_user_id, $audience, $days, $now)) {
                     $users[] = (int) $wp_user_id;
+                    if ($audience !== 'all' && count($users) > self::MAX_RECIPIENTS) {
+                        return array('result' => self::TOO_MANY);
+                    }
                 }
             }
         } while (count($page) === 500);

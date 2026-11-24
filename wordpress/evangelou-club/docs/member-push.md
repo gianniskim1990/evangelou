@@ -289,6 +289,12 @@ app** («Μηνύματα»):
 3. Leave the app open, send a second message, tap its notification: the same window shows the new message.
 4. A member outside the audience (e.g. «Μόνο τα μέλη με ενεργή συνδρομή» and an expired member) does not see it.
 
+## Round 19 — hardening of the in-app messages
+
+- **Images:** an image address with an encoded dot, slash or backslash (`%2e`, `%2f`, `%5c`, any case, also double-encoded as `%252e`) or an encoded control character is dropped, on the server (`EVC_Club_Messages::allowed_image`) and in the member app (`richImage`, which also requires the path to be inside `/wp-content/uploads/`). Only the site's own media library (same origin) is shown; an image on a CDN is dropped.
+- **Recipient snapshot:** an «active» / «expiring» message keeps its recipients in ONE post meta row `_evc_recipients` (`,12,40,`), not one row per member. Bounds: `EVC_Push_Campaign::MAX_RECIPIENTS` (5000 members kept) and `EVC_Push_Campaign::MAX_SCAN` (20000 enabled members read, 500 per query). Beyond either, the send and its preview answer «too_many»: nothing is sent, stored or audited; «Όλα τα μέλη» keeps no list and is not bounded. Round-18 messages (`_evc_recipient` rows) are still read. No migration.
+- **Not changed:** sent messages are not editable and not withdrawable (D33); the read marker is untouched.
+
 ## Security notes
 
 - SSRF: only `https://` + exactly `fcm.googleapis.com`, `web.push.apple.com`, `updates.push.services.mozilla.com` or

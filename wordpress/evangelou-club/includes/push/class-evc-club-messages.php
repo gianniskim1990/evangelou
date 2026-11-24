@@ -17,7 +17,9 @@ defined('ABSPATH') || exit;
  *   - a message waits as 'draft' until its send job has been written, then becomes 'private' (a status that
  *     WordPress never shows to visitors); a refused send deletes the draft.
  * Post meta (counts and labels only): _evc_audience (all | active | expiring), _evc_days, _evc_sent_at (unix time) and,
- * for 'active' / 'expiring', one _evc_recipient row per WordPress user who was in the audience when it was sent.
+ * for 'active' / 'expiring', ONE _evc_recipients row (',12,40,' = the WordPress users who were in the audience when it was
+ * sent; at most EVC_Push_Campaign::MAX_RECIPIENTS, the sender refuses a bigger audience). Round-18 messages keep their
+ * _evc_recipient rows (still read).
  *
  * Who sees a message (GET /me/messages, EVC_Rest_Me_Messages_Controller): an ENABLED Club member (evc_members) only;
  * a message to «όλα τα μέλη» (all) to every such member, a message to active / expiring members only to the members
@@ -41,7 +43,10 @@ final class EVC_Club_Messages {
     const META_AUDIENCE = '_evc_audience';
     const META_DAYS = '_evc_days';
     const META_SENT_AT = '_evc_sent_at';
+    /** Round 18 (legacy): one row per recipient. Still read, no longer written. */
     const META_RECIPIENT = '_evc_recipient';
+    /** Round 19: the recipient snapshot as ONE row: ',12,40,77,' (the ids between commas, so a LIKE on ',id,' is exact). */
+    const META_RECIPIENTS = '_evc_recipients';
     const STATUS_SENT = 'private';
     const STATUS_DRAFT = 'draft';
 
@@ -287,7 +292,11 @@ final class EVC_Club_Messages {
         return is_array($parts) && isset($parts['scheme'], $parts['host']) && in_array(strtolower($parts['scheme']), array('http', 'https'), true) && $parts['host'] !== '';
     }
 
-    /** An image of this site's media library: below the uploads address, no '..', no query tricks with quotes. */
+    /**
+     * An image of this site's media library: below the uploads address, no '..', no query tricks with quotes.
+     * Round 19: percent-encoded dots, slashes and backslashes (%2e, %2f, %5c, any case, also double-encoded as %252e) are
+     * refused, and the address must still start with this site's uploads address (host and path).
+     */
     public static function allowed_image(string $src): bool {
         $src = trim($src);
         $uploads = wp_get_upload_dir();
@@ -295,8 +304,17 @@ final class EVC_Club_Messages {
         if ($base === '' || $src === '' || preg_match('/[\x00-\x20"\'<>\\\\`]/', $src) === 1 || strpos($src, '..') !== false) {
             return false;
         }
+        // Any encoded '%', dot, slash or backslash: refused (a legitimate media-library name never needs them).
+        if (preg_match('/%(?:25|2e|2f|5c)/i', $src) === 1) {
+            return false;
+        }
+        // A decoded control character (%00, %0a ...) is refused too; double-encoding is already refused above (%25).
+        if (preg_match('/[\x00-\x1f\x7f]/', rawurldecode($src)) === 1) {
+            return false;
+        }
         // The same media library over https when the site is reached over https (set_url_scheme).
         foreach (array_unique(array($base, set_url_scheme($base, 'https'))) as $prefix) {
+            // The resolved path starts with the uploads path of this site (the prefix includes host and path).
             if (strpos($src, $prefix . '/') === 0) {
                 return true;
             }
@@ -327,11 +345,14 @@ final class EVC_Club_Messages {
         update_post_meta($id, self::META_AUDIENCE, $audience);
         update_post_meta($id, self::META_DAYS, $days);
         if ($recipients !== null) {
-            foreach (array_values(array_unique(array_map('intval', $recipients))) as $wp_user_id) {
-                if ($wp_user_id > 0) {
-                    add_post_meta($id, self::META_RECIPIENT, $wp_user_id);
-                }
+            $ids = array_values(array_unique(array_filter(array_map('intval', $recipients), static function (int $v): bool {
+                return $v > 0;
+            })));
+            if (count($ids) > EVC_Push_Campaign::MAX_RECIPIENTS) {
+                wp_delete_post($id, true);
+                return 0;
             }
+            update_post_meta($id, self::META_RECIPIENTS, $ids === array() ? ',' : ',' . implode(',', $ids) . ',');
         }
         return $id;
     }
@@ -368,6 +389,7 @@ final class EVC_Club_Messages {
             'meta_query' => array(
                 'relation' => 'OR',
                 array('key' => self::META_AUDIENCE, 'value' => 'all'),
+                array('key' => self::META_RECIPIENTS, 'value' => ',' . $wp_user_id . ',', 'compare' => 'LIKE'),
                 array('key' => self::META_RECIPIENT, 'value' => (string) $wp_user_id),
             ),
         ));
@@ -384,6 +406,9 @@ final class EVC_Club_Messages {
             return false;
         }
         if ((string) get_post_meta($id, self::META_AUDIENCE, true) === 'all') {
+            return true;
+        }
+        if (strpos((string) get_post_meta($id, self::META_RECIPIENTS, true), ',' . $wp_user_id . ',') !== false) {
             return true;
         }
         return in_array((string) $wp_user_id, array_map('strval', get_post_meta($id, self::META_RECIPIENT, false)), true);

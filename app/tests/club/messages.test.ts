@@ -166,6 +166,29 @@ describe("round 18 (D30): the formatted body is drawn by an allowlist, never as 
     assert.equal(richImage("https://evil.example/x.png", ORIGIN), null);
     assert.equal(richImage("data:image/png;base64,AAAA", ORIGIN), null);
     assert.equal(richImage("/wp-content/uploads/x.png", ORIGIN), `${ORIGIN}/wp-content/uploads/x.png`);
+    // Round 19: encoded dots / slashes / backslashes (any case, also double-encoded) and anything outside the uploads folder.
+    for (const bad of [
+      "/wp-content/uploads/%2e%2e/%2e%2e/wp-config.php",
+      "/wp-content/uploads/%2E%2E/wp-config.php",
+      "/wp-content/uploads/a%2fb.png",
+      "/wp-content/uploads/a%2Fb.png",
+      "/wp-content/uploads/a%5cb.png",
+      "/wp-content/uploads/a%5Cb.png",
+      "/wp-content/uploads/%252e%252e/x.png",
+      "/wp-content/uploads/%252fx.png",
+      "/wp-content/uploads/%255cx.png",
+      "/wp-content/uploads/a.png%00.php",
+      `${ORIGIN}/wp-content/uploads/%2e%2e/x.png`,
+      "https://evil.example/wp-content/uploads/a.png",
+      "//evil.example/wp-content/uploads/a.png",
+      "/images/x.png",
+      "/wp-content/plugins/x.png",
+      "/wp-content/uploadsx/a.png",
+    ]) {
+      assert.ok(richImage(bad, ORIGIN) === null, bad);
+    }
+    assert.equal(richImage("/wp-content/uploads/2026/11/a%20b.png", ORIGIN), `${ORIGIN}/wp-content/uploads/2026/11/a%20b.png`);
+    assert.equal(richImage("/sub/wp-content/uploads/a.png", ORIGIN), `${ORIGIN}/sub/wp-content/uploads/a.png`);
     const deep = "<span>".repeat(200) + "βαθύ" + "</span>".repeat(200);
     assert.ok(draw(deep).includes("βαθύ"), "the text survives");
     assert.ok((draw(deep).match(/<span>/g) ?? []).length <= 24, "the depth is bounded");

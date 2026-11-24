@@ -2108,6 +2108,141 @@ final class PushTest extends EVC_WP_Test_Case {
         $this->assertCount(1, $this->message_posts());
     }
 
+    /** @return int[] the WordPress user ids of $count bulk-inserted enabled members (not real users: only the Club DB reads them) */
+    private function bulk_members(int $count, int $first_user_id, bool $active): array {
+        $db = $this->db();
+        $now = $this->clock->now()->getTimestamp();
+        $ids = array();
+        for ($from = 0; $from < $count; $from += 500) {
+            $sql = array();
+            $args = array();
+            for ($i = $from; $i < min($count, $from + 500); $i++) {
+                $user = $first_user_id + $i;
+                $ids[] = $user;
+                $sql[] = '(?, ?, ?, ?, ?)';
+                array_push($args, EVC_Member_Id::mint(), $user, 'enabled', '2026-11-01 00:00:00.000000', '2026-11-01 00:00:00.000000');
+                if ($active) {
+                    $this->memberships[$user] = array('state' => 'active', 'paid_until_utc' => gmdate('Y-m-d\TH:i:sP', $now + 20 * 86400));
+                }
+            }
+            $db->execute('INSERT INTO evc_members (member_public_id, wp_user_id, status, created_at_utc, updated_at_utc) VALUES ' . implode(', ', $sql), $args);
+        }
+        return $ids;
+    }
+
+    public function test_round19_allowed_image_refuses_encoded_dots_slashes_and_backslashes(): void {
+        $uploads = wp_get_upload_dir()['baseurl'];
+        foreach (array('%2e%2e', '%2E%2E', '%2e.', '.%2e', '%252e%252e', '%252E%252E', '%2f', '%2F', '%252f', '%5c', '%5C', '%255c', '%255C', '%25', '%2e%2e%2f%2e%2e%2fwp-config.php') as $trick) {
+            $this->assertFalse(EVC_Club_Messages::allowed_image($uploads . '/2026/' . $trick . '/a.jpg'), $trick);
+            $this->assertFalse(EVC_Club_Messages::allowed_image($uploads . '/2026/11/a' . $trick . '.jpg'), $trick);
+        }
+        foreach (array('%00', '%0a', '%0d%0a', '%1f', '%7f') as $control) {
+            $this->assertFalse(EVC_Club_Messages::allowed_image($uploads . '/2026/11/a' . $control . '.jpg'), $control);
+        }
+        $this->assertFalse(EVC_Club_Messages::allowed_image('/wp-content/uploads/2026/11/a.jpg'), 'relative addresses are not media-library addresses here');
+        $this->assertFalse(EVC_Club_Messages::allowed_image(preg_replace('#/wp-content/uploads$#', '/other', $uploads) . '/a.jpg'));
+        // Ordinary names, also with a space or a Greek letter written as UTF-8 percent bytes, still pass.
+        $this->assertTrue(EVC_Club_Messages::allowed_image($uploads . '/2026/11/a%20b.jpg'));
+        $this->assertTrue(EVC_Club_Messages::allowed_image($uploads . '/2026/11/%CE%B3%CE%BB%CF%85%CE%BA%CF%8C.jpg'));
+        $this->assertTrue(EVC_Club_Messages::allowed_image($uploads . '/2026/11/glyko-300x200.jpg?ver=2'));
+        // And through the sanitiser: such an image is dropped from the body.
+        $html = EVC_Club_Messages::sanitize_html('<p>x</p><img src="' . $uploads . '/%2e%2e/%2e%2e/wp-config.php"><img src="' . $uploads . '/%252e%252e/x.jpg"><img src="' . $uploads . '/a%5cb.jpg">');
+        $this->assertStringNotContainsString('<img', $html);
+    }
+
+    public function test_round19_the_recipient_snapshot_is_one_compact_row_and_the_id_match_is_exact(): void {
+        $draft = EVC_Club_Messages::create_draft('Τ', 'Σ', '<p>x</p>', 'active', 0, array(15, 1234, 15, 0, -3), 1);
+        $this->assertGreaterThan(0, $draft);
+        EVC_Club_Messages::publish($draft, 1795000000);
+        $this->assertSame(',15,1234,', get_post_meta($draft, EVC_Club_Messages::META_RECIPIENTS, true), 'one row, each id once, nothing invalid, a comma at both ends');
+        $this->assertSame(array(), get_post_meta($draft, EVC_Club_Messages::META_RECIPIENT, false), 'no row per recipient');
+        $this->assertSame(1, count(get_post_meta($draft, EVC_Club_Messages::META_RECIPIENTS, false)));
+        foreach (array(15, 1234) as $who) {
+            $this->assertTrue(EVC_Club_Messages::visible_to($draft, $who), (string) $who);
+            $this->assertSame(array($draft), EVC_Club_Messages::visible_ids($who), (string) $who);
+        }
+        // A number inside another number is nobody: 5, 123, 234, 1, 4 are not recipients.
+        foreach (array(5, 123, 234, 1, 4, 151, 12345) as $other) {
+            $this->assertFalse(EVC_Club_Messages::visible_to($draft, $other), (string) $other);
+            $this->assertSame(array(), EVC_Club_Messages::visible_ids($other), (string) $other);
+        }
+        // The last recipient of the row is found (the closing comma).
+        $this->assertTrue(EVC_Club_Messages::visible_to($draft, 1234));
+        // An audience with nobody in it is a message nobody sees.
+        $empty = EVC_Club_Messages::create_draft('Τ', 'Σ', '', 'expiring', 3, array(), 1);
+        EVC_Club_Messages::publish($empty, 1795000001);
+        $this->assertSame(',', get_post_meta($empty, EVC_Club_Messages::META_RECIPIENTS, true));
+        $this->assertFalse(EVC_Club_Messages::visible_to($empty, 15));
+        $this->assertSame(array($draft), EVC_Club_Messages::visible_ids(15));
+        // Round-18 messages (one _evc_recipient row each) are still read.
+        $old = EVC_Club_Messages::create_draft('Παλιό', 'Σ', '', 'active', 0, array(), 1);
+        add_post_meta($old, EVC_Club_Messages::META_RECIPIENT, 77);
+        EVC_Club_Messages::publish($old, 1795000002);
+        $this->assertTrue(EVC_Club_Messages::visible_to($old, 77));
+        $this->assertFalse(EVC_Club_Messages::visible_to($old, 78));
+        $this->assertSame(array($old), EVC_Club_Messages::visible_ids(77));
+        $this->assertSame(array(), EVC_Club_Messages::visible_ids(78));
+    }
+
+    public function test_round19_the_snapshot_has_an_upper_bound_and_the_row_is_the_same_size_class(): void {
+        $this->assertSame(5000, EVC_Push_Campaign::MAX_RECIPIENTS);
+        $this->assertSame(20000, EVC_Push_Campaign::MAX_SCAN);
+        $at = range(100001, 100000 + EVC_Push_Campaign::MAX_RECIPIENTS);
+        $id = EVC_Club_Messages::create_draft('Τ', 'Σ', '', 'active', 0, $at, 1);
+        $this->assertGreaterThan(0, $id, 'the bound itself is allowed');
+        $this->assertSame(1, count(get_post_meta($id, EVC_Club_Messages::META_RECIPIENTS, false)));
+        EVC_Club_Messages::publish($id, 1795000000);
+        $this->assertTrue(EVC_Club_Messages::visible_to($id, 105000));
+        $this->assertSame(array($id), EVC_Club_Messages::visible_ids(100001));
+        $before = $this->message_posts();
+        $over = EVC_Club_Messages::create_draft('Τ', 'Σ', '', 'active', 0, range(100001, 100001 + EVC_Push_Campaign::MAX_RECIPIENTS), 1);
+        $this->assertSame(0, $over, 'one over the bound: no message');
+        $this->assertSame($before, $this->message_posts(), 'and no half-written draft');
+    }
+
+    public function test_round19_an_audience_over_the_bound_is_refused_before_anything_is_sent_or_stored(): void {
+        $this->bulk_members(EVC_Push_Campaign::MAX_RECIPIENTS, 200000, true);
+        $c = $this->parts['campaign'];
+        $reach = $c->recipients('active', 0);
+        $this->assertSame(EVC_Push_Campaign::OK, $reach['result']);
+        $this->assertCount(EVC_Push_Campaign::MAX_RECIPIENTS, $reach['users'], 'exactly the bound is fine');
+        $this->bulk_members(1, 300000, true);
+        $this->assertSame(array('result' => EVC_Push_Campaign::TOO_MANY), $c->recipients('active', 0));
+        $this->assertSame(array('result' => EVC_Push_Campaign::TOO_MANY), $c->recipients('expiring', 30));
+        // «all» keeps no list: its count is not bounded by the snapshot.
+        $all = $c->recipients('all', 0);
+        $this->assertSame(EVC_Push_Campaign::OK, $all['result']);
+        $this->assertCount(EVC_Push_Campaign::MAX_RECIPIENTS + 1, $all['users']);
+        // The send is refused with nothing created: no job, no message, no audit entry.
+        $admin = get_userdata($this->admin());
+        $this->assertSame(array('result' => EVC_Push_Campaign::TOO_MANY), $c->start($admin, 'Τ', 'Κ', 'active', 0, 0, '<p>x</p>'));
+        $this->assertNull(EVC_Push_Campaign::fresh_job());
+        $this->assertSame(array(), $this->message_posts());
+        $this->assertSame(array(), EVC_Push_Campaign::audit());
+        $this->assertSame(array(), $this->requests);
+        // The page says so, for the preview as well as for the send.
+        wp_set_current_user($admin->ID);
+        foreach (array('preview', 'send') as $action) {
+            $r = $this->page_post(array('evc_push_action' => $action, 'evc_push_title' => 'Τ', 'evc_push_body' => 'Κ', 'evc_push_audience' => 'active', EVC_Push_Admin_Page::FIELD_MESSAGE => '<p>x</p>'));
+            $this->assertSame('refused', $r['code'], $action);
+            $this->assertSame(EVC_Push_Campaign::TOO_MANY, $r['result'], $action);
+        }
+        $this->assertNotSame('', EVC_Push_Admin_Page::RESULTS[EVC_Push_Campaign::TOO_MANY]);
+        // «all» still starts, and its message carries no list.
+        $this->assertSame(array('result' => 'ok'), $c->start($admin, 'Τ', 'Κ', 'all', 0, 0, '<p>x</p>'));
+        $this->assertSame(array(), get_post_meta((int) EVC_Push_Campaign::fresh_job()['message'], EVC_Club_Messages::META_RECIPIENTS, false));
+    }
+
+    public function test_round19_the_snapshot_reads_at_most_the_scan_bound_of_members(): void {
+        $this->bulk_members(EVC_Push_Campaign::MAX_SCAN, 400000, false);
+        $c = $this->parts['campaign'];
+        $this->assertSame(array('result' => EVC_Push_Campaign::OK, 'users' => array()), $c->recipients('active', 0), 'exactly the scan bound, nobody active: fine');
+        $this->bulk_members(1, 500000, false);
+        $this->assertSame(array('result' => EVC_Push_Campaign::TOO_MANY), $c->recipients('active', 0), 'one more member read: refused');
+        $this->assertSame(array('result' => EVC_Push_Campaign::TOO_MANY), $c->start(get_userdata($this->admin()), 'Τ', 'Κ', 'expiring', 3, 0, ''));
+        $this->assertSame(array(), $this->message_posts());
+    }
+
     public function test_round18_d30_the_page_writes_with_the_editor_and_previews_the_formatted_message(): void {
         $user = $this->customer();
         $this->member($user);

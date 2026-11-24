@@ -48,9 +48,9 @@ final class EVC_Push_Admin_Page {
     const EDITOR_ID = 'evcpushmessage';
     const NOT_ALLOWED = 'Δεν έχετε δικαίωμα για αυτή τη σελίδα.';
     const AUDIENCE_LABELS = array(
-        'all' => 'Όλα τα μέλη που έχουν ενεργοποιήσει τις ειδοποιήσεις',
-        'active' => 'Μόνο τα μέλη με ενεργή συνδρομή',
-        'expiring' => 'Μέλη των οποίων η συνδρομή λήγει μέσα στις επόμενες ημέρες',
+        'all' => 'Όλα τα μέλη (ειδοποίηση στα κινητά που την έχουν ενεργοποιήσει και μήνυμα στην εφαρμογή)',
+        'active' => 'Μόνο τα μέλη με ενεργή συνδρομή (ειδοποίηση και μήνυμα στην εφαρμογή)',
+        'expiring' => 'Μέλη των οποίων η συνδρομή λήγει μέσα στις επόμενες ημέρες (ειδοποίηση και μήνυμα στην εφαρμογή)',
     );
     const PROBLEMS = array(
         EVC_Push_Message::PROBLEM_TITLE_EMPTY => 'Γράψτε τίτλο.',
@@ -66,6 +66,7 @@ final class EVC_Push_Admin_Page {
         EVC_Push_Campaign::BUSY => 'Τρέχει ήδη μια αποστολή. Περιμένετε να τελειώσει.',
         EVC_Push_Campaign::INVALID => 'Η ειδοποίηση δεν είναι έγκυρη. Δεν στάλθηκε τίποτα.',
         EVC_Push_Campaign::UNAVAILABLE => 'Οι ειδοποιήσεις δεν είναι διαθέσιμες: δείτε τη σελίδα «Ετοιμότητα» (κλειδιά, βάση του Club, μετάβαση 005).',
+        EVC_Push_Campaign::TOO_MANY => 'Το κοινό είναι πολύ μεγάλο για μήνυμα στην εφαρμογή με λίστα παραληπτών. Δεν στάλθηκε τίποτα. Διαλέξτε «Όλα τα μέλη» ή ενημερώστε τον τεχνικό.',
         EVC_Push_Campaign::NO_LOCK => 'Η βάση δεδομένων του ιστότοπου δεν επέτρεψε το κλείδωμα που χρειάζεται για ασφαλή αποστολή. Για ασφάλεια δεν στάλθηκε τίποτα. Ενημερώστε τον τεχνικό.',
         EVC_Push_Campaign::NONE => 'Δεν υπάρχει αποστολή σε εξέλιξη.',
         'bad_nonce' => 'Η σελίδα έληξε. Ανοίξτε την ξανά και δοκιμάστε πάλι.',
@@ -195,6 +196,9 @@ final class EVC_Push_Admin_Page {
         }
         if ($action === 'preview') {
             $reach = $this->campaign->recipients($audience, $days);
+            if ($reach['result'] !== EVC_Push_Campaign::OK) {
+                return array('code' => 'refused', 'result' => $reach['result'], 'form' => $form);
+            }
             return array('code' => 'preview', 'form' => $form, 'members' => $preview['members'], 'subscriptions' => $preview['subscriptions'], 'app_members' => count($reach['users'] ?? array()));
         }
         $started = $this->campaign->start($user, $title, $body, $audience, $days, (int) $preview['subscriptions'], $rich);

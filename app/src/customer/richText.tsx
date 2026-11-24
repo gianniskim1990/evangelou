@@ -71,14 +71,20 @@ export function richHref(href: string | null): string | null {
   }
 }
 
-/** An image a message may show: this origin only (absolute or relative to it). */
+/** Round 19: an encoded %, dot, slash, backslash or control character (any case; %25 = double encoding) never belongs to a media-library address. */
+const ENCODED_PATH_TRICK = /%(?:25|2e|2f|5c|[01][0-9a-f]|7f)/i;
+/** Round 19: the WordPress uploads folder; the resolved path must be inside it (a sub-folder install keeps a prefix before it). */
+const UPLOADS_SEGMENT = "/wp-content/uploads/";
+
+/** An image a message may show: this origin's uploads folder only (absolute or relative to the origin). */
 export function richImage(src: string | null, origin: string): string | null {
   if (!src) return null;
   const s = src.trim();
-  if (s === "" || UNSAFE.test(s) || s.includes("..")) return null;
+  if (s === "" || UNSAFE.test(s) || s.includes("..") || ENCODED_PATH_TRICK.test(s)) return null;
   try {
     const url = new URL(s, origin);
-    return url.origin === origin && (url.protocol === "https:" || url.protocol === "http:") ? url.href : null;
+    if (url.origin !== origin || (url.protocol !== "https:" && url.protocol !== "http:")) return null;
+    return url.pathname.includes(UPLOADS_SEGMENT) ? url.href : null;
   } catch {
     return null;
   }

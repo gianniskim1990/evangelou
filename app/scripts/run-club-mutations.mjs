@@ -3852,8 +3852,8 @@ const mutants = [
   {
     id: "S8R18-M6-image-of-another-origin",
     file: "customer/richText.tsx",
-    search: "return url.origin === origin && (url.protocol === \"https:\" || url.protocol === \"http:\") ? url.href : null;",
-    replace: "return url.href;",
+    search: "if (url.origin !== origin || (url.protocol !== \"https:\" && url.protocol !== \"http:\")) return null;",
+    replace: "",
   },
   {
     id: "S8R18-M7-any-colour-value",
@@ -3866,6 +3866,30 @@ const mutants = [
     file: "customer/richText.tsx",
     search: " target=\"_blank\" rel=\"noopener noreferrer nofollow\">",
     replace: " target=\"_blank\">",
+  },
+  {
+    id: "S8R19-1-image-encoded-dot-slash-allowed",
+    file: "customer/richText.tsx",
+    search: " || ENCODED_PATH_TRICK.test(s)) return null;",
+    replace: ") return null;",
+  },
+  {
+    id: "S8R19-2-image-double-encoding-allowed",
+    file: "customer/richText.tsx",
+    search: "const ENCODED_PATH_TRICK = /%(?:25|2e|2f|5c|[01][0-9a-f]|7f)/i;",
+    replace: "const ENCODED_PATH_TRICK = /%(?:2e|2f|5c|[01][0-9a-f]|7f)/i;",
+  },
+  {
+    id: "S8R19-3-image-encoded-backslash-allowed",
+    file: "customer/richText.tsx",
+    search: "const ENCODED_PATH_TRICK = /%(?:25|2e|2f|5c|[01][0-9a-f]|7f)/i;",
+    replace: "const ENCODED_PATH_TRICK = /%(?:25|2e|2f|[01][0-9a-f]|7f)/i;",
+  },
+  {
+    id: "S8R19-4-image-outside-the-uploads-folder",
+    file: "customer/richText.tsx",
+    search: "return url.pathname.includes(UPLOADS_SEGMENT) ? url.href : null;",
+    replace: "return url.href;",
   },
   {
     id: "S8R18-M9-push-message-any-number",
