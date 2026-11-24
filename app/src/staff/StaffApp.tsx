@@ -1,4 +1,6 @@
 import { useSyncExternalStore, type ReactNode } from "react";
+import type { StaffLink } from "./config";
+import { UsefulLinks } from "./UsefulLinks";
 import { ClubShell } from "../club/ClubShell";
 import { formatClockTime } from "../club/format";
 import logoUrl from "./assets/logo-evaggelou-color.png";
@@ -74,7 +76,7 @@ function PrimaryButton({ onClick, children, disabled }: { onClick: () => void; c
 const NO_COUNTER: CounterState = { screen: "home" };
 const noSubscribe = () => () => {};
 
-function Dashboard({ state, controller, counter }: { state: Extract<StaffState, { phase: "ready" }>; controller: StaffController; counter?: CounterFlow }) {
+function Dashboard({ state, controller, counter, links }: { state: Extract<StaffState, { phase: "ready" }>; controller: StaffController; counter?: CounterFlow; links: StaffLink[] }) {
   const qrOn = state.session.features.qrLookup && counter !== undefined;
   return (
     <main className="mx-auto max-w-[560px] px-5 pt-8 pb-12 md:max-w-[880px] md:px-8 md:pt-12">
@@ -166,11 +168,13 @@ function Dashboard({ state, controller, counter }: { state: Extract<StaffState, 
           Κλείδωμα οθόνης
         </button>
       </div>
+      {/* Round 18 (owner decision D31): the Club addresses of the enabled features (no administrator page). */}
+      <UsefulLinks links={links} />
     </main>
   );
 }
 
-export function StaffApp({ controller, counter, camera }: { controller: StaffController; counter?: CounterFlow; camera?: CameraEnv }) {
+export function StaffApp({ controller, counter, camera, links = [] }: { controller: StaffController; counter?: CounterFlow; camera?: CameraEnv; links?: StaffLink[] }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   const counterState = useSyncExternalStore(counter?.subscribe ?? noSubscribe, counter?.getState ?? (() => NO_COUNTER));
   const login = () => controller.reauthenticate();
@@ -190,7 +194,7 @@ export function StaffApp({ controller, counter, camera }: { controller: StaffCon
         counter && camera && state.session.features.qrLookup && counterState.screen !== "home" ? (
           <CounterScreens flow={counter} camera={camera} />
         ) : (
-          <Dashboard state={state} controller={controller} counter={counter} />
+          <Dashboard state={state} controller={controller} counter={counter} links={links} />
         );
       break;
     case "locked":

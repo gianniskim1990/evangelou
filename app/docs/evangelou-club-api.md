@@ -552,6 +552,16 @@ caller-owned `requestId`), `RedemptionOutcome` (`benefit`, `requestId`,
   - The customer app remembers its own QR between visits (owner decision); the server still sends the
     token only at issue.
 
+**STAGE-08 round 8 (2026-11-19, owner decision D23):**
+
+- New read-only customer route `GET /me/coffees` (customer namespace, same gates as `/me/qr`): the member's own
+  `{"state":"member","today":"YYYY-MM-DD","taken_today":bool,"this_month":int}` (Athens day and month, by the
+  ledger's `business_date`), or `not_member` / `member_disabled`; `503 {"result":"unavailable"}`; `404` = off.
+- The customer app (`coffeesApi.ts`, `memberCoffees.ts`) shows them on the card; any failure keeps «—».
+  It asks when the member area opens and on visibility / focus / online / opening the card: at most every 30 s
+  after an answer (also after `not_member` / `member_disabled`), 5 s after a failure, and 3 times per rolling
+  minute; after `404`, `401` or `403` it does not ask again in that page.
+
 ## 16. Demo-only shortcuts (deliberate)
 
 - Mock "member not found" returns `{ member: null }` (production: 404).

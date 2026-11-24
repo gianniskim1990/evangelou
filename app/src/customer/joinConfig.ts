@@ -1,4 +1,5 @@
 import { CUSTOMER_NAMESPACE } from "./config";
+import { sameOriginRestBase } from "../lib/restRoute";
 
 /*
  * STAGE-07 bootstrap configuration of the join page and the tablet poster, delivered by the WordPress pages
@@ -30,7 +31,8 @@ export interface PosterConfig {
   appVersion: string;
 }
 
-export type BootMode = "member" | "join" | "poster";
+/** "offline" (STAGE-08 round 11): the page the member app's service worker builds when the network fails (pwa/swRules.ts). */
+export type BootMode = "member" | "join" | "poster" | "offline";
 export type Parsed<T> = { ok: true; config: T } | { ok: false; reason: string };
 
 const NONCE_RE = /^[0-9a-f]{10}$/;
@@ -63,21 +65,17 @@ export function bootMode(raw: string | null | undefined): BootMode | null {
   const data = readJson(raw);
   if (!data) return null;
   if (!("mode" in data)) return "member";
-  return data.mode === "join" || data.mode === "poster" ? data.mode : null;
+  return data.mode === "join" || data.mode === "poster" || data.mode === "offline" ? data.mode : null;
 }
 
-function restBaseOk(value: unknown, origin: string): string | null {
-  const href = sameOrigin(value, origin);
-  if (!href) return null;
-  const url = new URL(href);
-  const route = url.searchParams.has("rest_route") ? url.searchParams.get("rest_route")!.replace(/\/+$/, "") === CUSTOMER_NAMESPACE : url.pathname.replace(/\/+$/, "").endsWith(CUSTOMER_NAMESPACE);
-  return route ? href : null;
+function restBaseOk(value: unknown, origin: string, homePath: unknown): string | null {
+  return sameOriginRestBase(value, origin, CUSTOMER_NAMESPACE, homePath);
 }
 
 export function parseJoinConfig(raw: string | null | undefined, origin: string): Parsed<JoinConfig> {
   const d = readJson(raw);
   if (!d || d.mode !== "join") return { ok: false, reason: "not_join" };
-  const restBase = restBaseOk(d.restBase, origin);
+  const restBase = restBaseOk(d.restBase, origin, d.homePath);
   if (!restBase) return { ok: false, reason: "rest_base" };
   if (typeof d.nonce !== "string" || !NONCE_RE.test(d.nonce)) return { ok: false, reason: "nonce" };
   if (typeof d.step !== "string" || !(JOIN_STEPS_ALLOWED as readonly string[]).includes(d.step)) return { ok: false, reason: "step" };

@@ -44,13 +44,22 @@ final class EVC_Prep_Snapshot_Invalid extends Exception {
 
 final class EVC_Prep_Snapshot {
     const SCHEMA = 'evc-prep-snapshot-v1';
+    /**
+     * D24 (2026-11-20): the same record plus `note` (the normalised staff note, EVC_Prep_Note), which is
+     * bound by snapshot_hash. Written only when an order carries a note; an order without one is still
+     * stored as v1, so every v1 rule (no `note` key at all) keeps holding for those records.
+     */
+    const SCHEMA_V2 = 'evc-prep-snapshot-v2';
     const HASH_PATTERN = '/^[0-9a-f]{64}$/D';
 
-    /** The record to store for a validated order (contains no free text by construction). */
-    public static function from_order(EVC_Prepared_Order $order): array {
+    /** The record to store for a validated order; `note` only for a normalised D24 staff note. */
+    public static function from_order(EVC_Prepared_Order $order, ?string $note = null): array {
+        if ($note !== null && !EVC_Prep_Note::is_normal($note)) {
+            throw new InvalidArgumentException('The staff note is not normalised.');
+        }
         $s = $order->snapshot();
         $record = array(
-            'schema' => self::SCHEMA,
+            'schema' => $note === null ? self::SCHEMA : self::SCHEMA_V2,
             'prep_version' => EVC_Prep_Canonical::PREP_VERSION,
             'catalogue_version' => $s['catalogue_version'],
             'coffee_code' => $s['coffee_code'],
@@ -59,8 +68,16 @@ final class EVC_Prep_Snapshot {
             'quick_notes' => $s['quick_notes'],
             'prep_hash' => $s['prep_hash'],
         );
+        if ($note !== null) {
+            $record['note'] = $note;
+        }
         $record['snapshot_hash'] = self::snapshot_hash($record);
         return $record;
+    }
+
+    /** The staff note of a VERIFIED snapshot (null for v1 records). */
+    public static function note_of(array $verified): ?string {
+        return isset($verified['note']) && is_string($verified['note']) ? $verified['note'] : null;
     }
 
     /**
@@ -70,11 +87,16 @@ final class EVC_Prep_Snapshot {
      * @throws EVC_Prep_Snapshot_Invalid
      */
     public static function verify($raw): string {
-        if (!EVC_Prep_Catalogue::is_object_with($raw, array('schema', 'prep_version', 'catalogue_version', 'coffee_code', 'coffee_label', 'modifiers', 'quick_notes', 'prep_hash', 'snapshot_hash'))) {
+        $keys = array('schema', 'prep_version', 'catalogue_version', 'coffee_code', 'coffee_label', 'modifiers', 'quick_notes', 'prep_hash', 'snapshot_hash');
+        $v2 = is_array($raw) && array_key_exists('schema', $raw) && $raw['schema'] === self::SCHEMA_V2;
+        if (!EVC_Prep_Catalogue::is_object_with($raw, $v2 ? array_merge($keys, array('note')) : $keys)) {
             throw new EVC_Prep_Snapshot_Invalid('shape');
         }
-        if ($raw['schema'] !== self::SCHEMA || $raw['prep_version'] !== EVC_Prep_Canonical::PREP_VERSION) {
+        if (($raw['schema'] !== self::SCHEMA && !$v2) || $raw['prep_version'] !== EVC_Prep_Canonical::PREP_VERSION) {
             throw new EVC_Prep_Snapshot_Invalid('version');
+        }
+        if ($v2 && !EVC_Prep_Note::is_normal($raw['note'])) {
+            throw new EVC_Prep_Snapshot_Invalid('field');
         }
         if (!is_int($raw['catalogue_version']) || $raw['catalogue_version'] < 1 || $raw['catalogue_version'] > EVC_Prep_Catalogue::MAX_VERSION
             || !EVC_Prep_Catalogue::is_id($raw['coffee_code']) || !EVC_Prep_Catalogue::is_label($raw['coffee_label'])
@@ -125,8 +147,7 @@ final class EVC_Prep_Snapshot {
 
     /** sha256 over the whole record except snapshot_hash itself (labels included). */
     private static function snapshot_hash(array $r): string {
-        return hash('sha256', self::SCHEMA . "
-" . json_encode(array(
+        $fields = array(
             $r['prep_version'],
             $r['catalogue_version'],
             $r['coffee_code'],
@@ -138,7 +159,13 @@ final class EVC_Prep_Snapshot {
                 return array($q['id'], $q['label']);
             }, $r['quick_notes']),
             $r['prep_hash'],
-        ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        );
+        $v2 = isset($r['schema']) && $r['schema'] === self::SCHEMA_V2;
+        if ($v2) {
+            $fields[] = $r['note'];
+        }
+        return hash('sha256', ($v2 ? self::SCHEMA_V2 : self::SCHEMA) . "
+" . json_encode($fields, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
     }
 }
 

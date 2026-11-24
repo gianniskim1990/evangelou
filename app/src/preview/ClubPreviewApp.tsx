@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import "./preview.css";
-import { CustomerPreview } from "./CustomerPreview";
+import { CustomerPreview } from "./customerSampleScreens";
 import { ManagementPreview } from "./ManagementPreview";
 import { PREVIEW_MARKER, athensToday, type PreviewMembershipState } from "./previewData";
 import { AREAS, cx, parsePreviewPath, previewPath, type Area, type CustomerScreen, type ManagementScreen, type StaffScreen } from "./screens";

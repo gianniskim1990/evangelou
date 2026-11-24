@@ -16,7 +16,8 @@ final class EVC_Club_Migrations_Feature {
     /**
      * STAGE-05C review (MINOR 5): the HIGHEST migration the page / command may apply. Undefined = 2, so
      * migration 003 (code approved, applying it NOT approved) is never applied by the one-click apply.
-     * The technician sets define('EVC_CLUB_MIGRATIONS_TARGET', 3); only after the owner's go-ahead.
+     * The technician sets define('EVC_CLUB_MIGRATIONS_TARGET', 3); only after the owner's go-ahead (staging: D19).
+     * Round 9 (D24): migration 004 needs its own go-ahead; then the staging value becomes 4.
      */
     const TARGET_CONSTANT = 'EVC_CLUB_MIGRATIONS_TARGET';
     const DEFAULT_TARGET = 2;

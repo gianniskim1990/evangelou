@@ -8,7 +8,11 @@
  * and the app shows a configuration error instead of running.
  */
 
+import { sameOriginRestBase } from "../lib/restRoute";
+
 export const CONFIG_ELEMENT_ID = "evc-staff-config";
+/** The staff REST namespace (pretty: …/wp-json/evangelou-club/v1; plain: …/index.php?rest_route=/evangelou-club/v1). */
+export const STAFF_NAMESPACE = "/evangelou-club/v1";
 /** Owner-approved tablet idle lock. The client never waits LONGER than this. */
 export const MAX_IDLE_LOCK_SECONDS = 300;
 const NONCE_RE = /^[0-9a-f]{10}$/;
@@ -22,7 +26,8 @@ export interface StaffFeatures {
 }
 
 export interface StaffConfig {
-  /** Absolute same-origin URL of the evangelou-club/v1 REST namespace (no trailing slash). */
+  /** Absolute same-origin URL of the evangelou-club/v1 REST namespace, pretty or plain permalinks (no trailing
+   *  slash); build request URLs with restRouteUrl() (src/lib/restRoute.ts), never by string concatenation. */
   restBase: string;
   /** WordPress wp_rest nonce (in memory only; never persisted). */
   nonce: string;
@@ -33,6 +38,16 @@ export interface StaffConfig {
   sessionRef: string;
   appVersion: string;
   features: StaffFeatures;
+  /** Round 18 (D31): «Χρήσιμοι σύνδεσμοι»; each one this site's address (a bad entry is dropped, never a reason to refuse). */
+  links?: StaffLink[];
+}
+
+/** STAGE-08 round 18, owner decision D31: the useful Club addresses the till app may show (never an administrator page). */
+export const STAFF_LINK_KEYS = ["join", "poster", "member", "member_login", "till"] as const;
+export type StaffLinkKey = (typeof STAFF_LINK_KEYS)[number];
+export interface StaffLink {
+  key: StaffLinkKey;
+  url: string;
 }
 
 export type ConfigResult = { ok: true; config: StaffConfig } | { ok: false; reason: string };
@@ -47,6 +62,26 @@ function sameOriginUrl(value: unknown, origin: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Round 18 (D31): the links of the server's config: only the known keys, each once, each a same-origin http(s) address
+ * with no user name, password or fragment. Anything else is dropped (the card then shows fewer links).
+ */
+export function parseStaffLinks(value: unknown, origin: string): StaffLink[] {
+  if (!Array.isArray(value)) return [];
+  const out: StaffLink[] = [];
+  for (const item of value.slice(0, 20)) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const { key, url } = item as Record<string, unknown>;
+    if (!(STAFF_LINK_KEYS as readonly unknown[]).includes(key) || out.some((l) => l.key === key)) continue;
+    const href = sameOriginUrl(url, origin);
+    if (href === null) continue;
+    const parsed = new URL(href);
+    if (parsed.username !== "" || parsed.password !== "" || parsed.hash !== "") continue;
+    out.push({ key: key as StaffLinkKey, url: href });
+  }
+  return out;
 }
 
 export function isValidNonce(value: unknown): value is string {
@@ -64,8 +99,9 @@ export function parseStaffConfig(raw: string | null | undefined, origin: string)
   if (typeof data !== "object" || data === null || Array.isArray(data)) return { ok: false, reason: "not_object" };
   const d = data as Record<string, unknown>;
 
-  const restBase = sameOriginUrl(d.restBase, origin);
-  if (!restBase || !/\/evangelou-club\/v1\/?$/.test(new URL(restBase).pathname)) return { ok: false, reason: "rest_base" };
+  // STAGE-08 round 4: plain permalinks (staging, 2026-11-18) give …/index.php?rest_route=/evangelou-club/v1.
+  const restBase = sameOriginRestBase(d.restBase, origin, STAFF_NAMESPACE, d.homePath);
+  if (!restBase) return { ok: false, reason: "rest_base" };
   if (!isValidNonce(d.nonce)) return { ok: false, reason: "nonce" };
   const loginUrl = sameOriginUrl(d.loginUrl, origin);
   if (!loginUrl) return { ok: false, reason: "login_url" };
@@ -81,7 +117,7 @@ export function parseStaffConfig(raw: string | null | undefined, origin: string)
   return {
     ok: true,
     config: {
-      restBase: restBase.replace(/\/+$/, ""),
+      restBase,
       nonce: d.nonce,
       loginUrl,
       shellUrl,
@@ -94,6 +130,7 @@ export function parseStaffConfig(raw: string | null | undefined, origin: string)
         coffeeRedemption: f.coffeeRedemption === true,
         history: f.history === true,
       },
+      links: parseStaffLinks(d.links, origin),
     },
   };
 }

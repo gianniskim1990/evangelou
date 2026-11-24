@@ -99,7 +99,7 @@ final class EVC_Club_Migrations_Cli {
         $line = $this->io['line'];
         $config = array('present' => 'υπάρχουν', 'missing' => 'λείπουν', 'invalid' => 'δεν είναι έγκυρα');
         $line('Στοιχεία σύνδεσης: ' . ($config[$report['config']] ?? $report['config']) . ($report['database_hint'] !== null ? ' (βάση ' . $report['database_hint'] . ')' : ''));
-        $line('Σύνδεση: ' . $report['connection'] . ($report['connection_code'] !== null ? ' (κωδικός ' . (int) $report['connection_code'] . ')' : ''));
+        $line('Σύνδεση: ' . $report['connection'] . ($report['connection_code'] !== null ? ' (σφάλμα MySQL ' . (int) $report['connection_code'] . ')' : ''));
         if ($report['server_version'] !== null) {
             $line('Διακομιστής: ' . $report['server_version']);
         }

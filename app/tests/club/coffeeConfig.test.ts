@@ -28,7 +28,8 @@ import {
 } from "../../src/preview/coffeeConfig";
 import * as coffeeConfigModule from "../../src/preview/coffeeConfig";
 import { CoffeeConfigurator, OrderSummary } from "../../src/preview/StaffOrder";
-import { COFFEES, MEMBERS, memberById, redemptionHistory, todaysRedemptions } from "../../src/preview/previewData";
+import { COFFEES } from "../../src/preview/previewData";
+import { MEMBERS, memberById, redemptionHistory, todaysRedemptions } from "../../src/preview/previewRoster";
 
 /** UI-02.R1: staff coffee configuration model (preview-only, illustrative catalogue). */
 

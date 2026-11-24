@@ -36,6 +36,8 @@ function evc_test_commerce_site(string $dir): void {
     define('EVC_CLUB_DB_PASSWORD', (string) getenv('EVC_TEST_DB_PASSWORD'));
     // STAGE-05C: the lookup-proof secret (test-only value; a real site keeps its own >= 32 bytes in wp-config).
     define('EVC_CLUB_LOOKUP_KEY', 'evc-test-only-lookup-key-0123456789abcdef');
+    // D22: the member-QR derivation secret (test-only value; a real site keeps its own >= 32 bytes in wp-config).
+    define('EVC_CLUB_QR_SECRET', 'evc-test-only-qr-secret-0123456789abcdef');
 
     // Loaded like normal plugins, before the Club plugin (priority 10).
     tests_add_filter('muplugins_loaded', function () use ($dir) {

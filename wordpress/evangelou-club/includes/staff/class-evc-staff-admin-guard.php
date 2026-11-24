@@ -5,10 +5,11 @@ defined('ABSPATH') || exit;
  * Keeps the shared Club staff account out of WordPress administration.
  * Only users with the evc_club_staff role are affected; administrators and
  * every other user are untouched. admin-ajax.php is never redirected.
- * The target /club-admin/ is the future plugin-served staff app (Option A);
- * it is NOT created in this task.
+ * The target is the plugin-served staff app, EVC_Staff_Shell::shell_url(): /club-admin/ with pretty permalinks,
+ * /?evc_club_admin=1 with plain permalinks (STAGE-08 round 4).
  */
 final class EVC_Staff_Admin_Guard {
+    /** The pretty-permalink path of the staff app (kept for reference; the URL comes from EVC_Staff_Shell). */
     const STAFF_PATH = '/club-admin/';
 
     public static function register_hooks(): void {
@@ -26,7 +27,7 @@ final class EVC_Staff_Admin_Guard {
         if ($doing_ajax || !EVC_Staff_Role::has_staff_role($user)) {
             return null;
         }
-        return home_url(self::STAFF_PATH);
+        return EVC_Staff_Shell::shell_url();
     }
 
     public static function maybe_redirect(): void {
@@ -38,6 +39,6 @@ final class EVC_Staff_Admin_Guard {
     }
 
     public static function filter_login_redirect($redirect_to, $requested, $user) {
-        return EVC_Staff_Role::has_staff_role($user) ? home_url(self::STAFF_PATH) : $redirect_to;
+        return EVC_Staff_Role::has_staff_role($user) ? EVC_Staff_Shell::shell_url() : $redirect_to;
     }
 }

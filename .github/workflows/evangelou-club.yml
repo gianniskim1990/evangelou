@@ -12,9 +12,11 @@ on:
       - 'app/customer.html'
       - 'app/vite.customer.config.ts'
       - 'app/src/customer/**'
+      - 'app/src/lib/restRoute.ts'
       - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/scripts/php-guards.mjs'
+      - 'app/scripts/sample-guard.*'
       - 'app/package.json'
       - 'app/package-lock.json'
   pull_request:
@@ -29,9 +31,11 @@ on:
       - 'app/customer.html'
       - 'app/vite.customer.config.ts'
       - 'app/src/customer/**'
+      - 'app/src/lib/restRoute.ts'
       - 'app/src/preview/**'
       - 'app/scripts/package-club-plugin.mjs'
       - 'app/scripts/php-guards.mjs'
+      - 'app/scripts/sample-guard.*'
       - 'app/package.json'
       - 'app/package-lock.json'
 
@@ -223,6 +227,30 @@ jobs:
           if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/onboarding-junit.xml" 40; fi
           exit $rc
 
+      - name: WordPress suite - Club admin pages ON (STAGE-08, test environment only)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_ADMIN_TOOLS_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-admin-tools --log-junit "$RUNNER_TEMP/admin-tools-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/admin-tools-junit.xml" 40; fi
+          exit $rc
+
+      - name: WordPress suite - member push ON (STAGE-08 round 12, customer flag ON, TEST-ONLY VAPID keys, automatic notifications OFF)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_PUSH_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-push --log-junit "$RUNNER_TEMP/push-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/push-junit.xml" 40; fi
+          exit $rc
+
+      - name: WordPress suite - member push ON with both automatic notifications ON (STAGE-08 round 12)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_PUSH_FLAG=auto vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-push --log-junit "$RUNNER_TEMP/push-auto-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/push-auto-junit.xml" 40; fi
+          exit $rc
+
       - name: Authorization mutation tests (real WordPress)
         if: matrix.php == '8.2' && matrix.db == 'mysql:8.0'
         run: php tests/mutation/run-wp-mutations.php
@@ -334,6 +362,14 @@ jobs:
           EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_ONBOARDING_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-commerce-onboarding --log-junit "$RUNNER_TEMP/commerce-onboarding-junit.xml"
           rc=$?
           if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/commerce-onboarding-junit.xml" 40; fi
+          exit $rc
+
+      - name: Commerce suite - readiness checks over the real stack (STAGE-08, admin pages ON)
+        run: |
+          set +e
+          EVC_TEST_STAFF_FLAG=disabled EVC_TEST_CUSTOMER_FLAG=enabled EVC_TEST_ONBOARDING_FLAG=enabled EVC_TEST_ADMIN_TOOLS_FLAG=enabled vendor/bin/phpunit -c phpunit-wp.xml.dist --testsuite wp-commerce-admin-tools --log-junit "$RUNNER_TEMP/commerce-admin-tools-junit.xml"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then php tests/bin/junit-annotations.php "$RUNNER_TEMP/commerce-admin-tools-junit.xml" 40; fi
           exit $rc
 
       - name: Commerce source mutation tests (real plugins)

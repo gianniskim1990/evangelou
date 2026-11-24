@@ -49,6 +49,12 @@ final class EVC_Rest_Security {
         'member_disabled' => 'Η κάρτα μέλους δεν είναι διαθέσιμη.',
         'qr_exists' => 'Υπάρχει ήδη QR. Ζητήστε νέο μόνο αν χάθηκε.',
         'concurrent_change' => 'Το QR άλλαξε μόλις τώρα. Ανανεώστε τη σελίδα.',
+        // Round 9 (D24): migration 004 is not applied yet; the till records the coffee type only.
+        'prepared_unavailable' => 'Η καταγραφή της προετοιμασίας δεν είναι ακόμη διαθέσιμη. Καταχωρήστε μόνο το είδος του καφέ.',
+        // Round 12 (D26 part 2): this browser's push subscription belongs to another member's active row.
+        'endpoint_in_use' => 'Οι ειδοποιήσεις αυτής της συσκευής ανήκουν σε άλλον λογαριασμό. Δοκιμάστε ξανά.',
+        // STAGE-08 round 18 (D30): a message that does not exist or is not this member's (the same answer).
+        'message_not_found' => 'Το μήνυμα δεν βρέθηκε.',
     );
 
     public static function register_hooks(): void {
@@ -124,6 +130,38 @@ final class EVC_Rest_Security {
         }
         return null;
     }
+
+    /**
+     * STAGE-08 round 5: the site's home path ("/" or "/sub/"), sent to the apps as homePath. With plain permalinks
+     * the apps accept a REST base only exactly at this path or its index.php (rest_url() uses home_url('index.php'));
+     * with pretty permalinks the base must sit under it.
+     *
+     * Round 6: each segment is percent-encoded (rawurlencode of the decoded segment) the way the browser's
+     * URL.pathname spells it, so a non-ASCII home path ("/καφές/") matches: "/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/".
+     * The characters the URL parser leaves as they are in a path stay unencoded too.
+     */
+    public static function home_path(): string {
+        $path = wp_parse_url(home_url('/'), PHP_URL_PATH);
+        $path = is_string($path) && $path !== '' ? $path : '/';
+        // Round 8 (NIT-3): in an http(s) URL the browser reads «\» in a path as «/» (WHATWG special schemes), so
+        // URL.pathname of the REST base shows «/a/b/» for a home of «/a\b»: the same here.
+        $path = str_replace('\\', '/', $path);
+        $path = substr($path, -1) === '/' ? $path : $path . '/';
+        // Round 7: exactly what the browser's URL.pathname shows for this path. The WHATWG URL parser keeps every
+        // «%» as it is (a valid escape in its own case, e.g. %2F or %ce, and a bare «%» too) and percent-encodes,
+        // byte by byte in upper-case hex, only the path percent-encode set: C0 controls, space, «"», «#», «<», «>»,
+        // «?», «`», «{», «}», DEL and every non-ASCII byte. Nothing is decoded first, so nothing changes meaning.
+        return (string) preg_replace_callback(
+            self::PATH_ENCODE,
+            static function (array $m): string {
+                return sprintf('%%%02X', ord($m[0]));
+            },
+            $path
+        );
+    }
+
+    /** The bytes the WHATWG URL parser percent-encodes in a path (byte-wise; no /u flag). */
+    private const PATH_ENCODE = '/[\x00-\x20"#<>?`{}\x7F-\xFF]/';
 
     /** @return array<string,string> */
     public static function security_headers(): array {

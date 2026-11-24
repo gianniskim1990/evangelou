@@ -14,8 +14,9 @@ import { execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, QR_RULES, REDEMPTION_RULES, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, problemsFor, qrProblemsFor, redemptionProblemsFor, selfTest } from "./php-guards.mjs";
+import { ADMIN_TOOLS_RULES, FLUENTCRM_RULES, MEMBER_SYNC_RULES, MIGRATIONS_RULES, ONBOARDING_RULES, PREPARED_RULES, PUSH_RULES, PWA_RULES, QR_RULES, REDEMPTION_RULES, adminToolsProblemsFor, fluentcrmProblemsFor, onboardingProblemsFor, memberSyncProblemsFor, preparedProblemsFor, problemsFor, pushProblemsFor, pwaProblemsFor, qrProblemsFor, redemptionProblemsFor, selfTest, workerProblems } from "./php-guards.mjs";
 import { storageProblems, storageSelfTest } from "./storage-guard.mjs";
+import { sampleBundleMarkers, sampleBundleProblems, sampleGraphProblems, sampleGuardSelfTest, staffSampleGraphProblems } from "./sample-guard.mjs";
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pluginSrc = join(appDir, "..", "wordpress", "evangelou-club");
@@ -29,9 +30,14 @@ const FORBIDDEN_BUNDLE_STRINGS = [
   "mockClubService", "createMockClubService", "TEST Espresso", "x-admin-password", "/api/orders", "/api/overrides",
   // UI-01 design preview must never reach the real staff bundle.
   "evc-club-design-preview", "ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ", "ΠΡΟΕΠΙΣΚΟΠΗΣΗ ΣΧΕΔΙΑΣΜΟΥ", "example.invalid",
+  // STAGE-08 round 11 (D26): the member app's home-screen pieces never reach the staff app.
+  "serviceWorker", "beforeinstallprompt", "webmanifest", "Εγκατάσταση στο κινητό",
+  // Round 12 (D26 part 2): nor its notifications.
+  "requestPermission", "pushManager", "Θέλω ειδοποιήσεις", "/me/push",
 ];
-// STAGE-01 customer app: the approved screens with the non-redeemable sample QR stamp are expected,
-// but never the synthetic roster, the local journey simulation, the staff app or a mock service.
+// STAGE-01 customer app: never the synthetic roster, the local journey simulation, the staff app or a mock service.
+// STAGE-08 round 17 (owner-found bug): never the design preview's sample QR either (scripts/sample-guard.mjs: its
+// stamp, pattern, labels and the whole roster are refused below, and so are the preview-only modules in the graph).
 const FORBIDDEN_CUSTOMER_BUNDLE_STRINGS = [
   "example.invalid", "Αλεξάνδρα Κωνσταντίνου", "evc-club-design-preview", "customer-journey-local", "evc-cj", "SCENARIO_START",
   "mockClubService", "createMockClubService", "DEMO-QR", "evc-staff-config", "/club-admin", "x-admin-password", "/api/orders", "/api/overrides",
@@ -52,7 +58,7 @@ const FORBIDDEN_CUSTOMER_BUNDLE_STRINGS = [
 const EXPECTED_CUSTOMER_LOCAL_STORAGE = 1;
 /** Destructuring a store out of navigator in the minified output: let{storage:e}=navigator. */
 const NAVIGATOR_DESTRUCTURING = /\{[^{}]*\bstorage\b[^{}]*\}\s*=\s*navigator\b/;
-const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Bacs_Payment_Confirmation", "new EVC_Bacs_Payment_Finalizer", "new EVC_Bacs_Payment_Issuer", "class EVC_Hooked_Provenance_Store", "class EVC_Bacs_Intent_Fixture", "class EVC_Read_Only_Provenance_Store_Spy", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup", "class EVC_In_Memory_Prepared_Redemption_Store", "class EVC_Fake_Prep_Catalogue_Authority", "new EVC_Prepared_Redemption_Service", "implements EVC_Prep_Redemption_Store", "implements EVC_Prep_Catalogue_Authority", "class EVC_Fake_Club_Staff_Authorizer", "new EVC_Handoff_Service", "new EVC_Fulfillment_Read_Model", "implements EVC_Redemption_Fulfillment_Store", "class EVC_Fake_Redemption_History", "class EVC_Fake_Member_Context_Verifier", "new EVC_Usual_Coffee_Service", "implements EVC_Redemption_History_Source", "new EVC_Signed_Member_Context_Verifier", "class EVC_Fake_Qr_Token_Store", "class EVC_Fake_Member_Phone_Directory", "class EVC_Fake_Lookup_Rate_Limiter", "class EVC_Fake_Member_Identity_Store", "class EVC_Fake_Wp_Account_Directory", "class EVC_Fake_Member_Status_Policy", "class EVC_Fake_Qr_Delivery_Policy", "new EVC_Member_Account_Service", "new EVC_Member_Qr_Coordinator", "implements EVC_Member_Status_Policy", "implements EVC_Qr_Delivery_Policy", "class EVC_Contract_Vector_Builder", "EVC_Test_Redemption_Backend", "EVC_Test_Coffee_Catalogue", "fixtures/coffee-catalog.php", "new EVC_Rest_V2_Domain_Response", "register_rest_route(EVC_Rest_V2_Routes", "'EVC_Rest_V2_Security'", "EVC_Rest_V2_Security::filter_post_dispatch", "EVC_Test_V2_Harness", "EVC_Staff_Role_Upgrade_Planner::", "new EVC_Staff_Role_Upgrade_Approval", "EVC_Staff_Role_Versions::VERSION_OPTION"];
+const FORBIDDEN_PHP_STRINGS = ["class EVC_Mock_Membership_Adapter", "class EVC_Test_", "class EVC_Faulty_Pdo", "class EVC_Tripwire", "class EVC_Fake_Pmpro_Reader", "class EVC_Pmpro_Fixture", "class EVC_In_Memory_Provenance_Store", "class EVC_Provenance_Fact_Builder", "class EVC_Provenance_Test_Fixture", "trait EVC_Provenance_Store_Contract", "new EVC_Bacs_Payment_Confirmation", "new EVC_Bacs_Payment_Finalizer", "new EVC_Bacs_Payment_Issuer", "class EVC_Hooked_Provenance_Store", "class EVC_Bacs_Intent_Fixture", "class EVC_Read_Only_Provenance_Store_Spy", "class EVC_Fake_Payment_Source_Verifier", "class EVC_Payment_Identity_Fixture", "implements EVC_Payment_Source_Verifier", "new EVC_Payment_Evidence_Gate", "new EVC_Prepared_Redeem_Precheck", "implements EVC_Prep_Request_Lookup", "class EVC_In_Memory_Prepared_Redemption_Store", "class EVC_Fake_Prep_Catalogue_Authority", "class EVC_Fake_Club_Staff_Authorizer", "new EVC_Handoff_Service", "new EVC_Fulfillment_Read_Model", "implements EVC_Redemption_Fulfillment_Store", "class EVC_Fake_Redemption_History", "class EVC_Fake_Member_Context_Verifier", "new EVC_Usual_Coffee_Service", "implements EVC_Redemption_History_Source", "new EVC_Signed_Member_Context_Verifier", "class EVC_Fake_Qr_Token_Store", "class EVC_Fake_Member_Phone_Directory", "class EVC_Fake_Lookup_Rate_Limiter", "class EVC_Fake_Member_Identity_Store", "class EVC_Fake_Wp_Account_Directory", "class EVC_Fake_Member_Status_Policy", "class EVC_Fake_Qr_Delivery_Policy", "new EVC_Member_Account_Service", "new EVC_Member_Qr_Coordinator", "implements EVC_Member_Status_Policy", "implements EVC_Qr_Delivery_Policy", "class EVC_Contract_Vector_Builder", "EVC_Test_Redemption_Backend", "EVC_Test_Coffee_Catalogue", "fixtures/coffee-catalog.php", "new EVC_Rest_V2_Domain_Response", "register_rest_route(EVC_Rest_V2_Routes", "'EVC_Rest_V2_Security'", "EVC_Rest_V2_Security::filter_post_dispatch", "EVC_Test_V2_Harness", "EVC_Staff_Role_Upgrade_Planner::", "new EVC_Staff_Role_Upgrade_Approval", "EVC_Staff_Role_Versions::VERSION_OPTION"];
 const SILENCE = "<?php\n// Silence is golden.\n";
 
 function fail(message) {
@@ -93,6 +99,30 @@ cpSync(customerManifestPath, join(out, "customer-app", "manifest.json"));
 writeFileSync(join(out, "customer-app", "index.php"), SILENCE);
 writeFileSync(join(out, "customer-app", "assets", "index.php"), SILENCE);
 
+// STAGE-08 round 11 (owner decision D26 part 1): the member app's service worker and home-screen icons in
+// customer-app/pwa/. The worker is one classic script built from src/customer/pwa/sw.ts (not minified, so it can be
+// read and checked below); EVC_Customer_Pwa serves it at /club-member/sw.js with its configuration in front. The
+// icons are the committed PNG files made by scripts/generate-pwa-icons.mjs from the bundled logo.
+const PWA_ICONS = { "icon-192.png": 192, "icon-512.png": 512, "icon-maskable-512.png": 512, "apple-touch-icon.png": 180 };
+{
+  mkdirSync(join(out, "customer-app", "pwa"), { recursive: true });
+  const { build: esbuildWorker } = await import("esbuild");
+  await esbuildWorker({
+    entryPoints: [join(appDir, "src", "customer", "pwa", "sw.ts")],
+    absWorkingDir: appDir,
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    target: "es2020",
+    minify: false,
+    legalComments: "none",
+    outfile: join(out, "customer-app", "pwa", "sw.js"),
+    logLevel: "warning",
+  });
+  for (const icon of Object.keys(PWA_ICONS)) cpSync(join(appDir, "src", "customer", "pwa", "icons", icon), join(out, "customer-app", "pwa", icon));
+  writeFileSync(join(out, "customer-app", "pwa", "index.php"), SILENCE);
+}
+
 let commit = "unknown";
 try {
   commit = execSync("git rev-parse HEAD", { cwd: appDir }).toString().trim();
@@ -127,8 +157,20 @@ for (const f of files) {
   }
   if (f.endsWith(".map")) fail(`source map shipped: ${f}`);
 }
+// Round 11: the worker has its own rules (it is not part of the app bundle and may use the cache).
+const WORKER_FILE = "customer-app/pwa/sw.js";
 {
-  const customerJs = files.filter((x) => x.startsWith("customer-app/") && x.endsWith(".js"));
+  if (!files.includes(WORKER_FILE)) fail("the member app's service worker is missing from the package");
+  const problems = workerProblems(readFileSync(join(out, WORKER_FILE), "utf8"));
+  if (problems.length > 0) fail(problems.join("; "));
+  for (const [icon, size] of Object.entries(PWA_ICONS)) {
+    const png = readFileSync(join(out, "customer-app", "pwa", icon));
+    const isPng = png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    if (!isPng || png.readUInt32BE(16) !== size || png.readUInt32BE(20) !== size) fail(`home-screen icon ${icon} is not a ${size} x ${size} PNG`);
+  }
+}
+{
+  const customerJs = files.filter((x) => x.startsWith("customer-app/") && x.endsWith(".js") && x !== WORKER_FILE);
   const texts = customerJs.map((f) => readFileSync(join(out, f), "utf8"));
   for (const word of ["localStorage", "Storage"]) {
     const count = texts.reduce((n, t) => n + t.split(word).length - 1, 0);
@@ -136,12 +178,23 @@ for (const f of files) {
   }
   if (texts.some((t) => NAVIGATOR_DESTRUCTURING.test(t))) fail("the built customer JS destructures storage out of navigator");
 }
-for (const f of files.filter((x) => /\.(js|css)$/.test(x))) {
+const SAMPLE_MARKERS = sampleBundleMarkers(appDir);
+{
+  const sampleSelf = sampleGuardSelfTest(appDir);
+  if (sampleSelf.length > 0) fail(`sample guard self-test failed: ${sampleSelf.join("; ")}`);
+}
+for (const f of files.filter((x) => /\.(js|css)$/.test(x) && x !== WORKER_FILE)) {
   const text = readFileSync(join(out, f), "utf8");
   const customer = f.startsWith("customer-app/");
   if (!customer && !f.startsWith("staff-app/")) fail(`unexpected bundle file ${f}`);
   for (const needle of customer ? FORBIDDEN_CUSTOMER_BUNDLE_STRINGS : FORBIDDEN_BUNDLE_STRINGS) {
     if (text.includes(needle)) fail(`forbidden content "${needle}" in ${f}`);
+  }
+  // Round 17: the member app never contains the design preview's sample QR, sample card texts or roster.
+  // Round 18 (round-17 review nit): nor does the staff app; and neither has the preview's own words.
+  {
+    const problems = sampleBundleProblems(f, text, SAMPLE_MARKERS);
+    if (problems.length > 0) fail(problems.join("; "));
   }
 }
 // STAGE-03D: the guarded classes may be constructed ONLY by the WooCommerce-completion bootstrap, inside
@@ -174,10 +227,30 @@ const FORBIDDEN_CLASSES = ["EVC_Bacs_Payment_Confirmation", "EVC_Bacs_Payment_Fi
   });
   const inputs = Object.keys(graph.metafile.inputs).filter((p) => /\.(m?[jt]sx?|cjs)$/.test(p));
   if (!inputs.includes("src/customer/qrStore.ts")) fail("storage guard: the customer graph does not contain src/customer/qrStore.ts (sanity)");
+  // Round 17: the member app's graph never reaches the preview-only sample modules.
+  const sampleGraph = sampleGraphProblems(inputs.map((p) => p.split(sep).join("/")));
+  if (sampleGraph.length > 0) fail(sampleGraph.join("; "));
   for (const input of inputs) {
     const problems = storageProblems(input.split(sep).join("/"), readFileSync(join(appDir, input), "utf8"));
     if (problems.length > 0) fail(problems.join("; "));
   }
+  // Round 18 (round-17 review nit): the staff app's graph never reaches the preview-only sample modules either.
+  const staffGraph = await esbuildBuild({
+    entryPoints: [join(appDir, "src", "staff", "main.tsx")],
+    absWorkingDir: appDir,
+    bundle: true,
+    write: false,
+    metafile: true,
+    outdir: join(appDir, "dist-plugin", ".staff-graph"),
+    format: "esm",
+    platform: "browser",
+    jsx: "automatic",
+    loader: { ".png": "file", ".css": "empty", ".webp": "file", ".svg": "file", ".jpg": "file" },
+    logLevel: "silent",
+  });
+  const staffInputs = Object.keys(staffGraph.metafile.inputs).filter((p) => /\.(m?[jt]sx?|cjs)$/.test(p)).map((p) => p.split(sep).join("/"));
+  const staffSample = staffSampleGraphProblems(staffInputs);
+  if (staffSample.length > 0) fail(staffSample.join("; "));
 }
 const guardSelfTest = selfTest();
 if (guardSelfTest.length > 0) fail(`PHP construction guard self-test failed: ${guardSelfTest.join("; ")}`);
@@ -218,6 +291,10 @@ const sawMemberSync = new Set();
 const sawQr = new Set();
 const sawFluentcrm = new Set();
 const sawOnboarding = new Set();
+const sawAdminTools = new Set();
+const sawPrepared = new Set();
+let sawPwa = false;
+const sawPush = new Set();
 for (const f of files.filter((x) => x.endsWith(".php"))) {
   const text = readFileSync(join(out, f), "utf8");
   const path = f.replace(/\\/g, "/");
@@ -253,6 +330,26 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   for (const problem of problemsFor(path, text, ONBOARDING_RULES).concat(onboardingProblemsFor(path, text))) {
     fail(problem);
   }
+  // STAGE-08: the Club admin pages only behind EVC_CLUB_ADMIN_TOOLS_ENABLED; readiness never writes; no password leaks.
+  if (ADMIN_TOOLS_RULES.guardedFiles.includes(path)) sawAdminTools.add(path);
+  for (const problem of problemsFor(path, text, ADMIN_TOOLS_RULES).concat(adminToolsProblemsFor(path, text))) {
+    fail(problem);
+  }
+  // Round 9 (D24): the prepared-redemption pieces only at their one construction site, behind the redemption opt-in.
+  if (Object.values(PREPARED_RULES).includes(path)) sawPrepared.add(path);
+  for (const problem of preparedProblemsFor(path, text)) {
+    fail(problem);
+  }
+  // Round 11 (D26): the manifest, the iOS tags and the worker only in EVC_Customer_Pwa; never Service-Worker-Allowed.
+  if (path === PWA_RULES.pwaFile) sawPwa = true;
+  for (const problem of pwaProblemsFor(path, text)) {
+    fail(problem);
+  }
+  // Round 12 (D26 part 2): the push pieces only behind EVC_CLUB_PUSH_ENABLED; HTTP only in the sender; no secret in logs.
+  if (PUSH_RULES.guardedFiles.includes(path) || PUSH_RULES.pureFiles.includes(path)) sawPush.add(path);
+  for (const problem of problemsFor(path, text, PUSH_RULES).concat(pushProblemsFor(path, text))) {
+    fail(problem);
+  }
   // STAGE-05C: the QR pieces only at their one construction site, behind the customer / staff opt-ins.
   if (Object.values(QR_RULES).includes(path)) sawQr.add(path);
   for (const problem of qrProblemsFor(path, text)) {
@@ -260,8 +357,12 @@ for (const f of files.filter((x) => x.endsWith(".php"))) {
   }
 }
 if (sawQr.size !== Object.values(QR_RULES).length) fail("a STAGE-05C QR file is missing from the package");
+if (!sawPwa) fail("the round-11 home-screen app file (EVC_Customer_Pwa) is missing from the package");
+if (sawPush.size !== PUSH_RULES.guardedFiles.length + PUSH_RULES.pureFiles.length) fail("a round-12 push file is missing from the package");
+if (sawPrepared.size !== new Set(Object.values(PREPARED_RULES)).size) fail("a round-9 prepared-redemption file is missing from the package");
 if (sawFluentcrm.size !== 2) fail("a STAGE-06 FluentCRM file (plugin or gateway) is missing from the package");
 if (sawOnboarding.size !== ONBOARDING_RULES.guardedFiles.length) fail("a STAGE-07 onboarding file is missing from the package");
+if (sawAdminTools.size !== ADMIN_TOOLS_RULES.guardedFiles.length) fail("a STAGE-08 admin-tools file is missing from the package");
 if (!sawBootstrap) fail("the STAGE-03D bootstrap file is missing from the package");
 if (!sawMigrationsBootstrap) fail("the STAGE-04A migrations bootstrap file is missing from the package");
 if (sawMemberSync.size !== 3) fail("a STAGE-05B member-sync file (sync, SQL store or core) is missing from the package");

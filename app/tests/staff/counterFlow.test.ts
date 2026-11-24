@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { parseCatalogue, parsePreparation, validatePreparation } from "../../src/club/preparationContract";
-import { MEMBERS } from "../../src/preview/previewData";
+import { MEMBERS } from "../../src/preview/previewRoster";
 import { EMPTY_ORDER, orderReducer, usualOrder, type CoffeeOrder, type OrderAction } from "../../src/preview/coffeeConfig";
 import { availableActions, shouldOfferPrepare, type MachineState } from "../../src/staff/redemptionRecovery/machine";
 import { CONTRACT_STATUS, classifyHttpReply, type ReplySurface } from "../../src/staff/redemptionRecovery/wire";

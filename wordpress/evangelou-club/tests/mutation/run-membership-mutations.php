@@ -33,6 +33,8 @@
  * And STAGE-05B (MS6: the member-sync construction guard).
  * And STAGE-06 (FT1-FT40: FluentCRM membership tags).
  * And STAGE-07 (OR1-OR10: in-store onboarding rules).
+ * And STAGE-08 round 10 (DG1-DG10: the SHOW GRANTS reader of the migration-004 readiness row); round 11 DG11-DG13.
+ * And STAGE-08 round 12 (PC1-PC9, PV1-PV6, PE1-PE7, PM1-PM3: web push encryption, VAPID, endpoint allowlist, text).
  *
  * Same discipline as run-mutations.php: each mutant applies ONE exact source
  * edit (pattern must occur exactly once), runs the DB-free unit suite and
@@ -731,7 +733,7 @@ $mutants = array(
     array(
         'id' => 'M11-catalogue-allows-free-text',
         'file' => 'includes/class-evc-prep-catalogue.php',
-        'search' => "if (\$d['free_text_note'] !== false) {",
+        'search' => "if (!is_bool(\$d['free_text_note'])) {",
         'replace' => 'if (false) {',
     ),
     array(
@@ -912,8 +914,9 @@ $mutants = array(
     array(
         'id' => 'N27-snapshot-accepts-a-note',
         'file' => 'includes/class-evc-prep-snapshot.php',
-        'search' => '\'prep_hash\', \'snapshot_hash\'))) {',
-        'replace' => '\'prep_hash\', \'snapshot_hash\'), array(\'note\'))) {',
+        // Round 9 (D24): only a v2 snapshot may carry `note`; a v1 record with one stays corrupt.
+        'search' => '$v2 ? array_merge($keys, array(\'note\')) : $keys)) {',
+        'replace' => '$keys, array(\'note\'))) {',
     ),
     array(
         'id' => 'N28-fake-store-not-atomic',
@@ -2839,6 +2842,344 @@ $mutants = array(
         'file' => 'includes/class-evc-onboarding-rules.php',
         'search' => '\'/^(\\d{1,9})\\|(\\d{1,12})$/D\'',
         'replace' => '\'/(\\d{1,9})\\|(\\d{1,12})/\'',
+    ),
+    // ---- Round 9, owner decision D24: the staff note, the approved catalogue (PreparedRedemptionTransactionTest,
+    //      ClubPrepCatalogueTest, PreparationContractTest; DB-free) ------------------------------------------------
+    array(
+        'id' => 'D24-1-note-not-bound-to-the-request',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'EVC_Prep_Canonical::prep_hash($canonical), $note);',
+        'replace' => 'EVC_Prep_Canonical::prep_hash($canonical));',
+    ),
+    array(
+        'id' => 'D24-2-note-accepted-when-the-catalogue-forbids-it',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => 'if ($note !== null && !$catalogue->allows_free_text_note()) {',
+        'replace' => 'if (false) {',
+    ),
+    array(
+        'id' => 'D24-3-eighty-one-characters-accepted',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => '    const MAX_CHARACTERS = 80;',
+        'replace' => '    const MAX_CHARACTERS = 81;',
+    ),
+    array(
+        'id' => 'D24-4-html-accepted',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "        if (strpbrk(\$text, '<>') !== false) {",
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'D24-5-white-space-not-normalised',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "        \$text = preg_replace('/[\\s\\p{Z}\\p{Cc}\\p{Cf}]+/u', ' ', \$raw);",
+        'replace' => '        $text = $raw;',
+    ),
+    array(
+        'id' => 'D24-6-snapshot-hash-ignores-the-note',
+        'file' => 'includes/class-evc-prep-snapshot.php',
+        'search' => "            \$fields[] = \$r['note'];",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'D24-7-a-note-stored-as-a-v1-snapshot',
+        'file' => 'includes/class-evc-prep-snapshot.php',
+        'search' => "'schema' => \$note === null ? self::SCHEMA : self::SCHEMA_V2,",
+        'replace' => "'schema' => self::SCHEMA,",
+    ),
+    array(
+        'id' => 'D24-8-blank-note-kept-as-text',
+        'file' => 'includes/class-evc-prep-contract.php',
+        'search' => "        if (\$text === '') {\n            return null;\n        }",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'D24-9-catalogue-always-allows-a-note',
+        'file' => 'includes/class-evc-prep-catalogue.php',
+        'search' => "    public function allows_free_text_note(): bool {\n        return \$this->free_text_note;",
+        'replace' => "    public function allows_free_text_note(): bool {\n        return true;",
+    ),
+    array(
+        'id' => 'D24-10-note-dropped-from-the-replay-check',
+        'file' => 'includes/class-evc-prepared-redemption.php',
+        'search' => "                \$snapshot['prep_hash'],\n                EVC_Prep_Snapshot::note_of(\$snapshot)\n",
+        'replace' => "                \$snapshot['prep_hash']\n",
+    ),
+    array(
+        'id' => 'D24-11-no-triple-dose',
+        'file' => 'includes/class-evc-club-prep-catalogue.php',
+        'search' => "                \$options[] = self::option('triple', 'Τριπλός');",
+        'replace' => '',
+    ),
+    array(
+        'id' => 'D24-12-greek-coffee-gets-a-size',
+        'file' => 'includes/class-evc-club-prep-catalogue.php',
+        'search' => "'groups' => array(\$dose(true), \$sweetness, \$sweetener),\n                    'quick_notes' => array('takeaway', 'very_hot', 'lukewarm')),\n                array('code' => 'filter_coffee'",
+        'replace' => "'groups' => array(\$size, \$dose(true), \$sweetness, \$sweetener),\n                    'quick_notes' => array('takeaway', 'very_hot', 'lukewarm')),\n                array('code' => 'filter_coffee'",
+    ),
+    array(
+        'id' => 'D24-13-other-coffee-label-drifts-from-d3',
+        'file' => 'includes/class-evc-club-prep-catalogue.php',
+        'search' => "array('code' => 'other_coffee', 'label' => 'Άλλος καφές',",
+        'replace' => "array('code' => 'other_coffee', 'label' => 'Άλλο',",
+    ),
+    array(
+        'id' => 'D24-14-prefill-keeps-a-retired-option',
+        'file' => 'includes/class-evc-coffee-history.php',
+        'search' => "            if (isset(\$groups[\$group]['options'][\$option])) {",
+        'replace' => '            if (true) {',
+    ),
+    array(
+        'id' => 'D24-15-prefill-keeps-a-hidden-group',
+        'file' => 'includes/class-evc-coffee-history.php',
+        'search' => '        for ($i = 0; $i < 2; $i++) {',
+        'replace' => '        for ($i = 0; $i < 0; $i++) {',
+    ),
+    array(
+        'id' => 'D24-16-customer-view-carries-the-note',
+        'file' => 'includes/class-evc-coffee-history.php',
+        'search' => "                'coffee' => \$i['coffee_label'],",
+        'replace' => "                'coffee' => \$i['coffee_label'],\n                'note' => \$i['note'],",
+    ),
+    array(
+        'id' => 'D24-17-two-exclusive-quick-notes-pre-filled',
+        'file' => 'includes/class-evc-coffee-history.php',
+        'search' => "|| (\$set !== null && isset(\$sets[\$set]))",
+        'replace' => '',
+    ),    // STAGE-08 round 10 (LOW-1): the pure SHOW GRANTS reader behind the readiness row of migration 004.
+    array(
+        'id' => 'DG1-partial-revoke-ignored',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                \$revoked = true;\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'DG2-role-line-ignored',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                // A role granted to the user (no \"ON\"), or a line this reader does not understand.\n                \$uncertain = true;\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'DG3-column-privileges-counted-as-table',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                    \$uncertain = true; // column privileges are not table privileges, but they make the answer unsure\n                    continue;\n",
+        'replace' => "",
+    ),
+    array(
+        'id' => 'DG4-db-wildcard-percent-not-read',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                \$regex .= '.*';",
+        'replace' => "                \$regex .= '%';",
+    ),
+    array(
+        'id' => 'DG5-escaped-wildcard-not-read',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "            if (\$c === '\\\\' && \$i + 1 < \$length) {",
+        'replace' => "            if (false) {",
+    ),
+    array(
+        'id' => 'DG6-grant-on-another-table-counted',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "        if (\$table_name === \$table) {",
+        'replace' => "        if (true) {",
+    ),
+    array(
+        'id' => 'DG7-all-privileges-not-read',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "if (\$name === 'ALL' || \$name === 'ALL PRIVILEGES') {",
+        'replace' => "if (\$name === 'ALL') {",
+    ),
+    array(
+        'id' => 'DG8-missing-despite-uncertainty',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "        if (\$revoked || \$uncertain) {",
+        'replace' => "        if (\$revoked) {",
+    ),
+    array(
+        'id' => 'DG9-letter-case-read-as-another-database',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "            return self::db_matches(strtolower(\$db_name), strtolower(\$database)) ? null : false;",
+        'replace' => "            return false;",
+    ),
+    array(
+        'id' => 'DG10-no-current-database-still-read',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "        if (\$lines === array() || \$database === '') {",
+        'replace' => "        if (\$lines === array()) {",
+    ),
+    // STAGE-08 round 11 (C3 of the round-10 review): escaped underscores and literal database names.
+    array(
+        'id' => 'DG11-table-level-database-read-as-a-pattern',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "        if (\$db_name !== \$database) {",
+        'replace' => "        if (!self::db_matches(\$db_name, \$database)) {",
+    ),
+    array(
+        'id' => 'DG12-equal-names-shortcut',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "    private static function db_matches(string \$pattern, string \$database): bool {\n",
+        'replace' => "    private static function db_matches(string \$pattern, string \$database): bool {\n        if (\$pattern === \$database) {\n            return true;\n        }\n",
+    ),
+    array(
+        'id' => 'DG13-escaped-underscore-read-as-a-wildcard',
+        'file' => 'includes/class-evc-db-grants.php',
+        'search' => "                \$regex .= preg_quote(\$pattern[++\$i], '/');",
+        'replace' => "                \$regex .= \$pattern[++\$i] === '_' ? '.' : preg_quote(\$pattern[\$i], '/');",
+    ),
+    // STAGE-08 round 12 (owner decision D26 part 2): RFC 8291 encryption (PC*), RFC 8292 VAPID (PV*), the endpoint allowlist (PE*)
+    // and the notification text (PM*).
+    array(
+        'id' => 'PC1-key-info-order-swapped',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '"WebPush: info\\0" . $ua_public . $as_public',
+        'replace' => '"WebPush: info\\0" . $as_public . $ua_public',
+    ),
+    array(
+        'id' => 'PC2-no-padding-delimiter',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => 'openssl_encrypt($plaintext . "\\x02",',
+        'replace' => 'openssl_encrypt($plaintext,',
+    ),
+    array(
+        'id' => 'PC3-wrong-record-size',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => 'pack(\'N\', self::RECORD_SIZE)',
+        'replace' => 'pack(\'N\', 4095)',
+    ),
+    array(
+        'id' => 'PC4-wrong-cek-info',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '"Content-Encoding: aes128gcm\\0"',
+        'replace' => '"Content-Encoding: aesgcm\\0"',
+    ),
+    array(
+        'id' => 'PC5-nonce-salted-with-the-auth-secret',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '$nonce = hash_hkdf(\'sha256\', $ikm, 12, "Content-Encoding: nonce\\0", $salt);',
+        'replace' => '$nonce = hash_hkdf(\'sha256\', $ikm, 12, "Content-Encoding: nonce\\0", $auth_secret);',
+    ),
+    array(
+        'id' => 'PC6-oversized-payload-accepted',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '        if (strlen($plaintext) > self::MAX_PLAINTEXT) {',
+        'replace' => '        if (strlen($plaintext) > 4096) {',
+    ),
+    array(
+        'id' => 'PC7-non-canonical-base64url-accepted',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => ' || self::b64u_encode($bytes) !== $text) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'PC8-short-auth-secret-accepted',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => '        if (strlen($auth_secret) !== self::AUTH_LENGTH) {',
+        'replace' => '        if (strlen($auth_secret) < 8) {',
+    ),
+    array(
+        'id' => 'PC9-scalar-not-below-the-order',
+        'file' => 'includes/class-evc-push-crypto.php',
+        'search' => ' || strcmp($scalar, hex2bin(self::CURVE_ORDER)) >= 0) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'PV1-pair-not-checked',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => '        if ($derived === null || !hash_equals($derived, $point)) {',
+        'replace' => '        if ($derived === null) {',
+    ),
+    array(
+        'id' => 'PV2-example-domain-accepted',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => '            if ($domain === $reserved || substr($domain, -strlen(\'.\' . $reserved)) === \'.\' . $reserved) {
+                return false;',
+        'replace' => '            if ($domain === $reserved || substr($domain, -strlen(\'.\' . $reserved)) === \'.\' . $reserved) {
+                continue;',
+    ),
+    array(
+        'id' => 'PV3-token-lives-two-days',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => '    const LIFETIME_SECONDS = 43200;',
+        'replace' => '    const LIFETIME_SECONDS = 172800;',
+    ),
+    array(
+        'id' => 'PV4-trailing-der-bytes-accepted',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => '        return $at === $n ? $out : null;',
+        'replace' => '        return $out;',
+    ),
+    array(
+        'id' => 'PV5-audience-fixed',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => 'array(\'aud\' => $audience,',
+        'replace' => 'array(\'aud\' => \'https://fcm.googleapis.com\',',
+    ),
+    array(
+        'id' => 'PV6-subject-not-mailto',
+        'file' => 'includes/class-evc-push-vapid.php',
+        'search' => 'preg_match(\'/^mailto:[A-Za-z0-9._%+-]+@',
+        'replace' => 'preg_match(\'/^(?:mailto:|https:\\/\\/)?[A-Za-z0-9._%+-]*@?',
+    ),
+    array(
+        'id' => 'PE1-windows-sub-domains-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => '
+            && preg_match(\'/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/D\', substr($host, 0, -$suffix)) === 1) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'PE2-plain-http-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => 'if (preg_match(\'#^https://([a-z0-9.-]+)(?::443)?',
+        'replace' => 'if (preg_match(\'#^https?://([a-z0-9.-]+)(?::443)?',
+    ),
+    array(
+        'id' => 'PE3-any-port-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => 'if (preg_match(\'#^https://([a-z0-9.-]+)(?::443)?',
+        'replace' => 'if (preg_match(\'#^https://([a-z0-9.-]+)(?::\\d+)?',
+    ),
+    array(
+        'id' => 'PE4-fragment-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => ' || strpbrk($url, "#\\\\") !== false) {',
+        'replace' => ') {',
+    ),
+    array(
+        'id' => 'PE5-longer-endpoints-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => '        if ($length < 12 || $length > self::MAX_LENGTH) {',
+        'replace' => '        if ($length < 12 || $length > 2048) {',
+    ),
+    array(
+        'id' => 'PE6-any-auth-length-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => '        return $raw !== null && strlen($raw) === EVC_Push_Crypto::AUTH_LENGTH ? $raw : null;',
+        'replace' => '        return $raw !== null && strlen($raw) >= 12 ? $raw : null;',
+    ),
+    array(
+        'id' => 'PE7-any-host-accepted',
+        'file' => 'includes/class-evc-push-endpoint.php',
+        'search' => '        return self::service_of_host($m[1]) === null ? self::PROBLEM_HOST : null;',
+        'replace' => '        return null;',
+    ),
+    array(
+        'id' => 'PM1-title-limit-60',
+        'file' => 'includes/class-evc-push-message.php',
+        'search' => '        if (self::length($t) > self::MAX_TITLE) {',
+        'replace' => '        if (self::length($t) > 60) {',
+    ),
+    array(
+        'id' => 'PM2-hidden-characters-accepted',
+        'file' => 'includes/class-evc-push-message.php',
+        'search' => '        if (preg_match(\'/[\\p{Cc}\\p{Cf}\\p{Co}\\p{Cs}]/u\', $text) === 1) {',
+        'replace' => '        if (false) {',
+    ),
+    array(
+        'id' => 'PM3-body-limit-200',
+        'file' => 'includes/class-evc-push-message.php',
+        'search' => '        return self::length($b) > self::MAX_BODY ? self::PROBLEM_BODY_LONG : null;',
+        'replace' => '        return self::length($b) > 200 ? self::PROBLEM_BODY_LONG : null;',
     ),
 );
 

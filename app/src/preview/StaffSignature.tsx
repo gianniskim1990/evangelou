@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { coffeeName, greekDate, memberById, todaysRedemptions } from "./previewData";
+import { coffeeName, greekDate } from "./previewData";
+import { memberById, todaysRedemptions } from "./previewRoster";
 import { cx, type StaffScreen } from "./screens";
 import { Glyph, Logo, PreviewNote } from "./ds";
 

@@ -39,7 +39,16 @@ $commands = array(
     // STAGE-05C: mutants with 'command' => 'qr' run the QR token store tests instead.
     'qr' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
         '--filter', '/(SqlQrTokenStoreTest|SqlLookupRateLimiterTest)/', '--exclude-group', 'concurrency'),
+    // Round 9 (owner decision D24): mutants with 'command' => 'prepared' run migration 004 + the prepared store + history tests.
+    'prepared' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
+        '--filter', '/(SqlPrepRedemptionStoreTest|ClubPrepCatalogueTest)/'),
+    // STAGE-08 round 12 (D26 part 2): the push subscription store and migration 005.
+    'push' => array(PHP_BINARY, $root . '/vendor/bin/phpunit', '--configuration', $root . '/phpunit.xml.dist',
+        '--filter', '/SqlPushSubscriptionStoreTest/'),
 );
+$sql004 = 'database/004_prepared_redemptions.sql';
+$prep_store = 'includes/class-evc-sql-prep-redemption-store.php';
+$history = 'includes/class-evc-coffee-history.php';
 $qr = 'includes/class-evc-sql-qr-token-store.php';
 $limiter = 'includes/class-evc-sql-lookup-rate-limiter.php';
 $services = 'includes/class-evc-club-qr-services.php';
@@ -176,6 +185,74 @@ $mutants = array(
         'replace' => "            \$this->report(\$e);\n        }\n        return EVC_Member_Lookup_Result::of(\$kind);"),
     array('id' => 'LR7-raw-session-ref-stored', 'file' => $limiter, 'command' => 'qr',
         'search' => "                \$out[] = hash('sha256', self::DOMAIN . \$action . '|' . \$key);", 'replace' => "                \$out[] = substr(str_pad(\$key, 64, '0'), 0, 64);"),
+    // ---- Round 9, owner decision D24: migration 004, the prepared store, the coffee history (SqlPrepRedemptionStoreTest).
+    array('id' => 'PS1-half-prepared-row-allowed', 'file' => $sql004, 'command' => 'prepared',
+        'search' => "  ADD CONSTRAINT ck_redemptions_prepared CHECK (\n    (fingerprint_version IS NULL AND catalogue_version IS NULL AND prep_hash IS NULL AND snapshot_hash IS NULL)\n    OR (fingerprint_version = 'evc-redeem-v2' AND catalogue_version > 0 AND prep_hash IS NOT NULL AND snapshot_hash IS NOT NULL)\n  );",
+        'replace' => "  ADD CONSTRAINT ck_redemptions_prepared CHECK (catalogue_version IS NULL OR catalogue_version > 0);"),
+    array('id' => 'PS2-two-snapshots-per-redemption', 'file' => $sql004, 'command' => 'prepared',
+        'search' => "  PRIMARY KEY (redemption_id),\n", 'replace' => "  KEY ix_preparations_redemption (redemption_id),\n"),
+    array('id' => 'PS3-snapshot-not-written', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "            \$db->execute(\n                'INSERT INTO evc_redemption_preparations", 'replace' => "            0 && \$db->execute(\n                'INSERT INTO evc_redemption_preparations"),
+    array('id' => 'PS4-note-not-stored', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "                    EVC_Prep_Snapshot::note_of(\$snapshot),\n", 'replace' => "                    null,\n"),
+    array('id' => 'PS5-note-dropped-on-read', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "        if (\$record['schema'] === EVC_Prep_Snapshot::SCHEMA_V2 || \$s['note_text'] !== null) {", 'replace' => '        if (false) {'),
+    array('id' => 'PS6-success-audit-not-written', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "            \$this->audit->record(\$db, \$event);\n", 'replace' => ''),
+    array('id' => 'PS7-ledger-without-the-v2-fingerprint-version', 'file' => $prep_store, 'command' => 'prepared',
+        'search' => "                    (string) \$ledger['fingerprint_version'],", 'replace' => '                    null,'),
+    array('id' => 'HS1-another-members-history', 'file' => $history, 'command' => 'prepared',
+        'search' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {",
+        'replace' => "                . ' WHERE (r.member_id = ? OR 1 = 1) AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {"),
+    array('id' => 'HS2-another-members-history-below-schema-4', 'file' => $history, 'command' => 'prepared',
+        'search' => "                'SELECT r.business_date, r.coffee_code FROM evc_redemptions r'\n                . ' WHERE r.member_id = ?",
+        'replace' => "                'SELECT r.business_date, r.coffee_code FROM evc_redemptions r'\n                . ' WHERE ? > 0"),
+    array('id' => 'HS3-oldest-first', 'file' => $history, 'command' => 'prepared',
+        'search' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {",
+        'replace' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date ASC, r.id ASC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {"),
+    array('id' => 'HS4-limit-ignored', 'file' => $history, 'command' => 'prepared',
+        'search' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT ' . (int) \$limit,\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {",
+        'replace' => "                . ' WHERE r.member_id = ? AND r.benefit_type = ? ORDER BY r.business_date DESC, r.id DESC LIMIT 10',\n                array(\$member_id, self::BENEFIT)\n            );\n        } else {"),
+    array('id' => 'HS5-damaged-snapshot-shown', 'file' => $history, 'command' => 'prepared',
+        'search' => "        } catch (EVC_Prep_Snapshot_Invalid \$e) {\n            return null;\n        }", 'replace' => "        } catch (EVC_Prep_Snapshot_Invalid \$e) {\n        }"),
+    array('id' => 'HS6-details-in-stored-order', 'file' => $history, 'command' => 'prepared',
+        'search' => "        foreach (self::in_step_order(\$snapshot['modifiers'], \$current, \$code) as \$m) {", 'replace' => "        foreach (\$snapshot['modifiers'] as \$m) {"),
+    // STAGE-08 round 12 (owner decision D26 part 2): the push subscription store and migration 005 (PU1-PU15).
+    array('id' => 'PU1-another-members-active-row-taken', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '                    if (!$mine && !$revoked) {
+                        return self::TAKEN;
+                    }
+', 'replace' => ''),
+    array('id' => 'PU2-stop-without-the-member', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'WHERE endpoint_hash = ? AND member_id = ? AND revoked_at_utc IS NULL\',
+            array($now_utc, self::REASON_MEMBER, $now_utc, EVC_Push_Endpoint::hash($endpoint), $member_id)', 'replace' => 'WHERE endpoint_hash = ? AND ? > 0 AND revoked_at_utc IS NULL\',
+            array($now_utc, self::REASON_MEMBER, $now_utc, EVC_Push_Endpoint::hash($endpoint), $member_id)'),
+    array('id' => 'PU3-revoked-rows-sent-to', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '\' JOIN evc_members m ON m.id = s.member_id WHERE s.revoked_at_utc IS NULL AND s.id > ?\'', 'replace' => '\' JOIN evc_members m ON m.id = s.member_id WHERE s.id > ?\''),
+    array('id' => 'PU4-cursor-row-sent-again', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'WHERE s.revoked_at_utc IS NULL AND s.id > ?\'', 'replace' => 'WHERE s.revoked_at_utc IS NULL AND s.id >= ?\''),
+    array('id' => 'PU5-gone-recorded-as-stopped', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '            array($now_utc, self::REASON_GONE, $now_utc, $id)', 'replace' => '            array($now_utc, self::REASON_MEMBER, $now_utc, $id)'),
+    array('id' => 'PU6-success-keeps-the-failure-count', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'success_count = success_count + 1, failure_count = 0 WHERE', 'replace' => 'success_count = success_count + 1 WHERE'),
+    array('id' => 'PU7-revoked-row-counted-as-success', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'failure_count = 0 WHERE id = ? AND revoked_at_utc IS NULL\',', 'replace' => 'failure_count = 0 WHERE id = ?\','),
+    array('id' => 'PU8-disabled-members-subscribed', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '" WHERE s.revoked_at_utc IS NULL AND m.status = \'enabled\' AND s.member_id > ? ORDER BY s.member_id LIMIT "', 'replace' => '" WHERE s.revoked_at_utc IS NULL AND s.member_id > ? ORDER BY s.member_id LIMIT "'),
+    array('id' => 'PU9-disabled-members-counted', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '" s JOIN evc_members m ON m.id = s.member_id WHERE s.revoked_at_utc IS NULL AND m.status = \'enabled\'"', 'replace' => '" s JOIN evc_members m ON m.id = s.member_id WHERE s.revoked_at_utc IS NULL"'),
+    array('id' => 'PU10-resync-resets-the-consent', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => '\'UPDATE \' . self::TABLE . \' SET p256dh = ?, auth = ?, agent_family = ?, updated_at_utc = ? WHERE id = ? AND member_id = ? AND revoked_at_utc IS NULL\',', 'replace' => '\'UPDATE \' . self::TABLE . \' SET p256dh = ?, auth = ?, agent_family = ?, updated_at_utc = ?, consent_at_utc = updated_at_utc WHERE id = ? AND member_id = ? AND revoked_at_utc IS NULL\','),
+    array('id' => 'PU11-renewal-keeps-the-old-consent', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => 'array($member_id, $p256dh, $auth, $service, $agent, $now_utc, $now_utc, (int) $row[\'id\'])', 'replace' => 'array($member_id, $p256dh, $auth, $service, $agent, \'2026-01-01 00:00:00.000000\', $now_utc, (int) $row[\'id\'])'),
+    array('id' => 'PU12-bad-agent-stored', 'file' => 'includes/class-evc-sql-push-subscription-store.php', 'command' => 'push',
+        'search' => ' || !in_array($agent, EVC_Push_Endpoint::AGENTS, true)', 'replace' => ''),
+    array('id' => 'PU13-revoked-without-a-reason', 'file' => 'database/005_push_subscriptions.sql', 'command' => 'push',
+        'search' => 'revoked_reason IS NOT NULL AND revoked_reason IN (\'member\', \'gone\')', 'replace' => 'revoked_reason IN (\'member\', \'gone\')'),
+    array('id' => 'PU14-endpoint-not-unique', 'file' => 'database/005_push_subscriptions.sql', 'command' => 'push',
+        'search' => '  UNIQUE KEY uq_push_endpoint (endpoint_hash),', 'replace' => '  KEY uq_push_endpoint (endpoint_hash),'),
+    array('id' => 'PU15-plain-http-endpoint-stored', 'file' => 'database/005_push_subscriptions.sql', 'command' => 'push',
+        'search' => 'CHECK (endpoint LIKE \'https://%\' AND', 'replace' => 'CHECK ('),
 );
 
 /** Output of the most recent suite run (printed only when the baseline fails). */
@@ -210,6 +287,10 @@ if ($baseline === 0) {
 if ($baseline === 0) {
     echo "Baseline (unmutated) QR token store run...\n";
     $baseline = evc_run_suite($commands['qr']);
+}
+if ($baseline === 0) {
+    echo "Baseline (unmutated) prepared redemption store run...\n";
+    $baseline = evc_run_suite($commands['prepared']);
 }
 if ($baseline !== 0) {
     fwrite(STDERR, "ABORT: baseline suite is not green (exit $baseline); mutation results would be meaningless.\n");

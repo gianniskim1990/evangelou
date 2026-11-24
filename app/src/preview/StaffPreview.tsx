@@ -1,5 +1,6 @@
 import { useReducer, useState, type Dispatch, type ReactNode } from "react";
-import { MEMBERS, addDays, coffeeName, greekDate, memberById, memberHistory, todaysRedemptions, type PreviewMember } from "./previewData";
+import { addDays, coffeeName, greekDate, type PreviewMember } from "./previewData";
+import { MEMBERS, memberById, memberHistory, todaysRedemptions } from "./previewRoster";
 import { EMPTY_ORDER, historyPreparation, isComplete, missing, orderReducer, preparationLine, usualOrder, type CoffeeOrder, type OrderAction } from "./coffeeConfig";
 import { CoffeeConfigurator, OrderSummary } from "./StaffOrder";
 import { cx, type StaffScreen } from "./screens";

@@ -20,6 +20,15 @@ final class CustomerFeatureOffTest extends EVC_WP_Test_Case {
         $page = EVC_Customer_Shell::respond(wp_get_current_user(), new EVC_Staff_Assets(sys_get_temp_dir(), 'https://example.org/x', EVC_Customer_Shell::ASSET_ENTRY));
         $this->assertSame(404, $page['status']);
         $this->assertStringNotContainsString('nonce', $page['body']);
+        // STAGE-08 round 11: no manifest and no service worker either, with either permalink form.
+        foreach (array('', '/%postname%/') as $structure) {
+            update_option('permalink_structure', $structure);
+            foreach (array(EVC_Customer_Pwa::MANIFEST, EVC_Customer_Pwa::WORKER) as $what) {
+                $pwa = EVC_Customer_Shell::respond_pwa($what, EVC_Rest_Security::home_path() . 'club-member/sw.js', new EVC_Staff_Assets(sys_get_temp_dir(), 'https://example.org/x', EVC_Customer_Shell::ASSET_ENTRY), 'https://example.org/x', __FILE__);
+                $this->assertSame(404, $pwa['status'], $what);
+                $this->assertSame('', $pwa['body']);
+            }
+        }
 
         $r = $this->rest('GET', '/evangelou-club-customer/v1/me', null, $this->nonce());
         $this->assertSame(404, $r->get_status());

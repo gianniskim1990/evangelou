@@ -3,11 +3,21 @@ import { createRoot } from "react-dom/client";
 import "../index.css";
 import "../preview/preview.css";
 import { CONFIG_ELEMENT_ID, parseCustomerConfig } from "./config";
-import { CustomerApp } from "./CustomerApp";
+import { CustomerApp, OfflineApp } from "./CustomerApp";
+import { InstallHintFlow, isIosDevice, isIosSafari, isStandalone } from "./pwa/installHint";
+import { MemberPushFlow } from "./pwa/push";
+import { pushManagerOf, registerMemberWorker } from "./pwa/register";
+import { createCustomerPushApi } from "./pushApi";
+import { createCustomerCoffeesApi } from "./coffeesApi";
 import { createCustomerApi, createNonceBox } from "./customerApi";
+import { MemberCoffeesFlow } from "./memberCoffees";
+import { createCustomerHistoryApi } from "./historyApi";
+import { MemberHistoryFlow } from "./memberHistory";
 import { createQrKeeper, MemberQrFlow } from "./memberQr";
 import { createCustomerQrApi } from "./qrApi";
-import { createStorageQrKeeper } from "./qrStore";
+import { createDeviceFlag, createStorageQrKeeper } from "./qrStore";
+import { createCustomerMessagesApi } from "./messagesApi";
+import { MemberMessagesFlow } from "./memberMessages";
 import { createJoinApi } from "./joinApi";
 import { bootMode, parseJoinConfig, parsePosterConfig } from "./joinConfig";
 import { JoinApp } from "./JoinApp";
@@ -38,6 +48,13 @@ if (root) {
           <JoinApp config={parsed.config} api={createJoinApi(parsed.config)} navigate={(url) => window.location.assign(url)} />
         </StrictMode>,
       );
+  } else if (mode === "offline") {
+    // Round 11 (D26): built by the service worker when the network fails; nothing about the member is known.
+    createRoot(root).render(
+      <StrictMode>
+        <OfflineApp reload={() => window.location.reload()} />
+      </StrictMode>,
+    );
   } else if (mode === "poster") {
     const parsed = parsePosterConfig(raw, window.location.origin);
     if (!parsed.ok) root.textContent = FAILED;
@@ -53,11 +70,35 @@ if (root) {
       root.textContent = FAILED;
     } else {
       const nonce = createNonceBox(parsed.config.nonce);
+      // Round 11 (D26): the home-screen app. The worker only with pretty permalinks (pwa/register.ts); the hint
+      // listens from now on (the browser's install event can come before the first render).
+      void registerMemberWorker(parsed.config.serviceWorker ?? null, navigator as never, window.location.pathname);
+      const installHint = new InstallHintFlow({ standalone: () => isStandalone(window as never), ios: isIosSafari(navigator.userAgent, navigator.maxTouchPoints ?? 0), flag: createDeviceFlag() }, window);
       // Owner decision 2026-11-04: the phone remembers the QR (qrStore.ts); memory only if storage cannot work.
       const qrFlow = new MemberQrFlow(createCustomerQrApi(parsed.config, nonce), createQrKeeper(createStorageQrKeeper()));
+      // D23: the member card's real coffee figures (read only).
+      const coffeesFlow = new MemberCoffeesFlow(createCustomerCoffeesApi(parsed.config, nonce));
+      // D24: the member card's own last coffees (read only, never the staff note).
+      const historyFlow = new MemberHistoryFlow(createCustomerHistoryApi(parsed.config, nonce));
+      // Round 12 (D26 part 2): «Θέλω ειδοποιήσεις»; nothing is asked of the browser before the member taps it.
+      const win = window as unknown as { Notification?: { permission: string; requestPermission(): Promise<string> }; PushManager?: unknown };
+      const pushFlow = new MemberPushFlow(
+        {
+          publicKey: parsed.config.pushPublicKey ?? "",
+          worker: Boolean(parsed.config.serviceWorker),
+          standalone: () => isStandalone(window as never),
+          ios: isIosDevice(navigator.userAgent, navigator.maxTouchPoints ?? 0),
+          notification: win.Notification ?? null,
+          pushSupported: typeof win.PushManager !== "undefined",
+          pushManager: () => pushManagerOf(parsed.config.serviceWorker ?? null, navigator as never),
+        },
+        createCustomerPushApi(parsed.config, nonce),
+      );
+      // Round 18 (D30): «Μηνύματα», only when the server has them (clubMessages); nothing is asked otherwise.
+      const messagesFlow = parsed.config.clubMessages ? new MemberMessagesFlow(createCustomerMessagesApi(parsed.config, nonce)) : undefined;
       createRoot(root).render(
         <StrictMode>
-          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} navigate={(url) => window.location.assign(url)} />
+          <CustomerApp config={parsed.config} api={createCustomerApi(parsed.config, undefined, undefined, nonce)} qrFlow={qrFlow} coffeesFlow={coffeesFlow} historyFlow={historyFlow} installHint={installHint} pushFlow={pushFlow} messagesFlow={messagesFlow} navigate={(url) => window.location.assign(url)} />
         </StrictMode>,
       );
     }

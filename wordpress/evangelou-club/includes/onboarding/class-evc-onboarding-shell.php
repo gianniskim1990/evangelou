@@ -100,6 +100,7 @@ final class EVC_Onboarding_Shell {
         $config = array(
             'mode' => 'join',
             'restBase' => untrailingslashit(rest_url(EVC_Customer_Rest_Security::NAMESPACE_V1)),
+            'homePath' => EVC_Rest_Security::home_path(),
             'nonce' => wp_create_nonce('wp_rest'),
             'step' => $this->step($user),
             'joinUrl' => $join,

@@ -595,7 +595,18 @@ installs a disposable WordPress, serves it with `php -S`, installs the
 **packaged** plugin and checks redirects, real headers, real CORS, cookies,
 logout replay and the reauth form with the flag on and off.
 
-## Prepared redemption transaction model (UI-03D.A — pure PHP, NOT wired)
+## Prepared redemption transaction model (UI-03D.A; round 9 / D24: wired behind EVC_CLUB_REDEMPTION_SOURCE, migration 004 written, NOT applied)
+
+**Round 9 (owner decision D24, 2026-11-20).** The till can record HOW the free coffee was prepared (dose incl.
+triple, sugar, sweetener, milk, size, quick notes, a short staff note) through
+`POST evangelou-club/v1/members/{id}/benefits/free_coffee/prepared-redeem` (+ `GET /coffee-catalogue`), behind the
+same opt-in as the v1 route; the lookup reply with `"history": true` carries the member's last 3 coffees and a
+«Το ίδιο» pre-fill, and the member card gets `GET evangelou-club-customer/v1/me/history` (last 5, never the staff
+note). Needs **migration 004**: approved for the **staging** Club database only (owner decision D25, 2026-11-20;
+applied by the owner / technician); **production still needs its own approval**. Below 4 everything falls back to v1
+gracefully.
+Details and the v1/v2 coexistence choice: `docs/prepared-redemption-transaction.md`; owner steps: `docs/go-live.md`.
+
 
 `EVC_Prepared_Redemption_Service` models how one verified, eligible redemption
 atomically records its structured preparation: exactly one ledger row, one
@@ -831,11 +842,21 @@ applied until the technician sets the target to 3 after the owner's go-ahead.
 Owner decisions 2026-11-04 (later): successful tablet re-logins stay unlimited, so each new login
 gives about 10 more failed scans («Όχι, μένει έτσι», an accepted risk, no code); QR revocation stays
 administrator-only and the tablet only scans («Όχι, μόνο ο διαχειριστής»).
+Owner decisions 2026-11-19: D21 the card always shows the QR (no «Νέο QR» button); **D22** («Όχι, να μην
+αλλάζει ποτέ») the QR is the SAME on every device and browser, opening the card never revokes it, and a
+screenshot works from any device; only an administrator's revocation gives a new code.
 
 - **Customer:** `GET|POST evangelou-club-customer/v1/me/qr`, only with `EVC_CLUB_CUSTOMER_ENABLED` AND
-  `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'`. A member gets one QR; a second request without
-  `replace: true` is `409 qr_exists`. The plaintext is returned ONLY at issue (digests are stored); the app
-  keeps it.
+  `EVC_CLUB_PAYMENT_PROVENANCE = 'club_db_v1'` AND (D22) a valid `EVC_CLUB_QR_SECRET` (≥ 32 bytes, not equal
+  to `EVC_CLUB_LOOKUP_KEY`; fail closed, readiness row `qr_secret`). `POST {}` returns the member's stable
+  token: `EVC_Qr_Token::derive()` = HMAC-SHA256 over the member's public id and generation (the member's QR
+  row count), so it is the same on every call and device; `replace` from older apps is ignored. Only digests
+  are stored (no migration 004); a pre-D22 random token is replaced once. GET never returns a token.
+- **Customer, D23 (2026-11-19):** `GET evangelou-club-customer/v1/me/coffees`, same gates as `/me/qr` (no QR
+  secret needed): the signed-in member's own free coffees, read only from `evc_redemptions` by Athens business
+  date: `{"state":"member","today":"YYYY-MM-DD","taken_today":bool,"this_month":int}` (or `not_member` /
+  `member_disabled`); 503 `unavailable` = the card shows «—». Never delete `evc_qr_tokens` rows (round 8: the
+  generation is the row count; see docs/member-qr.md).
 - **Staff:** `POST evangelou-club/v1/members/lookup` → `{member:{member_id, first_name}, status:
   active|used_today|inactive}`, one generic 404 for unknown / replaced / revoked / disabled. Only with
   everything the STAGE-05A redeem route needs, plus migration 003 and the new wp-config secret
@@ -848,12 +869,14 @@ administrator-only and the tablet only scans («Όχι, μόνο ο διαχει
     the v1 list (including «Άλλος καφές»). Shown ONLY while `GET /session` reports `features.qr_lookup:
     true`, which happens only when every lookup gate passes now (constants, key, connection, schema ≥ 3).
     No revoke on the tablet.
-  - **Member card** (`app/src/customer/`): the real QR (own encoder), `409 qr_exists`, and «Νέο QR» with
-    a Greek confirmation. Owner decision 2026-11-04 «Ναι, να τον θυμάται»: the phone remembers the QR.
+  - **Member card** (`app/src/customer/`): the real QR (own encoder), always shown (D21: the «Νέο QR»
+    button and its confirmation question are gone), the same on every device (D22: the app only ever sends
+    `POST {}`). Owner decision 2026-11-04 «Ναι, να τον θυμάται»: the phone remembers the QR.
     It lives in `qrStore.ts`, the only file allowed to use browser storage (`localStorage`; packager
     guard `storage-guard.mjs`), keyed by hashes of the account and issued_at. It is shown only for the
-    `issued_at` the server reports, and deleted on sign-out, signed_out, not_member, member_disabled,
-    route off and replace. The server never re-sends a token.
+    `issued_at` the server reports (or, round 7, as «unchecked» while the server cannot be reached), and
+    deleted on sign-out, signed_out, not_member, member_disabled and route off. A failed re-check never
+    takes a shown QR off the screen; retries pause while the member is off the card.
   - **Devices** (owner decision 2026-11-04 «Δεν ξέρω ακόμα, να δουλεύει σε όλες»): iPad, Android and a
     USB hand scanner. The camera uses `BarcodeDetector`, else jsQR loaded lazily as its own chunk on
     in-memory downscaled frames. A hand scanner on the Greek layout or with Caps Lock is corrected, and
@@ -865,6 +888,49 @@ administrator-only and the tablet only scans («Όχι, μόνο ο διαχει
   (packager rule set `qrProblemsFor`).
 
 Greek operator note and developer notes: `docs/member-qr.md`.
+
+## Member app on the home screen (STAGE-08 round 11, owner decision D26 part 1 — behind EVC_CLUB_CUSTOMER_ENABLED)
+
+- `EVC_Customer_Pwa` (includes/customer/class-evc-customer-pwa.php), served only through the member page's query
+  variable: a web app manifest (`/club-member/manifest.webmanifest`, plain `?evc_club_member=manifest`), the iOS
+  home-screen tags, and a service worker at `/club-member/sw.js` with the scope `/club-member/` — **only with pretty
+  permalinks** (with plain permalinks a worker would control the whole site, the till included: none is served).
+- The worker (built from `app/src/customer/pwa/sw.ts` into `customer-app/pwa/sw.js`) caches only the app's hashed
+  build files; REST (`/wp-json/`, `rest_route`), any non-GET request and any page with a nonce are never answered or
+  stored. Offline, the member page becomes a «Δεν υπάρχει σύνδεση» page without any member data. No push.
+- Icons in `customer-app/pwa/` (from the bundled logo). Packager guards: `pwaProblemsFor`, `workerProblems`.
+- Owner decision D27: «Ανανέωση 20 €» for an expired membership opens the join flow; the checkout guard serialises two
+  simultaneous Club checkouts of one account with a database `GET_LOCK` (no migration).
+
+Details and the real-phone test steps: `docs/member-pwa.md`.
+
+## Member push notifications (STAGE-08 round 12, owner decision D26 part 2 — behind EVC_CLUB_PUSH_ENABLED, default OFF)
+
+- Sent from this server to the browsers' push services (FCM, Apple, Mozilla, Windows), no third-party sender:
+  RFC 8291 encryption (`EVC_Push_Crypto`) and RFC 8292 VAPID (`EVC_Push_Vapid`) written on PHP's openssl, tested
+  against the RFC 8291 example byte for byte. Keys only in wp-config.php (`EVC_CLUB_PUSH_VAPID_PUBLIC`,
+  `EVC_CLUB_PUSH_VAPID_PRIVATE`, `EVC_CLUB_PUSH_SUBJECT`), made with the one-line command of `docs/member-push.md`;
+  any problem = push hidden and nothing sent (fail closed).
+- Migration **005** (`evc_push_subscriptions`): written, **NOT applied anywhere**; needs the owner's approval per
+  database. Runtime grants: SELECT, INSERT, UPDATE. Below schema 5 push is simply hidden.
+- Member app: «Θέλω ειδοποιήσεις» (the tap is the consent; only it asks for permission), «Διακοπή ειδοποιήσεων»,
+  iPhone only when installed, no push with plain permalinks. Routes: GET / POST / DELETE `/me/push`.
+- Administrators: «Evangelou Club → Ειδοποιήσεις» (preview, confirmation, batches, rate limit, audit with counts only).
+  Automatic notifications, each with its own constant (default OFF): `EVC_CLUB_PUSH_AUTO_ACTIVATED`,
+  `EVC_CLUB_PUSH_AUTO_EXPIRY`.
+- Packager guards: `PUSH_RULES` / `pushProblemsFor` (construction only in `EVC_Push_Plugin::wire()`, HTTP only in the
+  sender, no endpoint / key / payload in a log, the private key constant only in `EVC_Push_Vapid`), `workerProblems`.
+- Round 13: «Διακοπή αποστολής» stored as its own row and applied only under the lock (a running batch stops before its
+  next message; the page says «Η διακοπή καταχωρήθηκε…» until the job really stopped); no named lock (`GET_LOCK` NULL /
+  error) = nothing sent; the automatic notifications run under their own lock; the rate limit has its own store. The
+  packager guards were widened and are documented as accident prevention, not an anti-evasion boundary. Server-side
+  sign-outs do not revoke push rows (documented in `docs/member-push.md`).
+- Round 14: a running send always has its next WP-Cron event (a busy WP-Cron batch queues itself again in 60 s; every
+  batch queues the next after releasing the lock); separate audit stores for the administrators' sends and the automatic
+  notifications (no entry lost); a reconnect that drops the lock stops the batch; the daily cap is seeded from the audit
+  on upgrade; no automatic page reload without a lock; «ενεργοποιήθηκε» retried without a lock (5 min, 6 tries).
+
+Details, the owner steps and the real-phone tests: `docs/member-push.md`.
 
 ## Known deployment blockers
 

@@ -13,7 +13,7 @@ const ORIGIN = "https://evangelouprofiterole.gr";
 const PRETTY = `${ORIGIN}/prometheus/wp-json/evangelou-club-customer/v1`;
 const PLAIN = `${ORIGIN}/prometheus/?rest_route=/evangelou-club-customer/v1`;
 const cfg = (over: Record<string, unknown> = {}) =>
-  JSON.stringify({ restBase: PRETTY, nonce: "0123456789", loginUrl: `${ORIGIN}/prometheus/wp-login.php?redirect_to=x`, logoutUrl: `${ORIGIN}/prometheus/wp-login.php?action=logout&_wpnonce=abc`, appVersion: "0.1.0-dev", ...over });
+  JSON.stringify({ restBase: PRETTY, homePath: "/prometheus/", nonce: "0123456789", loginUrl: `${ORIGIN}/prometheus/wp-login.php?redirect_to=x`, logoutUrl: `${ORIGIN}/prometheus/wp-login.php?action=logout&_wpnonce=abc`, appVersion: "0.1.0-dev", ...over });
 
 const okBody = (membership: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
   result: "ok",
@@ -48,6 +48,9 @@ describe("STAGE-01 customer bootstrap config", () => {
       ["other origin", { restBase: `https://evil.example/wp-json/evangelou-club-customer/v1` }],
       ["staff namespace", { restBase: `${ORIGIN}/wp-json/evangelou-club/v1` }],
       ["plain other route", { restBase: `${ORIGIN}/?rest_route=/wp/v2` }],
+      ["plain without homePath (round 5)", { restBase: PLAIN, homePath: undefined }],
+      ["plain at another path (round 5)", { restBase: `${ORIGIN}/prometheus/shop/?rest_route=/evangelou-club-customer/v1` }],
+      ["pretty with a PHP rest_route alias (round 5)", { restBase: `${PRETTY}?rest.route=/wp/v2/users` }],
       ["nonce", { nonce: "<script>" }],
       ["login elsewhere", { loginUrl: "https://evil.example/login" }],
       ["logout missing", { logoutUrl: "" }],
@@ -55,6 +58,34 @@ describe("STAGE-01 customer bootstrap config", () => {
     for (const [label, over] of bad) assert.equal(parseCustomerConfig(cfg(over), ORIGIN).ok, false, label);
     assert.equal(parseCustomerConfig(null, ORIGIN).ok, false);
     assert.equal(parseCustomerConfig("{", ORIGIN).ok, false);
+  });
+
+  it("round 10: the join URL is optional, and only this site's is kept (round 11: a bad one is dropped)", () => {
+    const parsed = (over: Record<string, unknown>) => parseCustomerConfig(cfg(over), ORIGIN);
+    const none = parsed({});
+    assert.ok(none.ok);
+    assert.equal(none.config.joinUrl, "", "absent = no join action");
+    for (const url of [`${ORIGIN}/prometheus/club/join/`, `${ORIGIN}/prometheus/?evc_club_join=1`]) {
+      const r = parsed({ joinUrl: url });
+      assert.ok(r.ok, url);
+      assert.equal(r.config.joinUrl, url, "pretty and plain permalink forms");
+    }
+    const bad: [string, unknown][] = [
+      ["other origin", "https://evil.example/club/join/"],
+      ["other scheme", "javascript:alert(1)"],
+      ["protocol-relative to another host", "//evil.example/club/join/"],
+      ["credentials", "https://user:pw@evangelouprofiterole.gr/club/join/"],
+      ["fragment", `${ORIGIN}/club/join/#x`],
+      ["empty", ""],
+      ["not a string", 7],
+      ["null", null],
+    ];
+    // Round 11 (C2): a bad optional join URL is DROPPED (no join / renewal button); it never stops the member app.
+    for (const [label, joinUrl] of bad) {
+      const r = parsed({ joinUrl });
+      assert.ok(r.ok, label);
+      assert.equal(r.config.joinUrl, "", label);
+    }
   });
 });
 

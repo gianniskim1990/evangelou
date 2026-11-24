@@ -84,7 +84,7 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         $r = $this->shell();
         $this->assertSame(302, $r['status']);
         $this->assertStringContainsString('wp-login.php', $r['location']);
-        $this->assertStringContainsString(rawurlencode(home_url('/club-admin/')), $r['location']);
+        $this->assertStringContainsString(rawurlencode(EVC_Staff_Shell::shell_url()), $r['location']);
         $this->assertSame('', $r['body']);
         $this->assertNoBootstrap($r);
     }
@@ -112,7 +112,7 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         $this->assertSame(untrailingslashit(rest_url('evangelou-club/v1')), $config['restBase']);
         $this->assertNotFalse(wp_verify_nonce($config['nonce'], 'wp_rest'), 'valid wp_rest nonce for this session');
         $this->assertStringContainsString('reauth=1', $config['loginUrl']);
-        $this->assertSame(home_url('/club-admin/'), $config['shellUrl']);
+        $this->assertSame(EVC_Staff_Shell::shell_url(), $config['shellUrl']);
         $this->assertSame(300, $config['idleLockSeconds']);
         $this->assertSame(EVC_Staff_Session::session_ref($token), $config['sessionRef']);
         $this->assertSame(array('qrLookup' => false, 'phoneLookup' => false, 'coffeeRedemption' => false, 'history' => false), $config['features']);
@@ -121,6 +121,14 @@ final class StaffShellTest extends EVC_WP_Test_Case {
             $this->assertArrayNotHasKey($secretish, $config);
         }
         $this->assertStringNotContainsString('_wpnonce', $r['body'], 'no nonce in any URL');
+        // STAGE-08 round 11 (D26): the member page's home-screen app never reaches the staff app, with either permalink form.
+        foreach (array('', '/%postname%/') as $structure) {
+            update_option('permalink_structure', $structure);
+            $body = $this->shell()['body'];
+            foreach (array('rel="manifest"', 'apple-touch-icon', 'apple-mobile-web-app', 'serviceWorker', 'sw.js', 'manifest.webmanifest', 'theme-color') as $needle) {
+                $this->assertStringNotContainsString($needle, $body, $needle);
+            }
+        }
     }
 
     public function test_page_load_counts_as_staff_activity(): void {
@@ -251,6 +259,129 @@ final class StaffShellTest extends EVC_WP_Test_Case {
         $this->assertContains(EVC_Staff_Shell::QUERY_VAR, apply_filters('query_vars', array()));
         $this->go_to(home_url('/club-admin/'));
         $this->assertSame('1', (string) get_query_var(EVC_Staff_Shell::QUERY_VAR));
+    }
+
+    /** STAGE-08 round 4: staging ran with plain permalinks; /club-admin/ never reached WordPress there (Apache 404). */
+    /**
+     * STAGE-08 round 18, owner decision D31: «Χρήσιμοι σύνδεσμοι». The till receives only the addresses of the enabled
+     * features (here only the staff app: the member page, the join flow and push are off in this suite), each built
+     * by the server for the permalink form and the install folder in use, and never an administrator page.
+     */
+    public function test_round18_d31_the_till_gets_only_the_enabled_club_links_built_for_the_site(): void {
+        $staff = get_userdata($this->create_staff_user());
+        $sub = static function () {
+            return 'http://example.org/prometheus';
+        };
+        foreach (array('' => 'http://example.org/prometheus/?evc_club_admin=1', '/%postname%/' => 'http://example.org/prometheus/club-admin/') as $structure => $till) {
+            $this->set_permalink_structure($structure);
+            add_filter('pre_option_home', $sub);
+            try {
+                $this->login_as($staff->ID);
+                $config = self::config_of($this->shell());
+            } finally {
+                remove_filter('pre_option_home', $sub);
+            }
+            $this->assertSame(array(array('key' => 'till', 'url' => $till)), $config['links'], 'structure «' . $structure . '»');
+        }
+        foreach (EVC_Club_Links::staff() as $link) {
+            $this->assertContains($link['key'], EVC_Club_Links::STAFF_KEYS);
+        }
+        $this->assertSame(array(), array_intersect(array_column(EVC_Club_Links::staff(), 'key'), EVC_Club_Links::ADMIN_KEYS), 'never an administrator page');
+        $body = $this->shell()['body'];
+        foreach (array('wp-admin', 'evc-club-push', 'evc-club-readiness', 'evc-club-db', 'shop_order', 'wc-orders') as $needle) {
+            $this->assertStringNotContainsString($needle, $body, $needle);
+        }
+    }
+
+    public function test_the_shell_url_follows_the_permalink_setting(): void {
+        $this->set_permalink_structure('');
+        $plain = EVC_Staff_Shell::shell_url();
+        $this->assertSame(add_query_arg(EVC_Staff_Shell::QUERY_VAR, '1', home_url('/')), $plain);
+        $this->assertStringNotContainsString('club-admin', $plain, 'plain permalinks: no pretty path');
+        $this->go_to($plain);
+        $this->assertSame('1', (string) get_query_var(EVC_Staff_Shell::QUERY_VAR), 'the plain URL reaches the shell');
+        $r = $this->shell();
+        $this->assertStringContainsString(rawurlencode($plain), $r['location'], 'login returns to the plain URL');
+        $staff = get_userdata($this->create_staff_user());
+        $this->assertSame($plain, EVC_Staff_Admin_Guard::redirect_target($staff, false), 'wp-admin sends the till to the plain URL');
+        $this->assertSame($plain, apply_filters('login_redirect', admin_url(), '', $staff), 'so does the login redirect');
+        $token = $this->login_as($staff->ID);
+        $config = self::config_of($this->shell());
+        $this->assertIsArray($config);
+        $this->assertSame($plain, $config['shellUrl']);
+        $this->assertStringContainsString(rawurlencode($plain), $config['loginUrl']);
+        $this->assertStringContainsString('rest_route=', $config['restBase'], 'plain REST base for the app');
+        // Round 5: the app accepts a plain base only exactly at homePath or its index.php.
+        $this->assertSame('/', $config['homePath'], 'the test site sits at the root (fixed value, not recomputed)');
+        $this->assertContains((string) wp_parse_url($config['restBase'], PHP_URL_PATH), array($config['homePath'], $config['homePath'] . 'index.php'), 'the plain base sits at the home path');
+        unset($token);
+
+        $this->set_permalink_structure('/%postname%/');
+        $this->assertSame(home_url('/club-admin/'), EVC_Staff_Shell::shell_url());
+        $this->assertSame(home_url('/club-admin/'), apply_filters('login_redirect', admin_url(), '', $staff));
+    }
+
+    /** STAGE-08 round 6: a subfolder install sends its own home path; fixed expected values, not recomputed. */
+    public function test_the_home_path_of_a_subfolder_install_is_sent_as_a_fixed_value(): void {
+        $this->set_permalink_structure('');
+        $sub = static function () {
+            return 'http://example.org/prometheus';
+        };
+        add_filter('pre_option_home', $sub);
+        try {
+            $this->assertSame('/prometheus/', EVC_Rest_Security::home_path());
+            $staff = get_userdata($this->create_staff_user());
+            $token = $this->login_as($staff->ID);
+            $config = self::config_of($this->shell());
+            $this->assertIsArray($config);
+            $this->assertSame('/prometheus/', $config['homePath']);
+            $this->assertSame('/prometheus/index.php', wp_parse_url($config['restBase'], PHP_URL_PATH), 'the plain base sits at that home path');
+            unset($token);
+        } finally {
+            remove_filter('pre_option_home', $sub);
+        }
+        $greek = static function () {
+            return 'http://example.org/καφές';
+        };
+        add_filter('pre_option_home', $greek);
+        try {
+            $this->assertSame('/%CE%BA%CE%B1%CF%86%CE%AD%CF%82/', EVC_Rest_Security::home_path(), 'non-ASCII: the form URL.pathname uses');
+        } finally {
+            remove_filter('pre_option_home', $greek);
+        }
+        $spaced = static function () {
+            return 'http://example.org/my shop/caf%C3%A9';
+        };
+        add_filter('pre_option_home', $spaced);
+        try {
+            $this->assertSame('/my%20shop/caf%C3%A9/', EVC_Rest_Security::home_path(), 'already-encoded segments are not encoded twice');
+        } finally {
+            remove_filter('pre_option_home', $spaced);
+        }
+        // Round 7: the browser's URL.pathname keeps every «%» as it is: an encoded slash, lower-case hex and a
+        // bare «%» are never decoded or re-encoded (fixed values, checked against new URL(…).pathname).
+        foreach (array(
+            'http://example.org/a%2Fb' => '/a%2Fb/',
+            'http://example.org/a%2fb' => '/a%2fb/',
+            'http://example.org/%ce%ba%ce%b1' => '/%ce%ba%ce%b1/',
+            'http://example.org/100%' => '/100%/',
+            'http://example.org/50%off/%zz' => '/50%off/%zz/',
+            'http://example.org/x^|[]y/{a}`b' => '/x^|[]y/%7Ba%7D%60b/',
+            // Round 8 (NIT-3): a backslash is a «/» for the browser (new URL('http://h/a\\b').pathname === '/a/b').
+            'http://example.org/a\\b' => '/a/b/',
+            'http://example.org/shop\\' => '/shop//', // home_url('/') = «…/shop\\/»: URL.pathname «/shop//», as the REST base
+        ) as $home => $expected) {
+            $filter = static function () use ($home) {
+                return $home;
+            };
+            add_filter('pre_option_home', $filter);
+            try {
+                $this->assertSame($expected, EVC_Rest_Security::home_path(), $home);
+            } finally {
+                remove_filter('pre_option_home', $filter);
+            }
+        }
+        $this->assertSame('/', EVC_Rest_Security::home_path());
     }
 
     public function test_rewrite_rules_are_flushed_only_when_the_state_changes(): void {

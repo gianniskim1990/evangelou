@@ -6,11 +6,14 @@ import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 import { isClubPreviewPath, resolveEntry } from "../../src/entryRoute";
 import { clubPreviewEnabled } from "../../src/preview/buildFlag";
-import { MEMBERS, PREVIEW_MARKER, addDays, athensToday, redemptionHistory, todaysRedemptions } from "../../src/preview/previewData";
-import { parsePreviewPath, sampleQrModules } from "../../src/preview/screens";
+import { PREVIEW_MARKER, addDays, athensToday } from "../../src/preview/previewData";
+import { MEMBERS, redemptionHistory, todaysRedemptions } from "../../src/preview/previewRoster";
+import { parsePreviewPath } from "../../src/preview/screens";
+import { sampleQrModules } from "../../src/preview/sampleQr";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ClubWelcome, MemberPass } from "../../src/preview/CustomerSignature";
+import { ClubWelcome } from "../../src/preview/clubWelcome";
+import { MemberPass } from "../../src/preview/customerSampleScreens";
 
 /**
  * UI-01 design preview: route isolation, build gating and bundle isolation.

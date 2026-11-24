@@ -18,6 +18,7 @@
 import { CLUB_ERROR_MESSAGES, clubError } from "./errors";
 import type { ClubService } from "./clubService";
 import { isValidRequestId } from "./requestId";
+import { restRouteUrl } from "../lib/restRoute";
 import {
   API_ERROR_CODES,
   ClubApiError,
@@ -194,7 +195,7 @@ export function createRestClubService(options: RestClubServiceOptions = {}): Clu
     let res: Response;
     let text: string;
     try {
-      res = await doFetch(`${baseUrl}${path}`, {
+      res = await doFetch(restRouteUrl(baseUrl, path), {
         method,
         credentials: "include",
         cache: "no-store",

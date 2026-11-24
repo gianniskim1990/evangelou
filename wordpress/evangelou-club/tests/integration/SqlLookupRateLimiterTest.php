@@ -53,7 +53,7 @@ final class SqlLookupRateLimiterTest extends EVC_Db_Test_Case {
     }
 
     public function test_migration_003_creates_exactly_the_counter_table(): void {
-        $this->assertSame(array(1, 2, 3), array_map('intval', array_column($this->db->fetch_all('SELECT version FROM evc_schema_migrations ORDER BY version'), 'version')));
+        $this->assertSame(array(1, 2, 3, 4, 5), array_map('intval', array_column($this->db->fetch_all('SELECT version FROM evc_schema_migrations ORDER BY version'), 'version')));
         $columns = array_column($this->db->fetch_all("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'evc_lookup_failures' ORDER BY ORDINAL_POSITION"), 'c');
         $this->assertSame(array('limiter_key', 'window_start_utc', 'failures', 'updated_at_utc'), $columns);
         $this->assertSame(0, $this->count_rows('evc_lookup_failures'));

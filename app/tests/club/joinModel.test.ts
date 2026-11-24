@@ -16,6 +16,7 @@ const join = (over: Record<string, unknown> = {}) =>
   JSON.stringify({
     mode: "join",
     restBase: `${BASE}/?rest_route=/evangelou-club-customer/v1`,
+    homePath: "/prometheus/",
     nonce: "0123456789",
     step: "register",
     joinUrl: `${BASE}/?evc_club_join=1`,
@@ -30,6 +31,16 @@ const join = (over: Record<string, unknown> = {}) =>
   });
 
 describe("STAGE-07 join form rules", () => {
+  it("round 18 (D32): «Επιβεβαίωση κωδικού» is required and must be the same before anything is sent", () => {
+    const base = { name: "Ελένη Μαρκοπούλου", phone: "6941234567", email: "e@example.gr", password: "kafes-sto-limani-7" };
+    assert.deepEqual(validateJoin({ ...base, confirm: "kafes-sto-limani-7" }), {});
+    assert.deepEqual(validateJoin({ ...base, confirm: "" }), { confirm: "Γράψτε ξανά τον κωδικό σας." });
+    assert.deepEqual(validateJoin({ ...base, confirm: "kafes-sto-limani-8" }), { confirm: "Οι κωδικοί δεν ταιριάζουν." });
+    assert.deepEqual(validateJoin({ ...base, confirm: "Kafes-sto-limani-7" }), { confirm: "Οι κωδικοί δεν ταιριάζουν." });
+    assert.equal(SERVER_CODES.confirm_mismatch, "Οι κωδικοί δεν ταιριάζουν.");
+    assert.equal(SERVER_CODES.confirm_missing, "Γράψτε ξανά τον κωδικό σας.");
+  });
+
   it("are the approved CUSTOMER-01 rules with the e-mail required", () => {
     const cases = [
       { name: "", phone: "", email: "" },
@@ -40,7 +51,7 @@ describe("STAGE-07 join form rules", () => {
     ];
     for (const c of cases) {
       const preview = validateRegistration(c, true);
-      const live = validateJoin({ ...c, password: "kafes-sto-limani-7" });
+      const live = validateJoin({ ...c, password: "kafes-sto-limani-7", confirm: "kafes-sto-limani-7" });
       assert.deepEqual({ name: live.name, phone: live.phone, email: live.email }, { name: preview.name, phone: preview.phone, email: preview.email }, JSON.stringify(c));
     }
     for (const key of Object.keys(MESSAGES) as (keyof typeof MESSAGES)[]) assert.equal(JOIN_MESSAGES[key], MESSAGES[key], key);
@@ -84,6 +95,10 @@ describe("STAGE-07 bootstrap configs", () => {
     assert.ok(!parseJoinConfig(join({ step: "admin" }), ORIGIN).ok);
     assert.ok(!parseJoinConfig(join({ nonce: "x" }), ORIGIN).ok);
     assert.ok(!parseJoinConfig(join({ restBase: `${BASE}/?rest_route=/wp/v2` }), ORIGIN).ok);
+    // STAGE-08 round 5: a plain base needs the shell's home path, and must sit exactly there.
+    assert.ok(!parseJoinConfig(join({ homePath: undefined }), ORIGIN).ok, "plain base without homePath");
+    assert.ok(!parseJoinConfig(join({ homePath: "/" }), ORIGIN).ok, "plain base outside the home path");
+    assert.ok(!parseJoinConfig(join({ restBase: `${BASE}/?rest_route=/evangelou-club-customer/v1&rest.route=/wp/v2/users` }), ORIGIN).ok, "PHP alias of rest_route");
     assert.ok(!parseJoinConfig(join({ mode: "poster" }), ORIGIN).ok);
   });
 
@@ -129,14 +144,14 @@ describe("STAGE-07 join-v1 client", () => {
       return { status: 200, headers: new Headers({ "X-WP-Nonce": "abcdef0123" }), json: async () => ({ result: "ok" }) } as unknown as Response;
     }) as unknown as typeof fetch;
     const api = createJoinApi(parsed.config, fetchImpl);
-    assert.deepEqual(await api.register({ name: "Ελένη Μαρκοπούλου", phone: "6941234567", email: "e@example.gr", password: "kafes-sto-limani-7" }, "filled-by-a-bot"), { kind: "ok" });
+    assert.deepEqual(await api.register({ name: "Ελένη Μαρκοπούλου", phone: "6941234567", email: "e@example.gr", password: "kafes-sto-limani-7", confirm: "kafes-sto-limani-7" }, "filled-by-a-bot"), { kind: "ok" });
     assert.deepEqual(await api.acceptTerms(), { kind: "ok" });
     assert.equal(calls[0].url, `${BASE}/?rest_route=%2Fevangelou-club-customer%2Fv1%2Fjoin%2Faccount`);
     assert.equal(calls[0].init.method, "POST");
     assert.equal(calls[0].init.credentials, "same-origin");
     assert.equal(calls[0].init.redirect, "error");
     assert.equal((calls[0].init.headers as Record<string, string>)["X-WP-Nonce"], "0123456789");
-    assert.deepEqual(JSON.parse(String(calls[0].init.body)), { name: "Ελένη Μαρκοπούλου", phone: "6941234567", email: "e@example.gr", password: "kafes-sto-limani-7", evc_extra: "filled-by-a-bot" }, "the honeypot goes to the server as typed");
+    assert.deepEqual(JSON.parse(String(calls[0].init.body)), { name: "Ελένη Μαρκοπούλου", phone: "6941234567", email: "e@example.gr", password: "kafes-sto-limani-7", password_confirm: "kafes-sto-limani-7", evc_extra: "filled-by-a-bot" }, "the honeypot goes to the server as typed");
     assert.equal((calls[1].init.headers as Record<string, string>)["X-WP-Nonce"], "abcdef0123", "the refreshed nonce");
     assert.deepEqual(JSON.parse(String(calls[1].init.body)), { accept: true });
   });
@@ -147,7 +162,7 @@ describe("STAGE-07 join-v1 client", () => {
     const failing = (async () => {
       throw new Error("offline");
     }) as unknown as typeof fetch;
-    assert.deepEqual(await createJoinApi(parsed.config, failing).register({ name: "", phone: "", email: "", password: "" }, ""), { kind: "error" });
+    assert.deepEqual(await createJoinApi(parsed.config, failing).register({ name: "", phone: "", email: "", password: "", confirm: "" }, ""), { kind: "error" });
     const never = (() => new Promise(() => {})) as unknown as typeof fetch;
     assert.deepEqual(await createJoinApi(parsed.config, never, 5).checkout(), { kind: "error" });
   });

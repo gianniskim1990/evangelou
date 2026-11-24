@@ -67,5 +67,17 @@
         <testsuite name="wp-commerce-onboarding">
             <directory>tests/wordpress/commerce-onboarding</directory>
         </testsuite>
+        <!-- STAGE-08: the Club admin pages ON (EVC_TEST_ADMIN_TOOLS_FLAG=enabled), no commerce plugins. -->
+        <testsuite name="wp-admin-tools">
+            <directory>tests/wordpress/admin-tools</directory>
+        </testsuite>
+        <!-- STAGE-08: the readiness checks over the REAL commerce site (EVC_TEST_COMMERCE_PLUGINS, CI commerce job). -->
+        <testsuite name="wp-commerce-admin-tools">
+            <directory>tests/wordpress/commerce-admin-tools</directory>
+        </testsuite>
+        <!-- STAGE-08 round 12: member push ON (EVC_TEST_PUSH_FLAG=enabled|auto + EVC_TEST_CUSTOMER_FLAG=enabled), test VAPID keys. -->
+        <testsuite name="wp-push">
+            <directory>tests/wordpress/push</directory>
+        </testsuite>
     </testsuites>
 </phpunit>

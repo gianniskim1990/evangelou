@@ -1,16 +1,29 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode, type RefObject } from "react";
-import { Btn } from "../preview/ds";
+import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import type { MemberQrFlow, MemberQrState } from "./memberQr";
 import { encodeQr } from "./qrEncode";
 
 /*
  * STAGE-05D: the member's real Club QR inside the approved pass (replaces the
  * sample code only when the server's QR route exists). Greek copy, polite
- * live region for status changes, focus moves to the confirmation question.
- * The token is drawn, never printed as text.
+ * live region for status changes. The token is drawn, never printed as text.
+ * Owner decision D21 (2026-11-19): the QR is always shown (or «Φόρτωση…»
+ * while one is fetched); no «Νέο QR» button. Only the error states offer a
+ * small «Δοκιμάστε ξανά» link (memberQr.ts retries by itself, within limits).
+ * Owner decision D22 (2026-11-19): the code is the same on every device and
+ * never changes when the card is opened. Round 7: when the server cannot be
+ * reached the phone's own copy is shown as «unchecked», saying plainly that it
+ * was not checked now and will be checked again (`online` re-checks at once).
+ * STAGE-08 round 17 (owner-found bug, staging 2026-11-23): this panel is the
+ * ONLY thing the live card ever puts in its QR place, from the very first
+ * render: until the member's code is known it is a neutral place-holder
+ * («Φόρτωση του κωδικού σας…», no pattern); without the QR route (`off`) it says
+ * that the code is not available yet. The design preview's sample code is
+ * not reachable from the live app at all (src/preview/sampleQr.tsx).
+ * Round 18 (round-17 review, UX): on a cold start, when this phone keeps THIS member's code (qrStore.ts, by account),
+ * that code is drawn at once with a quiet «Έλεγχος του κωδικού σας…» line («checking») while GET /me/qr runs; the
+ * server's answer then replaces it (another account's code is never read: the store is keyed by the account).
  */
 
-const ATHENS_DATE = new Intl.DateTimeFormat("el-GR", { timeZone: "Europe/Athens", day: "numeric", month: "long", year: "numeric" });
 
 /** STAGE-07: `label` / `kind` (optional) for the tablet poster; the member card's defaults are unchanged. */
 export function QrSvg({ text, size = 196, label = "Ο κωδικός QR της κάρτας μέλους σας", kind = "member" }: { text: string; size?: number; label?: string; kind?: "member" | "join" }) {
@@ -39,41 +52,57 @@ function Message({ title, children }: { title: string; children?: ReactNode }) {
   );
 }
 
-function body(state: MemberQrState, flow: MemberQrFlow, confirmRef: RefObject<HTMLHeadingElement | null>) {
+/** The QR's place while the member's code is fetched: the size of the drawn code, words only, never a pattern. */
+export function QrLoading() {
+  return (
+    <div className="inline-block rounded-[10px] bg-[var(--stone)] p-1" style={{ width: 204, height: 204 }} data-evc-qr-placeholder="loading">
+      <div className="flex h-full items-center justify-center px-4 text-center">
+        <p className="t-small text-[var(--ink-2)]">Φόρτωση του κωδικού σας…</p>
+      </div>
+    </div>
+  );
+}
+
+/** The QR's place when this site has no member QR route yet (or no QR flow): words only, never a pattern. */
+export function QrNotAvailable() {
+  return (
+    <div data-evc-qr-placeholder="not-available">
+      <Message title="Ο κωδικός QR δεν είναι ακόμη διαθέσιμος">Θα εμφανιστεί σε αυτή την κάρτα μόλις ενεργοποιηθεί.</Message>
+    </div>
+  );
+}
+
+function body(state: MemberQrState, flow: MemberQrFlow) {
   switch (state.phase) {
     case "loading":
-    case "replacing":
-      return <Message title={state.phase === "loading" ? "Φόρτωση του κωδικού σας…" : "Δημιουργία νέου κωδικού…"} />;
+      return <QrLoading />;
     case "shown":
       return (
         <div className="text-center">
           <div className="inline-block rounded-[10px] bg-white p-1">
             <QrSvg text={state.token} size={196} />
           </div>
-          <p className="t-small mt-3 text-[var(--ink-2)]">Ενεργός από τις {ATHENS_DATE.format(new Date(state.issuedAt))}. Μένει ίδιος μέχρι να ζητήσετε νέο. Μπορείτε να κρατήσετε στιγμιότυπο οθόνης.</p>
-          <button type="button" onClick={() => flow.askReplace()} className="press t-small mt-2 min-h-11 rounded-full px-3 font-semibold text-[var(--ink)] underline underline-offset-4">
-            Νέο QR
-          </button>
+          <p className="t-small mt-3 text-[var(--ink-2)]">Ο κωδικός σας μένει ίδιος σε όλες τις συσκευές σας και δεν αλλάζει όταν ανοίγετε την κάρτα.</p>
+          <p className="t-small mt-1 text-[var(--ink-2)]">Στιγμιότυπο οθόνης ισχύει κανονικά στο ταμείο, από όποια συσκευή κι αν το δείξετε.</p>
         </div>
       );
-    case "elsewhere":
+    case "checking":
+      // Round 18: this member's code kept on the phone, shown at once on a cold start while the server is asked.
       return (
-        <Message title={state.reason === "created_elsewhere" ? "Ο κωδικός σας δημιουργήθηκε σε άλλη συσκευή" : "Ο κωδικός σας δεν φαίνεται σε αυτή τη συσκευή"}>
-          <p>Για λόγους ασφαλείας ο κωδικός QR εμφανίζεται μόνο τη στιγμή που δημιουργείται. Αν έχετε στιγμιότυπο οθόνης, ισχύει κανονικά. Διαφορετικά, ζητήστε νέο κωδικό.</p>
-          <Btn onClick={() => flow.askReplace()} className="mt-4">Νέο QR</Btn>
-        </Message>
-      );
-    case "confirm_replace":
-      return (
-        <div role="alertdialog" aria-labelledby="evc-qr-confirm-title" aria-describedby="evc-qr-confirm-text" className="mx-auto max-w-[32ch] py-4 text-center">
-          <h2 id="evc-qr-confirm-title" ref={confirmRef} tabIndex={-1} className="t-title text-[var(--ink)]">Θέλετε νέο κωδικό QR;</h2>
-          <p id="evc-qr-confirm-text" className="t-small mt-2 text-[var(--ink-2)]">
-            Ο τωρινός κωδικός, και κάθε στιγμιότυπο οθόνης του, θα σταματήσει να ισχύει αμέσως, σε όλες τις συσκευές.
-          </p>
-          <div className="mt-4 flex flex-wrap justify-center gap-3">
-            <Btn onClick={() => void flow.confirmReplace()}>Ναι, νέο QR</Btn>
-            <Btn tone="line" onClick={() => flow.cancelReplace()}>Άκυρο</Btn>
+        <div className="text-center" data-evc-qr-checking="kept">
+          <div className="inline-block rounded-[10px] bg-white p-1">
+            <QrSvg text={state.token} size={196} />
           </div>
+          <p className="t-small mt-3 text-[var(--ink-3)]">Έλεγχος του κωδικού σας…</p>
+        </div>
+      );
+    case "unchecked":
+      return (
+        <div className="text-center">
+          <div className="inline-block rounded-[10px] bg-white p-1">
+            <QrSvg text={state.token} size={196} />
+          </div>
+          <p className="t-small mt-3 text-[var(--ink-2)]">Δεν μπορέσαμε να ελέγξουμε τον κωδικό αυτή τη στιγμή. Δείχνουμε αυτόν που είναι αποθηκευμένος σε αυτή τη συσκευή· θα τον ελέγξουμε ξανά μόλις γίνει δυνατό.</p>
         </div>
       );
     case "not_member":
@@ -88,12 +117,14 @@ function body(state: MemberQrState, flow: MemberQrFlow, confirmRef: RefObject<HT
     case "error":
       return (
         <Message title={state.phase === "unavailable" ? "Ο κωδικός δεν είναι διαθέσιμος αυτή τη στιγμή" : "Δεν φορτώθηκε ο κωδικός σας"}>
-          <p>Ελέγξτε τη σύνδεσή σας και δοκιμάστε ξανά.</p>
-          <Btn onClick={() => void flow.open()} className="mt-4">Δοκιμάστε ξανά</Btn>
+          <p>Θα ξαναπροσπαθήσουμε αυτόματα σε λίγο.</p>
+          <button type="button" onClick={() => flow.retry()} className="press t-small mt-2 min-h-11 rounded-full px-3 font-semibold text-[var(--ink)] underline underline-offset-4">
+            Δοκιμάστε ξανά
+          </button>
         </Message>
       );
     case "off":
-      return null;
+      return <QrNotAvailable />;
   }
 }
 
@@ -102,12 +133,12 @@ function announce(state: MemberQrState): { status: string; alert: string } {
   switch (state.phase) {
     case "loading":
       return { status: "Φόρτωση του κωδικού σας.", alert: "" };
-    case "replacing":
-      return { status: "Δημιουργία νέου κωδικού.", alert: "" };
     case "shown":
       return { status: "Ο κωδικός QR σας εμφανίζεται.", alert: "" };
-    case "elsewhere":
-      return { status: "Ο κωδικός σας δεν φαίνεται σε αυτή τη συσκευή.", alert: "" };
+    case "checking":
+      return { status: "Εμφανίζεται ο κωδικός QR σας. Γίνεται έλεγχος.", alert: "" };
+    case "unchecked":
+      return { status: "Εμφανίζεται ο αποθηκευμένος κωδικός QR σας, χωρίς έλεγχο αυτή τη στιγμή.", alert: "" };
     case "unavailable":
     case "error":
     case "signed_out":
@@ -119,21 +150,34 @@ function announce(state: MemberQrState): { status: string; alert: string } {
 
 export function MemberQrPanel({ flow }: { flow: MemberQrFlow }) {
   const state = useSyncExternalStore(flow.subscribe, flow.getState);
-  const confirmRef = useRef<HTMLHeadingElement>(null);
+  // D21: a tab that becomes visible again (or comes back online, round 7) asks the server whether its code is
+  // still the active one. The listeners go with the panel (CustomerApp also pauses the flow off the card).
   useEffect(() => {
-    if (state.phase === "confirm_replace") confirmRef.current?.focus();
-  }, [state.phase]);
+    const doc = globalThis.document;
+    if (!doc) return;
+    const onVisible = () => {
+      if (doc.visibilityState !== "hidden") flow.wake();
+    };
+    doc.addEventListener("visibilitychange", onVisible);
+    globalThis.addEventListener?.("focus", onVisible);
+    globalThis.addEventListener?.("online", onVisible);
+    return () => {
+      doc.removeEventListener("visibilitychange", onVisible);
+      globalThis.removeEventListener?.("focus", onVisible);
+      globalThis.removeEventListener?.("online", onVisible);
+    };
+  }, [flow]);
   const said = announce(state);
   return (
-    <div data-evc-qr-state={state.phase} aria-busy={state.phase === "loading" || state.phase === "replacing"}>
-      {/* Two fixed live regions; the confirmation dialog is NOT inside either (it takes focus instead). */}
+    <div data-evc-qr-state={state.phase} aria-busy={state.phase === "loading" || state.phase === "checking"}>
+      {/* Two fixed live regions. */}
       <p role="status" aria-live="polite" className="sr-only">
         {said.status}
       </p>
       <p role="alert" aria-live="assertive" className="sr-only">
         {said.alert}
       </p>
-      {body(state, flow, confirmRef)}
+      {body(state, flow)}
     </div>
   );
 }

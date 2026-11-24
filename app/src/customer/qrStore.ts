@@ -29,8 +29,15 @@ import type { QrKeeper } from "./memberQr";
  *   (private mode, blocked, full), nothing is persisted: the QR lives in
  *   memory only, as before. Every access is wrapped; a failure never shows a
  *   code and never throws into the app.
- * The server never re-sends a token: if this record is lost, the member uses
- * a screenshot or asks for «Νέο QR».
+ * If this record is lost, the card simply asks the server again: owner
+ * decision D22 (2026-11-19) makes the server hand the member the SAME token
+ * on every device (memberQr.ts).
+ * - Round 7, peek(): while the server cannot be reached, the card may show
+ *   the account's kept token as «unchecked» (read only, nothing deleted).
+ * - STAGE-08 round 11 (owner decision D26): ONE other thing is remembered on
+ *   this device, through createDeviceFlag() below: that the member closed the
+ *   «Εγκατάσταση στο κινητό» hint. A fixed key with the value "1"; nothing
+ *   personal. Same storage access (browserStorage), same try/catch rule.
  */
 
 export const QR_STORE_PREFIX = "evc-club-qr:v1:";
@@ -170,6 +177,26 @@ export function createStorageQrKeeper(
         return null;
       }
     },
+    /**
+     * Round 7 (offline open): the token kept for this account, whatever its issued_at, read only: nothing is
+     * deleted (the server could not be asked, so nothing is known to be stale). Exactly one record of the account,
+     * else nothing. A forget / sign-out that starts while the digest is computed voids the answer.
+     */
+    async peek(account) {
+      const mine = epoch;
+      try {
+        const a = await accountHash(account);
+        if (mine !== epoch) return null;
+        const found: string[] = [];
+        for (const k of ownKeys()) {
+          const r = parse(storage.getItem(k));
+          if (r !== null && r.a === a) found.push(r.t);
+        }
+        return found.length === 1 ? found[0] : null;
+      } catch {
+        return null;
+      }
+    },
     async write(account, issuedAt, token) {
       if (!TOKEN_RE.test(token)) return;
       const mine = epoch;
@@ -198,6 +225,33 @@ export function createStorageQrKeeper(
     },
     onExternalChange(listener) {
       externalListeners.add(listener);
+    },
+  };
+}
+
+/** STAGE-08 round 11 (D26): the install hint was closed on this device (pwa/installHint.ts). Not a QR key. */
+export const INSTALL_HINT_KEY = "evc-club-install-hint:v1";
+
+/**
+ * A one-flag device memory for the install hint (fixed key, value "1"), or null without working storage. Every
+ * access is wrapped: a failure reads as "not set" and a write that fails is simply forgotten.
+ */
+export function createDeviceFlag(storage: StorageLike | null = browserStorage()): { get(): boolean; set(): void } | null {
+  if (!storage) return null;
+  return {
+    get: () => {
+      try {
+        return storage.getItem(INSTALL_HINT_KEY) === "1";
+      } catch {
+        return false;
+      }
+    },
+    set: () => {
+      try {
+        storage.setItem(INSTALL_HINT_KEY, "1");
+      } catch {
+        // full or blocked: the hint stays closed for this page only
+      }
     },
   };
 }

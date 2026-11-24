@@ -36,10 +36,12 @@ final class RestSessionTest extends EVC_WP_Test_Case {
         $session['expiration'] = $session['login'] + EVC_Staff_Session::ABSOLUTE_SECONDS;
         $manager->update($token, $session);
         $key = EVC_Staff_Session::activity_key($token);
-        update_user_meta($staff, $key, (string) (time() - 500));
+        // STAGE-08 round 15: the stored value is kept, not recomputed after the request (a second boundary made it flaky).
+        $last = (string) (time() - 500);
+        update_user_meta($staff, $key, $last);
 
         $this->assertSame(200, $this->rest('GET', self::STATUS, null, $this->nonce())->get_status());
-        $this->assertSame((string) (time() - 500), get_user_meta($staff, $key, true), 'status checks are not activity');
+        $this->assertSame($last, get_user_meta($staff, $key, true), 'status checks are not activity');
 
         $this->rest('POST', $this->redeem_route('mem_0123456789abcdef0123456789abcdef'), array('request_id' => self::uuid4(), 'coffee_code' => 'espresso'), $this->nonce());
         $this->assertGreaterThanOrEqual(time() - 2, (int) get_user_meta($staff, $key, true), 'real Club actions are');

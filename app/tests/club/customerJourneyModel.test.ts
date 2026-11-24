@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MEMBERS } from "../../src/preview/previewData";
+import { MEMBERS } from "../../src/preview/previewRoster";
 import { FakeCustomerServer } from "../../src/customerPreview/customerServer";
 import { addCalendarMonth, athensDate, athensInstant, athensTime, nextAthensMidnight, nextPeriod } from "../../src/customerPreview/membershipCalendar";
 import { MESSAGES, canonicalGreekMobile, firstInvalid, maskMobile, validateRegistration } from "../../src/customerPreview/registration";

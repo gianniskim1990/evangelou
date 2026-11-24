@@ -19,6 +19,7 @@ require_once EVC_CLUB_PATH . 'includes/customer/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/admin/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/fluentcrm/bootstrap.php';
 require_once EVC_CLUB_PATH . 'includes/onboarding/bootstrap.php';
+require_once EVC_CLUB_PATH . 'includes/push/bootstrap.php';
 
 // Staff authentication foundation (Task 1C-C). Role-scoped session policy,
 // admin guard and login throttling are active for users holding the
@@ -63,3 +64,14 @@ add_action('plugins_loaded', array('EVC_Fluentcrm_Plugin', 'boot'));
 // It never touches FluentCRM (owner decision D12) and adds nothing about payments (the existing WooCommerce checkout).
 register_deactivation_hook(__FILE__, array('EVC_Onboarding_Plugin', 'deactivate'));
 add_action('plugins_loaded', array('EVC_Onboarding_Plugin', 'boot'));
+
+// STAGE-08: the Club admin pages for administrators: the ONE shared till account (owner decision D18: create, new
+// password, disable / enable, sign out everywhere; audited without secrets) and the read-only «Ετοιμότητα» page. ONLY
+// when wp-config.php defines EVC_CLUB_ADMIN_TOOLS_ENABLED as boolean true (default: OFF = no menu, nothing hooked).
+add_action('plugins_loaded', array('EVC_Admin_Tools_Plugin', 'boot'));
+
+// STAGE-08 round 12 (owner decision D26 part 2): member web push notifications sent from this server (no third-party
+// service). ONLY when wp-config.php defines EVC_CLUB_PUSH_ENABLED as boolean true together with the member page
+// (default: OFF = no route, no menu, nothing scheduled); sending also needs valid VAPID keys and migration 005.
+register_deactivation_hook(__FILE__, array('EVC_Push_Plugin', 'deactivate'));
+add_action('plugins_loaded', array('EVC_Push_Plugin', 'boot'));

@@ -9,4 +9,14 @@ require_once $evc_admin . 'class-evc-club-migrations-service.php';
 require_once $evc_admin . 'class-evc-club-migrations-admin-page.php';
 require_once $evc_admin . 'class-evc-club-migrations-cli.php';
 require_once $evc_admin . 'class-evc-club-migrations-plugin.php';
+// STAGE-08: the Club admin pages (shared till account, read-only readiness), only behind EVC_CLUB_ADMIN_TOOLS_ENABLED.
+require_once $evc_admin . 'class-evc-admin-tools-feature.php';
+require_once $evc_admin . 'class-evc-staff-account-reader.php';
+require_once $evc_admin . 'class-evc-staff-account-service.php';
+require_once $evc_admin . 'class-evc-staff-account-page.php';
+require_once $evc_admin . 'class-evc-readiness.php';
+require_once $evc_admin . 'class-evc-readiness-page.php';
+require_once $evc_admin . 'class-evc-admin-tools-plugin.php';
+// STAGE-08 round 18 (D31): the useful Club addresses (static, read-only; the till app and the Club page show them).
+require_once $evc_admin . 'class-evc-club-links.php';
 unset($evc_admin);

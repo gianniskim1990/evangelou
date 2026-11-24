@@ -5,11 +5,12 @@
  * (EVC_Onboarding_Rules). The server checks everything again; these checks only spare a round trip.
  */
 
-export type JoinForm = { name: string; phone: string; email: string; password: string };
+/** Round 18 (owner decision D32): `confirm` = «Επιβεβαίωση κωδικού», sent as password_confirm; the server checks it too. */
+export type JoinForm = { name: string; phone: string; email: string; password: string; confirm: string };
 export type JoinField = keyof JoinForm;
 export type JoinErrors = Partial<Record<JoinField, string>>;
 
-export const EMPTY_JOIN_FORM: JoinForm = { name: "", phone: "", email: "", password: "" };
+export const EMPTY_JOIN_FORM: JoinForm = { name: "", phone: "", email: "", password: "", confirm: "" };
 export const NAME_MAX = 80;
 export const PASSWORD_MIN = 10;
 export const PASSWORD_MAX = 128;
@@ -28,6 +29,8 @@ export const JOIN_MESSAGES = {
   passwordShort: `Τουλάχιστον ${PASSWORD_MIN} χαρακτήρες.`,
   passwordLong: `Έως ${PASSWORD_MAX} χαρακτήρες.`,
   passwordWeak: "Διαλέξτε έναν λιγότερο προβλέψιμο κωδικό, χωρίς το e-mail ή το κινητό σας.",
+  confirmMissing: "Γράψτε ξανά τον κωδικό σας.",
+  confirmMismatch: "Οι κωδικοί δεν ταιριάζουν.",
 } as const;
 
 /** The server's field codes (EVC_Onboarding_Rules) -> the same Greek messages as the browser checks. */
@@ -43,6 +46,8 @@ export const SERVER_CODES: Record<string, string> = {
   password_short: JOIN_MESSAGES.passwordShort,
   password_long: JOIN_MESSAGES.passwordLong,
   password_weak: JOIN_MESSAGES.passwordWeak,
+  confirm_missing: JOIN_MESSAGES.confirmMissing,
+  confirm_mismatch: JOIN_MESSAGES.confirmMismatch,
 };
 
 /** "69x xxx xxxx", "+30 69…", "0030 69…" (spaces, dots, dashes, brackets ignored) -> "+3069xxxxxxxx", else null. */
@@ -89,10 +94,13 @@ export function validateJoin(form: JoinForm): JoinErrors {
 
   const password = passwordProblem(form.password, form.email, form.phone);
   if (password) errors.password = password;
+  // Round 18 (D32): the two values must be the same before anything is sent.
+  if (form.confirm === "") errors.confirm = JOIN_MESSAGES.confirmMissing;
+  else if (form.confirm !== form.password) errors.confirm = JOIN_MESSAGES.confirmMismatch;
   return errors;
 }
 
-export const JOIN_FIELD_ORDER: JoinField[] = ["name", "phone", "email", "password"];
+export const JOIN_FIELD_ORDER: JoinField[] = ["name", "phone", "email", "password", "confirm"];
 
 export function firstJoinError(errors: JoinErrors): JoinField | null {
   return JOIN_FIELD_ORDER.find((f) => errors[f] !== undefined) ?? null;

@@ -49,7 +49,7 @@ export function parseRegister(status: number, body: unknown): RegisterResult {
       if (!isRecord(body.fields)) return { kind: "error" };
       const fields: Record<string, string> = {};
       for (const [name, code] of Object.entries(body.fields)) {
-        if (!["name", "phone", "email", "password"].includes(name) || typeof code !== "string" || !FIELD_CODE.test(code)) return { kind: "error" };
+        if (!["name", "phone", "email", "password", "confirm"].includes(name) || typeof code !== "string" || !FIELD_CODE.test(code)) return { kind: "error" };
         fields[name] = code;
       }
       return { kind: "invalid", fields };
@@ -128,7 +128,7 @@ export function createJoinApi(
 
   return {
     async register(form, honeypot) {
-      const reply = await post("/join/account", { name: form.name, phone: form.phone, email: form.email, password: form.password, evc_extra: honeypot });
+      const reply = await post("/join/account", { name: form.name, phone: form.phone, email: form.email, password: form.password, password_confirm: form.confirm, evc_extra: honeypot });
       return reply ? parseRegister(reply.status, reply.body) : { kind: "error" };
     },
     async acceptTerms() {

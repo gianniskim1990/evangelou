@@ -140,14 +140,89 @@ final class EVC_Prep_Canonical {
         return hash('sha256', $canonical);
     }
 
-    public static function fingerprint_v2(string $member_public_id, string $benefit_type, int $staff_wp_user_id, string $prep_hash): string {
-        return hash('sha256', implode("\n", array(
+    /**
+     * D24: a staff note (already normalised by EVC_Prep_Note) is bound to the request too, so the same
+     * request id with another note is `idempotency_key_reused`, never a replay. Without a note the value is
+     * byte-identical to the original v2 fingerprint (the shared vectors keep holding); with one, a sixth
+     * line `note=<sha256 of "evc-prep-note-v1\n" + note>` is added (prep_hash is 64 hex, so the two forms
+     * can never collide). The note text itself is never hashed into prep_hash.
+     */
+    public static function fingerprint_v2(string $member_public_id, string $benefit_type, int $staff_wp_user_id, string $prep_hash, ?string $note = null): string {
+        $lines = array(
             self::FINGERPRINT_VERSION,
             $member_public_id,
             $benefit_type,
             (string) $staff_wp_user_id,
             $prep_hash,
-        )));
+        );
+        if ($note !== null) {
+            $lines[] = 'note=' . EVC_Prep_Note::digest($note);
+        }
+        return hash('sha256', implode("\n", $lines));
+    }
+}
+
+/**
+ * Owner decision D24 (2026-11-20): ONE short staff note may accompany a prepared redemption when the
+ * catalogue allows it (`free_text_note: true`). It reverses the D-NOTES "no free text" rule for this one
+ * field only. Server rules (the till applies the same, but the server decides):
+ *
+ *   - absent / null / only spaces          -> no note (null)
+ *   - not a string, not valid UTF-8        -> invalid_request / note_shape
+ *   - every run of white space or control / format characters becomes ONE space; trimmed
+ *   - contains `<` or `>` (HTML)           -> invalid_preparation / note_html (never stripped silently)
+ *   - more than 80 characters after that   -> invalid_preparation / note_too_long (never cut silently)
+ *
+ * The result is plain text: stored as such (evc_redemption_preparations.note_text), escaped wherever it is
+ * shown, NEVER logged, never put in an audit event, never returned to the customer. Retention: owner
+ * decision D9 is still open (docs/go-live.md).
+ */
+final class EVC_Prep_Note {
+    const MAX_CHARACTERS = 80;
+    const DIGEST_VERSION = 'evc-prep-note-v1';
+
+    /**
+     * @param mixed $raw
+     * @throws EVC_Prep_Rejection
+     */
+    public static function normalise($raw): ?string {
+        if ($raw === null) {
+            return null;
+        }
+        if (!is_string($raw) || strlen($raw) > 4096 || preg_match('//u', $raw) !== 1) {
+            throw EVC_Prep_Rejection::request('note_shape');
+        }
+        $text = preg_replace('/[\s\p{Z}\p{Cc}\p{Cf}]+/u', ' ', $raw);
+        if (!is_string($text)) {
+            throw EVC_Prep_Rejection::request('note_shape');
+        }
+        $text = trim($text, ' ');
+        if ($text === '') {
+            return null;
+        }
+        if (strpbrk($text, '<>') !== false) {
+            throw EVC_Prep_Rejection::preparation('note_html');
+        }
+        if (preg_match_all('/./su', $text) > self::MAX_CHARACTERS) {
+            throw EVC_Prep_Rejection::preparation('note_too_long');
+        }
+        return $text;
+    }
+
+    /** True for a value that normalise() returns unchanged (a stored note must already be normal). @param mixed $v */
+    public static function is_normal($v): bool {
+        if (!is_string($v)) {
+            return false;
+        }
+        try {
+            return self::normalise($v) === $v;
+        } catch (EVC_Prep_Rejection $e) {
+            return false;
+        }
+    }
+
+    public static function digest(string $note): string {
+        return hash('sha256', self::DIGEST_VERSION . "\n" . $note);
     }
 }
 

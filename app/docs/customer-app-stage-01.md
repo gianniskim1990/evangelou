@@ -37,8 +37,12 @@ and the app says the membership cannot be checked right now.
   WooCommerce reader is written and verified against the exact versions on
   staging (see the open items below). Nothing is faked.
 - **Club database:** today's coffee, history and visits are shown as "not yet
-  available", never as known. The card keeps the approved non-redeemable sample
-  QR stamped "ΔΕΙΓΜΑ / ΜΗ ΕΞΑΡΓΥΡΩΣΙΜΟ".
+  available", never as known. (History: at STAGE-01 the card kept the approved
+  non-redeemable sample QR. STAGE-08 round 17, owner-found bug: the live card
+  never shows the sample any more; it shows «Φόρτωση του κωδικού σας…» until
+  the member's real code arrives, and the sample modules are not in the member
+  app's import graph: tests/club/customerSampleGuard.test.ts,
+  scripts/sample-guard.mjs.)
 - **Payments, renewal, newsletter consent:** not read and not offered here.
 
 ## Needed from the technician before a real reader
